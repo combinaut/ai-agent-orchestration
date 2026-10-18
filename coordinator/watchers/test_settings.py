@@ -230,6 +230,28 @@ class PullsSettingsTest(SettingsTest):
         self.assertIn('full CI not run', line)
         self.assertIn('repos/owner/product/contents/.orchestration.toml?ref=feature%2Fbase', calls)
 
+    def test_a_broken_repo_file_is_a_pulls_readfail_until_it_recovers(self):
+        pr = json.loads((REPO / 'coordinator/watchers/fixtures/audit-pr.json').read_text())
+        pr.update(reviewDecision='APPROVED', baseRefName='feature/base')
+        pr['latestOpinionatedReviews']['nodes'] = [dict(state='APPROVED', commit=dict(oid=pr['headRefOid']))]
+        repo_file = ['[audit]\nmerge_gate_checks = ["Full gate"]\n']
+
+        def command(*args):
+            if '/contents/.orchestration.toml?' in args[-1]:
+                return repo_file[0]
+            if args[:3] == ('gh', 'api', 'graphql'):
+                return json.dumps(dict(data=dict(search=dict(nodes=[pr], pageInfo=dict(hasNextPage=False)))))
+            return json.dumps(dict(result=dict(workspaces=[])))
+        with patch.dict(os.environ, {'ORCH_PR_AUTHOR': 'author', 'ORCH_PR_REPOS': 'owner/product', 'ORCH_GIT_WATCH_REPOS': ''}):
+            os.environ.pop('ORCH_MERGE_GATE_CHECKS', None)
+            before, _ = w.reduce_pulls(None, w.collect_pulls(command, None))
+            repo_file[0] = '[pr]\nrepos = []\n'
+            broken, events = w.reduce_pulls(before, w.collect_pulls(command, before))
+            self.assertEqual(events, ['PULLS READFAIL settings:owner/product#7'])
+            repo_file[0] = '[audit]\nmerge_gate_checks = ["Full gate"]\n'
+            _, events = w.reduce_pulls(broken, w.collect_pulls(command, broken))
+            self.assertEqual(events, ['PULLS READFAIL cleared'])
+
 
 def example_value(setting):
     return {'str': 'x', 'int': 7, 'number': 7, 'bool': True, 'list': ['x', 'y'], 'json': [{'name': 'x'}]}[setting.kind]
