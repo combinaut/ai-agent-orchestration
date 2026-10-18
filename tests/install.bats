@@ -1064,14 +1064,14 @@ EOF
   printf '%s\n' '# who I am' 'ORCH_PR_AUTHOR="me"' 'ORCH_HEAVY_SLOTS_MAX="6"' 'ORCH_BIG_REPO_REMOTES="acme/webapp"' >"$HOME/.claude/orchestration.env"
   install_ok
   contains "$output" "migrated        converted $HOME/.claude/orchestration.env -> $HOME/.claude/orchestration.toml"
-  contains "$output" "migrated        wrote $HOME/.claude/orchestration-repo-snippets/acme-webapp.toml"
+  contains "$output" "migrated        wrote $HOME/.claude/orchestration-repo-snippets/acme/webapp.toml"
   contains "$output" "moved           $HOME/.claude/orchestration.env -> $HOME/.claude/orchestration.env.bak"
   [ ! -e "$HOME/.claude/orchestration.env" ]
   [ -f "$HOME/.claude/orchestration.env.bak" ]
   [ "$(config_get ORCH_PR_AUTHOR)" = me ]
   [ "$(config_get ORCH_HEAVY_SLOTS_MAX)" = 6 ]
   grep -qx '# who I am' "$HOME/.claude/orchestration.toml"
-  grep -qx 'big_repo = true' "$HOME/.claude/orchestration-repo-snippets/acme-webapp.toml"
+  grep -qx 'big_repo = true' "$HOME/.claude/orchestration-repo-snippets/acme/webapp.toml"
   install_ok
   not_contains "$output" 'migrated'
 }

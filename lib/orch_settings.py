@@ -260,6 +260,17 @@ def local_values(root):
     return read_file(local, 'repo')
 
 
+def main_checkout(root):
+    """The main checkout of a linked worktree, else None."""
+    try:
+        common = subprocess.run(['git', '-C', str(root), 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+                                capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    main = Path(common).parent if common and Path(common).name == '.git' else None
+    return main if main is not None and main.resolve() != Path(root).resolve() else None
+
+
 def merged(layers, environ):
     """Built-in default < each layer in order < an exported variable, as ORCH_* strings."""
     result = {s.env: env_value(s, s.default) for s in scoped('repo')}
@@ -272,7 +283,7 @@ def merged(layers, environ):
 
 
 def load_repo(start, environ=None):
-    """Repo settings for the checkout containing start: committed file, then the personal file."""
+    """Repo settings for the checkout containing start: committed file, the main checkout's personal file, its own."""
     environ = os.environ if environ is None else environ
     root = repo_root(start)
     layers = []
@@ -280,6 +291,9 @@ def load_repo(start, environ=None):
         committed = root / REPO_FILE
         if committed.is_file():
             layers.append(read_file(committed, 'repo'))
+        main = main_checkout(root)
+        if main is not None:
+            layers.append(local_values(main))
         layers.append(local_values(root))
     return merged(layers, environ)
 
@@ -539,8 +553,9 @@ def write_repo_layer(repo, layer, clone, snippet_dir, report):
             return
         report.append(f'kept {local} (yours, not merged{": " + problem if existing is None else ""}); '
                       'merge the snippet below by hand')
-    target = os.path.join(snippet_dir, repo.replace('/', '-') + '.toml')
-    os.makedirs(snippet_dir, exist_ok=True)
+    owner, name = repo.split('/', 1)
+    target = os.path.join(snippet_dir, owner, name + '.toml')
+    os.makedirs(os.path.dirname(target), exist_ok=True)
     Path(target).write_text(body)
     report.append(f'wrote {target}: commit it as {REPO_FILE} in {repo}, or save it as {LOCAL_FILE} in your clone')
 

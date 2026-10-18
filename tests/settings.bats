@@ -234,7 +234,7 @@ ENV
   [[ "$output" == *"not converted (unknown keys): ORCH_SOMETHING_ELSE"* ]]
   [[ "$output" == *"created $CLONE/.orchestration.local.toml (acme/webapp)"* ]]
   [[ "$output" == *"added .orchestration.local.toml to the info/exclude of $CLONE"* ]]
-  [[ "$output" == *"wrote $TMP/snippets/acme-tools.toml"* ]]
+  [[ "$output" == *"wrote $TMP/snippets/acme/tools.toml"* ]]
   [ "$(grep -cE '^\[guard\]|^(big_repo|scan|extra_pattern|exempt_paths|merge_gate_checks|pattern|architect) =' "$ORCH_CONFIG")" = 0 ]
   grep -qx 'pr_scope = "org:acme"' "$ORCH_CONFIG"
   run load_settings "$CLONE"
@@ -246,7 +246,7 @@ ORCH_LEGACY_EXTRA_PATTERN=old-widget
 ORCH_LEGACY_EXEMPT_PATHS=a.js b.js
 ORCH_FOCUS_PATTERN=billing
 ORCH_FOCUS_ARCHITECT=Billing" ]
-  [ "$(cat "$TMP/snippets/acme-tools.toml")" = '# Repo settings for acme/tools, converted from orchestration.env.
+  [ "$(cat "$TMP/snippets/acme/tools.toml")" = '# Repo settings for acme/tools, converted from orchestration.env.
 
 [audit]
 merge_gate_checks = ["Gate A", "Gate B"]' ]
@@ -270,7 +270,7 @@ merge_gate_checks = ["Gate A", "Gate B"]' ]
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"kept $CLONE/.orchestration.local.toml (yours, not merged); merge the snippet below by hand"* ]]
-  [[ "$output" == *"wrote $TMP/snippets/acme-webapp.toml"* ]]
+  [[ "$output" == *"wrote $TMP/snippets/acme/webapp.toml"* ]]
   [ "$(cat "$CLONE/.orchestration.local.toml")" = '[focus]
 pattern = "mine"' ]
 }
@@ -328,4 +328,44 @@ pattern = "mine"' ]
   [ "$status" -eq 0 ]
   grep -qx 'author = "config-user"' "$ORCH_CONFIG"
   grep -qx 'since = "2026-01-01"' "$ORCH_CONFIG"
+}
+
+@test "migrated personal settings reach existing and new linked worktrees of the clone" {
+  migration_fixture
+  git -C "$CLONE" -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m init
+  git -C "$CLONE" worktree add -q -b before "$TMP/wt-before"
+
+  run python3 "$SETTINGS" migrate "$OLD" "$ORCH_CONFIG" "$TMP/snippets"
+  [ "$status" -eq 0 ]
+  git -C "$CLONE" worktree add -q -b after "$TMP/wt-after"
+
+  for tree in "$TMP/wt-before" "$TMP/wt-after"; do
+    run load_settings "$tree"
+    [ "$status" -eq 0 ]
+    printf '%s\n' "$output" | grep -qxF "ORCH_BIG_REPO=1"
+    printf '%s\n' "$output" | grep -qxF "ORCH_FOCUS_PATTERN=billing"
+    run python3 "$ROOT/hooks/guard-bash.py" <<<"{\"tool_name\":\"Bash\",\"cwd\":\"$tree\",\"tool_input\":{\"command\":\"git grep needle\"}}"
+    [ "$status" -eq 2 ]
+  done
+  printf '[focus]\npattern = "mine"\n' >"$TMP/wt-after/.orchestration.local.toml"
+  run load_settings "$TMP/wt-after"
+  printf '%s\n' "$output" | grep -qxF "ORCH_FOCUS_PATTERN=mine"
+  printf '%s\n' "$output" | grep -qxF "ORCH_BIG_REPO=1"
+}
+
+@test "repos whose names join to the same text get separate migration snippets" {
+  cat >"$TMP/collide.env" <<'ENV'
+ORCH_BIG_REPO_REMOTES="acme/web-app"
+ORCH_LEGACY_REPOS="acme-web/app"
+ENV
+
+  run python3 "$SETTINGS" migrate "$TMP/collide.env" "$ORCH_CONFIG" "$TMP/snippets"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"wrote $TMP/snippets/acme/web-app.toml"* ]]
+  [[ "$output" == *"wrote $TMP/snippets/acme-web/app.toml"* ]]
+  grep -qx 'big_repo = true' "$TMP/snippets/acme/web-app.toml"
+  [ "$(grep -c scan "$TMP/snippets/acme/web-app.toml")" = 0 ]
+  grep -qx 'scan = true' "$TMP/snippets/acme-web/app.toml"
+  [ "$(grep -c 'big_repo' "$TMP/snippets/acme-web/app.toml")" = 0 ]
 }
