@@ -321,7 +321,7 @@ the rules file it used, so a PR is scanned again when the file on its default br
 - Only the first 2,000 characters of a line are matched. Globs: `**` crosses `/`, `*` and `?` do not, `{a,b}` alternates, a trailing `/` means the whole
   directory; a glob matches the whole path.
 
-No file (HTTP 404) falls back to the built-in rules, which match patterns only in the frontend source extensions above and skip the guard's own three files (`BUILTIN_EXEMPT` in `audit.py`); once the file is on the default branch its `selfExempt` list replaces that. A file that is not JSON, has `version` other
+No file (HTTP 404) falls back to the built-in rules, which match patterns only in the frontend source extensions above and skip the guard's own two `scripts/` files (`BUILTIN_EXEMPT` in `audit.py`) plus any `ORCH_LEGACY_EXEMPT_PATHS`; `ORCH_LEGACY_EXTRA_PATTERN` adds project names to the patterns; once the file is on the default branch its `selfExempt` list replaces that. A file that is not JSON, has `version` other
 than 1, has an unknown pattern kind, or holds a pattern the translator rejects is a scan failure
 (`READFAIL LEGACY <repo>#<n> <title>: <repo>@<default> scripts/legacy-deletion-ratchet-rules.json: pattern <id>: ...`).
 

@@ -191,5 +191,84 @@ SH
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"idle_no_worker=none"* ]]
-  [[ "$output" == *"no_finder_worker=none"* ]]
+  [[ "$output" == *"no_focus_worker=none"* ]]
+}
+
+focus_fixture() {
+  cat >"$TMP/bin/herdr" <<'SH'
+#!/bin/sh
+if [ "$1" = pane ]; then
+  printf '%s\n' '{"result":{"panes":[
+    {"workspace_id":"a","terminal_title_stripped":"Architect::Alpha","tokens":{"role":"architect"},"agent_status":"idle"},
+    {"workspace_id":"b","terminal_title_stripped":"Architect::Beta","tokens":{"role":"architect"},"agent_status":"idle"},
+    {"workspace_id":"w1","terminal_title_stripped":"worker","agent":"claude","tokens":{},"agent_status":"working"}]}}'
+else
+  printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"w1","label":"Billing-fix","tokens":{"owner":"a"}}]}}'
+fi
+SH
+  export ORCH_CONFIG="$TMP/orchestration.env"
+  : >"$ORCH_CONFIG"
+}
+
+@test "a focus pattern counts matching workers case-insensitively and flags architects without one" {
+  focus_fixture
+  printf 'ORCH_FOCUS_PATTERN="billing|invoice"\n' >"$ORCH_CONFIG"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"focus_workers_live=1"* ]]
+  [[ "$output" == *"no_focus_worker=Beta"* ]]
+}
+
+@test "the focus architect is left out of the no-worker list" {
+  focus_fixture
+  printf 'ORCH_FOCUS_PATTERN="billing"\nORCH_FOCUS_ARCHITECT="Beta"\n' >"$ORCH_CONFIG"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no_focus_worker=none"* ]]
+}
+
+@test "an empty focus pattern turns the focus check off" {
+  focus_fixture
+  printf 'ORCH_FOCUS_PATTERN=""\n' >"$ORCH_CONFIG"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"focus_workers_live=0"* ]]
+  [[ "$output" == *"no_focus_worker=none"* ]]
+}
+
+@test "an unset focus pattern turns the focus check off" {
+  focus_fixture
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"focus_workers_live=0"* ]]
+  [[ "$output" == *"no_focus_worker=none"* ]]
+}
+
+@test "the environment overrides the configured focus pattern" {
+  focus_fixture
+  printf 'ORCH_FOCUS_PATTERN="nomatch"\n' >"$ORCH_CONFIG"
+  export ORCH_FOCUS_PATTERN="billing"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"focus_workers_live=1"* ]]
+}
+
+@test "an invalid focus pattern reports a read failure naming the setting" {
+  focus_fixture
+  printf 'ORCH_FOCUS_PATTERN="("\n' >"$ORCH_CONFIG"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FOCUS READFAIL ORCH_FOCUS_PATTERN" ]]
 }

@@ -78,6 +78,8 @@ Everything lives in `~/.claude/orchestration.env`, a bash file of `KEY="value"` 
 | `ORCH_AUDIT_PAGE_PRS`, `ORCH_AUDIT_PAGE_NODES` | `80`, `100` | GitHub query page sizes; a cut-off result prints `TRUNCATED` |
 | `ORCH_LEGACY_REPOS` | empty | Repos whose open PRs are scanned for a `LEGACY` line; empty means no scan |
 | `ORCH_LEGACY_SCANS_MAX`, `ORCH_LEGACY_READS_MAX` | `10`, `20` | PRs scanned per pass; file reads per PR scan |
+| `ORCH_LEGACY_EXTRA_PATTERN` | empty | Regex alternation appended to the built-in jQuery/ujs patterns of the legacy scan, for project names such as `old-widget\|legacy-grid` |
+| `ORCH_LEGACY_EXEMPT_PATHS` | empty | Space-separated paths the built-in scan skips, in addition to the two ratchet guard files under `scripts/` |
 | `ORCH_LEGACY_MAP_REPO` | empty | Clone the daily legacy-map job reads; empty picks the `ORCH_GIT_WATCH_REPOS` clone named like an `ORCH_LEGACY_REPOS` repo |
 | `ORCH_LEGACY_MAP_OUT` | `~/.claude/coordinator/legacy-map.tsv` | Where `legacy-map.sh` writes. Environment only: the script does not read the config file, and the daily job does not use it. The skills set it for a per-task map |
 | **Models and recycling** | | |
@@ -91,6 +93,8 @@ Everything lives in `~/.claude/orchestration.env`, a bash file of `KEY="value"` 
 | `ORCH_HEAVY_SLOTS_DIR` | `~/.claude/heavy-slots` | Slot directory; empty means the default |
 | `ORCH_HEAVY_SLOTS_KILL_GRACE` | `10` | Seconds a stopped job gets before it is killed |
 | `ORCH_FOCUS_SKIP_ARCHITECTS` | empty | Comma-separated architect names left out of focus reports |
+| `ORCH_FOCUS_PATTERN` | empty | Case-insensitive regex matched against worker workspace labels; the `FOCUS` line counts matches (`focus_workers_live`) and lists architects with none (`no_focus_worker`). Empty turns the check off |
+| `ORCH_FOCUS_ARCHITECT` | empty | Architect name never listed in `no_focus_worker` |
 | **Watchers and services** | | |
 | `ORCH_WATCHERS_SERVICE` | `0` | `1` registers the watchers as launchd or systemd user services; needs `ORCH_HERDR_BIN` and `ORCH_HERDR_SOCKET` |
 | `ORCH_HERDR_BIN`, `ORCH_HERDR_SOCKET` | empty | Absolute path of Herdr and of its socket |
