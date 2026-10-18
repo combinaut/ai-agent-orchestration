@@ -90,13 +90,13 @@ def repo_settings(root):
 
 def is_big_repo(cwd, opts):
     identity_opts = [value for i, value in enumerate(opts) if value != '-c' and (i == 0 or opts[i-1] != '-c')]
-    root = checkout_of_git_dir(git_read(cwd, identity_opts, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'))
+    root = checkout_of_git_dir(cwd, identity_opts)
     return root is not None and repo_settings(root)['ORCH_BIG_REPO'] == '1'
 
 
-def checkout_of_git_dir(dirs):
-    """The checkout a git directory belongs to, whatever --work-tree says; None for a bare repository."""
-    git_dir, _, common = dirs.partition('\n')
+def checkout_of_git_dir(cwd, opts):
+    """The checkout the selected git directory belongs to, whatever --work-tree says; None for a bare repository."""
+    git_dir, _, common = git_read(cwd, opts, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir').partition('\n')
     if not git_dir or not common:
         return None
     if Path(git_dir) != Path(common):
@@ -104,7 +104,16 @@ def checkout_of_git_dir(dirs):
             return str(Path((Path(git_dir) / 'gitdir').read_text().strip()).parent)
         except OSError:
             return None
-    return str(Path(common).parent) if Path(common).name == '.git' else None
+    if Path(common).name == '.git':
+        return str(Path(common).parent)
+    worktree = git_read(cwd, [f'--git-dir={git_dir}'], 'config', '--get', 'core.worktree')
+    if worktree:
+        return str((Path(git_dir) / worktree).resolve())
+    if git_read(cwd, [f'--git-dir={git_dir}'], 'config', '--bool', '--get', 'core.bare') == 'true':
+        return None
+    if any(value == '--work-tree' or value.startswith('--work-tree=') for value in opts):
+        raise OSError(f'{git_dir} names no checkout and --work-tree is not trusted')
+    return git_read(cwd, opts, 'rev-parse', '--show-toplevel') or None
 
 
 def guard_push(args, cwd, opts, raw):

@@ -210,6 +210,12 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
     git(webapp, 'remote', 'add', 'origin', 'git@github.com:acme/webapp.git')
     other = root/'other'; other.mkdir(); git(other, 'init', '-b', 'main')
     git(other, 'remote', 'add', 'origin', 'https://github.com/combinaut/not-webapp.git')
+    separate = root/'separate'; subprocess.run(['git', 'init', '-q', f'--separate-git-dir={root/"separate.git"}', str(separate)], check=True)
+    (separate/'.orchestration.toml').write_text('[guard]\nbig_repo = true\n')
+    sub_source = root/'sub-source'; sub_source.mkdir(); git(sub_source, 'init', '-b', 'main'); git(sub_source, '-c', 'user.name=Guard Test', '-c', 'user.email=guard@example.invalid', 'commit', '--allow-empty', '-m', 'initial')
+    superproject = root/'superproject'; superproject.mkdir(); git(superproject, 'init', '-b', 'main')
+    git(superproject, '-c', 'protocol.file.allow=always', 'submodule', '-q', 'add', str(sub_source), 'module')
+    (superproject/'module/.orchestration.toml').write_text('[guard]\nbig_repo = true\n')
     repo_file = webapp/'.orchestration.toml'
     local_file = webapp/'.orchestration.local.toml'
     (webapp/'app').mkdir()
@@ -417,6 +423,10 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
     case('webapp git dir grep', f'cd {webapp}/.git && git grep needle', True, root)
     case('webapp git dir with an outside work tree', f'git --git-dir={webapp}/.git --work-tree={other} cat-file --batch-all-objects --batch', True, root)
     case('other git dir with the webapp work tree', f'git --git-dir={other}/.git --work-tree={webapp} grep needle', cwd=root)
+    case('separate git dir checkout grep', 'git grep needle', True, separate)
+    case('separate git dir with an outside work tree', f'git --git-dir={root}/separate.git --work-tree={other} cat-file --batch-all-objects --batch', True, root)
+    case('submodule grep', 'git grep needle', True, superproject/'module')
+    case('submodule git dir with an outside work tree', f'git --git-dir={superproject}/.git/modules/module --work-tree={other} grep needle', True, root)
     case('non-webapp grep', 'git grep needle', cwd=other)
     case('leave webapp before grep', f'cd {other} && git grep needle', cwd=webapp)
     case('successful and cd leaves webapp', f'true && cd {other}; git grep needle', cwd=webapp)
