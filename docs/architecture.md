@@ -149,7 +149,7 @@ flowchart LR
 - Coordinator and architects bind their native route with [`bind-self.py`](../coordinator/watchers/bind-self.py), on every session start and after every recycle.
 - Watchers detect and report. They never stop a job or close a pane.
 
-Details, keys, delivery guarantees and thresholds: [`coordinator/watchers/README.md`](../coordinator/watchers/README.md). Settings: [Settings in the README](../README.md#settings).
+Details, keys, delivery guarantees and thresholds: [`coordinator/watchers/README.md`](../coordinator/watchers/README.md). Settings: [Settings](settings.md).
 
 ## Heavy slots
 

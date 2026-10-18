@@ -14,6 +14,7 @@ setup_fixture() {
   RADAR_ORIGIN="$TMP/radar.git"
   mkdir -p "$HOME" "$BIN" "$SRC"
   export LAUNCHCTL_CALLS="$TMP/launchctl.calls" SYSTEMCTL_CALLS="$TMP/systemctl.calls"
+  export ORCH_ENV=none
   export ORCH_LAUNCHD_WAIT_TRIES=2 ORCH_LAUNCHD_WAIT_SLEEP=0
   export PATH="$BATS_SERVICE_STUB_BIN:$BIN:$PATH"
   # Apply only inside this fixture, including repositories product code creates later.
@@ -58,8 +59,6 @@ setup_fixture() {
 case "$1 ${2:-}" in
   'auth status') [ ! -e "${GH_LOGGED_OUT:-}" ] ;;
   'api user') echo "${GH_LOGIN:-octo-login}" ;;
-  'api repos/'*'/contents/lib/platform/'*) cat "$INSTALL_SOURCE/lib/platform/${2##*/}" ;;
-  'api repos/'*) [ ! -e "${GH_LOGGED_OUT:-}" ] || exit 1; [ -z "${GH_EMPTY:-}" ] || exit 0; cat "$INSTALL_SOURCE/install.sh" ;;
   *) exit 0 ;;
 esac
 EOF
@@ -117,6 +116,16 @@ EOF
   cat >"$BIN/curl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$CURL_CALLS"
+raw=https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main
+case "$*" in
+  *"$raw/"*)
+    [ -z "${CURL_RAW_FAIL:-}" ] || { echo 'curl: (22) The requested URL returned error: 404' >&2; exit 22; }
+    [ -z "${CURL_RAW_EMPTY:-}" ] || exit 0
+    path=${2#"$raw"/}
+    cat "$INSTALL_SOURCE/$path"
+    exit 0
+    ;;
+esac
 [ -z "${CURL_FAIL:-}" ] || exit 1
 [ -z "${CURL_EMPTY:-}" ] || { : >"$4"; exit 0; }
 case "$2" in
@@ -136,6 +145,7 @@ EOF
 args=()
 for arg in "$@"; do
   if [ "$arg" = https://github.com/combinaut/herdr-radar.git ]; then arg="file://$RADAR_ORIGIN"; fi
+  if [ "$arg" = https://github.com/combinaut/ai-agent-orchestration.git ]; then arg="file://$ORIGIN"; fi
   args+=("$arg")
 done
 case "$*" in
@@ -163,12 +173,12 @@ EOF
   chmod +x "$BIN/uname"
   ln -s "$(command -v dirname)" "$BIN/dirname"
   export PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin"
-  export TMP BIN RADAR_ORIGIN
+  export TMP BIN ORIGIN RADAR_ORIGIN
   export MISE_CWDS="$TMP/mise.cwds" MISE_CALLS="$TMP/mise.calls" CURL_CALLS="$TMP/curl.calls"
   export INSTALL_SOURCE="$SRC" ORCH_REPO_URL="file://$ORIGIN"
   export HERDR_CALLS="$TMP/herdr.calls" HERDR_PLUGIN="$TMP/herdr.plugin"
   # shellcheck disable=SC2016 # Expansions belong to the downloaded script.
-  export ONE_LINER='s=$(gh api repos/combinaut/ai-agent-orchestration/contents/install.sh -H "Accept: application/vnd.github.raw") && [ -n "$s" ] && exec /bin/bash -c "$s" install.sh "$@"; echo "Download failed. Fix: install gh (https://cli.github.com) && gh auth login" >&2; exit 1'
+  export ONE_LINER='exec /bin/bash <(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) "$@"'
 }
 
 teardown_fixture() {
@@ -182,7 +192,7 @@ teardown_fixture() {
 }
 
 fresh_install() {
-  run /bin/bash -c 'cd "$1"; shift; exec /bin/bash -c "$ONE_LINER" _ "$@"' _ "$TMP" --env none
+  run /bin/bash -c 'cd "$1"; shift; exec /bin/bash -c "$ONE_LINER" _ "$@"' _ "$TMP"
   # shellcheck disable=SC2154 # bats assigns status and output after run.
   [ "$status" -eq 0 ]
   CLONE="$HOME/.claude/ai-agent-orchestration"

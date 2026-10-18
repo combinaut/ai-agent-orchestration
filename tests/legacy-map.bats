@@ -157,14 +157,14 @@ make_webapp() {
   [ -L "$HOME/.claude/coordinator/legacy-map.sh" ]
   [ -x "$HOME/.claude/coordinator/legacy-map.sh" ]
   printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' >>"$HOME/.claude/orchestration.env"
-  install_ok --env none
+  install_ok
   [ -z "$(find "$HOME/.claude/coordinator/service" -type f)" ]
   contains "$output" 'daily legacy map job (set ORCH_LEGACY_MAP_REPO'
   printf '%s\n' "ORCH_LEGACY_MAP_REPO=\"$BIG_REPO\"" >>"$HOME/.claude/orchestration.env"
   use_service_state
   mkdir -p "$HOME/.config/systemd/user"
   ln -s /elsewhere/com.combinaut.coord-legacy-map.service "$HOME/.config/systemd/user/com.combinaut.coord-legacy-map.service"
-  install_ok --env none
+  install_ok
   case "$(uname -s)" in
     Darwin)
       unit="$HOME/.claude/coordinator/service/macos/com.combinaut.coord-legacy-map.plist"
@@ -199,13 +199,13 @@ make_webapp() {
   mkdir -p "$TMP/other-webapp"
   printf '%s\n' "ORCH_LEGACY_MAP_REPO=\"$TMP/other-webapp\"" >>"$HOME/.claude/orchestration.env"
   : >"$SYSTEMCTL_CALLS"
-  install_ok --env none
+  install_ok
   case "$(uname -s)" in
     Darwin) contains "$(cat "$HOME/Library/LaunchAgents/com.combinaut.coord-legacy-map.plist")" "<string>$TMP/other-webapp</string>" ;;
     Linux) contains "$(cat "$SYSTEMCTL_CALLS")" 'user daemon-reload' ;;
   esac
   grep -v '^ORCH_LEGACY_MAP_REPO=' "$HOME/.claude/orchestration.env" >"$TMP/env" && mv "$TMP/env" "$HOME/.claude/orchestration.env"
-  install_ok --env none
+  install_ok
   case "$(uname -s)" in
     Darwin)
       [ ! -e "$HOME/Library/LaunchAgents/com.combinaut.coord-legacy-map.plist" ]
@@ -220,7 +220,7 @@ make_webapp() {
   printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' \
     'ORCH_LEGACY_REPOS="acme/webapp"' "ORCH_GIT_WATCH_REPOS=\"/elsewhere/other $BIG_REPO\"" >>"$HOME/.claude/orchestration.env"
   use_service_state
-  install_ok --env none
+  install_ok
   case "$(uname -s)" in
     Darwin) contains "$(cat "$HOME/.claude/coordinator/service/macos/com.combinaut.coord-legacy-map.plist")" "<string>$BIG_REPO</string>" ;;
     Linux) contains "$(cat "$HOME/.claude/coordinator/service/linux/com.combinaut.coord-legacy-map.service")" "\"$BIG_REPO\"" ;;
@@ -231,7 +231,7 @@ make_webapp() {
   fresh_install
   printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' \
     "ORCH_GIT_WATCH_REPOS=\"$BIG_REPO\"" 'ORCH_LEGACY_REPOS=""' >>"$HOME/.claude/orchestration.env"
-  install_ok --env none
+  install_ok
   contains "$output" 'daily legacy map job (set ORCH_LEGACY_MAP_REPO'
   [ -z "$(find "$HOME/.claude/coordinator/service" -type f)" ]
 }

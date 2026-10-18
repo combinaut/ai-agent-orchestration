@@ -16,7 +16,7 @@ GitHub access goes through your local `gh` login, via a native messaging host. N
 
 ## Install
 
-1. Run the [install command](../README.md#install-and-update). With a Chrome profile present it renders `~/.claude/chrome-pr-tabs/pr-tabs-host` (a launcher using `ORCH_PYTHON3` and `ORCH_PATH`, which must reach `gh`) and registers it in Chrome's `NativeMessagingHosts` directory (macOS: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`, Linux: `~/.config/google-chrome/NativeMessagingHosts/`). Without a profile it prints `skipped`.
+1. Run the [install command](../README.md#1-install). With a Chrome profile present it renders `~/.claude/chrome-pr-tabs/pr-tabs-host` (a launcher using `ORCH_PYTHON3` and `ORCH_PATH`, which must reach `gh`) and registers it in Chrome's `NativeMessagingHosts` directory (macOS: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`, Linux: `~/.config/google-chrome/NativeMessagingHosts/`). Without a profile it prints `skipped`.
 2. Load the extension once. Chrome cannot load an unpacked extension from a script, so this step is manual:
    1. Open `chrome://extensions` and turn on **Developer mode**.
    2. Click **Load unpacked** and choose `chrome/pr-tabs/extension` inside the clone (`~/.claude/ai-agent-orchestration/chrome/pr-tabs/extension` unless you set `ORCH_REPO_PATH`).

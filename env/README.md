@@ -1,6 +1,6 @@
 # Env adapters
 
-`install.sh --env <name>` runs `env/<name>/install.sh` after the shared files are linked. Without `--env` it uses `ORCH_ENV` from `~/.claude/orchestration.env`, asks on a terminal, and skips the step otherwise. `--env none` skips it.
+`install.sh --env <name>` runs `env/<name>/install.sh` after the shared files are linked. Without `--env` it uses `ORCH_ENV` from `~/.claude/orchestration.env`, else `herdr`. `ORCH_ENV="none"` skips it.
 
 ## Contract
 
