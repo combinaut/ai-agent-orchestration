@@ -56,6 +56,7 @@ The installer prints the fix with each error.
 | Message | Fix |
 |---|---|
 | `curl: (22) …` and nothing installs | The download failed. Check the network and run the command again. |
+| `s: empty download` | The download returned nothing. The command exits non-zero; run it again. |
 | `git not found. Fix: …` | macOS: `xcode-select --install`. Debian/Ubuntu: `sudo apt-get install git`. |
 | `jq not found. Fix: …` | macOS: `brew install jq`. Debian/Ubuntu: `sudo apt-get install jq`. |
 | `curl not found. Fix: …` | macOS: `brew install curl`. Debian/Ubuntu: `sudo apt-get install curl`. |

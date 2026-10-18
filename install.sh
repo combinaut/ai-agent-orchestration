@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs, updates and repairs the ai-agent-orchestration setup: one clone, symlinked into ~/.claude.
-# Safe to run any number of times. Run it without a clone (arguments go after the closing parenthesis):
-#   bash <(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh)
+# Safe to run any number of times. Run it without a clone (arguments go after the final _):
+#   s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) && bash -c "${s:?empty download}" _
 set -eu
 
 REPO_SLUG="combinaut/ai-agent-orchestration"
