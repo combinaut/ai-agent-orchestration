@@ -178,7 +178,7 @@ EOF
   export INSTALL_SOURCE="$SRC" ORCH_REPO_URL="file://$ORIGIN"
   export HERDR_CALLS="$TMP/herdr.calls" HERDR_PLUGIN="$TMP/herdr.plugin"
   # shellcheck disable=SC2016 # Expansions belong to the downloaded script.
-  export ONE_LINER='exec /bin/bash <(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) "$@"'
+  export ONE_LINER='s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) && bash -c "${s:?empty download}" _ "$@"'
 }
 
 teardown_fixture() {

@@ -110,6 +110,7 @@ CASES
 @test "failed one-liner download installs nothing and shows the curl error" {
   CURL_RAW_FAIL=1; export CURL_RAW_FAIL
   run /bin/bash -c "$ONE_LINER" _
+  [ "$status" -ne 0 ]
   contains "$output" 'curl: (22)'
   [ ! -e "$HOME/.claude/ai-agent-orchestration" ]
 }
@@ -117,6 +118,8 @@ CASES
 @test "empty one-liner download installs nothing" {
   CURL_RAW_EMPTY=1; export CURL_RAW_EMPTY
   run /bin/bash -c "$ONE_LINER" _
+  [ "$status" -ne 0 ]
+  contains "$output" 'empty download'
   [ ! -e "$HOME/.claude/ai-agent-orchestration" ]
 }
 
