@@ -10,7 +10,7 @@ if ! files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '
   echo macos=true
   exit 0
 fi
-if printf '%s\n' "$files" | grep -qvE '(\.md|^LICENSE)$|^docs/'; then
+if grep -qvE '(\.md|^LICENSE)$|^docs/' <<<"$files"; then
   echo macos=true
 else
   echo macos=false

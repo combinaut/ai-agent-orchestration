@@ -7,10 +7,10 @@ setup() {
 #!/bin/sh
 [ -n "$GH_FAIL" ] && exit 1
 while [ "$1" != --jq ]; do shift; done
-printf '%s' "$GH_JSON" | jq -r "$2"
+if [ -n "$GH_JSON_FILE" ]; then jq -r "$2" <"$GH_JSON_FILE"; else printf '%s' "$GH_JSON" | jq -r "$2"; fi
 STUB
   chmod +x "$BIN/gh"
-  export PATH="$BIN:$PATH" GITHUB_REPOSITORY=o/r PR=1 EVENT=pull_request GH_FAIL='' GH_JSON='[]'
+  export PATH="$BIN:$PATH" GITHUB_REPOSITORY=o/r PR=1 EVENT=pull_request GH_FAIL='' GH_JSON='[]' GH_JSON_FILE=''
 }
 
 teardown() { rm -rf "$BIN"; }
@@ -46,5 +46,13 @@ scope() { run /bin/bash "$BATS_TEST_DIRNAME/../.github/scripts/macos-scope.sh"; 
 
 @test "pushes run macOS" {
   EVENT=push GH_JSON='[{"filename":"README.md"}]' scope
+  [ "$output" = macos=true ]
+}
+
+@test "a code file ahead of a large documentation list runs macOS" {
+  GH_JSON_FILE="$BIN/files.json"
+  { printf '[{"filename":"install.sh"}'; seq 1 20000 | sed 's|.*|,{"filename":"docs/page-&.md"}|'; printf ']'; } >"$GH_JSON_FILE"
+  export GH_JSON_FILE
+  scope
   [ "$output" = macos=true ]
 }
