@@ -17,27 +17,18 @@ jobs:
     outputs:
       macos: ${{ steps.scope.outputs.macos }}
     steps:
+      - uses: actions/checkout@v7
       - id: scope
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           PR: ${{ github.event.pull_request.number }}
-        run: |
-          if [ "$EVENT" != pull_request ]; then
-            echo macos=true >>"$GITHUB_OUTPUT"
-            exit 0
-          fi
-          files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename')
-          if [ -z "$files" ] || printf '%s\n' "$files" | grep -qvE '(\.md|^LICENSE)$|^docs/'; then
-            echo macos=true >>"$GITHUB_OUTPUT"
-          else
-            echo macos=false >>"$GITHUB_OUTPUT"
-          fi
+        run: .github/scripts/macos-scope.sh >>"$GITHUB_OUTPUT"
 
   macos:
     name: Validate (macos-latest)
     needs: changes
-    if: needs.changes.outputs.macos == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.macos != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 25
     steps:
