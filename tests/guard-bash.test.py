@@ -415,6 +415,8 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
     case('webapp git -C cat-file tree', f'git -C {webapp} ls-tree -r HEAD | git -C {webapp} cat-file --batch', True, root)
     case('webapp git dir batch all objects', f'git -C {webapp}/.git cat-file --batch-all-objects --batch', True, root)
     case('webapp git dir grep', f'cd {webapp}/.git && git grep needle', True, root)
+    case('webapp git dir with an outside work tree', f'git --git-dir={webapp}/.git --work-tree={other} cat-file --batch-all-objects --batch', True, root)
+    case('other git dir with the webapp work tree', f'git --git-dir={other}/.git --work-tree={webapp} grep needle', cwd=root)
     case('non-webapp grep', 'git grep needle', cwd=other)
     case('leave webapp before grep', f'cd {other} && git grep needle', cwd=webapp)
     case('successful and cd leaves webapp', f'true && cd {other}; git grep needle', cwd=webapp)

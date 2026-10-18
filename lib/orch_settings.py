@@ -468,7 +468,7 @@ def from_env(setting, text):
     if kind == 'number':
         return float(text) if re.search(r'[.eE]', text) else int(text)
     if kind == 'list':
-        return text.split() if setting.sep == ' ' else text.split(setting.sep)
+        return text.split() if setting.sep == ' ' else [item for item in text.split(setting.sep) if item]
     return json.loads(text)
 
 
@@ -590,7 +590,11 @@ def migrate(env_path, toml_path, snippet_dir):
     text = render(global_values, {s: comments.get(s.env, []) for s in global_values}, header)
     validate(parse(text, str(toml_path)), str(toml_path), 'global')
     environ = dict(os.environ, ORCH_GIT_WATCH_REPOS=values.get('ORCH_GIT_WATCH_REPOS', ''))
-    for repo, layer in sorted(repo_layers(values, report).items()):
+    layers = sorted(repo_layers(values, report).items())
+    for repo, layer in layers:
+        label = f'{repo} repo settings'
+        validate(parse(render(layer), label), label, 'repo')
+    for repo, layer in layers:
         write_repo_layer(repo, layer, known_clone(repo, environ), snippet_dir, report)
     Path(toml_path).write_text(text)
     return [f'converted {env_path} -> {toml_path}'] + report

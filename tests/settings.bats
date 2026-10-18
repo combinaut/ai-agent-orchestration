@@ -351,6 +351,22 @@ pattern = "mine"' ]
   run load_settings "$TMP/wt-after"
   printf '%s\n' "$output" | grep -qxF "ORCH_FOCUS_PATTERN=mine"
   printf '%s\n' "$output" | grep -qxF "ORCH_BIG_REPO=1"
+  printf '[guard]\nbig_repo = false\n' >"$TMP/wt-after/.orchestration.local.toml"
+  run python3 "$ROOT/hooks/guard-bash.py" <<<"{\"tool_name\":\"Bash\",\"cwd\":\"$TMP/wt-after\",\"tool_input\":{\"command\":\"git grep needle\"}}"
+  [ "$status" -eq 0 ]
+}
+
+@test "migration drops empty merge gate entries and checks every repo layer before writing" {
+  migration_fixture
+  sed -i.orig 's/^ORCH_MERGE_GATE_CHECKS=.*/ORCH_MERGE_GATE_CHECKS="Gate A|"/' "$OLD"
+
+  run python3 "$SETTINGS" migrate "$OLD" "$ORCH_CONFIG" "$TMP/snippets"
+
+  [ "$status" -eq 0 ]
+  grep -qx 'merge_gate_checks = \["Gate A"\]' "$CLONE/.orchestration.local.toml"
+  run load_settings "$CLONE"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qxF "ORCH_MERGE_GATE_CHECKS=Gate A"
 }
 
 @test "repos whose names join to the same text get separate migration snippets" {

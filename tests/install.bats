@@ -1126,3 +1126,10 @@ EOF
   [ -e "$TMP/custom-clone/.git" ]
   [ ! -e "$HOME/.claude/ai-agent-orchestration" ]
 }
+
+@test "update hook reports a config the loader rejects" {
+  printf '%s\n' '[pr]' 'nope = 1' >"$TMP/bad.toml"
+  run env ORCH_CONFIG="$TMP/bad.toml" bash "$BATS_TEST_DIRNAME/../hooks/orch-update-check.sh"
+  [ "$status" -ne 0 ]
+  contains "$output" "orch-update-check: $TMP/bad.toml: pr.nope: unknown key"
+}

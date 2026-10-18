@@ -90,13 +90,21 @@ def repo_settings(root):
 
 def is_big_repo(cwd, opts):
     identity_opts = [value for i, value in enumerate(opts) if value != '-c' and (i == 0 or opts[i-1] != '-c')]
-    root = git_read(cwd, identity_opts, 'rev-parse', '--show-toplevel')
-    if not root:
-        common = git_read(cwd, identity_opts, 'rev-parse', '--path-format=absolute', '--git-common-dir')
-        if not common or Path(common).name != '.git':
-            return False
-        root = str(Path(common).parent)
-    return repo_settings(root)['ORCH_BIG_REPO'] == '1'
+    root = checkout_of_git_dir(git_read(cwd, identity_opts, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'))
+    return root is not None and repo_settings(root)['ORCH_BIG_REPO'] == '1'
+
+
+def checkout_of_git_dir(dirs):
+    """The checkout a git directory belongs to, whatever --work-tree says; None for a bare repository."""
+    git_dir, _, common = dirs.partition('\n')
+    if not git_dir or not common:
+        return None
+    if Path(git_dir) != Path(common):
+        try:
+            return str(Path((Path(git_dir) / 'gitdir').read_text().strip()).parent)
+        except OSError:
+            return None
+    return str(Path(common).parent) if Path(common).name == '.git' else None
 
 
 def guard_push(args, cwd, opts, raw):
