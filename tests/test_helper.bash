@@ -86,8 +86,7 @@ case "$1 ${2:-}" in
         [ -z "${HERDR_FAIL_START:-}" ] || exit 1
         # Like Radar: a live daemon is left alone, otherwise one starts.
         if [ -z "${HERDR_NO_DAEMON:-}" ] && ! { [ -f "$TMP/daemon.pid" ] && kill -0 "$(cat "$TMP/daemon.pid")" 2>/dev/null; }; then
-          radar=$(cd "${ORCH_RADAR_PATH:-$HOME/.claude/herdr-radar}" && pwd -P)
-          (exec -a "$radar/bin/agent-state.js --animate" sleep 300 </dev/null >/dev/null 2>&1 &
+          (sleep 300 </dev/null >/dev/null 2>&1 &
             echo $! >"$TMP/daemon.pid")
         fi
         ;;
@@ -104,6 +103,11 @@ esac
 EOF
   cat >"$BIN/node" <<'EOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = -e ]; then
+  # Stands in for Radar's control endpoint: the pid of this session's daemon.
+  { [ -f "$TMP/daemon.pid" ] && kill -0 "$(cat "$TMP/daemon.pid")" 2>/dev/null && cat "$TMP/daemon.pid"; } || true
+  exit 0
+fi
 echo "v${NODE_VERSION:-22.20.0}"
 EOF
   mkdir -p "$TMP/managed-node"

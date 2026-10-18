@@ -142,27 +142,20 @@ prepare_plugin() {
   fi
 }
 
-# radar_daemons <checkout>: pids of Radar's --animate processes run from the checkout, one per line.
-radar_daemons() {
-  local pattern
-  # shellcheck disable=SC2016 # sed program, not shell.
-  pattern=$(printf '%s' "$1/bin/agent-state.js --animate" | sed 's/[][\.*^$(){}?+|/]/\\&/g')
-  pgrep -f -- "(^| )$pattern" || true
+# radar_daemon <checkout>: pid of the daemon answering this Herdr session's control endpoint, empty when none does.
+radar_daemon() {
+  "$RADAR_NODE" -e 'require(process.argv[1] + "/lib/control").request({ cmd: "ping" }).then((r) => { if (r && r.ok && r.pid) console.log(r.pid); })' "$1" 2>/dev/null || true
 }
 
-pid_listed() { case $'\n'$2$'\n' in *$'\n'"$1"$'\n'*) return 0 ;; esac; return 1; }
-
-# radar_daemon_wait <stop|start> <checkout> <pids before>: succeeds once one of the pids is gone (stop) or a pid not among them is running (start).
-# Other Herdr sessions keep daemons of their own, so a count of zero is never the test.
+# radar_daemon_wait <stop|start> <checkout> <pid before>: succeeds once this session's daemon is not the pid before (stop) or is a running pid other than it (start).
 radar_daemon_wait() {
-  local mode=$1 tries=${ORCH_RADAR_WAIT_TRIES:-40} now pid
+  local mode=$1 tries=${ORCH_RADAR_WAIT_TRIES:-40} now
   while :; do
-    now=$(radar_daemons "$2")
+    now=$(radar_daemon "$2")
     if [ "$mode" = stop ]; then
-      [ -n "$3" ] || return 0
-      for pid in $3; do pid_listed "$pid" "$now" || return 0; done
+      [ "$now" != "$3" ] && return 0
     else
-      for pid in $now; do pid_listed "$pid" "$3" || return 0; done
+      [ -n "$now" ] && [ "$now" != "$3" ] && return 0
     fi
     tries=$((tries - 1))
     [ "$tries" -gt 0 ] || return 1
@@ -231,10 +224,10 @@ env_install() {
     say "already linked" "Herdr plugin $RADAR_ID -> $RADAR_PLUGIN"
   fi
   if [ "$moved" = 1 ]; then
-    known=$(radar_daemons "$path")
+    known=$(radar_daemon "$path")
     "$HERDR_EXE" plugin action invoke "$RADAR_ID.state-stop" >/dev/null
-    radar_daemon_wait stop "$path" "$known" || say "note" "no Radar daemon exited after state-stop; starting anyway"
-    known=$(radar_daemons "$path")
+    radar_daemon_wait stop "$path" "$known" || say "note" "the Radar daemon did not exit after state-stop; starting anyway"
+    known=$(radar_daemon "$path")
   fi
   radar_start
   if ! radar_daemon_wait start "$path" "$known"; then

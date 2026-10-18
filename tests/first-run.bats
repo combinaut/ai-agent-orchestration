@@ -678,8 +678,7 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/inst
 @test "a restart ignores another session's daemon from the same checkout" {
   fresh_install
   install_ok --env herdr
-  radar=$(cd "$HOME/.claude/herdr-radar" && pwd -P)
-  (exec -a "$radar/bin/agent-state.js --animate" sleep 60 >/dev/null 2>&1 &
+  (sleep 60 >/dev/null 2>&1 &
     echo $! >"$TMP/other.pid")
   git -C "$HOME/.claude/herdr-radar" checkout -q main
   run env ORCH_RADAR_WAIT_TRIES=10 ORCH_RADAR_WAIT_SLEEP=0.2 /bin/bash "$CLONE/install.sh" --env herdr
@@ -690,6 +689,16 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/inst
   [ "$status" -eq 0 ]
   [ "$alive" -eq 1 ]
   kill -0 "$(cat "$TMP/daemon.pid")"
+}
+
+@test "another session's daemon does not satisfy the check when this session starts none" {
+  fresh_install
+  install_ok --env herdr
+  mv "$TMP/daemon.pid" "$TMP/other.pid"
+  run env HERDR_NO_DAEMON=1 ORCH_RADAR_WAIT_TRIES=2 ORCH_RADAR_WAIT_SLEEP=0 /bin/bash "$CLONE/install.sh" --env herdr
+  kill "$(cat "$TMP/other.pid")" 2>/dev/null || true
+  [ "$status" -ne 0 ]
+  contains "$output" 'Radar daemon is not running after state-start'
 }
 
 @test "an install whose Radar daemon never appears fails instead of reporting it running" {
