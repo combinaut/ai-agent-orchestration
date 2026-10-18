@@ -162,7 +162,7 @@ load_config_cache() {
   [ -f "$CONFIG" ] && [ -n "$INSTALL_PYTHON" ] && [ -f "${SRC:-}/lib/orch_settings.py" ] || return 0
   out=$("$INSTALL_PYTHON" -I "$SRC/lib/orch_settings.py" global "$CONFIG" 2>/dev/null) || return 0
   for name in ${!__orch_file_@}; do unset "$name"; done
-  # shellcheck disable=SC2329 # Called by the eval below.
+  # shellcheck disable=SC2317,SC2329 # Called by the eval below.
   orch_set_default() { printf -v "__orch_file_$1" '%s' "$2"; }
   eval "$out"
   unset -f orch_set_default
