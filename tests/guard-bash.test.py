@@ -35,8 +35,8 @@ def hook(command, cwd):
 def check_installer(repo, root, push_cwd):
     home = root/'install-home'; bindir = root/'install-bin'
     home.mkdir(); bindir.mkdir()
-    custom_config = root/'selected-orchestration.env'
-    custom_config.write_text('ORCH_BIG_REPO_REMOTES="acme/webapp"\n')
+    custom_config = root/'selected-orchestration.toml'
+    custom_config.write_text('[pr]\nauthor = "me"\n')
     gh = bindir/'gh'
     gh.write_text('#!/bin/sh\n[ "$1 $2" = "auth status" ]\n')
     gh.chmod(0o755)
@@ -189,9 +189,7 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
     root = Path(directory)
     test_home = root/'home'; (test_home/'.claude/hooks').mkdir(parents=True)
     os.environ['HOME'] = str(test_home)
-    config = test_home / "orchestration.env"
-    config.write_text('ORCH_BIG_REPO_REMOTES="acme/webapp"\n')
-    os.environ["ORCH_CONFIG"] = str(config)
+    os.environ.pop("ORCH_CONFIG", None)
     repo = root/'repo'; repo.mkdir()
     git(repo, 'init', '-b', 'main')
     git(repo, '-c', 'user.name=Guard Test', '-c', 'user.email=guard@example.invalid', 'commit', '--allow-empty', '-m', 'initial')
@@ -212,53 +210,32 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
     git(webapp, 'remote', 'add', 'origin', 'git@github.com:acme/webapp.git')
     other = root/'other'; other.mkdir(); git(other, 'init', '-b', 'main')
     git(other, 'remote', 'add', 'origin', 'https://github.com/combinaut/not-webapp.git')
-    configured_remote = os.environ.get("GENERIC_PROOF_REMOTE", "acme/webapp")
-    git(
-        webapp,
-        "remote",
-        "set-url",
-        "origin",
-        "git@github.com:" + configured_remote + ".git",
-    )
-    config.write_text('ORCH_BIG_REPO_REMOTES="' + configured_remote + '"\n')
-    for value in ("", "acme/unrelated"):
-        os.environ["ORCH_BIG_REPO_REMOTES"] = value
-        assert hook("git grep needle", webapp).returncode == 0
-    del os.environ["ORCH_BIG_REPO_REMOTES"]
-    good_config = config.read_text()
-    config_failures = []
-    missing_config = root/'missing-orchestration.env'
-    for label, selected in [('missing file', missing_config), ('early exit', config)]:
-        if label == 'early exit':
-            config.write_text('ORCH_BIG_REPO_REMOTES="acme/webapp"\nexit 0\n')
-        os.environ['ORCH_CONFIG'] = str(selected)
-        result = hook('git grep needle', webapp)
-        if result.returncode != 2 or 'Cannot load ORCH configuration' not in result.stderr:
-            config_failures.append((label, result.returncode, result.stderr))
-        assert hook('git status', webapp).returncode == 0
-    os.environ['ORCH_CONFIG'] = str(config)
-    config.write_text('ORCH_BIG_REPO_REMOTES=""\n')
-    assert hook('git grep needle', webapp).returncode == 0
-    config.write_text(good_config)
-    assert not config_failures, config_failures
-    config.write_text('ORCH_BIG_REPO_REMOTES="unterminated\n')
+    repo_file = webapp/'.orchestration.toml'
+    local_file = webapp/'.orchestration.local.toml'
+    (webapp/'app').mkdir()
+    assert hook("git grep needle", webapp).returncode == 0
+    repo_file.write_text('[guard]\nbig_repo = true\n')
+    assert hook("git grep needle", webapp).returncode == 2
+    assert hook("git grep needle", webapp/'app').returncode == 2
+    assert hook("git grep needle", other).returncode == 0
+    os.environ["ORCH_BIG_REPO"] = "0"
+    assert hook("git grep needle", webapp).returncode == 0
+    del os.environ["ORCH_BIG_REPO"]
+    local_file.write_text('[guard]\nbig_repo = false\n')
+    assert hook("git grep needle", webapp).returncode == 0
+    local_file.unlink()
+    good_config = repo_file.read_text()
     try:
-        assert hook("git grep needle", webapp).returncode == 2
-        assert hook("git cat-file --batch-all-objects --batch", webapp).returncode == 2
-        assert (
-            hook("git ls-tree -r HEAD | git cat-file --batch", webapp).returncode == 2
-        )
-        assert hook("git cat-file -p HEAD", webapp).returncode == 0
-        assert hook("git status", webapp).returncode == 0
-        config.write_bytes(
-            ('ORCH_BIG_REPO_REMOTES="' + configured_remote + '"\n').encode()
-            + b'ORCH_PR_TABS_TOPICS="\xff"\n'
-        )
-        assert hook("git grep needle", webapp).returncode == 2
-        config.write_bytes(b'ORCH_BIG_REPO_REMOTES="\xff"\n')
-        assert hook("git grep needle", webapp).returncode == 2
+        for broken in ('[guard\n', '[guard]\nbig_repo = "yes"\n', '[heavy_slots]\nmax = 2\n', b'[guard]\nbig_repo = true\n# \xff\n'):
+            repo_file.write_bytes(broken if isinstance(broken, bytes) else broken.encode())
+            result = hook("git grep needle", webapp)
+            assert result.returncode == 2 and 'Cannot load the repo settings' in result.stderr, (broken, result.stderr)
+            assert hook("git cat-file --batch-all-objects --batch", webapp).returncode == 2
+            assert hook("git ls-tree -r HEAD | git cat-file --batch", webapp).returncode == 2
+            assert hook("git cat-file -p HEAD", webapp).returncode == 0
+            assert hook("git status", webapp).returncode == 0
     finally:
-        config.write_text(good_config)
+        repo_file.write_text(good_config)
     msg = root/'message.txt'; msg.write_text('Co-Authored-By: Claude <bot@anthropic.com>')
     oversized_msg = root/'oversized-message.txt'; oversized_msg.write_text('x'*(1024*1024) + 'Co-Authored-By: Claude')
     oversized_plain = root/'oversized-plain.txt'; oversized_plain.write_text('x'*(1024*1024 + 1))

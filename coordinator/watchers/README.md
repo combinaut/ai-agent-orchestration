@@ -115,7 +115,7 @@ templates, are registered as active jobs (see the top-level README, install step
 
 ## Feed delivery
 
-`notify-inbox.py --deliver file` passes every new alert through `alert_policy.py` and appends the lines it returns to `prod-context/coordinator-feed.log`; preview mode (no `--deliver`) prints the raw alert line. `notify-inbox.sh` loads `ORCH_CONFIG` (default `~/.claude/orchestration.env`) the way every watcher wrapper does, the environment winning, then runs `notify-inbox.py`; the services start the wrapper. The alert and state files keep every event.
+`notify-inbox.py --deliver file` passes every new alert through `alert_policy.py` and appends the lines it returns to `prod-context/coordinator-feed.log`; preview mode (no `--deliver`) prints the raw alert line. `notify-inbox.sh` loads `ORCH_CONFIG` (default `~/.claude/orchestration.toml`) the way every watcher wrapper does, the environment winning, then runs `notify-inbox.py`; the services start the wrapper. The alert and state files keep every event.
 
 The feed is mode 0600 and append-only; each batch is one `O_APPEND` write of whole lines, `<local ISO time> <mode>: <text> (<reason>)`. At 1 MiB it rotates to `coordinator-feed.log.1`, replacing the previous backup, so the feed takes at most 2 MiB. A single batch over 1 MiB keeps its newest lines that fit, after `watchers: <n> feed lines over the size cap dropped (digest)`.
 
@@ -286,10 +286,10 @@ use 20, with the configured thresholds deciding when to alert.
 `LEGACY <repo>#<n> <title> [<count> lines: JSERB a, JQUERY b, LEGACY c, TEST d]`
 lists lines an open PR adds that build on legacy front-end code: `.js.erb` files,
 jQuery/ujs/Select2 patterns, edits under `app/assets/javascripts/`, and those
-patterns in spec/test files. The scan runs for PRs in ORCH_LEGACY_REPOS (empty by default; no scans until configured) when a PR is first seen, when its head SHA changes, when its base branch changes, or when the rules file on its default branch changes, at most ORCH_LEGACY_SCANS_MAX PRs per
+patterns in spec/test files. The scan runs for PRs of repos whose repo settings turn `legacy.scan` on (off by default; read from the `.orchestration.toml` of the PR's base branch, then the `.orchestration.local.toml` of a watched clone) when a PR is first seen, when its head SHA changes, when its base branch changes, or when the rules file on its default branch changes, at most ORCH_LEGACY_SCANS_MAX PRs per
 pass (default 10; the rest wait for the next pass), and a head with a count above
 zero emits one line. Results are kept in `audit.json` → `before.legacy`, and the
-first read emits `AUDIT BASELINE legacy`. Each scan costs one `gh pr diff` call; every pass also makes one rules-file read per repository default branch of the scanned repos' open PRs. A PR over 300 files makes `gh pr diff`
+first read emits `AUDIT BASELINE legacy`. Each scan costs one `gh pr diff` call; every pass also makes one rules-file read per repository default branch of the scanned repos' open PRs, and one `.orchestration.toml` read per repository base branch of the open PRs. A PR over 300 files makes `gh pr diff`
 fail with `too_large`; the scan then reads the `pulls/<n>/files` patches, 100 files per page,
 and classifies them identically. GitHub leaves `patch` out of big file entries; the scan then reads
 the file at the PR head with the contents API (`added`), or the head and merge-base versions
@@ -298,7 +298,7 @@ files need no read. The added-line count must equal the entry's `additions`, or 
 `ORCH_LEGACY_READS_MAX` reads per PR (default 20; more fails the scan), each under the 45s
 command timeout, files over 1,000,000 bytes fail the scan, and binary files (NUL byte or not UTF-8)
 are skipped with a `legacy-scan skipped binary file <path>` line on stderr. A rules or scan failure becomes that PR’s `READFAIL LEGACY <repo>#<n> <title>: <reason>` entry, retried on later passes; other PR scans and own-PR review/check lines keep reporting. The classifier lives only in `audit.py` (built-in rules) and
-`legacy_rules.py` (the repository's rules file); `coordinator/legacy-scan.sh <pr> [repo]` uses the sole `ORCH_LEGACY_REPOS` entry when no repo is supplied; with zero or multiple entries, pass the repo explicitly. It is a
+`legacy_rules.py` (the repository's rules file); `coordinator/legacy-scan.sh <pr> [repo]` uses `watchers.primary_repo` when no repo is supplied. It is a
 thin CLI over it that prints the matching lines.
 
 If the repository has `scripts/legacy-deletion-ratchet-rules.json` on the repository's **default** branch

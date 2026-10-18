@@ -69,41 +69,22 @@ def is_wiki(remote, cwd, opts):
     return url.endswith('.wiki')
 
 
-def project_settings():
-    """Use the watcher loader, including exported-value precedence."""
-    configured_path = os.environ.get("ORCH_CONFIG")
-    if configured_path and not Path(configured_path).is_file():
-        raise FileNotFoundError(f"ORCH_CONFIG is not a file: {configured_path}")
-    library = Path(__file__).resolve().parents[1] / "coordinator/watchers/coord-lib.sh"
-    result = subprocess.run(
-        [
-            "/bin/bash",
-            "-e",
-            "-c",
-            '. "$1"; orch_load_config; printf "%s\\0" "$ORCH_BIG_REPO_REMOTES"',
-            "orch-config",
-            str(library),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=2,
-        check=True,
-    )
-    if "\0" not in result.stdout:
-        raise OSError("ORCH configuration loader did not complete")
-    return result.stdout.split("\0")[:1]
+def repo_settings(root):
+    """Repo settings of the checkout at root, from the shared settings reader."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+    import orch_settings
+    try:
+        return orch_settings.load_repo(root)
+    except orch_settings.ConfigError as error:
+        raise OSError(str(error)) from None
 
 
 def is_big_repo(cwd, opts):
-    repos = project_settings()[0].split()
-    if not repos:
-        return False
     identity_opts = [value for i, value in enumerate(opts) if value != '-c' and (i == 0 or opts[i-1] != '-c')]
-    remote = git_read(cwd, identity_opts, "remote", "get-url", "origin")
-    return any(
-        re.search(r"(?:^|[/:])" + re.escape(repo) + r"(?:\.git)?/?$", remote, re.I)
-        for repo in repos
-    )
+    root = git_read(cwd, identity_opts, 'rev-parse', '--show-toplevel')
+    if not root:
+        return False
+    return repo_settings(root)['ORCH_BIG_REPO'] == '1'
 
 
 def guard_push(args, cwd, opts, raw):
@@ -577,7 +558,7 @@ def guard_big_repo_reads(args, cwd, opts, raw, pipeline=()):
         if not is_big_repo(cwd, opts):
             return None
     except (OSError, subprocess.SubprocessError, UnicodeError):
-        config_error = "Cannot load ORCH configuration; broad Git reads are denied. Fix ORCH_CONFIG or orchestration.env, or use scoped rg."
+        config_error = "Cannot load the repo settings (.orchestration.toml or .orchestration.local.toml); broad Git reads are denied. Fix the file, or use scoped rg."
     if args[0] == "grep":
         return config_error or BIG_REPO_REASON
     if args[0] == 'cat-file' and any(a == '--batch-all-objects' or a.startswith('--batch-all-objects=') for a in args[1:]):

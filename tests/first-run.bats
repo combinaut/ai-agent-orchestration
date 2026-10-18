@@ -8,7 +8,7 @@ on_tty() {
   run env PTY_ANSWERS="$1" python3 "$ROOT/tests/pty_run.py" /bin/bash "$CLONE/install.sh" "${@:2}"
 }
 
-config_line() { grep "^$1=" "$HOME/.claude/orchestration.env"; }
+config_line() { printf '%s="%s"' "$1" "$(config_get "$1")"; }
 
 foreign_config() {
   mkdir -p "$HOME/.config/herdr"
@@ -95,19 +95,19 @@ EOF
   [ "$(config_line ORCH_CODEX_SMART_MODEL)" = 'ORCH_CODEX_SMART_MODEL=""' ]
 }
 
-@test "an answer replaces every assignment of its key" {
+@test "an answer replaces the placeholder line of its key" {
   fresh_install
-  printf '%s\n' 'ORCH_HERDR_BIN="<later-placeholder>"' >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_HERDR_BIN '<later-placeholder>'
   on_tty $'-\n-\n-\n-\n/opt/herdr/bin/herdr\n-'
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^ORCH_HERDR_BIN=' "$HOME/.claude/orchestration.env")" = 1 ]
-  # shellcheck disable=SC1090,SC1091
-  [ "$(. "$HOME/.claude/orchestration.env" && printf '%s' "$ORCH_HERDR_BIN")" = /opt/herdr/bin/herdr ]
+  [ "$(grep -c '^bin = ' "$HOME/.claude/orchestration.toml")" = 1 ]
+  [ "$(config_get ORCH_HERDR_BIN)" = /opt/herdr/bin/herdr ]
 }
 
 @test "an answer wins over an empty exported value for the rest of the run" {
   fresh_install
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_PR_AUTHOR="a"' 'ORCH_PR_REPOS="o/r"' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' 'ORCH_HERDR_BIN=""' 'ORCH_HERDR_SOCKET=""' >"$HOME/.claude/orchestration.env"
+  : >"$HOME/.claude/orchestration.toml"
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_PR_AUTHOR a ORCH_PR_REPOS o/r ORCH_CODEX_WORKER_MODEL w ORCH_CODEX_SMART_MODEL s ORCH_HERDR_BIN "" ORCH_HERDR_SOCKET ""
   ORCH_HERDR_BIN="" ORCH_HERDR_SOCKET="" LAUNCHCTL_NOT_LOADED=1 on_tty "$BIN/herdr"$'\n/tmp/herdr-fixture.sock\n'
   [ "$status" -eq "$(unloaded_status)" ]
   contains "$output" 'rendered'
@@ -116,17 +116,16 @@ EOF
 
 @test "an empty exported value does not hide a filled key" {
   fresh_install
-  sed -i.orig 's|^ORCH_PR_AUTHOR=.*|ORCH_PR_AUTHOR="mine"|' "$HOME/.claude/orchestration.env"
+  config_set ORCH_PR_AUTHOR mine
   ORCH_PR_AUTHOR="" on_tty $'-\n-\n-\n-\n-\n-'
   [ "$status" -eq 0 ]
   not_contains "$output" 'ORCH_PR_AUTHOR ('
   [ "$(config_line ORCH_PR_AUTHOR)" = 'ORCH_PR_AUTHOR="mine"' ]
 }
 
-@test "the notifier wrapper loads the config with shell semantics and the environment wins" {
-  cfg="$TMP/alert.env"
-  # shellcheck disable=SC2016 # Evaluated when the wrapper sources the file.
-  printf '%s\n' 'export ORCH_ALERT_DIGEST_S=60' 'ORCH_ALERT_QUIET_S=$((30 * 60))' 'ORCH_ALERT_ESCALATE_RATIO="3"' >"$cfg"
+@test "the notifier wrapper loads the config and the environment wins" {
+  cfg="$TMP/alert.toml"
+  printf '%s\n' '[alerts]' 'digest_s = 60' 'quiet_s = 1800' 'escalate_ratio = 3' >"$cfg"
   printf '#!/bin/sh\nenv | grep "^ORCH_ALERT_" | sort\necho "args: $*"\n' >"$TMP/fake-python"
   chmod +x "$TMP/fake-python"
   run env ORCH_CONFIG="$cfg" ORCH_PYTHON3="$TMP/fake-python" ORCH_ALERT_ESCALATE_RATIO=2 "$ROOT/coordinator/watchers/notify-inbox.sh" --deliver
@@ -139,7 +138,7 @@ EOF
 
 @test "rendered inbox services start the config-loading wrapper" {
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
   install_ok
   for unit in "$HOME"/.claude/coordinator/watchers/service/*/com.combinaut.coord-watcher-inbox-context.*; do
     case "$unit" in *.template) continue ;; esac
@@ -148,21 +147,22 @@ EOF
   done
 }
 
-@test "an answer replaces exported assignments of its key" {
+@test "an answer keeps the comments and other keys of the config" {
   fresh_install
-  printf '%s\n' '  export ORCH_HERDR_BIN="<later-placeholder>"' >>"$HOME/.claude/orchestration.env"
+  before=$(grep -c '^#' "$HOME/.claude/orchestration.toml")
+  keys=$(python3 "$ROOT/lib/orch_settings.py" keys "$HOME/.claude/orchestration.toml")
   on_tty $'-\n-\n-\n-\n/opt/herdr/bin/herdr\n-'
   [ "$status" -eq 0 ]
-  [ "$(grep -c 'ORCH_HERDR_BIN=' "$HOME/.claude/orchestration.env")" = 1 ]
-  # shellcheck disable=SC1090,SC1091
-  [ "$(. "$HOME/.claude/orchestration.env" && printf '%s' "$ORCH_HERDR_BIN")" = /opt/herdr/bin/herdr ]
+  [ "$(grep -c '^#' "$HOME/.claude/orchestration.toml")" = "$before" ]
+  [ "$(python3 "$ROOT/lib/orch_settings.py" keys "$HOME/.claude/orchestration.toml")" = "$keys" ]
+  [ "$(config_get ORCH_HERDR_BIN)" = /opt/herdr/bin/herdr ]
 }
 
 @test "printed service start commands run as printed when the path has a space" {
   use_home "$TMP/home with space"
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   LAUNCHCTL_NOT_LOADED=1 on_tty ''
   [ "$status" -eq "$(unloaded_status)" ]
   # shellcheck disable=SC1003 # A literal backslash in the expected text.
@@ -193,7 +193,7 @@ EOF
   [ "$(uname -s)" = Darwin ] || skip "only the macOS adapter prints migration commands"
   use_home "$TMP/home with space"
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
   install_ok
   # shellcheck disable=SC1003 # A literal backslash in the expected text.
   contains "$output" 'home\ with\ space/.claude/ai-agent-orchestration/install.sh'
@@ -208,7 +208,7 @@ EOF
 
 @test "filled keys are never asked or overwritten" {
   fresh_install
-  sed -i.orig 's|^ORCH_PR_REPOS=.*|ORCH_PR_REPOS="mine/kept"|; s|^ORCH_CODEX_SMART_MODEL=.*|ORCH_CODEX_SMART_MODEL="kept-model"|' "$HOME/.claude/orchestration.env"
+  config_set ORCH_PR_REPOS mine/kept ORCH_CODEX_SMART_MODEL kept-model
   on_tty $'-\n-\n-\n-'
   [ "$status" -eq 0 ]
   not_contains "$output" 'ORCH_PR_REPOS ('
@@ -223,24 +223,23 @@ EOF
   value='own"er/$HOME`x`\a'
   on_tty "$value"$'\n-\n-\n-\n-\n-'
   [ "$status" -eq 0 ]
-  # shellcheck disable=SC1090,SC1091
-  [ "$(. "$HOME/.claude/orchestration.env" && printf '%s' "$ORCH_PR_REPOS")" = "$value" ]
+  [ "$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["pr"]["repos"][0], end="")' "$HOME/.claude/orchestration.toml")" = "$value" ]
 }
 
 @test "a run without a terminal never asks and leaves the config alone" {
   fresh_install
-  before=$(cat "$HOME/.claude/orchestration.env")
+  before=$(cat "$HOME/.claude/orchestration.toml")
   install_ok
   not_contains "$output" ']: '
   contains "$output" 'fill in'
   contains "$output" 'ORCH_HERDR_BIN ORCH_HERDR_SOCKET'
-  [ "$(cat "$HOME/.claude/orchestration.env")" = "$before" ]
+  [ "$(cat "$HOME/.claude/orchestration.toml")" = "$before" ]
 }
 
 @test "watcher services register for login, a re-run changes nothing and stale services go" {
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   use_service_state
   case "$(uname -s)" in
     Darwin)
@@ -291,7 +290,7 @@ EOF
   [ "$restarts" = "$(printf '%s\n' "$expected" | sed 's/\.plist$//')" ]
   [ "$(printf '%s\n' "$output" | tr -d '\r' | grep -c '^restarted ')" -eq "$(printf '%s\n' "$expected" | wc -l)" ]
   [ "$(cut -d' ' -f1 "$HOME/.claude/coordinator/watchers/.registered-revision")" = "$(git -C "$HOME/.claude/ai-agent-orchestration" rev-parse HEAD)" ]
-  printf '%s\n' 'ORCH_ALERT_QUIET_S="900"' >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_ALERT_QUIET_S '900'
   on_tty ''
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | tr -d '\r' | grep -c '^restarted ')" -eq "$(printf '%s\n' "$expected" | wc -l)" ]
@@ -301,8 +300,8 @@ EOF
   fresh_install
   [ "$status" -eq 0 ]
   use_service_state
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   on_tty ''
   [ "$status" -eq 0 ]
   printf 'older-revision\n' >"$HOME/.claude/coordinator/watchers/.registered-revision"
@@ -315,8 +314,8 @@ EOF
 
 @test "a failed registration keeps the revision so the next run retries" {
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   printf 'current\n' >"$HOME/.claude/coordinator/watchers/.registered-revision"
   LAUNCHCTL_NOT_LOADED=1 SYSTEMCTL_FAIL=1 on_tty ''
   [ "$status" -eq 1 ]
@@ -326,8 +325,8 @@ EOF
 
 @test "a stale service that will not stop keeps its file and the revision" {
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   use_service_state
   case "$(uname -s)" in
     Darwin)
@@ -355,8 +354,8 @@ EOF
 
 @test "a stopped watcher starts again, a stuck one keeps its old copy, and turning services off removes them" {
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   use_service_state
   on_tty ''
   [ "$status" -eq 0 ]
@@ -381,7 +380,7 @@ EOF
       : >"$dir/com.combinaut.coord-watcher-host.service"
       ;;
   esac
-  sed 's/^ORCH_WATCHERS_SERVICE=.*/ORCH_WATCHERS_SERVICE="0"/' "$HOME/.claude/orchestration.env" >"$TMP/env" && mv "$TMP/env" "$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE 0
   on_tty ''
   [ "$status" -eq 0 ]
   [ -z "$(find "$dir" -name 'com.combinaut.coord-watcher-*')" ]
@@ -389,8 +388,8 @@ EOF
 
 @test "an update restores a missing current watcher registration" {
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   use_service_state
   on_tty ''
   [ "$status" -eq 0 ]
@@ -524,8 +523,8 @@ EOF
 
 @test "install exits non-zero and says so when a watcher service is not registered" {
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   LAUNCHCTL_NOT_LOADED=1 SYSTEMCTL_FAIL=1 on_tty ''
   [ "$status" -ne 0 ]
   contains "$output" 'not registered'
@@ -535,8 +534,8 @@ EOF
 
 @test "a service folder that cannot be written reports the failure and bootstraps nothing" {
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   use_service_state
   case "$(uname -s)" in
     Darwin) dir="$HOME/Library/LaunchAgents" stale=com.combinaut.coord-watcher-gone.plist ;;
@@ -556,8 +555,8 @@ EOF
 
 @test "turning services off with a stale service that will not stop drops the revision" {
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   use_service_state
   on_tty ''
   [ "$status" -eq 0 ]
@@ -576,7 +575,7 @@ EOF
   esac
   mkdir -p "$(dirname "$stale")"
   printf stale >"$stale"
-  sed 's/^ORCH_WATCHERS_SERVICE=.*/ORCH_WATCHERS_SERVICE="0"/' "$HOME/.claude/orchestration.env" >"$TMP/env" && mv "$TMP/env" "$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE 0
   on_tty ''
   [ "$status" -eq 1 ]
   contains "$output" 'not removed'
@@ -614,8 +613,8 @@ EOF
 @test "services are not offered while macOS legacy jobs are still loaded" {
   [ "$(uname -s)" = Darwin ] || skip "only the macOS adapter defers the migration"
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   rm -f "$HOME/.claude/coordinator/watchers/.migration-state-copied"
   on_tty 'y'
   [ "$status" -eq 0 ]
@@ -626,8 +625,8 @@ EOF
 
 @test "legacy watcher state is copied before services are offered" {
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   rm -f "$HOME/.claude/coordinator/watchers/.migration-state-copied"
   mkdir -p "$HOME/.claude/coordinator/v2/prod-context"
   printf '{"legacy":true}' >"$HOME/.claude/coordinator/v2/prod-context/host.json"
@@ -681,8 +680,8 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/inst
 
 @test "a filled config value wins over an empty exported one for the rest of the run" {
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
+  config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   ORCH_HERDR_BIN="" LAUNCHCTL_NOT_LOADED=1 on_tty ''
   [ "$status" -eq "$(unloaded_status)" ]
   not_contains "$output" 'ORCH_HERDR_BIN ('

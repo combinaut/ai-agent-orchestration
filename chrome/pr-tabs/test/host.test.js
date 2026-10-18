@@ -44,7 +44,7 @@ test("settings rejects an explicitly selected missing or non-file config", () =>
   const savedOrg = process.env.ORCH_PR_TABS_ORG;
   try {
     process.env.ORCH_PR_TABS_ORG = "acme";
-    for (const path of [join(dir, "missing.env"), dir]) {
+    for (const path of [join(dir, "missing.toml"), dir]) {
       process.env.ORCH_CONFIG = path;
       const result = ask({ type: "settings" });
       assert.equal(result.reply.ok, false, `expected error for ${path}`);
@@ -60,11 +60,9 @@ test("settings rejects an explicitly selected missing or non-file config", () =>
 });
 
 test("states for many PRs take one gh call and come back keyed by PR", () => {
-  const config = join(dir, "orchestration.env");
-  writeFileSync(
-    config,
-    'ORCH_PR_TABS_ORG="acme"\nORCH_PR_TABS_DEFAULT_REPO="webapp"\n',
-  );
+  const config = join(dir, "orchestration.toml");
+  const tabs = 'org = "acme"\ndefault_repo = "webapp"\n';
+  writeFileSync(config, `[pr_tabs]\n${tabs}`);
   const saved = process.env.ORCH_CONFIG;
   process.env.ORCH_CONFIG = config;
   assert.deepEqual(ask({ type: "settings" }).reply, {
@@ -76,16 +74,14 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
   });
   writeFileSync(
     config,
-    'ORCH_PR_TABS_TOPICS=\'[ {"name":"Webapp", "color":"blue", "repo":["^webapp$"]} ]\'\n',
-    { flag: "a" },
+    `[pr_tabs]\n${tabs}topics = [ { name = "Webapp", color = "blue", repo = ["^webapp$"] } ]\n`,
   );
   assert.deepEqual(ask({ type: "settings" }).reply.topics, [
     { name: "Webapp", color: "blue", repo: ["^webapp$"] },
   ]);
   writeFileSync(
     config,
-    'ORCH_PR_TABS_TOPICS=\'[ {"name":"Webapp", "color":"chartreuse", "repo":["^webapp$"]} ]\'\n',
-    { flag: "a" },
+    `[pr_tabs]\n${tabs}topics = [ { name = "Webapp", color = "chartreuse", repo = ["^webapp$"] } ]\n`,
   );
   const invalidColor = ask({ type: "settings" });
   assert.equal(invalidColor.reply.ok, false);
@@ -93,15 +89,15 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
   process.env.ORCH_PR_TABS_TOPICS = "";
   assert.deepEqual(ask({ type: "settings" }).reply.topics, []);
   delete process.env.ORCH_PR_TABS_TOPICS;
-  writeFileSync(config, "ORCH_PR_TABS_TOPICS='{}'\n", { flag: "a" });
+  writeFileSync(config, `[pr_tabs]\n${tabs}topics = {}\n`);
   assert.equal(ask({ type: "settings" }).reply.ok, false);
-  writeFileSync(config, "ORCH_PR_TABS_TOPICS='not json'\n", { flag: "a" });
+  writeFileSync(config, `[pr_tabs]\n${tabs}topics = "not json"\n`);
   assert.equal(ask({ type: "settings" }).reply.ok, false);
-  writeFileSync(config, "ORCH_PR_TABS_TOPICS=''\n", { flag: "a" });
+  writeFileSync(config, `[pr_tabs]\n${tabs}topics = []\n`);
   process.env.ORCH_PR_TABS_DEFAULT_REPO = "";
   assert.equal(ask({ type: "settings" }).reply.defaultRepo, "");
   delete process.env.ORCH_PR_TABS_DEFAULT_REPO;
-  writeFileSync(config, 'ORCH_PR_TABS_ORG=""\nORCH_PR_TABS_DEFAULT_REPO=""\n');
+  writeFileSync(config, '[pr_tabs]\norg = ""\ndefault_repo = ""\n');
   assert.deepEqual(ask({ type: "settings" }).reply, {
     ok: true,
     org: "",
@@ -109,13 +105,13 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
     openAll: "",
     topics: [],
   });
-  for (const [key, value] of [
-    ["ORCH_PR_TABS_ORG", "bad org"],
-    ["ORCH_PR_TABS_ORG", "a".repeat(40)],
-    ["ORCH_PR_TABS_DEFAULT_REPO", "bad/repo"],
-    ["ORCH_PR_TABS_DEFAULT_REPO", "a".repeat(101)],
+  for (const [key, name, value] of [
+    ["ORCH_PR_TABS_ORG", "org", "bad org"],
+    ["ORCH_PR_TABS_ORG", "org", "a".repeat(40)],
+    ["ORCH_PR_TABS_DEFAULT_REPO", "default_repo", "bad/repo"],
+    ["ORCH_PR_TABS_DEFAULT_REPO", "default_repo", "a".repeat(101)],
   ]) {
-    writeFileSync(config, `${key}="${value}"\n`);
+    writeFileSync(config, `[pr_tabs]\n${name} = "${value}"\n`);
     const invalidName = ask({ type: "settings" });
     assert.equal(invalidName.reply.ok, false);
     assert.match(invalidName.reply.error, new RegExp(key));
@@ -124,7 +120,7 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
   writeFileSync(
     config,
     Buffer.concat([
-      Buffer.from('ORCH_PR_TABS_ORG="'),
+      Buffer.from('[pr_tabs]\norg = "'),
       Buffer.from([255]),
       Buffer.from('"\n'),
     ]),
@@ -132,24 +128,11 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
   const badEncoding = ask({ type: "settings" });
   assert.equal(badEncoding.reply.ok, false);
   assert.match(badEncoding.reply.error, /Cannot load PR-tabs settings/);
-  writeFileSync(
-    config,
-    Buffer.concat([
-      Buffer.from('ORCH_BIG_REPO_REMOTES="'),
-      Buffer.from([255]),
-      Buffer.from(
-        '"\nORCH_PR_TABS_ORG="acme"\nORCH_PR_TABS_DEFAULT_REPO="webapp"\n',
-      ),
-    ]),
-  );
-  assert.deepEqual(ask({ type: "settings" }).reply, {
-    ok: true,
-    org: "acme",
-    defaultRepo: "webapp",
-    openAll: "",
-    topics: [],
-  });
-  writeFileSync(config, 'ORCH_PR_TABS_ORG="unterminated\n');
+  writeFileSync(config, `[guard]\nbig_repo = true\n[pr_tabs]\n${tabs}`);
+  const wrongScope = ask({ type: "settings" });
+  assert.equal(wrongScope.reply.ok, false);
+  assert.match(wrongScope.reply.error, /Cannot load PR-tabs settings/);
+  writeFileSync(config, '[pr_tabs]\norg = "unterminated\n');
   const broken = ask({ type: "settings" });
   assert.equal(broken.reply.ok, false);
   assert.match(broken.reply.error, /Cannot load PR-tabs settings/);

@@ -80,12 +80,12 @@ test("PR tabs whose URL differs from the org in case are kept; other orgs are dr
     hostSettings = { ...configured, org: "" };
     const noOrg = await import("../extension/background.js?missing-org");
     assert.deepEqual(await noOrg.goTo("7"), {
-      error: "Set ORCH_PR_TABS_ORG in orchestration.env",
+      error: "Set pr_tabs.org in orchestration.toml",
     });
     hostSettings = { ...configured, defaultRepo: "" };
     const noRepo = await import("../extension/background.js?missing-repo");
     assert.deepEqual(await noRepo.goTo("7"), {
-      error: "Set ORCH_PR_TABS_DEFAULT_REPO in orchestration.env",
+      error: "Set pr_tabs.default_repo in orchestration.toml",
     });
   } finally {
     hostSettings = configured;

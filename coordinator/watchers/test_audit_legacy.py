@@ -65,9 +65,10 @@ HITS = [('JSERB', 'app/views/menus/update.js.erb', 'plain line in erb'),
         ('LEGACY', 'app/assets/javascripts/menu.js', 'var plain = 1'),
         ('TEST', 'spec/features/menu_spec.rb', "find('.select2-choice').click")]
 SUMMARY = f'LEGACY {LABEL} [6 lines: JSERB 2, JQUERY 1, LEGACY 2, TEST 1]'
+SCAN = '[legacy]\nscan = true\n'
 
 
-VIEW = ('case "$*" in *".default_branch"*) echo main; exit 0;; esac\n'
+VIEW = ('case "$*" in *".default_branch"*) echo main; exit 0;; *"/contents/.orchestration.toml"*) echo "gh: Not Found (HTTP 404)" >&2; exit 1;; esac\n'
         'case "$2" in view) echo \'{"baseRefName":"main","headRefOid":"headsha"}\'; exit 0;; esac\n'
         'case "$*" in *"/contents/"*) if [ -s "$STUB_DIR/rules" ]; then cat "$STUB_DIR/rules"; exit 0; fi; '
         'echo "gh: Not Found (HTTP 404)" >&2; exit 1;; esac\n')
@@ -111,14 +112,17 @@ class LegacyTests(IsolatedTestCase):
         self.view = {}
         self.versions = {}
         self.env = patch.dict(os.environ, dict(ORCH_PR_AUTHOR='author', ORCH_PR_REPOS='owner/product',
-                            ORCH_GIT_WATCH_REPOS='', ORCH_PR_SINCE='', ORCH_LEGACY_REPOS='owner/product',
+                            ORCH_GIT_WATCH_REPOS='', ORCH_PR_SINCE='',
                             ORCH_LEGACY_SCANS_MAX='10', ORCH_AUDIT_PAGE_PRS='80', ORCH_AUDIT_PAGE_NODES='100'))
         self.env.start()
         self.addCleanup(self.env.stop)
+        self.repo_files = {'owner/product': SCAN}
 
     def fake(self, *args):
         if args[-2:] == ('--jq', '.default_branch'):
             return 'main\n'
+        if '/contents/.orchestration.toml?' in args[-1]:
+            return self.repo_file(args[-1])
         self.calls.append(args)
         if args[:2] == ('gh', 'api') and '/compare/' in args[2]:
             return 'mergebase\n'
@@ -137,6 +141,12 @@ class LegacyTests(IsolatedTestCase):
         if args[0] == 'gh':
             return json.dumps(dict(data=dict(search=dict(nodes=[self.pr], pageInfo=dict(hasNextPage=False)))))
         return json.dumps(dict(result=dict(workspaces=[])))
+
+    def repo_file(self, url):
+        repo = url.split('repos/', 1)[1].split('/contents/', 1)[0]
+        if repo not in self.repo_files:
+            raise subprocess.CalledProcessError(1, ['gh'], stderr='gh: Not Found (HTTP 404)')
+        return self.repo_files[repo]
 
     def version(self, url):
         path, ref = url.split('/contents/', 1)[1].rsplit('?ref=', 1)
@@ -432,11 +442,11 @@ class LegacyTests(IsolatedTestCase):
         self.assertEqual(self.events(self.scan()), [SUMMARY])
 
     def test_other_repos_and_closed_prs_are_not_scanned(self):
-        with patch.dict(os.environ, {"ORCH_LEGACY_REPOS": ""}):
-            self.scan()
+        self.repo_files = {}
+        self.scan()
         self.assertEqual(self.scans(), [])
-        with patch.dict(os.environ, {'ORCH_LEGACY_REPOS': 'owner/other'}):
-            self.scan()
+        self.repo_files = {'owner/product': '[legacy]\nscan = false\n', 'owner/other': SCAN}
+        self.scan()
         self.assertEqual(self.scans(), [])
         self.assertEqual(self.saved()['before']['legacy'], {})
         self.pr['state'] = 'CLOSED'
@@ -507,9 +517,9 @@ class LegacyTests(IsolatedTestCase):
         self.assertEqual((legacy['owner/product#7']['head'], legacy['owner/product#8']['head']), ('next', 'head'))
 
     def test_empty_first_read_still_baselines_once(self):
-        with patch.dict(os.environ, {'ORCH_LEGACY_REPOS': 'owner/other'}):
-            self.assertIn('AUDIT BASELINE legacy [0 active lines; see audit.json before.legacy]', self.events(self.scan()))
-            self.assertIsNone(self.scan())
+        self.repo_files = {'owner/other': SCAN}
+        self.assertIn('AUDIT BASELINE legacy [0 active lines; see audit.json before.legacy]', self.events(self.scan()))
+        self.assertIsNone(self.scan())
 
     def test_invalid_scan_budget_is_readfail(self):
         with patch.dict(os.environ, {'ORCH_LEGACY_SCANS_MAX': '0'}):
@@ -537,29 +547,29 @@ class LegacyTests(IsolatedTestCase):
         self.pr['reviewDecision'] = 'CHANGES_REQUESTED'
         other = copy.deepcopy(PR)
         other.update(number=8, repository=dict(nameWithOwner='owner/other', defaultBranchRef=dict(name='trunk')))
-        with patch.dict(os.environ, ORCH_LEGACY_REPOS='owner/product owner/other'):
-            for failure in ('rules', 'diff', 'decode'):
-                def command(*args):
-                    if args[:3] == ('gh', 'api', 'graphql'):
-                        return json.dumps(dict(data=dict(search=dict(nodes=[self.pr, other], pageInfo=dict(hasNextPage=False)))))
-                    if failure == 'rules' and 'repos/owner/other/contents/' in args[-1]:
-                        return '{nope'
-                    if failure != 'rules' and args[:4] == ('gh', 'pr', 'diff', '8'):
-                        if failure == 'decode':
-                            raise UnicodeDecodeError('utf-8', b'\xff', 0, 1, 'invalid byte')
-                        raise subprocess.CalledProcessError(1, args, stderr='HTTP 502')
-                    return self.fake(*args)
-                raw = audit.collect(command, self.base / 'slots')
-                self.assertNotIn('github', raw['unreadable'])
-                self.assertTrue(raw['sources']['github'])
-                self.assertIn('JQUERY 1', raw['legacy']['owner/product#7']['line'])
-                self.assertTrue(raw['legacy']['owner/other#8']['line'].startswith('READFAIL LEGACY owner/other#8'))
-                def recovered_command(*args):
-                    if args[:3] == ('gh', 'api', 'graphql'):
-                        return json.dumps(dict(data=dict(search=dict(nodes=[self.pr, other], pageInfo=dict(hasNextPage=False)))))
-                    return self.fake(*args)
-                recovered = audit.collect(recovered_command, self.base / 'slots', raw)
-                self.assertNotIn('READFAIL', recovered['legacy']['owner/other#8']['line'])
+        self.repo_files = {'owner/product': SCAN, 'owner/other': SCAN}
+        for failure in ('rules', 'diff', 'decode'):
+            def command(*args):
+                if args[:3] == ('gh', 'api', 'graphql'):
+                    return json.dumps(dict(data=dict(search=dict(nodes=[self.pr, other], pageInfo=dict(hasNextPage=False)))))
+                if failure == 'rules' and 'repos/owner/other/contents/' in args[-1]:
+                    return '{nope'
+                if failure != 'rules' and args[:4] == ('gh', 'pr', 'diff', '8'):
+                    if failure == 'decode':
+                        raise UnicodeDecodeError('utf-8', b'\xff', 0, 1, 'invalid byte')
+                    raise subprocess.CalledProcessError(1, args, stderr='HTTP 502')
+                return self.fake(*args)
+            raw = audit.collect(command, self.base / 'slots')
+            self.assertNotIn('github', raw['unreadable'])
+            self.assertTrue(raw['sources']['github'])
+            self.assertIn('JQUERY 1', raw['legacy']['owner/product#7']['line'])
+            self.assertTrue(raw['legacy']['owner/other#8']['line'].startswith('READFAIL LEGACY owner/other#8'))
+            def recovered_command(*args):
+                if args[:3] == ('gh', 'api', 'graphql'):
+                    return json.dumps(dict(data=dict(search=dict(nodes=[self.pr, other], pageInfo=dict(hasNextPage=False)))))
+                return self.fake(*args)
+            recovered = audit.collect(recovered_command, self.base / 'slots', raw)
+            self.assertNotIn('READFAIL', recovered['legacy']['owner/other#8']['line'])
 
     def test_failed_rules_load_is_cached_only_for_the_pass(self):
         other = copy.deepcopy(self.pr)
@@ -835,8 +845,8 @@ class LegacyTests(IsolatedTestCase):
         python = self.base / 'python'
         python.write_text('#!/bin/sh\necho configured "$@"\n')
         python.chmod(0o755)
-        config = self.base / 'orchestration.env'
-        config.write_text(f'ORCH_PYTHON3="{python}"\n')
+        config = self.base / 'orchestration.toml'
+        config.write_text(f'[watchers]\npython3 = "{python}"\n')
         result = self.cli('7', config=config)
         self.assertTrue(result.stdout.startswith('configured '), result.stdout)
 
@@ -845,12 +855,12 @@ class LegacyTests(IsolatedTestCase):
         self.assertEqual((result.returncode, result.stdout), (1, ''))
         self.assertIn('legacy-scan failed: HTTP 502', result.stderr)
         self.assertEqual(self.cli().returncode, 2)
-        with patch.dict(os.environ, ORCH_LEGACY_REPOS=""):
+        with patch.dict(os.environ, ORCH_WATCHERS_PRIMARY_REPO=""):
             self.assertEqual(self.cli("7").returncode, 2)
-        config = self.base / "legacy.env"
-        config.write_text('ORCH_LEGACY_REPOS="owner/product"\n')
+        config = self.base / "primary.toml"
+        config.write_text('[watchers]\nprimary_repo = "owner/product"\n')
         with patch.dict(os.environ):
-            os.environ.pop("ORCH_LEGACY_REPOS", None)
+            os.environ.pop("ORCH_WATCHERS_PRIMARY_REPO", None)
             self.assertEqual(self.cli("7", config=config).returncode, 0)
 
 

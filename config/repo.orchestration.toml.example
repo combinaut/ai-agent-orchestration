@@ -1,0 +1,24 @@
+# Repo settings. Commit this as .orchestration.toml at the repo root; personal overrides go in
+# .orchestration.local.toml next to it (git-ignored). An exported ORCH_* variable wins over both.
+
+[guard]
+# Broad Git reads (git grep, cat-file over all objects) are blocked in this repo
+big_repo = false
+
+[audit]
+# Check names that only run on a full CI run; an approved PR on a non-default base reports "full CI ran" or "full CI not run"
+merge_gate_checks = []
+
+[legacy]
+# Open PRs of this repo are scanned for lines that build on legacy front-end code (LEGACY line)
+scan = false
+# Regex searched in addition to the built-in jQuery/ujs patterns of the legacy scan
+extra_pattern = ""
+# Paths the built-in legacy scan skips, in addition to the two ratchet guard files under scripts/
+exempt_paths = []
+
+[focus]
+# Case-insensitive regex matched against the labels of the workers of an architect working in this repo; empty turns the focus check off
+pattern = ""
+# Architect name never listed as lacking a focus worker
+architect = ""

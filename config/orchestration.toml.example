@@ -1,0 +1,149 @@
+# Global settings for the Coordinator / architect setup. install.sh copies this file to
+# ~/.claude/orchestration.toml on the first run only and never overwrites it.
+# An exported ORCH_* variable wins over this file; ORCH_CONFIG=/path selects another file.
+# Repo settings ([guard], [legacy] scan, [focus] pattern, ...) live in each repo: .orchestration.toml
+# (committed) and .orchestration.local.toml (personal, git-ignored). See docs/settings.md.
+
+[pr]
+# GitHub repos (owner/name) whose PRs the audit watches; required by the audit watcher
+repos = []
+# GitHub login whose open PRs the audit watches ("@me" works); required by the audit watcher
+author = ""
+# Only PRs updated on or after this date (YYYY-MM-DD); empty means no date filter
+since = ""
+# Bot whose "Needs a closer look" review raises a COPILOT line
+bot_reviewer_login = "copilot-pull-request-reviewer"
+
+[audit]
+# Local clones checked for PACKS and WORKTREES pile-ups; their .orchestration.local.toml applies to PRs of the repo they clone
+git_watch_repos = []
+# Pack files in a watched clone before a PACKS line
+packs_max = 50
+# Worktrees in a watched clone before a WORKTREES line
+worktrees_max = 40
+# PR search page size (1-100)
+page_prs = 80
+# Nested GitHub query page size (1-100); a cut-off result prints TRUNCATED
+page_nodes = 100
+
+[legacy]
+# PRs scanned for legacy code per audit pass; the rest wait for the next pass
+scans_max = 10
+# File reads per PR scan for files GitHub returns without a patch
+reads_max = 20
+# Clone the daily legacy-map job reads; empty picks the audit.git_watch_repos clone whose repo settings turn legacy.scan on
+map_repo = ""
+
+[heavy_slots]
+# Most heavy jobs at once on the machine
+max = 4
+# Slot directory; empty means ~/.claude/heavy-slots
+dir = ""
+# Seconds a stopped job gets before it is killed
+kill_grace = 10
+
+[focus]
+# Architect names left out of focus reports
+skip_architects = []
+
+[models]
+# Model of the Coordinator
+coordinator = "claude-opus-5-5"
+# Model of the architects
+architect = "claude-opus-5-5"
+# Codex model for routine work; replace the placeholder
+codex_worker = "<codex-worker-model>"
+# Codex model for hard work; replace the placeholder
+codex_smart = "<codex-smart-model>"
+
+[recycle]
+# Tokens used at which RECYCLE fires
+tokens = 300000
+# Context percentage used when the token sensor is absent
+pct = 55
+# Park architects that have no open PR, worker or watcher
+park_idle = false
+
+[install]
+# The clone install.sh keeps up to date and links into ~/.claude; empty means ~/.claude/ai-agent-orchestration
+repo_path = ""
+# Env adapter install.sh runs without --env (a directory under env/); empty means herdr, "none" skips the env step
+env = ""
+# Herdr Radar checkout; empty means ~/.claude/herdr-radar
+radar_path = ""
+
+[watchers]
+# Register the watchers as launchd or systemd user services; needs herdr.bin and herdr.socket
+service = false
+# Interpreter for the watcher scripts and services (3.11 or newer)
+python3 = "python3"
+# GitHub search scope for the PR watchers, for example "org:acme"
+pr_scope = ""
+# Model label in dispatch records; empty leaves it out
+worker_model = ""
+# Primary owner/name repo in dispatch records
+primary_repo = ""
+# PATH entries given to services and to the Chrome host
+path = [
+  "~/.local/bin",
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+  "/usr/bin",
+  "/bin",
+  "/usr/sbin",
+  "/sbin",
+]
+# Where close-pane.sh marks a pane as closed on purpose; empty means ~/.claude/coordinator/watchers/prod-context/closed. The workers watcher reads <state-dir>/closed, so a custom folder needs that --state-dir
+closed_dir = ""
+
+[herdr]
+# Absolute path of the Herdr executable
+bin = ""
+# Absolute path of the Herdr socket
+socket = ""
+
+[user_todo]
+# To-do status directory; empty means ~/.claude/coordinator/status
+status_dir = ""
+# To-do output file; empty means ~/.claude/coordinator/user-todo.md
+output = ""
+# To-do state file; empty means ~/.claude/coordinator/user-todo.state.json
+state = ""
+
+[host]
+# Host watcher: lowest free memory percentage
+pressure_min_pct = 20
+# Host watcher: most swap used, in MB
+swap_max_mb = 1024
+# Host watcher: most processes
+procs_max = 1300
+# Host watcher: most open files
+files_max = 150000
+# Host watcher: highest load average
+load_max = 40
+
+[alerts]
+# Feed: ratio between severity steps; greater than 1
+escalate_ratio = 1.5
+# Feed: seconds between digest lines
+digest_s = 1800
+# Feed: seconds a condition stays clear before its clear line
+quiet_s = 1800
+
+[hog]
+# Hog watcher: process size in GB
+gb = 6
+# Hog watcher: git process size in GB
+git_gb = 2
+# Hog watcher: git process age in seconds
+git_age_s = 180
+
+[pr_tabs]
+# Organization the PR tabs extension manages; empty turns org actions off
+org = ""
+# Repo name for bare PR numbers; empty turns number jumps off
+default_repo = ""
+# GitHub search behind the Open all button; empty turns it off
+open_all = ""
+# Tab-group rules: tables with name, color and repo/title/any regex lists
+topics = []

@@ -602,8 +602,8 @@ class ActionPatternTest(IsolatedTestCase):
             python = base / "python"
             python.write_text(f"#!/bin/sh\ntouch {base / 'python-used'}\nexec python3 \"$@\"\n")
             python.chmod(0o755)
-            (base / "orchestration.env").write_text(f'ORCH_PYTHON3="{python}"\n')
-            env = dict(os.environ, ORCH_CONFIG=str(base / "orchestration.env"))
+            (base / "orchestration.toml").write_text(f'[watchers]\npython3 = "{python}"\n')
+            env = dict(os.environ, ORCH_CONFIG=str(base / "orchestration.toml"))
             env.pop("ORCH_PYTHON3", None)
             monitor = subprocess.Popen([str(w.ROOT / "feed-monitor.sh"), str(base)], stdout=subprocess.PIPE, text=True,
                                        start_new_session=True, env=env)
@@ -638,8 +638,8 @@ class ActionPatternTest(IsolatedTestCase):
             base = Path(tmp)
             beat = base / inbox.MONITOR_NAME
             (base / inbox.FEED_NAME).write_text("")
-            (base / "orchestration.env").write_text("")
-            env = dict(os.environ, ORCH_CONFIG=str(base / "orchestration.env"))
+            (base / "orchestration.toml").write_text("")
+            env = dict(os.environ, ORCH_CONFIG=str(base / "orchestration.toml"))
             monitors = []
 
             def start():
@@ -778,7 +778,7 @@ class DeliveryTest(IsolatedTestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="coord-feed-")
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
-        env = patch.dict(os.environ, {"ORCH_CONFIG": str(self.base / "orchestration.env"),
+        env = patch.dict(os.environ, {"ORCH_CONFIG": str(self.base / "orchestration.toml"),
                                       "ORCH_HOST_FILES_MAX": "150000", "ORCH_HOST_SWAP_MAX_MB": "1024"})
         env.start()
         self.addCleanup(env.stop)

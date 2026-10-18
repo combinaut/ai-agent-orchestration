@@ -34,7 +34,7 @@ The installer never edits your `~/.claude/CLAUDE.md`. When its sections are miss
 
 ## 2. Set it up
 
-The first run copies [`config/orchestration.env.example`](config/orchestration.env.example) to `~/.claude/orchestration.env`. On a terminal it asks only for the six keys in the table below, when they are empty or still a `<…>` placeholder, and offers a default it found on the machine. Enter takes the default, `-` leaves the key empty. A key that has a value is never asked or changed, and no other key is asked. Without a terminal it asks nothing and lists the keys to fill. Set at least:
+The first run copies [`config/orchestration.toml.example`](config/orchestration.toml.example) to `~/.claude/orchestration.toml` (an existing `~/.claude/orchestration.env` is converted instead). Settings for one repo go in that repo's `.orchestration.toml` and `.orchestration.local.toml`; see [`docs/settings.md`](docs/settings.md). Reading TOML needs Python 3.11 or newer. On a terminal it asks only for the six keys in the table below, when they are empty or still a `<…>` placeholder, and offers a default it found on the machine. Enter takes the default, `-` leaves the key empty. A key that has a value is never asked or changed, and no other key is asked. Without a terminal it asks nothing and lists the keys to fill. Set at least:
 
 | Key | Set it to |
 |---|---|
@@ -97,7 +97,7 @@ If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`
 
 - [`docs/architecture.md`](docs/architecture.md): how the Coordinator, architects, workers and watchers fit together.
 - [`docs/installer.md`](docs/installer.md): every installer step, the file table and a troubleshooting table.
-- [`docs/settings.md`](docs/settings.md): every `ORCH_*` setting in `~/.claude/orchestration.env`.
+- [`docs/settings.md`](docs/settings.md): every setting in `~/.claude/orchestration.toml` and in the repo files.
 - [`docs/watchers.md`](docs/watchers.md): the watchers, running them with or without services, and the host-pressure response.
 - [`docs/workers.md`](docs/workers.md): workers, recycles, handoffs and owner tags.
 - [`docs/heavy-slot.md`](docs/heavy-slot.md): the shared cap on heavy jobs and how slots work.

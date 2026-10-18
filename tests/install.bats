@@ -30,14 +30,13 @@ load test_helper
 @test "second run preserves all managed links" {
   fresh_install
   before=$(find "$HOME/.claude" -type l -exec sh -c 'printf "%s -> %s\\n" "$1" "$(readlink "$1")"' sh {} \; | sort)
-  keys="ORCH_BIG_REPO_REMOTES ORCH_LEGACY_REPOS ORCH_PR_TABS_ORG ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS ORCH_FOCUS_SKIP_ARCHITECTS"
-  sed '/^ORCH_BIG_REPO_REMOTES=/d; /^ORCH_LEGACY_REPOS=/d; /^ORCH_PR_TABS_/d; /^ORCH_FOCUS_SKIP_ARCHITECTS=/d' "$HOME/.claude/orchestration.env" >"$TMP/old.env"
-  printf '%s\n' 'ORCH_PR_TABS_ORG=""' >>"$TMP/old.env"
-  cp "$TMP/old.env" "$HOME/.claude/orchestration.env"
+  sed '/^\[pr_tabs\]/,$d; /^skip_architects = /d' "$HOME/.claude/orchestration.toml" >"$TMP/old.toml"
+  printf '%s\n' '[pr_tabs]' 'org = ""' >>"$TMP/old.toml"
+  cp "$TMP/old.toml" "$HOME/.claude/orchestration.toml"
   install_ok
-  contains "$output" "Project features are off until you configure missing keys in $HOME/.claude/orchestration.env: ORCH_BIG_REPO_REMOTES ORCH_LEGACY_REPOS ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS ORCH_FOCUS_SKIP_ARCHITECTS"
-  cmp "$TMP/old.env" "$HOME/.claude/orchestration.env"
-  for key in $keys; do printf '%s=""\n' "$key" >>"$HOME/.claude/orchestration.env"; done
+  contains "$output" "Project features are off until you configure missing keys in $HOME/.claude/orchestration.toml: ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS ORCH_FOCUS_SKIP_ARCHITECTS"
+  cmp "$TMP/old.toml" "$HOME/.claude/orchestration.toml"
+  config_set ORCH_PR_TABS_DEFAULT_REPO "" ORCH_PR_TABS_OPEN_ALL "" ORCH_PR_TABS_TOPICS "" ORCH_FOCUS_SKIP_ARCHITECTS ""
   install_ok
   not_contains "$output" 'Project features are off until you configure missing keys'
   after=$(find "$HOME/.claude" -type l -exec sh -c 'printf "%s -> %s\\n" "$1" "$(readlink "$1")"' sh {} \; | sort)
@@ -72,8 +71,8 @@ load test_helper
 
 @test "Bash guard matcher variants retain custom config" {
   fresh_install
-  custom="$TMP/selected-orchestration.env"
-  printf '%s\n' 'ORCH_BIG_REPO_REMOTES="acme/webapp"' >"$custom"
+  custom="$TMP/selected-orchestration.toml"
+  printf '%s\n' '[pr]' 'author = "me"' >"$custom"
   managed="ORCH_CONFIG=$custom python3 ~/.claude/hooks/guard-bash.py"
   legacy='python3 ~/.claude/hooks/guard-bash.py'
   while IFS='|' read -r name matcher hook preserve expected; do
@@ -157,8 +156,7 @@ CASES
 @test "ORCH_ENV=none in the config skips the env step" {
   fresh_install
   : >"$HERDR_CALLS"
-  sed 's/^ORCH_ENV=.*/ORCH_ENV="none"/' "$HOME/.claude/orchestration.env" >"$TMP/env.new"
-  cp "$TMP/env.new" "$HOME/.claude/orchestration.env"
+  config_set ORCH_ENV none
   run env -u ORCH_ENV /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   contains "$output" 'env step'
@@ -249,7 +247,7 @@ CASES
 
 @test "watcher services use platform settings and migrate a stopped legacy service" {
   fresh_install
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' "ORCH_HERDR_SOCKET=\"\$HOME/socket&name\"" >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET "\$HOME/socket&name"
   install_ok
   case "$(uname -s)" in
     Darwin)
@@ -266,11 +264,11 @@ CASES
       contains "$(cat "$CONTEXT_UNIT")" "Environment=\"HERDR_SOCKET_PATH=$HOME/socket&name\""
       ;;
   esac
-  grep -v '^ORCH_WATCHERS_SERVICE=' "$HOME/.claude/orchestration.env" >"$TMP/orchestration.env"
-  mv "$TMP/orchestration.env" "$HOME/.claude/orchestration.env"
+  rm "$HOME/.claude/orchestration.toml"
   rm -f "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist" \
     "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-inbox-context.plist"
-  printf '%s\n' 'ORCH_V2_LAUNCHD="1"' 'ORCH_V2_PR_SCOPE="org:example"' 'ORCH_V2_WORKER_MODEL="worker"' 'ORCH_V2_PRIMARY_REPO="owner/repo"' 'ORCH_HERDR_BIN="/bin/echo"' "ORCH_HERDR_SOCKET=\"\$HOME/socket&name\"" >>"$HOME/.claude/orchestration.env"
+  # shellcheck disable=SC2016 # The old file is sourced, so $HOME expands then.
+  printf '%s\n' 'ORCH_V2_PR_SCOPE="org:example"' 'ORCH_V2_WORKER_MODEL="worker"' 'ORCH_V2_PRIMARY_REPO="owner/repo"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="$HOME/socket&name"' >"$HOME/.claude/orchestration.env"
   mkdir -p "$HOME/.claude/coordinator/v2/bindings" "$HOME/.claude/coordinator/v2/prod-context"
   printf binding >"$HOME/.claude/coordinator/v2/bindings/coordinator.json"
   printf '{"before":{},"events":[]}' >"$HOME/.claude/coordinator/v2/prod-context/context.json"
@@ -285,11 +283,12 @@ EOF
   run env LAUNCHCTL_CONTEXT_ONLY=1 PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   [ ! -e "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist" ]
-  contains "$output" 'rename ORCH_V2_LAUNCHD to ORCH_WATCHERS_SERVICE'
-  contains "$output" 'rename ORCH_V2_PR_SCOPE to ORCH_WATCHERS_PR_SCOPE'
+  contains "$output" 'renamed ORCH_V2_PR_SCOPE to ORCH_WATCHERS_PR_SCOPE'
+  contains "$output" "moved           $HOME/.claude/orchestration.env -> $HOME/.claude/orchestration.env.bak"
+  [ "$(config_get ORCH_WATCHERS_PR_SCOPE)" = org:example ]
   contains "$output" 'set ORCH_WATCHERS_SERVICE=1 and rerun install.sh'
 
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE '1'
   run env LAUNCHCTL_CONTEXT_ONLY=1 PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   [ -f "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist" ]
@@ -776,7 +775,7 @@ CASES
 
 @test "host services render with shared inbox and print lifecycle commands" {
   fresh_install
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET '/tmp/socket'
   install_ok
   case "$(uname -s)" in
     Darwin) adapter=macos; suffix=plist; start='launchctl bootstrap'; stop='launchctl bootout' ;;
@@ -816,7 +815,7 @@ CASES
 
 @test "hog services render at five seconds and share the inbox" {
   fresh_install
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET '/tmp/socket'
   install_ok
   case "$(uname -s)" in
     Darwin) adapter=macos; suffix=plist; start='launchctl bootstrap'; stop='launchctl bootout' ;;
@@ -839,7 +838,7 @@ CASES
 
 @test "balance services render at sixty seconds and share the inbox" {
   fresh_install
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET '/tmp/socket'
   install_ok
   case "$(uname -s)" in
     Darwin) adapter=macos; suffix=plist; start='launchctl bootstrap'; stop='launchctl bootout' ;;
@@ -862,7 +861,7 @@ CASES
 
 @test "workers services render at sixty seconds and share the inbox" {
   fresh_install
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET '/tmp/socket'
   install_ok
   case "$(uname -s)" in
     Darwin) adapter=macos; suffix=plist; start='launchctl bootstrap'; stop='launchctl bootout' ;;
@@ -885,7 +884,7 @@ CASES
 
 @test "PR watchers are not registered until their settings are filled" {
   fresh_install
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET '/tmp/socket'
   install_ok
   contains "$output" 'com.combinaut.coord-watcher-audit watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
   contains "$output" 'com.combinaut.coord-watcher-pulls watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
@@ -898,7 +897,7 @@ CASES
 
 @test "audit services render at thirty minutes and share the inbox" {
   fresh_install
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' 'ORCH_PR_REPOS="o/r"' 'ORCH_PR_AUTHOR="me"' >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET '/tmp/socket' ORCH_PR_REPOS 'o/r' ORCH_PR_AUTHOR 'me'
   install_ok
   case "$(uname -s)" in
     Darwin) adapter=macos; suffix=plist ;;
@@ -920,10 +919,11 @@ CASES
 
 @test "installed audit entrypoint exports own-PR config to the collector" {
   fresh_install
-  printf '%s\n' 'ORCH_PR_REPOS="owner/product"' 'ORCH_PR_AUTHOR="author"' >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_PR_REPOS 'owner/product' ORCH_PR_AUTHOR 'author'
   python3 -c 'import json,sys; pr=json.load(open(sys.argv[1])); pr["mergeable"]="CONFLICTING"; print(json.dumps({"data":{"search":{"nodes":[pr],"pageInfo":{"hasNextPage":False}}}}))' "$ROOT/coordinator/watchers/fixtures/audit-pr.json" >"$TMP/audit-gh.json"
   cat >"$BIN/gh" <<'EOF'
 #!/bin/bash
+case "$*" in *"/contents/"*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; esac
 printf '%s\n' "$*" >"$AUDIT_ARGS"
 cat "$AUDIT_FIXTURE"
 EOF
@@ -945,6 +945,7 @@ EOF
   fresh_install
   cat >"$TMP/python" <<'EOF'
 #!/bin/bash
+case "$1" in -c | -I) exec python3 "$@" ;; esac
 printf '%s\n' "$2" >>"$WATCHER_MODES"
 EOF
   chmod +x "$TMP/python"
@@ -957,6 +958,7 @@ EOF
   fresh_install
   cat >"$TMP/python" <<'EOF'
 #!/bin/bash
+case "$1" in -c | -I) exec python3 "$@" ;; esac
 printf '%s\n' "$2" >>"$WATCHER_MODES"
 [ "$2" != hog ]
 EOF
@@ -971,6 +973,7 @@ EOF
   fresh_install
   cat >"$TMP/python" <<'EOF'
 #!/bin/bash
+case "$1" in -c | -I) exec python3 "$@" ;; esac
 printf '%s\n' "$*" >>"$WATCHER_ARGS"
 EOF
   chmod +x "$TMP/python"
@@ -992,7 +995,7 @@ EOF
 
 @test "every rendered service carries a custom config and the audit wrapper reads it" {
   fresh_install
-  custom="$TMP/custom config & <audit>.env"
+  custom="$TMP/custom config & <audit>.toml"
   prepare_custom_service_config "$custom"
   run env ORCH_CONFIG="$custom" /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
@@ -1002,28 +1005,27 @@ EOF
 
 @test "relative custom config remains usable from the service working directory" {
   fresh_install
-  prepare_custom_service_config "$TMP/relative config.env"
-  run /bin/bash -c 'cd "$1"; ORCH_CONFIG="relative config.env" /bin/bash "$2"' _ "$TMP" "$CLONE/install.sh"
+  prepare_custom_service_config "$TMP/relative config.toml"
+  run /bin/bash -c 'cd "$1"; ORCH_CONFIG="relative config.toml" /bin/bash "$2"' _ "$TMP" "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   prepare_audit_commands
-  check_service_config "$(cd "$TMP" && pwd -P)/relative config.env"
+  check_service_config "$(cd "$TMP" && pwd -P)/relative config.toml"
 }
 
 @test "every rendered service carries the default config selected by the installer" {
   fresh_install
-  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  prepare_custom_service_config "$HOME/.claude/orchestration.toml"
   run env -u ORCH_CONFIG /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   prepare_audit_commands
-  check_service_config "$HOME/.claude/orchestration.env"
+  check_service_config "$HOME/.claude/orchestration.toml"
 }
 
 @test "configured watcher settings reach the watcher environment" {
-  printf '%s\n' 'ORCH_LEGACY_REPOS="owner/legacy"' 'ORCH_LEGACY_SCANS_MAX="3"' 'ORCH_LEGACY_READS_MAX="7"' 'ORCH_HEAVY_SLOTS_MAX="7"' >"$BATS_TEST_TMPDIR/orchestration.env"
+  printf '%s\n' '[legacy]' 'scans_max = 3' 'reads_max = 7' '[heavy_slots]' 'max = 7' >"$BATS_TEST_TMPDIR/orchestration.toml"
   # shellcheck disable=SC2016 # the inner script expands its own variables
-  run env -i PATH="$PATH" ORCH_CONFIG="$BATS_TEST_TMPDIR/orchestration.env" bash -c '. "$1/coordinator/watchers/coord-lib.sh"; orch_load_config; orch_export_config; env' _ "$BATS_TEST_DIRNAME/.."
+  run env -i PATH="$PATH" ORCH_CONFIG="$BATS_TEST_TMPDIR/orchestration.toml" bash -c '. "$1/coordinator/watchers/coord-lib.sh"; orch_load_config; orch_export_config; env' _ "$BATS_TEST_DIRNAME/.."
   [ "$status" -eq 0 ]
-  [[ "$output" == *"ORCH_LEGACY_REPOS=owner/legacy"* ]]
   [[ "$output" == *"ORCH_LEGACY_SCANS_MAX=3"* ]]
   [[ "$output" == *"ORCH_LEGACY_READS_MAX=7"* ]]
   [[ "$output" == *"ORCH_HEAVY_SLOTS_MAX=7"* ]]
@@ -1054,4 +1056,52 @@ EOF
     [ "$status" -ne 0 ]
     [[ "$output" == *"ORCH_CONFIG is not a regular file"* ]]
   done
+}
+
+@test "install converts an old orchestration.env once and keeps it as .bak" {
+  fresh_install
+  rm "$HOME/.claude/orchestration.toml"
+  printf '%s\n' '# who I am' 'ORCH_PR_AUTHOR="me"' 'ORCH_HEAVY_SLOTS_MAX="6"' 'ORCH_BIG_REPO_REMOTES="acme/webapp"' >"$HOME/.claude/orchestration.env"
+  install_ok
+  contains "$output" "migrated        converted $HOME/.claude/orchestration.env -> $HOME/.claude/orchestration.toml"
+  contains "$output" "migrated        wrote $HOME/.claude/orchestration-repo-snippets/acme-webapp.toml"
+  contains "$output" "moved           $HOME/.claude/orchestration.env -> $HOME/.claude/orchestration.env.bak"
+  [ ! -e "$HOME/.claude/orchestration.env" ]
+  [ -f "$HOME/.claude/orchestration.env.bak" ]
+  [ "$(config_get ORCH_PR_AUTHOR)" = me ]
+  [ "$(config_get ORCH_HEAVY_SLOTS_MAX)" = 6 ]
+  grep -qx '# who I am' "$HOME/.claude/orchestration.toml"
+  grep -qx 'big_repo = true' "$HOME/.claude/orchestration-repo-snippets/acme-webapp.toml"
+  install_ok
+  not_contains "$output" 'migrated'
+}
+
+@test "with both config files the TOML file wins and install warns" {
+  fresh_install
+  printf '%s\n' 'ORCH_PR_AUTHOR="old"' >"$HOME/.claude/orchestration.env"
+  config_set ORCH_PR_AUTHOR new
+  install_ok
+  contains "$output" "$HOME/.claude/orchestration.env is not read any more; $HOME/.claude/orchestration.toml wins"
+  [ -f "$HOME/.claude/orchestration.env" ]
+  [ "$(config_get ORCH_PR_AUTHOR)" = new ]
+}
+
+@test "an invalid config stops install with the file and key" {
+  fresh_install
+  printf '%s\n' '[guard]' 'big_repo = true' >>"$HOME/.claude/orchestration.toml"
+  run /bin/bash "$CLONE/install.sh"
+  [ "$status" -ne 0 ]
+  contains "$output" "ERROR: $HOME/.claude/orchestration.toml: guard.big_repo: is a repo setting"
+}
+
+@test "install stops when no Python 3.11 or newer is found" {
+  fresh_install
+  mkdir "$TMP/oldpy"
+  for name in python3 python3.11 python3.12 python3.13 python3.14; do
+    printf '#!/bin/sh\nexit 1\n' >"$TMP/oldpy/$name"
+    chmod +x "$TMP/oldpy/$name"
+  done
+  run env PATH="$TMP/oldpy:$PATH" ORCH_PYTHON_FALLBACKS="" /bin/bash "$CLONE/install.sh"
+  [ "$status" -ne 0 ]
+  contains "$output" "Python 3.11 or newer not found (the TOML config needs it)"
 }

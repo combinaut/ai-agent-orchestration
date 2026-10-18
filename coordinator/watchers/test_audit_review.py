@@ -29,6 +29,9 @@ class IndependentReviewTests(IsolatedTestCase):
                                      'ORCH_GIT_WATCH_REPOS': '', 'ORCH_AUDIT_PAGE_NODES': '100'})
         env.start()
         self.addCleanup(env.stop)
+        settings = patch.object(audit, 'repo_settings', lambda command, repo, ref, cache: audit.orch_settings.merged([], os.environ))
+        settings.start()
+        self.addCleanup(settings.stop)
 
     def fake(self, *args):
         if args[0] == 'gh':
