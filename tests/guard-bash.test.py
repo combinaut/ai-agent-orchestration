@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+os.environ['ORCH_ENV'] = 'none'
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT/'hooks/guard-bash.py'
@@ -41,7 +42,7 @@ def check_installer(repo, root, push_cwd):
     gh.chmod(0o755)
     env = os.environ.copy()
     env.update(HOME=str(home), PATH=f'{bindir}:{env["PATH"]}', ORCH_REPO_PATH=str(repo), ORCH_CONFIG=str(custom_config))
-    command = ['/bin/bash', str(repo/'install.sh'), '--stage=link', '--env', 'none']
+    command = ['/bin/bash', str(repo/'install.sh'), '--stage=link']
     first = subprocess.run(command, env=env, capture_output=True, text=True)
     assert first.returncode == 0, first.stderr
     target = home/'.claude/hooks/guard-bash.py'
@@ -124,7 +125,7 @@ def check_installer(repo, root, push_cwd):
     (broken_repo/'hooks/guard-bash.py').write_text('import sys\nsys.exit(0)\n')
     broken_home = root/'broken-home'; broken_home.mkdir()
     broken_env = env.copy(); broken_env.update(HOME=str(broken_home), ORCH_REPO_PATH=str(broken_repo))
-    broken = subprocess.run(['/bin/bash', str(broken_repo/'install.sh'), '--stage=link', '--env', 'none'], env=broken_env, capture_output=True, text=True)
+    broken = subprocess.run(['/bin/bash', str(broken_repo/'install.sh'), '--stage=link'], env=broken_env, capture_output=True, text=True)
     assert broken.returncode != 0 and 'Bash is unguarded' in broken.stderr, (broken.returncode, broken.stderr)
     for name, guard_source in [('silent-deny', 'import sys\nsys.exit(2)\n'), ('missing', None)]:
         bad_repo = root/(name+'-repo')
@@ -135,7 +136,7 @@ def check_installer(repo, root, push_cwd):
             (bad_repo/'hooks/guard-bash.py').write_text(guard_source)
         bad_home = root/(name+'-home'); bad_home.mkdir()
         bad_env = env.copy(); bad_env.update(HOME=str(bad_home), ORCH_REPO_PATH=str(bad_repo))
-        bad = subprocess.run(['/bin/bash', str(bad_repo/'install.sh'), '--stage=link', '--env', 'none'], env=bad_env, capture_output=True, text=True)
+        bad = subprocess.run(['/bin/bash', str(bad_repo/'install.sh'), '--stage=link'], env=bad_env, capture_output=True, text=True)
         assert bad.returncode != 0 and 'Bash is unguarded' in bad.stderr, (name, bad.returncode, bad.stderr)
 
     for name, hook_command in [

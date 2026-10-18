@@ -115,7 +115,6 @@ esac
 EOF
   cat >"$BIN/curl" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >>"$CURL_CALLS"
 raw=https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main
 case "$*" in
   *"$raw/"*)
@@ -126,6 +125,7 @@ case "$*" in
     exit 0
     ;;
 esac
+printf '%s\n' "$*" >>"$CURL_CALLS"
 [ -z "${CURL_FAIL:-}" ] || exit 1
 [ -z "${CURL_EMPTY:-}" ] || { : >"$4"; exit 0; }
 case "$2" in
