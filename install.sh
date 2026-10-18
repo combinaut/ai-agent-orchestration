@@ -850,15 +850,15 @@ register_chrome_host() {
     skip "Chrome PR tabs host (no Chrome profile at $chrome_dir)"
     return 0
   fi
-  python=$(placeholder_value ORCH_PYTHON3)
+  python=$(placeholder_value ORCH_SERVICE_PYTHON)
   if [ -z "$python" ]; then
-    skip "Chrome PR tabs host (python3 not found; set ORCH_PYTHON3)"
+    skip "Chrome PR tabs host (no Python 3.11 or newer found; set watchers.python3)"
     return 0
   fi
   id=$(tr -d '[:space:]' <"$ORCH_REPO/chrome/pr-tabs/extension.id")
   launcher="$CLAUDE_DIR/chrome-pr-tabs/pr-tabs-host"
   write_rendered "$launcher" 755 < <(
-    printf '#!/bin/bash\nexport PATH=%q\nexport ORCH_CONFIG=%q\nexec %q %q\n' "$(placeholder_value ORCH_PATH)" "$(placeholder_value ORCH_CONFIG)" "$python" "$ORCH_REPO/chrome/pr-tabs/host/pr_tabs_host.py"
+    printf '#!/bin/bash\nexport PATH=%q\nexport ORCH_CONFIG=%q\nexport ORCH_PYTHON3=%q\nexec %q %q\n' "$(placeholder_value ORCH_PATH)" "$(placeholder_value ORCH_CONFIG)" "$python" "$python" "$ORCH_REPO/chrome/pr-tabs/host/pr_tabs_host.py"
   )
   write_rendered "$chrome_dir/NativeMessagingHosts/$CHROME_HOST.json" 644 < <(
     jq -n --arg name "$CHROME_HOST" --arg path "$launcher" --arg origin "chrome-extension://$id/" \

@@ -50,6 +50,9 @@ ask_host() {
   jq -e --arg origin "chrome-extension://$id/" '.name == "com.combinaut.pr_tabs" and .type == "stdio" and .allowed_origins == [$origin]' "$HOST_MANIFEST" >/dev/null
   launcher=$(jq -r .path "$HOST_MANIFEST")
   [ -x "$launcher" ]
+  python=$(sed -n 's/^export ORCH_PYTHON3=//p' "$launcher")
+  [ "$("$python" -c 'import sys; print(sys.version_info >= (3, 11))')" = True ]
+  grep -qx "exec $python .*" "$launcher"
   run ask_host "$launcher" '{"type":"ping"}'
   [ "$status" -eq 0 ]
   printf '%s' "$output" | jq -e '.ok == false and (.error | test("unknown request type"))' >/dev/null

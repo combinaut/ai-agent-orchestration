@@ -318,3 +318,14 @@ pattern = "mine"' ]
   run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; orch_load_config; orch_watcher_python; printf "%s" "$ORCH_WATCHER_PYTHON"' _ "$ROOT"
   [ "$output" = "$(command -v python3)" ]
 }
+
+@test "migration keeps values the old file builds from other variables and ignores exported settings" {
+  # shellcheck disable=SC2016 # The old file is sourced, so $USER_FOR_TEST expands then.
+  printf '%s\n' 'ORCH_PR_AUTHOR="$USER_FOR_TEST"' 'ORCH_PR_SINCE="2026-01-01"' >"$TMP/derived.env"
+
+  USER_FOR_TEST=config-user ORCH_PR_SINCE=exported run python3 "$SETTINGS" migrate "$TMP/derived.env" "$ORCH_CONFIG" "$TMP/snippets"
+
+  [ "$status" -eq 0 ]
+  grep -qx 'author = "config-user"' "$ORCH_CONFIG"
+  grep -qx 'since = "2026-01-01"' "$ORCH_CONFIG"
+}

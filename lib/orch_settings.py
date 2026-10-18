@@ -403,7 +403,7 @@ def env_file_values(path):
     script = ('set +u; . "$1" >/dev/null 2>&1; shift; for n in "$@"; do [ -z "${!n+x}" ] || printf "%s\\0%s\\0" "$n" "${!n}"; done; '
               'printf "%s\\0" "$0"')
     names = sorted(set(env_names()) | REMOVED | set(OLD_NAMES) | set(assigned_names(path)))
-    env = {'HOME': os.environ.get('HOME') or str(Path.home()), 'PATH': os.environ.get('PATH', '/usr/bin:/bin')}
+    env = {key: value for key, value in os.environ.items() if key not in names and key not in ('BASH_ENV', 'ENV')}
     syntax = subprocess.run(['/bin/bash', '-n', str(path)], capture_output=True, env=env)
     if syntax.returncode:
         raise ConfigError(f'{path}: bash syntax error: {syntax.stderr.decode(errors="replace").strip()}')
