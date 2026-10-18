@@ -108,6 +108,18 @@ class GlobalFileTest(SettingsTest):
                 s.parse('', 'c.toml')
 
 
+class SetKeyTest(SettingsTest):
+    def test_set_key_edits_dotted_quoted_and_plain_forms_in_place(self):
+        for text in ('# mine\npr.repos = []\n[herdr]\nbin = "x"\n', '# mine\n["pr"]\n"repos" = []\n[herdr]\nbin = "x"\n',
+                     '# mine\n[pr]\nrepos = []\n[herdr]\nbin = "x"\n', '# mine\n"pr"."repos" = []\n[herdr]\nbin = "x"\n'):
+            with self.subTest(text=text):
+                path = self.write('c.toml', text)
+                s.set_key(path, 'ORCH_PR_REPOS', 'a/b c/d')
+                s.set_key(path, 'ORCH_PR_AUTHOR', 'me')
+                self.assertEqual(s.load_global(path), {'ORCH_PR_REPOS': 'a/b c/d', 'ORCH_PR_AUTHOR': 'me', 'ORCH_HERDR_BIN': 'x'})
+                self.assertTrue(path.read_text().startswith('# mine\n'))
+
+
 class RepoFileTest(SettingsTest):
     def test_no_repo_file_gives_the_built_in_defaults(self):
         root = self.repo()

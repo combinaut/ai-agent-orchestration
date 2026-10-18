@@ -604,27 +604,42 @@ def set_key(path, env, text):
     """Sets one global setting in the file from its ORCH_* string form, keeping every other line."""
     setting = BY_ENV[env]
     value = from_env(setting, text)
-    line = f'{setting.name} = {toml_value([] if value is None else value)}'
+    value = [] if value is None else value
+    rendered = toml_value(value)
     lines = Path(path).read_text().splitlines()
-    header = re.compile(r'^\s*\[\s*([A-Za-z0-9_-]+)\s*\]\s*(#.*)?$')
-    assign = re.compile(rf'^\s*{re.escape(setting.name)}\s*=')
-    table, start, done = None, None, False
+
+    def name(part):
+        return rf'(?:"{part}"|\'{part}\'|{part})'
+    header = re.compile(r'^\s*\[\s*("?)([A-Za-z0-9_-]+)\1\s*\]\s*(#.*)?$')
+    plain = re.compile(rf'^\s*{name(setting.name)}\s*=')
+    dotted = re.compile(rf'^\s*{name(setting.table)}\s*\.\s*{name(setting.name)}\s*=')
+    dotted_table = re.compile(rf'^\s*{name(setting.table)}\s*\.')
+    table, start, done, last_dotted = None, None, False, None
     for index, current in enumerate(lines):
         match = header.match(current)
         if match:
-            table = match[1]
+            table = match[2]
             start = index if table == setting.table else start
-        elif table == setting.table and assign.match(current):
+            continue
+        found = plain.match(current) if table == setting.table else dotted.match(current) if table is None else None
+        if found:
             if current.rstrip().endswith(('[', '{')):
                 raise ConfigError(f'{path}: {setting.key}: spans several lines; edit it by hand')
-            lines[index], done = line, True
+            key = setting.name if table == setting.table else f'{setting.table}.{setting.name}'
+            lines[index], done = f'{key} = {rendered}', True
             break
+        if table is None and dotted_table.match(current):
+            last_dotted = index
     if not done and start is not None:
-        lines.insert(start + 1, line)
+        lines.insert(start + 1, f'{setting.name} = {rendered}')
+    elif not done and last_dotted is not None:
+        lines.insert(last_dotted + 1, f'{setting.table}.{setting.name} = {rendered}')
     elif not done:
-        lines += ['', f'[{setting.table}]', line] if lines else [f'[{setting.table}]', line]
+        lines += ['', f'[{setting.table}]', f'{setting.name} = {rendered}'] if lines else [f'[{setting.table}]', f'{setting.name} = {rendered}']
     text_out = '\n'.join(lines) + '\n'
-    validate(parse(text_out, str(path)), str(path), 'global')
+    written = validate(parse(text_out, str(path)), str(path), 'global')
+    if written.get(setting) != value:
+        raise ConfigError(f'{path}: {setting.key}: cannot be set in place; edit it by hand')
     Path(path).write_text(text_out)
 
 

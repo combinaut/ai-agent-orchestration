@@ -706,3 +706,12 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/inst
   contains "$output" 'WARNING'
   for backup in "$HOME"/.claude/backups/*/home/.config/herdr/config.toml; do cmp "$TMP/config.toml.orig" "$backup"; done
 }
+
+@test "setup answers a key written as a dotted top-level key" {
+  fresh_install
+  printf '%s\n' 'pr.repos = []' 'pr.author = "me"' '[models]' 'codex_worker = "w"' 'codex_smart = "s"' \
+    '[herdr]' 'bin = "/opt/herdr"' 'socket = "/tmp/sock"' >"$HOME/.claude/orchestration.toml"
+  on_tty $'owner/a\n'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PR_REPOS)" = owner/a ]
+}
