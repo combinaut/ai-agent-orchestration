@@ -43,7 +43,7 @@ Everything lives in `~/.claude/orchestration.env`, a bash file of `KEY="value"` 
 | **Install** | | |
 | `ORCH_REPO_PATH` | `~/.claude/ai-agent-orchestration` | The clone linked into `~/.claude` |
 | `ORCH_REPO_URL` | empty | Git URL the installer clones instead of `https://github.com/combinaut/ai-agent-orchestration.git` (for forks and tests). Environment only: set it on the install command line, not in the file |
-| `ORCH_ENV` | empty | Env adapter to run without `--env`; `none` skips |
+| `ORCH_ENV` | empty | Env adapter to run without `--env`; empty means `herdr`, `none` skips the env step |
 | `ORCH_RADAR_PATH` | `~/.claude/herdr-radar` | Herdr Radar checkout |
 | `ORCH_LAUNCHD_WAIT_TRIES`, `ORCH_LAUNCHD_WAIT_SLEEP` | `40`, `0.5` | macOS: how often and how long (seconds) the installer waits for launchd to unload a job. Environment only |
 | **Bash guard and Chrome PR tabs** | | |
