@@ -60,6 +60,11 @@ def exempt_paths():
     return BUILTIN_EXEMPT + tuple(os.environ.get('ORCH_LEGACY_EXEMPT_PATHS', '').split())
 
 
+def builtin_fingerprint():
+    settings = json.dumps([os.environ.get('ORCH_LEGACY_EXTRA_PATTERN', ''), exempt_paths()])
+    return 'builtin:' + hashlib.sha256(settings.encode()).hexdigest()
+
+
 def fetch_prs(command, page_nodes=None):
     author, repos = os.environ.get('ORCH_PR_AUTHOR', ''), os.environ.get('ORCH_PR_REPOS', '')
     if not author or not repos:
@@ -323,6 +328,7 @@ def legacy_scan(command, repo, number, base=None, cache=None, bridged=None):
         lines = list(files_lines(pages, ContentReader(command, repo, base)))
     if rules:
         return rules.scan(lines, bridged)
+    legacy_pattern()
     exempt = exempt_paths()
     return [(kind, path, text) for path, _, text, added in lines
             if added and path not in exempt and (kind := classify(path, text))]
@@ -405,7 +411,7 @@ def legacy_entries(command, prs, cache):
         key = f"{repo}#{pr['number']}"
         old = cache.get(key)
         try:
-            fingerprint = base_rules(command, repo, pr, rules)[1]
+            fingerprint = base_rules(command, repo, pr, rules)[1] or builtin_fingerprint()
             if old and old['head'] == pr['headRefOid'] and old.get('rules') == fingerprint and old.get('base') == pr['baseRefName']:
                 entries[key] = old
             elif budget > 0:

@@ -647,6 +647,22 @@ class LegacyTests(IsolatedTestCase):
         with patch.dict(os.environ, {'ORCH_LEGACY_EXEMPT_PATHS': ''}):
             self.assertEqual(len(audit.legacy_scan(self.fake, 'owner/product', 7)), 4)
 
+    def test_invalid_extra_legacy_pattern_fails_scans_without_frontend_additions(self):
+        self.diff = new_file('docs/a.md', 'plain')
+        with patch.dict(os.environ, {'ORCH_LEGACY_EXTRA_PATTERN': '('}):
+            with self.assertRaisesRegex(ValueError, 'ORCH_LEGACY_EXTRA_PATTERN'):
+                audit.legacy_scan(self.fake, 'owner/product', 7)
+
+    def test_changing_a_legacy_setting_rescans_cached_built_in_results(self):
+        self.scan()
+        self.scan()
+        self.assertEqual(len(self.scans()), 1)
+        for name, value in (('ORCH_LEGACY_EXTRA_PATTERN', 'acme-widget'), ('ORCH_LEGACY_EXEMPT_PATHS', 'app/x.rb')):
+            with patch.dict(os.environ, {name: value}):
+                before = len(self.scans())
+                self.scan()
+                self.assertEqual(len(self.scans()), before + 1, name)
+
     def test_pattern_kinds_only_apply_to_frontend_sources(self):
         data = ''.join(new_file(path, '"command": "$(git rev-parse --show-toplevel)"', 'select2 jQuery rails-ujs')
                        for path in ('.codex/hooks.json', 'app/a.sh', 'app/b.yml', 'app/c.yaml', 'app/d.md', 'lib/e.bash'))
