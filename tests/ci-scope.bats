@@ -56,3 +56,11 @@ scope() { run /bin/bash "$BATS_TEST_DIRNAME/../.github/scripts/macos-scope.sh"; 
   scope
   [ "$output" = macos=true ]
 }
+
+@test "a listing that reaches the 3000-file API cap runs macOS" {
+  GH_JSON_FILE="$BIN/files.json"
+  { printf '[{"filename":"docs/page-0.md"}'; seq 1 2999 | sed 's|.*|,{"filename":"docs/page-&.md"}|'; printf ']'; } >"$GH_JSON_FILE"
+  export GH_JSON_FILE
+  scope
+  [ "$output" = macos=true ]
+}
