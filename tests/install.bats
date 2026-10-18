@@ -34,11 +34,11 @@ load test_helper
   sed '/^ORCH_BIG_REPO_REMOTES=/d; /^ORCH_LEGACY_REPOS=/d; /^ORCH_PR_TABS_/d; /^ORCH_FOCUS_SKIP_ARCHITECTS=/d' "$HOME/.claude/orchestration.env" >"$TMP/old.env"
   printf '%s\n' 'ORCH_PR_TABS_ORG=""' >>"$TMP/old.env"
   cp "$TMP/old.env" "$HOME/.claude/orchestration.env"
-  install_ok --env none
+  install_ok
   contains "$output" "Project features are off until you configure missing keys in $HOME/.claude/orchestration.env: ORCH_BIG_REPO_REMOTES ORCH_LEGACY_REPOS ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS ORCH_FOCUS_SKIP_ARCHITECTS"
   cmp "$TMP/old.env" "$HOME/.claude/orchestration.env"
   for key in $keys; do printf '%s=""\n' "$key" >>"$HOME/.claude/orchestration.env"; done
-  install_ok --env none
+  install_ok
   not_contains "$output" 'Project features are off until you configure missing keys'
   after=$(find "$HOME/.claude" -type l -exec sh -c 'printf "%s -> %s\\n" "$1" "$(readlink "$1")"' sh {} \; | sort)
   [ "$before" = "$after" ]
@@ -47,7 +47,7 @@ load test_helper
 @test "deleted managed links are repaired" {
   fresh_install
   rm "$HOME/.claude/statusline-command.sh" "$HOME/.claude/coordinator/watchers/coord-lib.sh"
-  install_ok --env none
+  install_ok
   [ -L "$HOME/.claude/statusline-command.sh" ]
   [ -L "$HOME/.claude/coordinator/watchers/coord-lib.sh" ]
 }
@@ -56,7 +56,7 @@ load test_helper
   fresh_install
   rm "$HOME/.claude/coordinator/watchers/coord-audit-watch.sh"
   printf old >"$HOME/.claude/coordinator/watchers/coord-audit-watch.sh"
-  install_ok --env none
+  install_ok
   [ -L "$HOME/.claude/coordinator/watchers/coord-audit-watch.sh" ]
   for backup in "$HOME"/.claude/backups/*/coordinator/watchers/coord-audit-watch.sh; do [ -f "$backup" ]; done
   [ "$(cat "$backup")" = old ]
@@ -66,7 +66,7 @@ load test_helper
 @test "settings merge keeps an existing hook and status line" {
   fresh_install
   printf '%s\n' '{"statusLine":{"command":"mine"},"hooks":{"Stop":[{"hooks":[{"command":"stop"}]}]}}' >"$HOME/.claude/settings.json"
-  install_ok --env none
+  install_ok
   jq -e '.statusLine.command == "mine" and .hooks.Stop[0].hooks[0].command == "stop" and ([.hooks.SessionStart[]?.hooks[]?.command] | index("bash ~/.claude/hooks/orch-update-check.sh"))' "$HOME/.claude/settings.json" >/dev/null
 }
 
@@ -79,7 +79,7 @@ load test_helper
   while IFS='|' read -r name matcher hook preserve expected; do
     printf 'case %s\n' "$name"
     jq -n --arg matcher "$matcher" --arg hook "$hook" '{hooks: {PreToolUse: [{matcher: $matcher, hooks: [{type: "command", command: $hook}]}]}}' >"$HOME/.claude/settings.json"
-    run env ORCH_CONFIG="$custom" /bin/bash "$CLONE/install.sh" --env none
+    run env ORCH_CONFIG="$custom" /bin/bash "$CLONE/install.sh"
     [ "$status" -eq 0 ]
     run jq -e --arg managed "$managed" --arg hook "$hook" --arg preserve "$preserve" --argjson expected "$expected" '([.hooks.PreToolUse[]?.hooks[]?.command] | map(select(. == $managed)) | length) == $expected and (if $preserve == "yes" then ([.hooks.PreToolUse[]?.hooks[]?.command] | map(select(. == $hook)) | length) >= 1 else ([.hooks.PreToolUse[]?.hooks[]?.command] | map(select(. == $hook)) | length) == 0 end)' "$HOME/.claude/settings.json"
     [ "$status" -eq 0 ]
@@ -96,55 +96,87 @@ CASES
 @test "dirty clone is refused" {
   fresh_install
   printf dirty >>"$CLONE/README.md"
-  install_fails --env none
+  install_fails
   contains "$output" 'REFUSED:'
 }
 
 @test "unpushed clone commit is refused" {
   fresh_install
   git -C "$CLONE" -c user.email=test@example.invalid -c user.name=test commit --allow-empty -qm local
-  install_fails --env none
+  install_fails
   contains "$output" 'commits not on origin'
 }
 
-@test "logged-out one-liner download fails" {
-  GH_LOGGED_OUT="$TMP/out"; : >"$GH_LOGGED_OUT"; export GH_LOGGED_OUT
+@test "failed one-liner download installs nothing and shows the curl error" {
+  CURL_RAW_FAIL=1; export CURL_RAW_FAIL
   run /bin/bash -c "$ONE_LINER" _
-  [ "$status" -ne 0 ]
-  contains "$output" 'Download failed'
+  contains "$output" 'curl: (22)'
+  [ ! -e "$HOME/.claude/ai-agent-orchestration" ]
 }
 
-@test "missing gh one-liner download fails" {
+@test "empty one-liner download installs nothing" {
+  CURL_RAW_EMPTY=1; export CURL_RAW_EMPTY
+  run /bin/bash -c "$ONE_LINER" _
+  [ ! -e "$HOME/.claude/ai-agent-orchestration" ]
+}
+
+@test "a script read from a /dev/fd path bootstraps the clone and passes arguments on" {
+  run /bin/bash -c 'cd "$1"; shift; exec /bin/bash <(cat "$INSTALL_SOURCE/install.sh") "$@"' _ "$TMP"
+  [ "$status" -eq 0 ]
+  contains "$output" 'cloned'
+  contains "$output" 'env step'
+  [ -L "$HOME/.claude/skills/architect" ]
+}
+
+@test "installing without gh clones over https and keeps going" {
   mv "$BIN/gh" "$BIN/gh.off"
-  PATH="$BATS_SERVICE_STUB_BIN:$BIN" run /bin/bash -c "$ONE_LINER" _
-  [ "$status" -ne 0 ]
-  contains "$output" 'Download failed'
+  run env -u ORCH_REPO_URL /bin/bash -c "$ONE_LINER" _
+  [ "$status" -eq 0 ]
+  contains "$output" 'cloned'
+  [ -L "$HOME/.claude/skills/architect" ]
 }
 
-@test "empty one-liner download fails" {
-  GH_EMPTY=1; export GH_EMPTY
-  run /bin/bash -c "$ONE_LINER" _
-  [ "$status" -ne 0 ]
-  contains "$output" 'Download failed'
-}
-
-@test "clone installer reports one platform-aware missing gh fix" {
+@test "no --env and no ORCH_ENV sets up herdr without a prompt" {
   fresh_install
-  mv "$BIN/gh" "$BIN/gh.off"
-  while IFS='|' read -r platform expected; do
-    printf '#!/bin/bash\necho %s\n' "$platform" >"$BIN/uname"
-    for source in "$CLONE" "$SRC"; do
-      PATH="$BATS_SERVICE_STUB_BIN:$BIN" run /bin/bash "$source/install.sh" --env none
-      [ "$status" -ne 0 ]
-      contains "$output" 'gh (GitHub CLI) not found'
-      contains "$output" "$expected"
-      not_contains "$output" 'command not found'
-      [ "$(printf '%s' "$output" | grep -c 'gh (GitHub CLI) not found')" -eq 1 ]
-    done
-  done <<'CASES'
-Darwin|brew install gh
-Linux|sudo apt-get install gh
-CASES
+  run env -u ORCH_ENV /bin/bash "$CLONE/install.sh"
+  [ "$status" -eq 0 ]
+  contains "$(cat "$HERDR_CALLS")" 'plugin link'
+  not_contains "$output" 'Environment to set up'
+}
+
+@test "--env none and --no-env are refused" {
+  fresh_install
+  run env -u ORCH_ENV /bin/bash "$CLONE/install.sh" --env none
+  [ "$status" -ne 0 ]
+  contains "$output" 'unknown env: none'
+  run env -u ORCH_ENV /bin/bash "$CLONE/install.sh" --no-env
+  [ "$status" -ne 0 ]
+  contains "$output" 'unknown option: --no-env'
+}
+
+@test "ORCH_ENV=none in the config skips the env step" {
+  fresh_install
+  : >"$HERDR_CALLS"
+  sed 's/^ORCH_ENV=.*/ORCH_ENV="none"/' "$HOME/.claude/orchestration.env" >"$TMP/env.new"
+  cp "$TMP/env.new" "$HOME/.claude/orchestration.env"
+  run env -u ORCH_ENV /bin/bash "$CLONE/install.sh"
+  [ "$status" -eq 0 ]
+  contains "$output" 'env step'
+  not_contains "$(cat "$HERDR_CALLS")" 'plugin link'
+}
+
+@test "--env wins over ORCH_ENV=none" {
+  fresh_install
+  run env ORCH_ENV=none /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  contains "$(cat "$HERDR_CALLS")" 'plugin link'
+}
+
+@test "script header one-liner installs" {
+  header=$(sed -n 's/^#   //p' "$ROOT/install.sh")
+  run /bin/bash -c "$header" _
+  [ "$status" -eq 0 ]
+  [ -L "$HOME/.claude/skills/architect" ]
 }
 
 @test "herdr fresh install links the pinned Radar checkout" {
@@ -218,7 +250,7 @@ CASES
 @test "watcher services use platform settings and migrate a stopped legacy service" {
   fresh_install
   printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' "ORCH_HERDR_SOCKET=\"\$HOME/socket&name\"" >>"$HOME/.claude/orchestration.env"
-  install_ok --env none
+  install_ok
   case "$(uname -s)" in
     Darwin)
       [ -f "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist" ]
@@ -250,7 +282,7 @@ echo Darwin
 EOF
   chmod +x "$BIN/uname"
   export LAUNCHCTL_CALLS="$TMP/launchctl.calls"
-  run env LAUNCHCTL_CONTEXT_ONLY=1 PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$CLONE/install.sh" --env none
+  run env LAUNCHCTL_CONTEXT_ONLY=1 PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   [ ! -e "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist" ]
   contains "$output" 'rename ORCH_V2_LAUNCHD to ORCH_WATCHERS_SERVICE'
@@ -258,7 +290,7 @@ EOF
   contains "$output" 'set ORCH_WATCHERS_SERVICE=1 and rerun install.sh'
 
   printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' >>"$HOME/.claude/orchestration.env"
-  run env LAUNCHCTL_CONTEXT_ONLY=1 PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$CLONE/install.sh" --env none
+  run env LAUNCHCTL_CONTEXT_ONLY=1 PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   [ -f "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist" ]
   contains "$output" "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist"
@@ -273,7 +305,7 @@ EOF
   printf new >"$HOME/.claude/coordinator/watchers/bindings/coordinator.json"
   printf '{"before":{},"events":[{"seq":1,"line":"RECYCLE pane-9"}]}' >"$HOME/.claude/coordinator/watchers/prod-context/context.json"
   : >"$LAUNCHCTL_CALLS"
-  run env LAUNCHCTL_NOT_LOADED=1 PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$CLONE/install.sh" --env none
+  run env LAUNCHCTL_NOT_LOADED=1 PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 1 ]
   [ "$(cat "$HOME/.claude/coordinator/watchers/bindings/coordinator.json")" = new ]
   [ "$(cat "$HOME/.claude/coordinator/watchers/prod-context/legacy.json")" = copied ]
@@ -283,7 +315,7 @@ EOF
   not_contains "$output" 'MIGRATE WATCHER:'
   contains "$output" 'copied state'
 
-  run env LAUNCHCTL_NOT_LOADED=1 PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$CLONE/install.sh" --env none
+  run env LAUNCHCTL_NOT_LOADED=1 PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 1 ]
   not_contains "$output" 'copied state'
 }
@@ -492,15 +524,6 @@ CASES
   fresh_install
   not_contains "$output" unrelated-adapter
   [ -L "$HOME/.claude/skills/architect" ]
-}
-
-@test "script header download command has a standalone failure fix" {
-  GH_LOGGED_OUT="$TMP/out"; : >"$GH_LOGGED_OUT"; export GH_LOGGED_OUT
-  header=$(sed -n 's/^#   //p' "$ROOT/install.sh")
-  run /bin/bash -c "$header"
-  [ "$status" -ne 0 ]
-  contains "$output" 'Fix: install gh (https://cli.github.com) && gh auth login'
-  not_contains "$output" 'command not found'
 }
 
 @test "managed tools are reused without caller PATH changes" {
@@ -754,7 +777,7 @@ CASES
 @test "host services render with shared inbox and print lifecycle commands" {
   fresh_install
   printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' >>"$HOME/.claude/orchestration.env"
-  install_ok --env none
+  install_ok
   case "$(uname -s)" in
     Darwin) adapter=macos; suffix=plist; start='launchctl bootstrap'; stop='launchctl bootout' ;;
     Linux) adapter=linux; suffix=service; start='systemctl --user enable --now'; stop='systemctl --user disable --now' ;;
@@ -776,13 +799,13 @@ CASES
   mkdir -p "$(dirname "$old")"
   ln -s "$(cd "$CLONE" && pwd -P)/coordinator/monitors/retired-monitor.sh" "$old"
   printf '%s\n' "$old" >>"$HOME/.claude/.orch-links"
-  install_ok --env none
+  install_ok
   [ ! -L "$old" ]
   contains "$output" "removed stale"
 }
 
 @test "coordinator documentation covers host alerts and memory guard response" {
-  for doc in "$ROOT/README.md" "$ROOT/skills/coordinate/SKILL.md"; do
+  for doc in "$ROOT/docs/watchers.md" "$ROOT/skills/coordinate/SKILL.md"; do
     contains "$(cat "$doc")" 'HOST READFAIL'
     contains "$(cat "$doc")" 'HOST RECOVERED'
     contains "$(cat "$doc")" 'host HEARTBEAT STALE'
@@ -794,7 +817,7 @@ CASES
 @test "hog services render at five seconds and share the inbox" {
   fresh_install
   printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' >>"$HOME/.claude/orchestration.env"
-  install_ok --env none
+  install_ok
   case "$(uname -s)" in
     Darwin) adapter=macos; suffix=plist; start='launchctl bootstrap'; stop='launchctl bootout' ;;
     Linux) adapter=linux; suffix=service; start='systemctl --user enable --now'; stop='systemctl --user disable --now' ;;
@@ -817,7 +840,7 @@ CASES
 @test "balance services render at sixty seconds and share the inbox" {
   fresh_install
   printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' >>"$HOME/.claude/orchestration.env"
-  install_ok --env none
+  install_ok
   case "$(uname -s)" in
     Darwin) adapter=macos; suffix=plist; start='launchctl bootstrap'; stop='launchctl bootout' ;;
     Linux) adapter=linux; suffix=service; start='systemctl --user enable --now'; stop='systemctl --user disable --now' ;;
@@ -840,7 +863,7 @@ CASES
 @test "workers services render at sixty seconds and share the inbox" {
   fresh_install
   printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' >>"$HOME/.claude/orchestration.env"
-  install_ok --env none
+  install_ok
   case "$(uname -s)" in
     Darwin) adapter=macos; suffix=plist; start='launchctl bootstrap'; stop='launchctl bootout' ;;
     Linux) adapter=linux; suffix=service; start='systemctl --user enable --now'; stop='systemctl --user disable --now' ;;
@@ -863,12 +886,12 @@ CASES
 @test "PR watchers are not registered until their settings are filled" {
   fresh_install
   printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' >>"$HOME/.claude/orchestration.env"
-  install_ok --env none
+  install_ok
   contains "$output" 'com.combinaut.coord-watcher-audit watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
   contains "$output" 'com.combinaut.coord-watcher-pulls watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
   [ -z "$(find "$HOME/.claude/coordinator/watchers/service" \( -name 'com.combinaut.coord-watcher-audit.*' -o -name 'com.combinaut.coord-watcher-pulls.*' \) ! -name '*.template')" ]
   [ -n "$(find "$HOME/.claude/coordinator/watchers/service" -name 'com.combinaut.coord-watcher-host.*' ! -name '*.template')" ]
-  run env ORCH_PR_REPOS=o/r ORCH_PR_AUTHOR=me /bin/bash "$CLONE/install.sh" --env none
+  run env ORCH_PR_REPOS=o/r ORCH_PR_AUTHOR=me /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   contains "$output" 'com.combinaut.coord-watcher-pulls watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
 }
@@ -876,7 +899,7 @@ CASES
 @test "audit services render at thirty minutes and share the inbox" {
   fresh_install
   printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' 'ORCH_PR_REPOS="o/r"' 'ORCH_PR_AUTHOR="me"' >>"$HOME/.claude/orchestration.env"
-  install_ok --env none
+  install_ok
   case "$(uname -s)" in
     Darwin) adapter=macos; suffix=plist ;;
     Linux) adapter=linux; suffix=service ;;
@@ -962,7 +985,7 @@ EOF
   [ ! -L "$old" ]
   ln -s "$(cd "$CLONE" && pwd -P)/coordinator/watchers/coord-run.sh" "$old"
   printf '%s\n' "$old" >>"$HOME/.claude/.orch-links"
-  install_ok --env none
+  install_ok
   [ ! -L "$old" ]
   contains "$output" 'removed stale'
 }
@@ -971,7 +994,7 @@ EOF
   fresh_install
   custom="$TMP/custom config & <audit>.env"
   prepare_custom_service_config "$custom"
-  run env ORCH_CONFIG="$custom" /bin/bash "$CLONE/install.sh" --env none
+  run env ORCH_CONFIG="$custom" /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   prepare_audit_commands
   check_service_config "$custom"
@@ -980,7 +1003,7 @@ EOF
 @test "relative custom config remains usable from the service working directory" {
   fresh_install
   prepare_custom_service_config "$TMP/relative config.env"
-  run /bin/bash -c 'cd "$1"; ORCH_CONFIG="relative config.env" /bin/bash "$2" --env none' _ "$TMP" "$CLONE/install.sh"
+  run /bin/bash -c 'cd "$1"; ORCH_CONFIG="relative config.env" /bin/bash "$2"' _ "$TMP" "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   prepare_audit_commands
   check_service_config "$(cd "$TMP" && pwd -P)/relative config.env"
@@ -989,7 +1012,7 @@ EOF
 @test "every rendered service carries the default config selected by the installer" {
   fresh_install
   prepare_custom_service_config "$HOME/.claude/orchestration.env"
-  run env -u ORCH_CONFIG /bin/bash "$CLONE/install.sh" --env none
+  run env -u ORCH_CONFIG /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   prepare_audit_commands
   check_service_config "$HOME/.claude/orchestration.env"
@@ -1008,7 +1031,7 @@ EOF
 
 @test "explicit missing or non-file configuration fails before installation" {
   for config in "$TMP/missing.env" "$TMP"; do
-    run env ORCH_CONFIG="$config" /bin/bash "$BATS_TEST_DIRNAME/../install.sh" --env none
+    run env ORCH_CONFIG="$config" /bin/bash "$BATS_TEST_DIRNAME/../install.sh"
     [ "$status" -ne 0 ]
     [[ "$output" == *"ORCH_CONFIG is not a regular file"* ]]
   done

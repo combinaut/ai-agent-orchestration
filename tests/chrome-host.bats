@@ -54,7 +54,7 @@ ask_host() {
   [ "$status" -eq 0 ]
   printf '%s' "$output" | jq -e '.ok == false and (.error | test("unknown request type"))' >/dev/null
   printf '%s\n' 'ORCH_PR_TABS_ORG="acme"' 'ORCH_PR_TABS_DEFAULT_REPO="webapp"' >"$TMP/relative config.env"
-  run /bin/bash -c 'cd "$1"; ORCH_CONFIG="relative config.env" /bin/bash "$2" --env none' _ "$TMP" "$CLONE/install.sh"
+  run /bin/bash -c 'cd "$1"; ORCH_CONFIG="relative config.env" /bin/bash "$2"' _ "$TMP" "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   run ask_host "$launcher" '{"type":"settings"}'
   [ "$status" -eq 0 ]
@@ -65,7 +65,7 @@ ask_host() {
   mkdir -p "$CHROME_DIR"
   fresh_install
   before=$(cat "$HOST_MANIFEST" "$(jq -r .path "$HOST_MANIFEST")")
-  install_ok --env none
+  install_ok
   after=$(cat "$HOST_MANIFEST" "$(jq -r .path "$HOST_MANIFEST")")
   [ "$before" = "$after" ]
   printf '%s\n' "$output" | grep -F "$HOST_MANIFEST" | grep -q '^already set'
@@ -79,7 +79,7 @@ ask_host() {
   fresh_install
   launcher=$(jq -r .path "$HOST_MANIFEST")
   chmod -x "$launcher"
-  install_ok --env none
+  install_ok
   [ -x "$launcher" ]
 }
 
@@ -90,12 +90,12 @@ done_count() {
 
 @test "the Done summary counts the rendered host files" {
   fresh_install
-  install_ok --env none
+  install_ok
   without=$(done_count "$output" 'already linked')
   mkdir -p "$CHROME_DIR"
-  install_ok --env none
+  install_ok
   [ "$(done_count "$output" linked)" -eq 2 ]
-  install_ok --env none
+  install_ok
   [ "$(done_count "$output" 'already linked')" -eq $((without + 2)) ]
 }
 

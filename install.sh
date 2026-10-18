@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs, updates and repairs the ai-agent-orchestration setup: one clone, symlinked into ~/.claude.
-# Safe to run any number of times. Run it without a clone (arguments go after the final _):
-#   /bin/bash -c 's=$(gh api repos/combinaut/ai-agent-orchestration/contents/install.sh -H "Accept: application/vnd.github.raw") && [ -n "$s" ] && exec /bin/bash -c "$s" install.sh "$@"; echo "Download failed. Fix: install gh (https://cli.github.com) && gh auth login" >&2; exit 1' _
+# Safe to run any number of times. Run it without a clone (arguments go after the closing parenthesis):
+#   bash <(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh)
 set -eu
 
 REPO_SLUG="combinaut/ai-agent-orchestration"
@@ -85,13 +85,13 @@ release_lock() {
 
 usage() {
   cat <<'USAGE'
-Usage: install.sh [--env <name>|--env none]
+Usage: install.sh [--env <name>]
 
 Clones or updates the ai-agent-orchestration repo (ORCH_REPO_PATH, default ~/.claude/ai-agent-orchestration),
 then symlinks its shared files into ~/.claude. Install, update and repair are the same run.
 
-  --env <name>   Also run env/<name>/install.sh (e.g. herdr). "none" skips the env step.
-                 Without --env: ORCH_ENV from the config, else a prompt on a terminal, else no env step.
+  --env <name>   Run env/<name>/install.sh (e.g. herdr).
+                 Without --env: ORCH_ENV from the config ("none" skips the env step), else herdr.
 USAGE
 }
 
@@ -165,12 +165,9 @@ refuse_local_changes() {
 preflight() {
   command -v git >/dev/null 2>&1 || die "git not found. Fix: $(platform_dependency_fix git)"
   if ! command -v gh >/dev/null 2>&1; then
-    echo "ERROR: gh (GitHub CLI) not found. Fix: $(platform_dependency_fix gh) && gh auth login" >&2
-    exit 1
-  fi
-  if ! gh auth status >/dev/null 2>&1; then
-    echo "ERROR: gh is not logged in. Fix: gh auth login (then run this again)" >&2
-    exit 1
+    say "no gh" "PR watchers need it: $(platform_dependency_fix gh) && gh auth login"
+  elif ! gh auth status >/dev/null 2>&1; then
+    say "gh logged out" "PR watchers need it: gh auth login"
   fi
   command -v jq >/dev/null 2>&1 || die "jq not found. Fix: $(platform_dependency_fix jq)"
 }
@@ -179,11 +176,7 @@ sync_clone() {
   local repo=$1 before after upstream
   if [ ! -e "$repo" ]; then
     mkdir -p "$(dirname "$repo")"
-    if [ -n "${ORCH_REPO_URL:-}" ]; then
-      git clone -q "$ORCH_REPO_URL" "$repo"
-    else
-      gh repo clone "$REPO_SLUG" "$repo" -- -q
-    fi
+    git clone -q "${ORCH_REPO_URL:-https://github.com/$REPO_SLUG.git}" "$repo"
     say "cloned" "$repo"
     return
   fi
@@ -228,7 +221,7 @@ if [ -n "$SRC" ]; then
   . "$SRC/lib/platform/$PLATFORM.sh"
 else
   [ "$STAGE" != link ] || die "the link stage runs from $ORCH_REPO, not $SRC"
-  adapter=$(gh api "repos/$REPO_SLUG/contents/lib/platform/$PLATFORM.sh" -H "Accept: application/vnd.github.raw") || die "cannot download platform adapter. Fix: gh auth login"
+  adapter=$(curl -fsSL "https://raw.githubusercontent.com/$REPO_SLUG/main/lib/platform/$PLATFORM.sh") || die "cannot download platform adapter. Fix: check your network and run again"
   [ -n "$adapter" ] || die "empty platform adapter download"
   eval "$adapter"
 fi
@@ -839,20 +832,16 @@ claude_md_hint() {
 }
 
 run_env() {
-  local envs="" d answer
+  local envs="" d
   if [ "$ENV_GIVEN" = 0 ]; then
     ENV_NAME=$(config_value ORCH_ENV)
+    [ -n "$ENV_NAME" ] || ENV_NAME=herdr
   fi
   for d in "$ORCH_REPO"/env/*/; do
     [ -f "$d/install.sh" ] && envs="$envs $(basename "$d")"
   done
-  if [ -z "$ENV_NAME" ] && [ -t 0 ] && [ -t 1 ]; then
-    printf 'Environment to set up (%s, none) [none]: ' "${envs# }"
-    read -r answer || answer=""
-    ENV_NAME=${answer:-none}
-  fi
-  if [ -z "$ENV_NAME" ] || [ "$ENV_NAME" = none ]; then
-    skip "env step (choose one with --env <name>:$envs)"
+  if [ "$ENV_GIVEN" = 0 ] && [ "$ENV_NAME" = none ]; then
+    skip "env step (available:$envs)"
     return
   fi
   [ -f "$ORCH_REPO/env/$ENV_NAME/install.sh" ] || die "unknown env: $ENV_NAME (available:$envs)"
