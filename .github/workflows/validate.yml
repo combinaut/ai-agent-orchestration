@@ -23,7 +23,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           PR: ${{ github.event.pull_request.number }}
-        run: .github/scripts/macos-scope.sh >>"$GITHUB_OUTPUT"
+        run: exit 1
 
   macos:
     name: Validate (macos-latest)
