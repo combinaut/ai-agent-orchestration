@@ -640,7 +640,7 @@ EOF
 
 @test "Radar daemon started by the installer survives the installer's exit" {
   fresh_install
-  run env HERDR_DAEMON_PID="$TMP/daemon.pid" python3 -c 'import os, sys
+  run python3 -c 'import os, sys
 os.setpgrp()
 open(sys.argv[1], "w").write(str(os.getpgrp()))
 os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/install.sh" --env herdr
@@ -650,6 +650,78 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/inst
   kill -TERM -- "-$(cat "$TMP/install.pgid")" 2>/dev/null || true
   sleep 1
   kill -0 "$(cat "$TMP/daemon.pid")"
+}
+
+@test "a Radar restart starts the new daemon only after the old one has exited" {
+  fresh_install
+  install_ok --env herdr
+  old=$(cat "$TMP/daemon.pid")
+  git -C "$HOME/.claude/herdr-radar" checkout -q main
+  run env HERDR_STOP_DELAY=1 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  new=$(cat "$TMP/daemon.pid")
+  [ "$new" != "$old" ]
+  kill -0 "$new"
+  sleep 2
+  kill -0 "$new"
+}
+
+@test "a checkout path with regex characters is matched literally" {
+  fresh_install
+  checkout="$TMP/projects/radar(work)[dev]"
+  run env ORCH_RADAR_PATH="$checkout" /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  kill -0 "$(cat "$TMP/daemon.pid")"
+}
+
+@test "a restart ignores another session's daemon from the same checkout" {
+  fresh_install
+  install_ok --env herdr
+  (sleep 60 >/dev/null 2>&1 &
+    echo $! >"$TMP/other.pid")
+  git -C "$HOME/.claude/herdr-radar" checkout -q main
+  run env ORCH_RADAR_WAIT_TRIES=10 ORCH_RADAR_WAIT_SLEEP=0.2 /bin/bash "$CLONE/install.sh" --env herdr
+  other=$(cat "$TMP/other.pid")
+  alive=0
+  kill -0 "$other" 2>/dev/null && alive=1
+  kill "$other" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  [ "$alive" -eq 1 ]
+  kill -0 "$(cat "$TMP/daemon.pid")"
+}
+
+@test "another session's daemon does not satisfy the check when this session starts none" {
+  fresh_install
+  install_ok --env herdr
+  mv "$TMP/daemon.pid" "$TMP/other.pid"
+  run env HERDR_NO_DAEMON=1 ORCH_RADAR_WAIT_TRIES=2 ORCH_RADAR_WAIT_SLEEP=0 /bin/bash "$CLONE/install.sh" --env herdr
+  kill "$(cat "$TMP/other.pid")" 2>/dev/null || true
+  [ "$status" -ne 0 ]
+  contains "$output" 'Radar daemon is not running after state-start'
+}
+
+@test "a first install does not wait for a daemon that was never there" {
+  fresh_install
+  run env ORCH_RADAR_WAIT_TRIES=3 ORCH_RADAR_WAIT_SLEEP=0 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  not_contains "$output" 'did not exit'
+}
+
+@test "a replacement daemon started during the stop satisfies the check" {
+  fresh_install
+  install_ok --env herdr
+  git -C "$HOME/.claude/herdr-radar" checkout -q main
+  run env HERDR_STOP_REPLACES=1 HERDR_STOP_DELAY=1 ORCH_RADAR_WAIT_TRIES=6 ORCH_RADAR_WAIT_SLEEP=0.5 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  kill -0 "$(cat "$TMP/daemon.pid")"
+}
+
+@test "an install whose Radar daemon never appears fails instead of reporting it running" {
+  fresh_install
+  run env HERDR_NO_DAEMON=1 ORCH_RADAR_WAIT_TRIES=2 ORCH_RADAR_WAIT_SLEEP=0 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -ne 0 ]
+  contains "$output" 'Radar daemon is not running after state-start'
+  [ "$(grep -c 'state-start' "$HERDR_CALLS")" -eq 2 ]
 }
 
 @test "existing Herdr keeps its install and its config outside Radar's blocks" {

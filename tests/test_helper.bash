@@ -84,9 +84,24 @@ case "$1 ${2:-}" in
           printf '[keys]\nprefix = "ctrl-b"\n' >"$config"
         fi
         [ -z "${HERDR_FAIL_START:-}" ] || exit 1
-        if [ -n "${HERDR_DAEMON_PID:-}" ]; then
-          sleep 300 </dev/null >/dev/null 2>&1 &
-          echo $! >"$HERDR_DAEMON_PID"
+        # Like Radar: a live daemon is left alone, otherwise one starts.
+        if [ -z "${HERDR_NO_DAEMON:-}" ] && ! { [ -f "$TMP/daemon.pid" ] && kill -0 "$(cat "$TMP/daemon.pid")" 2>/dev/null; }; then
+          (sleep 300 </dev/null >/dev/null 2>&1 &
+            echo $! >"$TMP/daemon.pid")
+        fi
+        ;;
+      *state-stop*)
+        # Herdr returns from invoke before the action finishes: the daemon leaves after a delay.
+        if [ -f "$TMP/daemon.pid" ]; then
+          (
+            sleep "${HERDR_STOP_DELAY:-0.5}"
+            kill "$(cat "$TMP/daemon.pid")" 2>/dev/null
+            # A watchdog event can start the replacement before the installer starts one.
+            if [ -n "${HERDR_STOP_REPLACES:-}" ]; then
+              sleep 300 &
+              echo $! >"$TMP/daemon.pid"
+            fi
+          ) </dev/null >/dev/null 2>&1 &
         fi
         ;;
     esac
@@ -96,6 +111,11 @@ esac
 EOF
   cat >"$BIN/node" <<'EOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = -e ]; then
+  # Stands in for Radar's control endpoint: the pid of this session's daemon.
+  { [ -f "$TMP/daemon.pid" ] && kill -0 "$(cat "$TMP/daemon.pid")" 2>/dev/null && cat "$TMP/daemon.pid"; } || true
+  exit 0
+fi
 echo "v${NODE_VERSION:-22.20.0}"
 EOF
   mkdir -p "$TMP/managed-node"
