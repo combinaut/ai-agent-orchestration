@@ -25,7 +25,7 @@ nodes{... on CheckRun{name conclusion startedAt} ... on StatusContext{context st
 QUERY = '''query($q:String!,$np:Int!,$ni:Int!,$cursor:String){
 search(query:$q,type:ISSUE,first:$np,after:$cursor){pageInfo{hasNextPage endCursor}
 nodes{... on PullRequest{''' + SELECTION + '}}}}'
-LEGACY_PATTERN = r'\$\(|jQuery|\$\.ajax|ajax:(success|complete|error|send)|jquery_ujs|jquery-ujs|rails-ujs|data-remote|remote: *true|\.trigger\(|select2'
+LEGACY_PATTERN = re.compile(r'\$\(|jQuery|\$\.ajax|ajax:(success|complete|error|send)|jquery_ujs|jquery-ujs|rails-ujs|data-remote|remote: *true|\.trigger\(|select2')
 BUILTIN_EXEMPT = ('scripts/legacy-deletion-ratchet.mjs', 'scripts/legacy-deletion-ratchet-rules.json')
 LEGACY_KINDS = ('JSERB', 'JQUERY', 'LEGACY', 'TEST')
 TEST_PATH = re.compile(r'(^|/)(spec|test|tests)/|[._-](spec|test)\.[^/]*$')
@@ -48,10 +48,10 @@ def positive_setting(name, default, maximum=None):
     return value
 
 
-def legacy_pattern():
+def legacy_patterns():
     extra = os.environ.get('ORCH_LEGACY_EXTRA_PATTERN', '')
     try:
-        return re.compile(f'{LEGACY_PATTERN}|{extra}' if extra else LEGACY_PATTERN)
+        return (LEGACY_PATTERN, re.compile(extra)) if extra else (LEGACY_PATTERN,)
     except re.error as error:
         raise ValueError(f'ORCH_LEGACY_EXTRA_PATTERN is not a valid regex: {error}') from error
 
@@ -96,7 +96,7 @@ def classify(path, text):
         return 'JSERB'
     if path.endswith(NOT_FRONTEND):
         return None
-    if path.endswith(FRONTEND_EXTENSIONS) and legacy_pattern().search(text):
+    if path.endswith(FRONTEND_EXTENSIONS) and any(pattern.search(text) for pattern in legacy_patterns()):
         if TEST_PATH.search(path):
             return 'TEST'
         return 'LEGACY' if path.startswith('app/assets/javascripts/') else 'JQUERY'
@@ -328,7 +328,7 @@ def legacy_scan(command, repo, number, base=None, cache=None, bridged=None):
         lines = list(files_lines(pages, ContentReader(command, repo, base)))
     if rules:
         return rules.scan(lines, bridged)
-    legacy_pattern()
+    legacy_patterns()
     exempt = exempt_paths()
     return [(kind, path, text) for path, _, text, added in lines
             if added and path not in exempt and (kind := classify(path, text))]

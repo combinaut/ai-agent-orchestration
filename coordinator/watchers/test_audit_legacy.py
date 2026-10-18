@@ -623,6 +623,15 @@ class LegacyTests(IsolatedTestCase):
             self.assertIsNone(audit.classify('app/a.rb', 'plain'))
             self.assertEqual(audit.classify('spec/a.rb', 'acme-widget'), 'TEST')
 
+    def test_extra_legacy_pattern_keeps_its_own_flags_and_groups(self):
+        with patch.dict(os.environ, {'ORCH_LEGACY_EXTRA_PATTERN': '(?i)old-widget'}):
+            self.assertEqual(audit.classify('app/a.rb', 'OLD-WIDGET'), 'JQUERY')
+            self.assertEqual(audit.classify('app/a.rb', 'jQuery'), 'JQUERY')
+            self.assertIsNone(audit.classify('app/a.rb', 'JQUERY'))
+        with patch.dict(os.environ, {'ORCH_LEGACY_EXTRA_PATTERN': r'(ab)\1'}):
+            self.assertEqual(audit.classify('app/a.rb', 'abab'), 'JQUERY')
+            self.assertIsNone(audit.classify('app/a.rb', 'abxx'))
+
     def test_empty_extra_legacy_pattern_adds_nothing(self):
         with patch.dict(os.environ, {'ORCH_LEGACY_EXTRA_PATTERN': ''}):
             self.assertIsNone(audit.classify('app/a.rb', 'acme-widget'))
@@ -755,7 +764,7 @@ class LegacyTests(IsolatedTestCase):
         self.rules = {'main': RULES_TEXT}
         self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), HITS)
         self.diff = ''.join([
-            new_file('app/a.rb', 'rails-ujs', 'ajax:success', '$.ajax(x)', 'select2', 'JQUERY ref', 'plain'),
+            new_file('app/a.rb', 'rails-ujs', 'ajax:success', '$.ajax(x)', 'select2', 'legacy-select', 'JQUERY ref', 'plain'),
             new_file('app/assets/javascripts/b.js', 'plain', '$(x)'),
             new_file('app/c.coffee', 'plain'),
             new_file('docs/d.rb', '$(x)'),
@@ -763,7 +772,8 @@ class LegacyTests(IsolatedTestCase):
             new_file('spec/f_spec.rb', 'ajax:error', 'plain')])
         self.assertEqual([(kind, path, text) for kind, path, text in audit.legacy_scan(self.fake, 'owner/product', 7)], [
             ('JQUERY', 'app/a.rb', 'rails-ujs'), ('JQUERY', 'app/a.rb', 'ajax:success'),
-            ('JQUERY', 'app/a.rb', '$.ajax(x)'), ('JQUERY', 'app/a.rb', 'select2'), ('JQUERY', 'app/a.rb', 'JQUERY ref'),
+            ('JQUERY', 'app/a.rb', '$.ajax(x)'), ('JQUERY', 'app/a.rb', 'select2'), ('JQUERY', 'app/a.rb', 'legacy-select'),
+            ('JQUERY', 'app/a.rb', 'JQUERY ref'),
             ('LEGACY', 'app/assets/javascripts/b.js', 'plain'), ('LEGACY', 'app/assets/javascripts/b.js', '$(x)'),
             ('LEGACY', 'app/c.coffee', 'plain'), ('TEST', 'spec/f_spec.rb', 'ajax:error')])
 
