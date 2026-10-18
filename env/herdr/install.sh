@@ -142,20 +142,44 @@ prepare_plugin() {
   fi
 }
 
-# radar_daemon_wait <up|down> <checkout>: polls for Radar's --animate process until it is present (up) or gone (down).
+# radar_daemons <checkout>: pids of Radar's --animate processes run from the checkout, one per line.
+radar_daemons() {
+  local pattern
+  # shellcheck disable=SC2016 # sed program, not shell.
+  pattern=$(printf '%s' "$1/bin/agent-state.js --animate" | sed 's/[][\.*^$(){}?+|/]/\\&/g')
+  pgrep -f -- "(^| )$pattern" || true
+}
+
+pid_listed() { case $'\n'$2$'\n' in *$'\n'"$1"$'\n'*) return 0 ;; esac; return 1; }
+
+# radar_daemon_wait <stop|start> <checkout> <pids before>: succeeds once one of the pids is gone (stop) or a pid not among them is running (start).
+# Other Herdr sessions keep daemons of their own, so a count of zero is never the test.
 radar_daemon_wait() {
-  local want=$1 tries=${ORCH_RADAR_WAIT_TRIES:-40} running
+  local mode=$1 tries=${ORCH_RADAR_WAIT_TRIES:-40} now pid
   while :; do
-    pgrep -f -- "$2/bin/agent-state.js --animate" >/dev/null 2>&1 && running=up || running=down
-    [ "$running" = "$want" ] && return 0
+    now=$(radar_daemons "$2")
+    if [ "$mode" = stop ]; then
+      [ -n "$3" ] || return 0
+      for pid in $3; do pid_listed "$pid" "$now" || return 0; done
+    else
+      for pid in $now; do pid_listed "$pid" "$3" || return 0; done
+    fi
     tries=$((tries - 1))
     [ "$tries" -gt 0 ] || return 1
     sleep "${ORCH_RADAR_WAIT_SLEEP:-0.5}"
   done
 }
 
+radar_start() {
+  local status=0
+  herdr_config_snapshot
+  platform_run_detached "$HERDR_EXE" plugin action invoke "$RADAR_ID.state-start" >/dev/null || status=$?
+  herdr_config_check
+  [ "$status" = 0 ] || die "Radar state-start failed (status $status); run install.sh again"
+}
+
 env_install() {
-  local pin path url head moved=0 source origin status
+  local pin path url head moved=0 source origin known=""
   pin=$(tr -d '[:space:]' <"$ENV_DIR/radar.pin")
   path=$(config_value ORCH_RADAR_PATH)
   if [ -z "$path" ]; then
@@ -207,17 +231,15 @@ env_install() {
     say "already linked" "Herdr plugin $RADAR_ID -> $RADAR_PLUGIN"
   fi
   if [ "$moved" = 1 ]; then
+    known=$(radar_daemons "$path")
     "$HERDR_EXE" plugin action invoke "$RADAR_ID.state-stop" >/dev/null
-    radar_daemon_wait down "$path" || die "Radar daemon is still running after state-stop; stop it, then run install.sh again"
+    radar_daemon_wait stop "$path" "$known" || say "note" "no Radar daemon exited after state-stop; starting anyway"
+    known=$(radar_daemons "$path")
   fi
-  herdr_config_snapshot
-  status=0
-  platform_run_detached "$HERDR_EXE" plugin action invoke "$RADAR_ID.state-start" >/dev/null || status=$?
-  herdr_config_check
-  [ "$status" = 0 ] || die "Radar state-start failed (status $status); run install.sh again"
-  if ! radar_daemon_wait up "$path"; then
-    platform_run_detached "$HERDR_EXE" plugin action invoke "$RADAR_ID.state-start" >/dev/null || true
-    radar_daemon_wait up "$path" || die "Radar daemon is not running after state-start; run install.sh again, or see: $HERDR_EXE plugin log"
+  radar_start
+  if ! radar_daemon_wait start "$path" "$known"; then
+    radar_start
+    radar_daemon_wait start "$path" "$known" || die "Radar daemon is not running after state-start; run install.sh again, or see: $HERDR_EXE plugin log"
   fi
   say "running" "Radar daemon (mise Node $RADAR_NODE)"
 }

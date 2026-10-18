@@ -667,6 +667,31 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/inst
   kill -0 "$new"
 }
 
+@test "a checkout path with regex characters is matched literally" {
+  fresh_install
+  checkout="$TMP/projects/radar(work)[dev]"
+  run env ORCH_RADAR_PATH="$checkout" /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  kill -0 "$(cat "$TMP/daemon.pid")"
+}
+
+@test "a restart ignores another session's daemon from the same checkout" {
+  fresh_install
+  install_ok --env herdr
+  radar=$(cd "$HOME/.claude/herdr-radar" && pwd -P)
+  (exec -a "$radar/bin/agent-state.js --animate" sleep 60 >/dev/null 2>&1 &
+    echo $! >"$TMP/other.pid")
+  git -C "$HOME/.claude/herdr-radar" checkout -q main
+  run env ORCH_RADAR_WAIT_TRIES=10 ORCH_RADAR_WAIT_SLEEP=0.2 /bin/bash "$CLONE/install.sh" --env herdr
+  other=$(cat "$TMP/other.pid")
+  alive=0
+  kill -0 "$other" 2>/dev/null && alive=1
+  kill "$other" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  [ "$alive" -eq 1 ]
+  kill -0 "$(cat "$TMP/daemon.pid")"
+}
+
 @test "an install whose Radar daemon never appears fails instead of reporting it running" {
   fresh_install
   run env HERDR_NO_DAEMON=1 ORCH_RADAR_WAIT_TRIES=2 ORCH_RADAR_WAIT_SLEEP=0 /bin/bash "$CLONE/install.sh" --env herdr
