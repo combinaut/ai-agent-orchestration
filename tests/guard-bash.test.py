@@ -413,6 +413,8 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
     case('webapp nonrecursive formatted root tree', "git ls-tree --full-tree --format='%(objectname)' HEAD | git cat-file --batch-check", cwd=webapp)
     case('webapp config-spoofed grep', 'git -c remote.origin.url=https://github.com/combinaut/other.git grep needle', True, webapp)
     case('webapp git -C cat-file tree', f'git -C {webapp} ls-tree -r HEAD | git -C {webapp} cat-file --batch', True, root)
+    case('webapp git dir batch all objects', f'git -C {webapp}/.git cat-file --batch-all-objects --batch', True, root)
+    case('webapp git dir grep', f'cd {webapp}/.git && git grep needle', True, root)
     case('non-webapp grep', 'git grep needle', cwd=other)
     case('leave webapp before grep', f'cd {other} && git grep needle', cwd=webapp)
     case('successful and cd leaves webapp', f'true && cd {other}; git grep needle', cwd=webapp)

@@ -92,7 +92,10 @@ def is_big_repo(cwd, opts):
     identity_opts = [value for i, value in enumerate(opts) if value != '-c' and (i == 0 or opts[i-1] != '-c')]
     root = git_read(cwd, identity_opts, 'rev-parse', '--show-toplevel')
     if not root:
-        return False
+        common = git_read(cwd, identity_opts, 'rev-parse', '--path-format=absolute', '--git-common-dir')
+        if not common or Path(common).name != '.git':
+            return False
+        root = str(Path(common).parent)
     return repo_settings(root)['ORCH_BIG_REPO'] == '1'
 
 
