@@ -84,9 +84,17 @@ case "$1 ${2:-}" in
           printf '[keys]\nprefix = "ctrl-b"\n' >"$config"
         fi
         [ -z "${HERDR_FAIL_START:-}" ] || exit 1
-        if [ -n "${HERDR_DAEMON_PID:-}" ]; then
-          sleep 300 </dev/null >/dev/null 2>&1 &
-          echo $! >"$HERDR_DAEMON_PID"
+        # Like Radar: a live daemon is left alone, otherwise one starts.
+        if [ -z "${HERDR_NO_DAEMON:-}" ] && ! { [ -f "$TMP/daemon.pid" ] && kill -0 "$(cat "$TMP/daemon.pid")" 2>/dev/null; }; then
+          radar=$(cd "${ORCH_RADAR_PATH:-$HOME/.claude/herdr-radar}" && pwd -P)
+          (exec -a "$radar/bin/agent-state.js --animate" sleep 300 </dev/null >/dev/null 2>&1 &
+            echo $! >"$TMP/daemon.pid")
+        fi
+        ;;
+      *state-stop*)
+        # Herdr returns from invoke before the action finishes: the daemon leaves after a delay.
+        if [ -f "$TMP/daemon.pid" ]; then
+          (sleep "${HERDR_STOP_DELAY:-0.5}"; kill "$(cat "$TMP/daemon.pid")" 2>/dev/null) </dev/null >/dev/null 2>&1 &
         fi
         ;;
     esac

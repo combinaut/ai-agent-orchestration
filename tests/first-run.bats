@@ -641,7 +641,7 @@ EOF
 
 @test "Radar daemon started by the installer survives the installer's exit" {
   fresh_install
-  run env HERDR_DAEMON_PID="$TMP/daemon.pid" python3 -c 'import os, sys
+  run python3 -c 'import os, sys
 os.setpgrp()
 open(sys.argv[1], "w").write(str(os.getpgrp()))
 os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/install.sh" --env herdr
@@ -651,6 +651,28 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/inst
   kill -TERM -- "-$(cat "$TMP/install.pgid")" 2>/dev/null || true
   sleep 1
   kill -0 "$(cat "$TMP/daemon.pid")"
+}
+
+@test "a Radar restart starts the new daemon only after the old one has exited" {
+  fresh_install
+  install_ok --env herdr
+  old=$(cat "$TMP/daemon.pid")
+  git -C "$HOME/.claude/herdr-radar" checkout -q main
+  run env HERDR_STOP_DELAY=1 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  new=$(cat "$TMP/daemon.pid")
+  [ "$new" != "$old" ]
+  kill -0 "$new"
+  sleep 2
+  kill -0 "$new"
+}
+
+@test "an install whose Radar daemon never appears fails instead of reporting it running" {
+  fresh_install
+  run env HERDR_NO_DAEMON=1 ORCH_RADAR_WAIT_TRIES=2 ORCH_RADAR_WAIT_SLEEP=0 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -ne 0 ]
+  contains "$output" 'Radar daemon is not running after state-start'
+  [ "$(grep -c 'state-start' "$HERDR_CALLS")" -eq 2 ]
 }
 
 @test "existing Herdr keeps its install and its config outside Radar's blocks" {

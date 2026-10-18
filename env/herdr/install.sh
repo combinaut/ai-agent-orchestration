@@ -142,6 +142,18 @@ prepare_plugin() {
   fi
 }
 
+# radar_daemon_wait <up|down> <checkout>: polls for Radar's --animate process until it is present (up) or gone (down).
+radar_daemon_wait() {
+  local want=$1 tries=${ORCH_RADAR_WAIT_TRIES:-40} running
+  while :; do
+    pgrep -f -- "$2/bin/agent-state.js --animate" >/dev/null 2>&1 && running=up || running=down
+    [ "$running" = "$want" ] && return 0
+    tries=$((tries - 1))
+    [ "$tries" -gt 0 ] || return 1
+    sleep "${ORCH_RADAR_WAIT_SLEEP:-0.5}"
+  done
+}
+
 env_install() {
   local pin path url head moved=0 source origin status
   pin=$(tr -d '[:space:]' <"$ENV_DIR/radar.pin")
@@ -196,12 +208,17 @@ env_install() {
   fi
   if [ "$moved" = 1 ]; then
     "$HERDR_EXE" plugin action invoke "$RADAR_ID.state-stop" >/dev/null
+    radar_daemon_wait down "$path" || die "Radar daemon is still running after state-stop; stop it, then run install.sh again"
   fi
   herdr_config_snapshot
   status=0
   platform_run_detached "$HERDR_EXE" plugin action invoke "$RADAR_ID.state-start" >/dev/null || status=$?
   herdr_config_check
   [ "$status" = 0 ] || die "Radar state-start failed (status $status); run install.sh again"
+  if ! radar_daemon_wait up "$path"; then
+    platform_run_detached "$HERDR_EXE" plugin action invoke "$RADAR_ID.state-start" >/dev/null || true
+    radar_daemon_wait up "$path" || die "Radar daemon is not running after state-start; run install.sh again, or see: $HERDR_EXE plugin log"
+  fi
   say "running" "Radar daemon (mise Node $RADAR_NODE)"
 }
 
