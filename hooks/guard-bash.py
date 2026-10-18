@@ -586,8 +586,10 @@ def guard_big_repo_reads(args, cwd, opts, raw, pipeline=()):
     try:
         if not is_big_repo(cwd, opts):
             return None
-    except (OSError, subprocess.SubprocessError, UnicodeError):
-        config_error = "Cannot load the repo settings (.orchestration.toml or .orchestration.local.toml); broad Git reads are denied. Fix the file, or use scoped rg."
+    except (OSError, subprocess.SubprocessError, UnicodeError) as error:
+        detail = (getattr(error, 'stderr', None) or str(error)).strip()
+        detail = detail[len('ERROR: '):] if detail.startswith('ERROR: ') else detail
+        config_error = f"Cannot load the repo settings ({detail}); broad Git reads are denied. Fix the file, or use scoped rg."
     if args[0] == "grep":
         return config_error or BIG_REPO_REASON
     if args[0] == 'cat-file' and any(a == '--batch-all-objects' or a.startswith('--batch-all-objects=') for a in args[1:]):

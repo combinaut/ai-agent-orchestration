@@ -199,6 +199,17 @@ class RemoteReadTest(SettingsTest):
             values = audit.repo_settings(run, 'acme/webapp', 'main', {})
         self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXTRA_PATTERN']), ('1', 'mine'))
 
+    def test_a_watched_linked_worktree_also_applies_its_main_checkout_file(self):
+        main = self.repo('main')
+        git(main, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init')
+        git(main, 'worktree', 'add', '-q', '-b', 'side', str(self.base / 'side'))
+        (main / s.LOCAL_FILE).write_text('[legacy]\nscan = true\nextra_pattern = "main"\n')
+        (self.base / 'side' / s.LOCAL_FILE).write_text('[legacy]\nextra_pattern = "side"\n')
+        run, _ = self.command(None)
+        with patch.dict(os.environ, {'ORCH_GIT_WATCH_REPOS': str(self.base / 'side')}):
+            values = audit.repo_settings(run, 'acme/webapp', 'main', {})
+        self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXTRA_PATTERN']), ('1', 'side'))
+
     def test_without_a_known_clone_only_the_committed_file_applies(self):
         run, _ = self.command(None)
         with patch.dict(os.environ, {'ORCH_GIT_WATCH_REPOS': str(self.base / 'missing')}):

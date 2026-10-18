@@ -306,6 +306,9 @@ def load_remote(repo, ref, committed_text, clone=None, environ=None):
         label = f'{repo}@{ref}:{REPO_FILE}'
         layers.append(validate(parse(committed_text, label), label, 'repo'))
     if clone:
+        main = main_checkout(clone)
+        if main is not None:
+            layers.append(local_values(main))
         layers.append(local_values(clone))
     return merged(layers, environ)
 

@@ -239,6 +239,7 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
             repo_file.write_bytes(broken if isinstance(broken, bytes) else broken.encode())
             result = hook("git grep needle", webapp)
             assert result.returncode == 2 and 'Cannot load the repo settings' in result.stderr, (broken, result.stderr)
+            assert 'heavy_slots' not in str(broken) or 'heavy_slots.max: is a global setting' in result.stderr, result.stderr
             assert hook("git cat-file --batch-all-objects --batch", webapp).returncode == 2
             assert hook("git ls-tree -r HEAD | git cat-file --batch", webapp).returncode == 2
             assert hook("git cat-file -p HEAD", webapp).returncode == 0
