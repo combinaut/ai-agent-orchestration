@@ -93,7 +93,15 @@ case "$1 ${2:-}" in
       *state-stop*)
         # Herdr returns from invoke before the action finishes: the daemon leaves after a delay.
         if [ -f "$TMP/daemon.pid" ]; then
-          (sleep "${HERDR_STOP_DELAY:-0.5}"; kill "$(cat "$TMP/daemon.pid")" 2>/dev/null) </dev/null >/dev/null 2>&1 &
+          (
+            sleep "${HERDR_STOP_DELAY:-0.5}"
+            kill "$(cat "$TMP/daemon.pid")" 2>/dev/null
+            # A watchdog event can start the replacement before the installer starts one.
+            if [ -n "${HERDR_STOP_REPLACES:-}" ]; then
+              sleep 300 &
+              echo $! >"$TMP/daemon.pid"
+            fi
+          ) </dev/null >/dev/null 2>&1 &
         fi
         ;;
     esac

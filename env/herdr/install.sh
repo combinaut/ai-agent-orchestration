@@ -226,8 +226,7 @@ env_install() {
   if [ "$moved" = 1 ]; then
     known=$(radar_daemon "$path")
     "$HERDR_EXE" plugin action invoke "$RADAR_ID.state-stop" >/dev/null
-    radar_daemon_wait stop "$path" "$known" || say "note" "the Radar daemon did not exit after state-stop; starting anyway"
-    known=$(radar_daemon "$path")
+    [ -z "$known" ] || radar_daemon_wait stop "$path" "$known" || say "note" "the Radar daemon did not exit after state-stop; starting anyway"
   fi
   radar_start
   if ! radar_daemon_wait start "$path" "$known"; then

@@ -701,6 +701,22 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/inst
   contains "$output" 'Radar daemon is not running after state-start'
 }
 
+@test "a first install does not wait for a daemon that was never there" {
+  fresh_install
+  run env ORCH_RADAR_WAIT_TRIES=3 ORCH_RADAR_WAIT_SLEEP=0 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  not_contains "$output" 'did not exit'
+}
+
+@test "a replacement daemon started during the stop satisfies the check" {
+  fresh_install
+  install_ok --env herdr
+  git -C "$HOME/.claude/herdr-radar" checkout -q main
+  run env HERDR_STOP_REPLACES=1 HERDR_STOP_DELAY=1 ORCH_RADAR_WAIT_TRIES=6 ORCH_RADAR_WAIT_SLEEP=0.5 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  kill -0 "$(cat "$TMP/daemon.pid")"
+}
+
 @test "an install whose Radar daemon never appears fails instead of reporting it running" {
   fresh_install
   run env HERDR_NO_DAEMON=1 ORCH_RADAR_WAIT_TRIES=2 ORCH_RADAR_WAIT_SLEEP=0 /bin/bash "$CLONE/install.sh" --env herdr
