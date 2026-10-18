@@ -41,7 +41,7 @@ Recycle architects and the Coordinator at `$ORCH_RECYCLE_TOKENS` tokens used (de
 - **Architect recycle.** Before ordering or starting a successor, read [references/recycle.md](references/recycle.md) and follow the entire architect recycle procedure. Preserve the name, owner and role tags; the successor reads only the bounded handoff and takes over workers by pane id. One architect at a time; never one holding a heavy slot.
 - **Coordinator recycle.** Before writing the Coordinator handoff or starting a successor, read [references/recycle.md](references/recycle.md) and follow the entire Coordinator recycle procedure. Overwrite (never append) the handoff under about 4,000 characters with its fixed template; preserve the model setting and name, stop duplicate Monitors, and let the successor close the ancestor.
 
-**Parked architects — opt in with `ORCH_PARK_IDLE="1"` (default off).** With it off, close no architect for being idle. With it on, an architect with no open PR, running worker, or watcher writes its bounded handoff, sends you its path, and exits. Restart it from that handoff when work arrives, using the recycle start procedure.
+**Parked architects — opt in with `recycle.park_idle = true` (default off).** With it off, close no architect for being idle. With it on, an architect with no open PR, running worker, or watcher writes its bounded handoff, sends you its path, and exits. Restart it from that handoff when work arrives, using the recycle start procedure.
 
 ## On start
 

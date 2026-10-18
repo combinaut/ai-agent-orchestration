@@ -6,6 +6,7 @@ StartLimitIntervalSec=0
 ExecStart="@ORCH_CLAUDE_DIR@/coordinator/watchers/coord-audit-watch.sh" "--state-dir" "@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context" "--loop" "--interval" "1800"
 WorkingDirectory=@ORCH_CLAUDE_DIR@/coordinator/watchers
 Environment="ORCH_CONFIG=@ORCH_CONFIG@"
+Environment="ORCH_PYTHON3=@ORCH_SERVICE_PYTHON@"
 Environment="HERDR_BIN_PATH=@ORCH_HERDR_BIN@"
 Environment=HERDR_ENV=1
 Environment="HERDR_SOCKET_PATH=@ORCH_HERDR_SOCKET@"

@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import os
 import re
 import subprocess
@@ -10,6 +11,7 @@ from unittest.mock import patch
 
 from test_support import IsolatedTestCase
 import audit
+import watchers as w
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / 'lib'))
@@ -74,6 +76,10 @@ class GlobalFileTest(SettingsTest):
             '[pr]\nrepos = "a/b"\n': 'pr.repos: must be a list of strings, got str',
             '[pr]\nrepos = [1]\n': 'pr.repos: must be a list of strings, got list',
             '[pr]\nauthor = "a\\u0000b"\n': 'pr.author: contains a NUL character',
+            '[audit]\ngit_watch_repos = ["/tmp/project clone"]\n': 'audit.git_watch_repos: entry "/tmp/project clone" is empty or contains whitespace',
+            '[focus]\nskip_architects = ["A,B"]\n': 'focus.skip_architects: entry "A,B" is empty or contains ","',
+            '[watchers]\npath = ["/a:/b"]\n': 'watchers.path: entry "/a:/b" is empty or contains ":"',
+            '[pr]\nrepos = [""]\n': 'pr.repos: entry "" is empty',
         }
         for text, problem in cases.items():
             with self.subTest(text=text):
@@ -89,6 +95,12 @@ class GlobalFileTest(SettingsTest):
     def test_a_global_key_in_a_repo_file_is_an_error(self):
         message = self.error('[pr]\nrepos = []\n', 'repo')
         self.assertIn('pr.repos: is a global setting; set it in the global ~/.claude/orchestration.toml', message)
+
+    def test_a_repo_list_entry_with_its_separator_is_an_error(self):
+        message = self.error('[legacy]\nexempt_paths = ["a b.js"]\n', 'repo')
+        self.assertIn('legacy.exempt_paths: entry "a b.js" is empty or contains whitespace', message)
+        message = self.error('[audit]\nmerge_gate_checks = ["A|B"]\n', 'repo')
+        self.assertIn('audit.merge_gate_checks: entry "A|B" is empty or contains "|"', message)
 
     def test_old_python_is_named(self):
         with patch.object(s, 'tomllib', None):
@@ -195,6 +207,28 @@ class RemoteReadTest(SettingsTest):
                 audit.repo_settings(run, 'acme/webapp', 'main', cache)
             audit.repo_settings(run, 'acme/webapp', 'next', cache)
         self.assertEqual(len(calls), 2)
+
+
+class PullsSettingsTest(SettingsTest):
+    def test_pr_events_read_merge_gate_checks_from_the_base_ref(self):
+        pr = json.loads((REPO / 'coordinator/watchers/fixtures/audit-pr.json').read_text())
+        pr.update(reviewDecision='APPROVED', baseRefName='feature/base')
+        pr['latestOpinionatedReviews']['nodes'] = [dict(state='APPROVED', commit=dict(oid=pr['headRefOid']))]
+        calls = []
+
+        def command(*args):
+            calls.append(args[-1])
+            if '/contents/.orchestration.toml?' in args[-1]:
+                return '[audit]\nmerge_gate_checks = ["Full gate"]\n'
+            if args[:3] == ('gh', 'api', 'graphql'):
+                return json.dumps(dict(data=dict(search=dict(nodes=[pr], pageInfo=dict(hasNextPage=False)))))
+            return json.dumps(dict(result=dict(workspaces=[])))
+        with patch.dict(os.environ, {'ORCH_PR_AUTHOR': 'author', 'ORCH_PR_REPOS': 'owner/product', 'ORCH_GIT_WATCH_REPOS': ''}):
+            os.environ.pop('ORCH_MERGE_GATE_CHECKS', None)
+            pulls = w.collect_pulls(command, None)
+        line = next(iter(pulls['prs'].values()))['lines'].get('APPROVED-STACKED', '')
+        self.assertIn('full CI not run', line)
+        self.assertIn('repos/owner/product/contents/.orchestration.toml?ref=feature%2Fbase', calls)
 
 
 def example_value(setting):

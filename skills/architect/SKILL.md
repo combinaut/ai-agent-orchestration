@@ -33,7 +33,7 @@ Reply with its path and stop. The Coordinator starts your successor in a fresh p
 
 **PR events come to you.** On start and after every recycle, run `python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/architect-$HERDR_WORKSPACE_ID.json` from your own Bash environment. The pulls watcher then sends APPROVED, RED, CHANGES, THREADS, COPILOT and MERGED for PRs whose branch is checked out in a workspace tagged `owner=$HERDR_WORKSPACE_ID` straight to you, within about 3 minutes. Do not poll for approvals.
 
-**Park when idle — opt in with `ORCH_PARK_IDLE="1"` (default off).** With this setting off, stay open. With it on and no open PR, running worker, or watcher, overwrite the same bounded handoff, tell the Coordinator its path in one line, and exit. The Coordinator restarts you from that handoff when work arrives, using the recycle start procedure.
+**Park when idle — opt in with `recycle.park_idle = true` (default off).** With this setting off, stay open. With it on and no open PR, running worker, or watcher, overwrite the same bounded handoff, tell the Coordinator its path in one line, and exit. The Coordinator restarts you from that handoff when work arrives, using the recycle start procedure.
 
 Default to worker models. Pick the tier per task: Sonnet/terra for routine work, Opus/sol-medium for hard work, Fable for the hardest only. Use a smart model only when architecture or requirements are ambiguous, substantial reasoning across subsystems is required, a worker is blocked after a reasonable attempt, or the consequences of a subtle mistake are high.
 

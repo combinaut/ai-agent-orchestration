@@ -6,7 +6,7 @@ Settings come from three places. Each setting has one scope and lives in only on
 - **Repo** settings (big-repo guard, legacy scan, focus report, merge gate checks) live at the root of each repo: `.orchestration.toml` is committed and shared, `.orchestration.local.toml` is personal. [`config/repo.orchestration.toml.example`](../config/repo.orchestration.toml.example) lists them.
 - An **exported** `ORCH_*` variable wins over both files, for every setting.
 
-A repo key in the global file, a global key in a repo file, an unknown key, a value of the wrong type and invalid TOML are errors that name the file and the key. A script that lacks a setting or a command prints `ERROR: …` and exits with status 2. Reading TOML needs Python 3.11 or newer: the loader takes `ORCH_PYTHON3` from the environment, then `python3` on `PATH`, then the Homebrew paths.
+A repo key in the global file, a global key in a repo file, an unknown key, a value of the wrong type, a list entry that is empty or contains its separator (whitespace, `,`, `|` or `:`) and invalid TOML are errors that name the file and the key. A script that lacks a setting or a command prints `ERROR: …` and exits with status 2. Reading TOML needs Python 3.11 or newer: the loader takes `ORCH_PYTHON3` from the environment, then `python3` on `PATH`, then the Homebrew paths.
 
 ## Repo files
 
@@ -49,7 +49,7 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `install.env` | `ORCH_ENV` | empty | Env adapter install.sh runs without --env (a directory under env/); empty means herdr, "none" skips the env step |
 | `install.radar_path` | `ORCH_RADAR_PATH` | empty | Herdr Radar checkout; empty means ~/.claude/herdr-radar |
 | `watchers.service` | `ORCH_WATCHERS_SERVICE` | `false` | Register the watchers as launchd or systemd user services; needs herdr.bin and herdr.socket |
-| `watchers.python3` | `ORCH_PYTHON3` | `"python3"` | Interpreter for the watcher scripts and services (3.11 or newer) |
+| `watchers.python3` | `ORCH_PYTHON3` | `"python3"` | Interpreter for the watcher scripts (3.11 or newer); services get it, or the installer's Python 3.11+ when it is older |
 | `watchers.pr_scope` | `ORCH_WATCHERS_PR_SCOPE` | empty | GitHub search scope for the PR watchers, for example "org:acme" |
 | `watchers.worker_model` | `ORCH_WATCHERS_WORKER_MODEL` | empty | Model label in dispatch records; empty leaves it out |
 | `watchers.primary_repo` | `ORCH_WATCHERS_PRIMARY_REPO` | empty | Primary owner/name repo in dispatch records |

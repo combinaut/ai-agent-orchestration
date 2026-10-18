@@ -234,3 +234,14 @@ make_webapp() {
   contains "$output" 'daily legacy map job (set ORCH_LEGACY_MAP_REPO'
   [ -z "$(find "$HOME/.claude/coordinator/service" -type f)" ]
 }
+
+@test "a broken repo file in a watched clone stops install before the legacy map job changes" {
+  fresh_install
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket ORCH_GIT_WATCH_REPOS "$BIG_REPO"
+  printf '%s\n' '[heavy_slots]' 'max = 2' >"$BIG_REPO/.orchestration.local.toml"
+  run /bin/bash "$CLONE/install.sh"
+  [ "$status" -ne 0 ]
+  contains "$output" "/webapp/.orchestration.local.toml: heavy_slots.max: is a global setting"
+  contains "$output" 'cannot read the repo settings of the audit.git_watch_repos clones'
+  not_contains "$output" 'daily legacy map job'
+}

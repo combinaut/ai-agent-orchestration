@@ -75,7 +75,7 @@ radar_path = ""
 [watchers]
 # Register the watchers as launchd or systemd user services; needs herdr.bin and herdr.socket
 service = false
-# Interpreter for the watcher scripts and services (3.11 or newer)
+# Interpreter for the watcher scripts (3.11 or newer); services get it, or the installer's Python 3.11+ when it is older
 python3 = "python3"
 # GitHub search scope for the PR watchers, for example "org:acme"
 pr_scope = ""

@@ -141,12 +141,32 @@ config_file_value() {
     fi
     return 0
   fi
-  if [ -n "$lib" ] && [ -f "$lib" ]; then
+  if [ "$CONFIG_CACHE" = "$(config_stamp)" ]; then
+    local cached="__orch_file_$1"
+    printf '%s' "${!cached:-}"
+  elif [ -n "$lib" ] && [ -f "$lib" ]; then
     # shellcheck source=coordinator/watchers/coord-lib.sh
     (unset "$1" && . "$lib" && orch_load_config >/dev/null 2>&1 && printf '%s' "${!1:-}") || true
   elif [ "$1" = ORCH_REPO_PATH ] && [ -n "$INSTALL_PYTHON" ]; then
     "$INSTALL_PYTHON" -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb")).get("install", {}).get("repo_path", ""), end="")' "$CONFIG" 2>/dev/null || true
   fi
+}
+
+config_stamp() { cksum <"$CONFIG" 2>/dev/null; }
+
+# load_config_cache: reads every value of the config file once; config_file_value uses it while the file is unchanged.
+CONFIG_CACHE=""
+load_config_cache() {
+  local out name
+  CONFIG_CACHE=""
+  [ -f "$CONFIG" ] && [ -n "$INSTALL_PYTHON" ] && [ -f "${SRC:-}/lib/orch_settings.py" ] || return 0
+  out=$("$INSTALL_PYTHON" -I "$SRC/lib/orch_settings.py" global "$CONFIG" 2>/dev/null) || return 0
+  for name in ${!__orch_file_@}; do unset "$name"; done
+  # shellcheck disable=SC2329 # Called by the eval below.
+  orch_set_default() { printf -v "__orch_file_$1" '%s' "$2"; }
+  eval "$out"
+  unset -f orch_set_default
+  CONFIG_CACHE=$(config_stamp)
 }
 
 # refuse_local_changes <dir> <label>: exits when <dir> has uncommitted edits or commits not on origin.
@@ -432,11 +452,8 @@ write_config_key() {
   say "set" "$CONFIG: $1"
 }
 
-# settings_cli <args>: runs the settings module with a Python 3.11 or newer.
-settings_cli() {
-  # shellcheck source=coordinator/watchers/coord-lib.sh
-  (. "$ORCH_REPO/coordinator/watchers/coord-lib.sh" && orch_python >/dev/null && "$ORCH_LOADER_PYTHON" -I "$ORCH_REPO/lib/orch_settings.py" "$@")
-}
+# settings_cli <args>: runs the settings module with the installer's Python 3.11 or newer.
+settings_cli() { "$INSTALL_PYTHON" -I "$ORCH_REPO/lib/orch_settings.py" "$@"; }
 
 # First run on a terminal: asks for each empty or placeholder key; "-" leaves it empty.
 ask_config_keys() {
@@ -494,9 +511,9 @@ personal_config() {
     cp "$example" "$CONFIG"
     say "created" "$CONFIG"
   fi
-  # shellcheck source=coordinator/watchers/coord-lib.sh
-  error=$( (. "$ORCH_REPO/coordinator/watchers/coord-lib.sh" && orch_load_config) 2>&1 >/dev/null) || die "${error#ERROR: }"
-  have=" $(settings_cli keys "$CONFIG") "
+  have=$(settings_cli keys "$CONFIG" 2>&1) || die "${have#ERROR: }"
+  have=" $have "
+  load_config_cache
   local missing_project_keys=""
   for k in ORCH_PR_TABS_ORG ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS ORCH_FOCUS_SKIP_ARCHITECTS; do
     case "$have" in *" $k "*) ;; *) missing_project_keys="$missing_project_keys $k" ;; esac
@@ -594,13 +611,20 @@ placeholder_value() {
     printf '%s' "$v"
     return
   fi
+  if [ "$1" = ORCH_SERVICE_PYTHON ]; then
+    [ -z "$SERVICE_PYTHON" ] || { printf '%s' "$SERVICE_PYTHON" && return; }
+    v=$(placeholder_value ORCH_PYTHON3)
+    [ -n "$v" ] && [ "$("$v" -c 'import sys; print(sys.version_info >= (3, 11))' 2>/dev/null)" = True ] || v=$INSTALL_PYTHON
+    printf '%s' "$v"
+    return
+  fi
   v=$(config_value "$1")
   if [ -z "$v" ]; then
     case "$1" in
       ORCH_CLAUDE_DIR) v=$CLAUDE_DIR ;;
       ORCH_PATH) v="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" ;;
       ORCH_PYTHON3) v=python3 ;;
-      ORCH_LEGACY_MAP_REPO) v=$(legacy_map_default_repo) ;;
+      ORCH_LEGACY_MAP_REPO) v=$(legacy_map_default_repo) || return 2 ;;
     esac
   fi
   # shellcheck disable=SC2016
@@ -620,7 +644,7 @@ render_service() {
   dest=${dest%.template}
   script="" missing=""
   for key in $(grep -o '@ORCH_[A-Z0-9_]*@' "$t" | tr -d @ | sort -u); do
-    value=$(placeholder_value "$key")
+    value=$(placeholder_value "$key") || die "cannot resolve $key for $t"
     if [ -z "$value" ]; then
       missing="$missing $key"
       continue
@@ -758,10 +782,14 @@ register_services() {
 
 # legacy_map_default_repo: the ORCH_GIT_WATCH_REPOS clone whose repo settings turn legacy.scan on, else empty.
 legacy_map_default_repo() {
-  local path
+  local path scan
   for path in $(config_value ORCH_GIT_WATCH_REPOS); do
-    # shellcheck source=coordinator/watchers/coord-lib.sh
-    if (. "$ORCH_REPO/coordinator/watchers/coord-lib.sh" && orch_load_repo_config "$path" 2>/dev/null && [ "$ORCH_LEGACY_SCAN" = 1 ]); then
+    scan=${ORCH_LEGACY_SCAN-}
+    if [ -z "${ORCH_LEGACY_SCAN+x}" ]; then
+      scan=$(settings_cli repo "$path") || return 2
+      case "$scan" in *"orch_set_default ORCH_LEGACY_SCAN 1"*) scan=1 ;; *) scan=0 ;; esac
+    fi
+    if [ "$scan" = 1 ]; then
       printf '%s' "$path"
       return
     fi
@@ -770,9 +798,10 @@ legacy_map_default_repo() {
 
 # Renders the daily legacy map units of the current platform for registration; off until a repo to map is known.
 render_legacy_map_service() {
-  local t start dest
+  local t start dest repo
   [ "$(config_value ORCH_WATCHERS_SERVICE)" = 1 ] || return 0
-  if [ -z "$(placeholder_value ORCH_LEGACY_MAP_REPO)" ]; then
+  repo=$(placeholder_value ORCH_LEGACY_MAP_REPO) || die "cannot read the repo settings of the audit.git_watch_repos clones (see above); fix them or set legacy.map_repo in $CONFIG"
+  if [ -z "$repo" ]; then
     skip "daily legacy map job (set ORCH_LEGACY_MAP_REPO in $CONFIG to the local clone to map)"
     return 0
   fi
@@ -898,6 +927,9 @@ merge_settings
 verify_guard
 run_env
 ask_config_keys
+load_config_cache
+SERVICE_PYTHON=""
+SERVICE_PYTHON=$(placeholder_value ORCH_SERVICE_PYTHON)
 render_services
 render_legacy_map_service
 register_chrome_host

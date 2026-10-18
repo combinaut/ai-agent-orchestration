@@ -249,10 +249,7 @@ prepare_custom_service_config() {
 config_set() {
   local file=${CONFIG_FILE:-$HOME/.claude/orchestration.toml}
   [ -e "$file" ] || : >"$file"
-  while [ $# -ge 2 ]; do
-    python3 "$ROOT/lib/orch_settings.py" set "$file" "$1" "$2" || return
-    shift 2
-  done
+  python3 "$ROOT/lib/orch_settings.py" set "$file" "$@"
 }
 
 # config_get <ORCH_NAME>: the value the loader gives for a setting of the installed global config.

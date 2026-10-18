@@ -432,10 +432,11 @@ def collect_pulls(command, before, clock=time.monotonic):
     if roots:
         unreadable = ["owners"]
     unresolved = set(roots)
-    current = {}
+    current, settings = {}, {}
     for pr in prs:
         key = f"{pr['repository']['nameWithOwner']}#{pr['number']}"
-        lines = {line.split(" ", 1)[0]: line for line in audit.pr_lines(pr, page_nodes)
+        repo_settings = lambda pr=pr: audit.repo_settings(command, pr["repository"]["nameWithOwner"], pr["baseRefName"], settings)
+        lines = {line.split(" ", 1)[0]: line for line in audit.pr_lines(pr, page_nodes, repo_settings)
                  if line.split(" ", 1)[0] in alert_policy.PULL_KINDS}
         repo = pr["repository"]["nameWithOwner"].lower()
         kept = lookup_failed or repo in unresolved or "*/" + repo.split("/")[-1] in unresolved

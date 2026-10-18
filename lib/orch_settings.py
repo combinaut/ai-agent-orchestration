@@ -70,7 +70,7 @@ SETTINGS = [
     _g('install.env', 'ORCH_ENV', 'str', '', 'Env adapter install.sh runs without --env (a directory under env/); empty means herdr, "none" skips the env step'),
     _g('install.radar_path', 'ORCH_RADAR_PATH', 'str', '', 'Herdr Radar checkout; empty means ~/.claude/herdr-radar', paths=True),
     _g('watchers.service', 'ORCH_WATCHERS_SERVICE', 'bool', False, 'Register the watchers as launchd or systemd user services; needs herdr.bin and herdr.socket'),
-    _g('watchers.python3', 'ORCH_PYTHON3', 'str', 'python3', 'Interpreter for the watcher scripts and services (3.11 or newer)', paths=True),
+    _g('watchers.python3', 'ORCH_PYTHON3', 'str', 'python3', 'Interpreter for the watcher scripts (3.11 or newer); services get it, or the installer\'s Python 3.11+ when it is older', paths=True),
     _g('watchers.pr_scope', 'ORCH_WATCHERS_PR_SCOPE', 'str', '', 'GitHub search scope for the PR watchers, for example "org:acme"'),
     _g('watchers.worker_model', 'ORCH_WATCHERS_WORKER_MODEL', 'str', '', 'Model label in dispatch records; empty leaves it out'),
     _g('watchers.primary_repo', 'ORCH_WATCHERS_PRIMARY_REPO', 'str', '', 'Primary owner/name repo in dispatch records'),
@@ -196,6 +196,12 @@ def validate(data, label, scope):
                 raise ConfigError(f'{label}: {key}: must be {TYPE_NAMES[setting.kind]}, got {type(value).__name__}')
             if has_nul(value):
                 raise ConfigError(f'{label}: {key}: contains a NUL character')
+            if setting.kind == 'list':
+                for item in value:
+                    if (re.search(r'\s', item) if setting.sep == ' ' else setting.sep in item) or item == '':
+                        what = 'whitespace' if setting.sep == ' ' else f'"{setting.sep}"'
+                        raise ConfigError(f'{label}: {key}: entry {json.dumps(item)} is empty or contains {what}, '
+                                          'which separates entries')
             found[setting] = value
     return found
 
@@ -626,15 +632,16 @@ def main(argv):
             sys.stdout.write(example(argv[2]))
         elif command == 'table' and len(argv) == 3 and argv[2] in ('global', 'repo'):
             print(markdown_table(argv[2]))
-        elif command == 'set' and len(argv) == 5:
-            set_key(*argv[2:])
+        elif command == 'set' and len(argv) >= 5 and len(argv) % 2 == 1:
+            for name, value in zip(argv[3::2], argv[4::2]):
+                set_key(argv[2], name, value)
         elif command == 'keys' and len(argv) == 3:
             print(' '.join(file_keys(argv[2], 'global')))
         elif command == 'names' and len(argv) == 2:
             print(' '.join(env_names()))
         else:
             print('usage: orch_settings.py global <file> | repo <dir> | migrate <env> <toml> <snippet-dir> '
-                  '| set <file> <ORCH_NAME> <value> | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
+                  '| set <file> <ORCH_NAME> <value>... | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
             return 2
     except ConfigError as error:
         print(f'ERROR: {error}', file=sys.stderr)
