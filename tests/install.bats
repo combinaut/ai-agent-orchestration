@@ -1105,3 +1105,21 @@ EOF
   [ "$status" -ne 0 ]
   contains "$output" "Python 3.11 or newer not found (the TOML config needs it)"
 }
+
+@test "the one-liner reads install.repo_path with a compatible Python when python3 on PATH is older" {
+  mkdir -p "$TMP/oldpy/site" "$HOME/.claude"
+  printf 'import sys\nsys.modules["tomllib"] = None\n' >"$TMP/oldpy/site/sitecustomize.py"
+  # A Python 3.10 stand-in: it runs code, says it is older than 3.11 and has no tomllib.
+  cat >"$TMP/oldpy/python3" <<EOF
+#!/bin/sh
+case "\$2" in *"version_info >= (3, 11)"*) echo False; exit 0 ;; esac
+PYTHONPATH="$TMP/oldpy/site" exec "$BIN/python3" "\$@"
+EOF
+  chmod +x "$TMP/oldpy/python3"
+  printf '%s\n' '[install]' "repo_path = \"$TMP/custom-clone\"" >"$HOME/.claude/orchestration.toml"
+  # shellcheck disable=SC2016 # The child Bash expands these.
+  run env PATH="$TMP/oldpy:$PATH" ORCH_PYTHON3="$BIN/python3" /bin/bash -c 'cd "$1"; exec /bin/bash -c "$ONE_LINER"' _ "$TMP"
+  [ "$status" -eq 0 ]
+  [ -e "$TMP/custom-clone/.git" ]
+  [ ! -e "$HOME/.claude/ai-agent-orchestration" ]
+}

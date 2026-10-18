@@ -144,8 +144,8 @@ config_file_value() {
   if [ -n "$lib" ] && [ -f "$lib" ]; then
     # shellcheck source=coordinator/watchers/coord-lib.sh
     (unset "$1" && . "$lib" && orch_load_config >/dev/null 2>&1 && printf '%s' "${!1:-}") || true
-  elif [ "$1" = ORCH_REPO_PATH ]; then
-    python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb")).get("install", {}).get("repo_path", ""), end="")' "$CONFIG" 2>/dev/null || true
+  elif [ "$1" = ORCH_REPO_PATH ] && [ -n "$INSTALL_PYTHON" ]; then
+    "$INSTALL_PYTHON" -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb")).get("install", {}).get("repo_path", ""), end="")' "$CONFIG" 2>/dev/null || true
   fi
 }
 
@@ -172,12 +172,7 @@ refuse_local_changes() {
 
 # find_python: a Python 3.11 or newer (reading TOML needs tomllib), else exits.
 find_python() {
-  local candidate
-  for candidate in ${ORCH_PYTHON3:+"$ORCH_PYTHON3"} python3 ${ORCH_PYTHON_FALLBACKS-/opt/homebrew/bin/python3 /usr/local/bin/python3} python3.14 python3.13 python3.12 python3.11; do
-    command -v "$candidate" >/dev/null 2>&1 || continue
-    [ "$("$candidate" -c 'import sys; print(sys.version_info >= (3, 11))' 2>/dev/null)" != True ] || return 0
-  done
-  die "Python 3.11 or newer not found (the TOML config needs it). Fix: $(platform_dependency_fix python3), or export ORCH_PYTHON3=/path/to/python3.11+"
+  [ -n "$INSTALL_PYTHON" ] || die "Python 3.11 or newer not found (the TOML config needs it). Fix: $(platform_dependency_fix python3), or export ORCH_PYTHON3=/path/to/python3.11+"
 }
 
 preflight() {
@@ -218,6 +213,14 @@ sync_clone() {
   fi
 }
 
+INSTALL_PYTHON=""
+for candidate in ${ORCH_PYTHON3:+"$ORCH_PYTHON3"} python3 ${ORCH_PYTHON_FALLBACKS-/opt/homebrew/bin/python3 /usr/local/bin/python3} python3.14 python3.13 python3.12 python3.11; do
+  command -v "$candidate" >/dev/null 2>&1 || continue
+  if [ "$("$candidate" -c 'import sys; print(sys.version_info >= (3, 11))' 2>/dev/null)" = True ]; then
+    INSTALL_PYTHON=$(command -v "$candidate")
+    break
+  fi
+done
 ORCH_REPO=$(config_value ORCH_REPO_PATH)
 [ -n "$ORCH_REPO" ] || ORCH_REPO="$CLAUDE_DIR/ai-agent-orchestration"
 
@@ -467,8 +470,9 @@ convert_old_config() {
     say "warning" "$OLD_CONFIG is not read any more; $CONFIG wins. Remove $OLD_CONFIG when nothing in it is missing from $CONFIG"
     return 0
   fi
-  report=$(settings_cli migrate "$OLD_CONFIG" "$CONFIG" "$SNIPPET_DIR") && [ -f "$CONFIG" ] ||
+  if ! report=$(settings_cli migrate "$OLD_CONFIG" "$CONFIG" "$SNIPPET_DIR") || [ ! -f "$CONFIG" ]; then
     die "cannot convert $OLD_CONFIG; it is unchanged. Fix it, or write $CONFIG from $ORCH_REPO/config/orchestration.toml.example"
+  fi
   while IFS= read -r line; do
     say "migrated" "$line"
   done <<<"$report"

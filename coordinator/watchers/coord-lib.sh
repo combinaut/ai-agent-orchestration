@@ -42,6 +42,14 @@ orch_python() {
   return 2
 }
 
+# orch_watcher_python: ORCH_PYTHON3 when it is 3.11 or newer, else the loader's Python; sets ORCH_WATCHER_PYTHON.
+orch_watcher_python() {
+  ORCH_WATCHER_PYTHON=${ORCH_PYTHON3:-python3}
+  [ "$("$ORCH_WATCHER_PYTHON" -c 'import sys; print(sys.version_info >= (3, 11))' 2>/dev/null)" != True ] || return 0
+  orch_python >/dev/null || exit 2
+  ORCH_WATCHER_PYTHON=$ORCH_LOADER_PYTHON
+}
+
 orch_set_default() {
   [ -n "${!1+x}" ] || printf -v "$1" '%s' "$2"
 }

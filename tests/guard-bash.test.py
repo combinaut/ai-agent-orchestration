@@ -224,6 +224,9 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
     local_file.write_text('[guard]\nbig_repo = false\n')
     assert hook("git grep needle", webapp).returncode == 0
     local_file.unlink()
+    no_tomllib = subprocess.run([sys.executable, '-c', 'import runpy, sys; sys.modules["tomllib"] = None; sys.argv = [sys.argv[1]]; runpy.run_path(sys.argv[0], run_name="__main__")', str(HOOK)],
+                                input=json.dumps({'tool_name': 'Bash', 'cwd': str(webapp), 'tool_input': {'command': 'git grep needle'}}), capture_output=True, text=True, timeout=20)
+    assert no_tomllib.returncode == 2 and 'No git grep in a configured big repo' in no_tomllib.stderr, no_tomllib.stderr
     good_config = repo_file.read_text()
     try:
         for broken in ('[guard\n', '[guard]\nbig_repo = "yes"\n', '[heavy_slots]\nmax = 2\n', b'[guard]\nbig_repo = true\n# \xff\n'):

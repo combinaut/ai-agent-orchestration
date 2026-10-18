@@ -285,3 +285,36 @@ pattern = "mine"' ]
   [[ "$output" != *"info/exclude"* ]]
   [ "$(grep -cx '.orchestration.local.toml' "$CLONE/.git/info/exclude")" = 0 ]
 }
+
+@test "migration refuses an old file that stops early or has a syntax error, and accepts a trailing false" {
+  printf '%s\n' 'ORCH_PR_AUTHOR="me"' 'exit 0' 'ORCH_PR_REPOS="a/b"' >"$TMP/early.env"
+  run python3 "$SETTINGS" migrate "$TMP/early.env" "$ORCH_CONFIG" "$TMP/snippets"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"early.env: stops before its end"* ]]
+  [ ! -e "$ORCH_CONFIG" ]
+  printf '%s\n' 'ORCH_PR_AUTHOR="me"' 'if then' >"$TMP/broken.env"
+  run python3 "$SETTINGS" migrate "$TMP/broken.env" "$ORCH_CONFIG" "$TMP/snippets"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"broken.env: bash syntax error"* ]]
+  [ ! -e "$ORCH_CONFIG" ]
+  printf '%s\n' 'ORCH_PR_AUTHOR="me"' 'false' >"$TMP/false.env"
+  run python3 "$SETTINGS" migrate "$TMP/false.env" "$ORCH_CONFIG" "$TMP/snippets"
+  [ "$status" -eq 0 ]
+  grep -qx 'author = "me"' "$ORCH_CONFIG"
+}
+
+@test "watchers run on ORCH_PYTHON3 when it is 3.11 or newer, else on the loader's Python" {
+  mkdir "$TMP/oldpy"
+  printf '#!/bin/sh\nexit 1\n' >"$TMP/oldpy/old-python"
+  chmod +x "$TMP/oldpy/old-python"
+  printf '[watchers]\npython3 = "%s"\n' "$TMP/oldpy/old-python" >"$ORCH_CONFIG"
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; orch_load_config; orch_watcher_python; printf "%s" "$ORCH_WATCHER_PYTHON"' _ "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" != "$TMP/oldpy/old-python" ]
+  [ "$("$output" -c 'import sys; print(sys.version_info >= (3, 11))')" = True ]
+  printf '[watchers]\npython3 = "%s"\n' "$(command -v python3)" >"$ORCH_CONFIG"
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; orch_load_config; orch_watcher_python; printf "%s" "$ORCH_WATCHER_PYTHON"' _ "$ROOT"
+  [ "$output" = "$(command -v python3)" ]
+}

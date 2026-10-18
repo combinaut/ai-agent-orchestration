@@ -394,12 +394,20 @@ ASSIGN = re.compile(r'^\s*(?:export\s+)?(ORCH_[A-Z0-9_]*)=')
 
 def env_file_values(path):
     """ORCH_* values bash gets from sourcing the old file, in a clean environment."""
-    script = 'set +u; . "$1" >/dev/null 2>&1; shift; for n in "$@"; do [ -z "${!n+x}" ] || printf "%s\\0%s\\0" "$n" "${!n}"; done'
+    script = ('set +u; . "$1" >/dev/null 2>&1; shift; for n in "$@"; do [ -z "${!n+x}" ] || printf "%s\\0%s\\0" "$n" "${!n}"; done; '
+              'printf "%s\\0" "$0"')
     names = sorted(set(env_names()) | REMOVED | set(OLD_NAMES) | set(assigned_names(path)))
     env = {'HOME': os.environ.get('HOME') or str(Path.home()), 'PATH': os.environ.get('PATH', '/usr/bin:/bin')}
-    out = subprocess.run(['/bin/bash', '-c', script, 'orch-env', str(path), *names],
-                         capture_output=True, env=env, check=True).stdout.decode()
+    syntax = subprocess.run(['/bin/bash', '-n', str(path)], capture_output=True, env=env)
+    if syntax.returncode:
+        raise ConfigError(f'{path}: bash syntax error: {syntax.stderr.decode(errors="replace").strip()}')
+    done = 'ORCH_ENV_DONE'
+    out = subprocess.run(['/bin/bash', '-c', script, done, str(path), *names],
+                         capture_output=True, env=env).stdout.decode()
     parts = out.split('\0')[:-1]
+    if not parts or parts[-1] != done:
+        raise ConfigError(f'{path}: stops before its end (exit or return in the file); nothing was converted')
+    parts = parts[:-1]
     return dict(zip(parts[::2], parts[1::2]))
 
 

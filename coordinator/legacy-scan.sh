@@ -5,4 +5,5 @@ root="$(cd "$(dirname "$0")" && pwd)"
 . "$root/watchers/coord-lib.sh"
 orch_load_config
 orch_export_config
-exec "${ORCH_PYTHON3:-python3}" "$root/watchers/audit.py" "$@"
+orch_watcher_python
+exec "$ORCH_WATCHER_PYTHON" "$root/watchers/audit.py" "$@"

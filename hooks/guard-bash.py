@@ -70,9 +70,18 @@ def is_wiki(remote, cwd, opts):
 
 
 def repo_settings(root):
-    """Repo settings of the checkout at root, from the shared settings reader."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+    """Repo settings of the checkout at root, from the shared settings reader; a Python without tomllib asks the shell loader."""
+    repo = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo / 'lib'))
     import orch_settings
+    if orch_settings.tomllib is None:
+        result = subprocess.run(
+            ['/bin/bash', '-c', '. "$1"; orch_load_repo_config "$2"; printf "%s\\0" "$ORCH_BIG_REPO"',
+             'orch-config', str(repo / 'coordinator/watchers/coord-lib.sh'), str(root)],
+            capture_output=True, text=True, timeout=5, check=True)
+        if '\0' not in result.stdout:
+            raise OSError('ORCH repo settings loader did not complete')
+        return {'ORCH_BIG_REPO': result.stdout.split('\0')[0]}
     try:
         return orch_settings.load_repo(root)
     except orch_settings.ConfigError as error:

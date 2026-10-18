@@ -843,7 +843,7 @@ class LegacyTests(IsolatedTestCase):
 
     def test_cli_uses_the_configured_python(self):
         python = self.base / 'python'
-        python.write_text('#!/bin/sh\necho configured "$@"\n')
+        python.write_text('#!/bin/sh\ncase "$1" in -c) exec python3 "$@" ;; esac\necho configured "$@"\n')
         python.chmod(0o755)
         config = self.base / 'orchestration.toml'
         config.write_text(f'[watchers]\npython3 = "{python}"\n')
