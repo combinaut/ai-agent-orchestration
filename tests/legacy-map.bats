@@ -408,3 +408,21 @@ keep_previous_map() {
   install_ok
   contains "$output" "mapped/.orchestration.local.toml: legacy.exempt_paths -> legacy.exempt"
 }
+
+@test "install.sh converts the legacy.map_repo clone when the config still has retired PR topics" {
+  fresh_install
+  git init -q "$HOME/mapped"
+  printf '%s\n' '[legacy]' 'extra_pattern = "old-widget"' >"$HOME/mapped/.orchestration.local.toml"
+  config_set ORCH_LEGACY_MAP_REPO "$HOME/mapped"
+  python3 - "$HOME/.claude/orchestration.toml" <<'PY'
+import sys
+path = sys.argv[1]
+lines = open(path).read().splitlines()
+lines.insert(lines.index('[pr_tabs]') + 1, 'topics = []')
+open(path, 'w').write('\n'.join(lines) + '\n')
+PY
+  install_ok
+  contains "$output" "mapped/.orchestration.local.toml: legacy.extra_pattern -> [[legacy.rules]]"
+  not_contains "$(cat "$HOME/.claude/orchestration.toml")" 'topics'
+  not_contains "$(cat "$HOME/mapped/.orchestration.local.toml")" 'extra_pattern'
+}

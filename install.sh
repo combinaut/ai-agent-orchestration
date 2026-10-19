@@ -553,11 +553,11 @@ personal_config() {
     cp "$example" "$CONFIG"
     say "created" "$CONFIG"
   fi
-  upgrade_repo_files
-  drop_removed_keys
   local removed
   removed=$(settings_cli drop-removed "$CONFIG" 2>&1) || die "${removed#ERROR: }"
   [ -z "$removed" ] || say "migrated" "$removed"
+  upgrade_repo_files
+  drop_removed_keys
   have=$(settings_cli keys "$CONFIG" 2>&1) || die "${have#ERROR: }"
   have=" $have "
   load_config_cache
