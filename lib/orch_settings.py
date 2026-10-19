@@ -561,7 +561,7 @@ def upgrade(path):
     for line in text.splitlines():
         header = TABLE.match(line)
         if header:
-            table = header[1]
+            table = re.sub(r'\s*\.\s*', '.', re.sub(r'["\']', '', header[1]))
         match = LEGACY_KEY.match(line)
         dotted = match is not None and line.lstrip().startswith(('legacy', '"legacy', "'legacy"))
         if match and ((table == 'legacy' and not dotted) or (table is None and dotted)):

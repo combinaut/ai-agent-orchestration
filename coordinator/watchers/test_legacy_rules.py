@@ -172,14 +172,16 @@ class RulesTests(IsolatedTestCase):
         subprocess.run([*git, 'add', '-A'], check=True)
         subprocess.run([*git, 'commit', '-qm', 'seed'], check=True)
         subprocess.run([*git, 'update-index', '--add', '--cacheinfo', f'160000,{"1" * 40},vendor/sub'], check=True)
+        blob = subprocess.run([*git, 'hash-object', '-w', '--stdin'], input=b'$(x)\n', check=True, capture_output=True).stdout.strip()
+        subprocess.run([*git, 'update-index', '--add', '--cacheinfo', b'100644,' + blob + b',docs/old-\xff.js'], check=True)
         (root / orch_settings.REPO_FILE).write_text(rule(kind='"ALL"', paths='["**"]'))
         subprocess.run([*git, 'add', orch_settings.REPO_FILE], check=True)
         subprocess.run([*git, 'commit', '-qm', 'rules and a submodule'], check=True)
         env = {key: value for key, value in os.environ.items() if not key.startswith('ORCH_LEGACY_')}
         mapped = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'HEAD'],
                                 capture_output=True, text=True, env=env)
-        self.assertEqual((mapped.returncode, mapped.stdout, mapped.stderr), (0, 'ALL\t.orchestration.toml\nALL\ta.js\n', ''))
-        subprocess.run([*git, 'rm', '-q', '--cached', 'vendor/sub', orch_settings.REPO_FILE], check=True)
+        self.assertEqual((mapped.returncode, mapped.stdout, mapped.stderr), (0, 'ALL\t.orchestration.toml\nALL\ta.js\nALL\tdocs/old-\ufffd.js\n', ''))
+        subprocess.run([*git, 'rm', '-q', '--cached', 'vendor/sub', b'docs/old-\xff.js', orch_settings.REPO_FILE], check=True)
         subprocess.run([*git, 'commit', '-qm', 'no rules'], check=True)
         env = {key: value for key, value in os.environ.items() if not key.startswith('ORCH_LEGACY_')}
         result = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'HEAD'],

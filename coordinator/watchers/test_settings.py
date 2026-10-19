@@ -310,6 +310,12 @@ class LegacyUpgradeTest(SettingsTest):
                                            'legacy.exempt_paths -> legacy.exempt'])
         self.assertEqual(path.read_text(), 'legacy.exempt = ["a"]\n')
 
+    def test_upgrade_reads_quoted_table_headers(self):
+        for header in ('["legacy"]', "['legacy']", '[ "legacy" ]'):
+            path = self.write('local.toml', f'{header}\nscan = true\nexempt_paths = ["a"]\n')
+            s.upgrade(path)
+            self.assertEqual(path.read_text(), f'{header}\nscan = true\nexempt = ["a"]\n', header)
+
     def test_upgrade_keeps_rules_already_there(self):
         path = self.write('local.toml', '[legacy]\nextra_pattern = "b"\n\n[[legacy.rules]]\nkind = "A"\npaths = ["**"]\n')
         s.upgrade(path)

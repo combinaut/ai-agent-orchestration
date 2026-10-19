@@ -174,12 +174,13 @@ def clone_rules(repo, ref):
 
 def map_rows(repo, ref, rules):
     """(kind, path) for every file on `ref` with a line a rule counts."""
-    entries = [entry.decode().split('\t', 1) for entry in git(repo, 'ls-tree', '-r', '-z', ref).split(b'\0') if entry]
-    paths = [path for meta, path in entries if meta.split()[1] == 'blob' and rules.for_path(path)]
+    entries = [entry.split(b'\t', 1) for entry in git(repo, 'ls-tree', '-r', '-z', ref).split(b'\0') if entry]
+    blobs = [(meta.split()[2].decode(), path.decode(errors='replace')) for meta, path in entries if meta.split()[1] == b'blob']
+    blobs = [(oid, path) for oid, path in blobs if rules.for_path(path)]
     rows = set()
     with subprocess.Popen(['git', '-C', repo, 'cat-file', '--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as batch:
-        for path in paths:
-            batch.stdin.write(f'{ref}:{path}\n'.encode())
+        for oid, path in blobs:
+            batch.stdin.write(f'{oid}\n'.encode())
             batch.stdin.flush()
             header = batch.stdout.readline().split()
             if len(header) != 3:
