@@ -25,7 +25,7 @@ When the host is under pressure, the Coordinator follows the memory guard: on HO
 
 ## Repos from the open work
 
-The audit and pulls watchers take their repos from the open workspaces: each workspace's repo root is a clone to check for PACKS and WORKTREES, and its `origin` (`owner/name` on GitHub) a repo whose PRs to watch, deduplicated. The env adapter reports the workspaces (`env/<name>/open_work.py`). When it cannot, or a clone's `origin` cannot be read, they use the last set saved in `~/.claude/coordinator/open-work.json` and log `open work unreadable (...)`; with no saved set the github and git sources are `READFAIL`. A clone without an `origin` remote is checked for pile-ups but has no PRs.
+The audit and pulls watchers take their repos from the open workspaces: each workspace's repo root is a clone to check for PACKS and WORKTREES, and its `origin` (`owner/name` on GitHub) a repo whose PRs to watch, deduplicated. The env adapter reports the workspaces (`env/<name>/open_work.py`). When it cannot, or a clone's `origin` cannot be read, they use the last set saved in `~/.claude/coordinator/open-work.json` and log `open work unreadable (...)`; with no saved set the github and git sources are `READFAIL`. A clone without an `origin` remote is checked for pile-ups but has no PRs; a repo root whose folder is gone is skipped.
 
 ## Focus report
 
