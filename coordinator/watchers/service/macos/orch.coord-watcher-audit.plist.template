@@ -20,24 +20,24 @@
 	<key>KeepAlive</key>
 	<true/>
 	<key>Label</key>
-	<string>com.combinaut.coord-watcher-pulls</string>
+	<string>orch.coord-watcher-audit</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/watcher-log-exec.sh</string>
-		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/pulls.stderr</string>
-		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/coord-pulls-watch.sh</string>
+		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/audit.stderr</string>
+		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/coord-audit-watch.sh</string>
 		<string>--state-dir</string>
 		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context</string>
 		<string>--loop</string>
 		<string>--interval</string>
-		<string>150</string>
+		<string>1800</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
-	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/pulls.stderr</string>
+	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/audit.stderr</string>
 	<key>StandardOutPath</key>
-	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/pulls.stdout</string>
+	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/audit.stdout</string>
 	<key>WorkingDirectory</key>
 	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers</string>
 </dict>

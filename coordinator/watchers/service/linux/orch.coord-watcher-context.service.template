@@ -1,5 +1,5 @@
 [Unit]
-Description=Combinaut coordinator context watcher
+Description=Coordinator context watcher
 StartLimitIntervalSec=0
 
 [Service]

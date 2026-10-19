@@ -1,5 +1,5 @@
 [Unit]
-Description=Combinaut legacy map
+Description=Coordinator legacy map
 
 [Service]
 Type=oneshot

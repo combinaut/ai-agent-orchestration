@@ -23,7 +23,7 @@ import {
 } from "./core.js";
 import { messageListener } from "./messages.js";
 
-const HOST = "com.combinaut.pr_tabs";
+const HOST = "orch.pr_tabs";
 const ALARM = "pr-tabs-poll";
 const HOST_TIMEOUT_MS = 45000;
 const GROUP_DEBOUNCE_MS = 400;

@@ -24,7 +24,7 @@ BASH_MATCHER_JQ='def bash_matcher: . as $matcher | ($matcher == null or $matcher
 MANAGED_GUARD_RE='^ORCH_CONFIG=.*[[:space:]]+python3[[:space:]]+~/.claude/hooks/guard-bash\.py[[:space:]]*$'
 # shellcheck disable=SC2016 # The regex matches a literal $HOME in hook commands.
 SUPPORTED_GUARD_RE='^[[:space:]]*(?:(?:(?:[^[:space:]]*/)?env(?:[[:space:]]+(?:[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+|-[^[:space:]]+))*[[:space:]]+)?[^[:space:]]*python[0-9.]*[[:space:]]+)?(?:~/.claude|[\"]?\$HOME/.claude|/[^[:space:]]*\.claude)/hooks/guard-bash\.py\"?[[:space:]]*$'
-CHROME_HOST="com.combinaut.pr_tabs"
+CHROME_HOST="orch.pr_tabs"
 
 n_linked=0
 SERVICES_FAILED=0

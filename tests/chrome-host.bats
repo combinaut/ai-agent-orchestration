@@ -25,7 +25,7 @@ setup() {
     Darwin) CHROME_DIR="$HOME/Library/Application Support/Google/Chrome" ;;
     *) CHROME_DIR="$HOME/.config/google-chrome" ;;
   esac
-  HOST_MANIFEST="$CHROME_DIR/NativeMessagingHosts/com.combinaut.pr_tabs.json"
+  HOST_MANIFEST="$CHROME_DIR/NativeMessagingHosts/orch.pr_tabs.json"
 }
 teardown() { teardown_fixture; }
 
@@ -47,7 +47,7 @@ ask_host() {
   mkdir -p "$CHROME_DIR"
   fresh_install
   id=$(extension_id)
-  jq -e --arg origin "chrome-extension://$id/" '.name == "com.combinaut.pr_tabs" and .type == "stdio" and .allowed_origins == [$origin]' "$HOST_MANIFEST" >/dev/null
+  jq -e --arg origin "chrome-extension://$id/" '.name == "orch.pr_tabs" and .type == "stdio" and .allowed_origins == [$origin]' "$HOST_MANIFEST" >/dev/null
   launcher=$(jq -r .path "$HOST_MANIFEST")
   [ -x "$launcher" ]
   python=$(sed -n 's/^export ORCH_PYTHON3=//p' "$launcher")
@@ -106,7 +106,7 @@ done_count() {
   mkdir -p "$CHROME_DIR/NativeMessagingHosts"
   printf '{"name":"old"}\n' >"$HOST_MANIFEST"
   fresh_install
-  jq -e '.name == "com.combinaut.pr_tabs"' "$HOST_MANIFEST" >/dev/null
+  jq -e '.name == "orch.pr_tabs"' "$HOST_MANIFEST" >/dev/null
   for backup in "$HOME"/.claude/backups/*/home/"${HOST_MANIFEST#"$HOME"/}"; do jq -e '.name == "old"' "$backup" >/dev/null; done
   [ -z "$(find "$CHROME_DIR/NativeMessagingHosts" -name '*.bak.*')" ]
 }

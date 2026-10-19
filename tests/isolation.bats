@@ -29,10 +29,10 @@ load test_helper
 
 @test "mutant direct service calls in installer adapters only change stub logs" {
   for adapter in macos linux; do
-    printf '\nlaunchctl bootout gui/123/com.combinaut.fixture\nsystemctl --user stop fixture.service\n' >>"$SRC/lib/platform/$adapter.sh"
+    printf '\nlaunchctl bootout gui/123/orch.fixture\nsystemctl --user stop fixture.service\n' >>"$SRC/lib/platform/$adapter.sh"
   done
   fresh_install
-  contains "$(cat "$LAUNCHCTL_CALLS")" 'bootout gui/123/com.combinaut.fixture'
+  contains "$(cat "$LAUNCHCTL_CALLS")" 'bootout gui/123/orch.fixture'
   contains "$(cat "$SYSTEMCTL_CALLS")" 'stop fixture.service'
   [ -L "$HOME/.claude/coordinator/watchers/watchers.py" ]
 }

@@ -163,11 +163,11 @@ make_webapp() {
   config_set ORCH_LEGACY_MAP_REPO "$BIG_REPO"
   use_service_state
   mkdir -p "$HOME/.config/systemd/user"
-  ln -s /elsewhere/com.combinaut.coord-legacy-map.service "$HOME/.config/systemd/user/com.combinaut.coord-legacy-map.service"
+  ln -s /elsewhere/orch.coord-legacy-map.service "$HOME/.config/systemd/user/orch.coord-legacy-map.service"
   install_ok
   case "$(uname -s)" in
     Darwin)
-      unit="$HOME/.claude/coordinator/service/macos/com.combinaut.coord-legacy-map.plist"
+      unit="$HOME/.claude/coordinator/service/macos/orch.coord-legacy-map.plist"
       [ -f "$unit" ]
       contains "$(cat "$unit")" "<string>$HOME/.claude/coordinator/legacy-map.sh</string>"
       contains "$(cat "$unit")" "<string>$BIG_REPO</string>"
@@ -177,23 +177,23 @@ make_webapp() {
       ;;
     Linux)
       dir="$HOME/.claude/coordinator/service/linux"
-      contains "$(cat "$dir/com.combinaut.coord-legacy-map.service")" "ExecStart=\"$HOME/.claude/coordinator/legacy-map.sh\" \"$BIG_REPO\""
-      contains "$(cat "$dir/com.combinaut.coord-legacy-map.timer")" 'OnCalendar=*-*-* 06:00:00'
+      contains "$(cat "$dir/orch.coord-legacy-map.service")" "ExecStart=\"$HOME/.claude/coordinator/legacy-map.sh\" \"$BIG_REPO\""
+      contains "$(cat "$dir/orch.coord-legacy-map.timer")" 'OnCalendar=*-*-* 06:00:00'
       contains "$output" 'systemctl --user link'
-      units=$(cat "$dir"/com.combinaut.coord-legacy-map.service "$dir"/com.combinaut.coord-legacy-map.timer)
+      units=$(cat "$dir"/orch.coord-legacy-map.service "$dir"/orch.coord-legacy-map.timer)
       contains "$output" 'systemctl --user enable --now'
-      contains "$output" 'systemctl --user disable --now com.combinaut.coord-legacy-map.timer'
+      contains "$output" 'systemctl --user disable --now orch.coord-legacy-map.timer'
       ;;
   esac
   not_contains "$units" '@ORCH_'
   case "$(uname -s)" in
     Darwin)
-      cmp -s "$unit" "$HOME/Library/LaunchAgents/com.combinaut.coord-legacy-map.plist"
-      grep -qxF com.combinaut.coord-legacy-map "$LAUNCHCTL_STATE"
+      cmp -s "$unit" "$HOME/Library/LaunchAgents/orch.coord-legacy-map.plist"
+      grep -qxF orch.coord-legacy-map "$LAUNCHCTL_STATE"
       ;;
     Linux)
-      [ "$(readlink "$HOME/.config/systemd/user/com.combinaut.coord-legacy-map.service")" = "$dir/com.combinaut.coord-legacy-map.service" ]
-      grep -qxF com.combinaut.coord-legacy-map.timer "$SYSTEMCTL_STATE"
+      [ "$(readlink "$HOME/.config/systemd/user/orch.coord-legacy-map.service")" = "$dir/orch.coord-legacy-map.service" ]
+      grep -qxF orch.coord-legacy-map.timer "$SYSTEMCTL_STATE"
       ;;
   esac
   mkdir -p "$TMP/other-webapp"
@@ -201,17 +201,17 @@ make_webapp() {
   : >"$SYSTEMCTL_CALLS"
   install_ok
   case "$(uname -s)" in
-    Darwin) contains "$(cat "$HOME/Library/LaunchAgents/com.combinaut.coord-legacy-map.plist")" "<string>$TMP/other-webapp</string>" ;;
+    Darwin) contains "$(cat "$HOME/Library/LaunchAgents/orch.coord-legacy-map.plist")" "<string>$TMP/other-webapp</string>" ;;
     Linux) contains "$(cat "$SYSTEMCTL_CALLS")" 'user daemon-reload' ;;
   esac
   config_set ORCH_LEGACY_MAP_REPO ""
   install_ok
   case "$(uname -s)" in
     Darwin)
-      [ ! -e "$HOME/Library/LaunchAgents/com.combinaut.coord-legacy-map.plist" ]
+      [ ! -e "$HOME/Library/LaunchAgents/orch.coord-legacy-map.plist" ]
       not_contains "$(cat "$LAUNCHCTL_STATE")" legacy-map
       ;;
-    Linux) [ ! -L "$HOME/.config/systemd/user/com.combinaut.coord-legacy-map.service" ] ;;
+    Linux) [ ! -L "$HOME/.config/systemd/user/orch.coord-legacy-map.service" ] ;;
   esac
 }
 
@@ -222,8 +222,8 @@ make_webapp() {
   use_service_state
   install_ok
   case "$(uname -s)" in
-    Darwin) contains "$(cat "$HOME/.claude/coordinator/service/macos/com.combinaut.coord-legacy-map.plist")" "<string>$BIG_REPO</string>" ;;
-    Linux) contains "$(cat "$HOME/.claude/coordinator/service/linux/com.combinaut.coord-legacy-map.service")" "\"$BIG_REPO\"" ;;
+    Darwin) contains "$(cat "$HOME/.claude/coordinator/service/macos/orch.coord-legacy-map.plist")" "<string>$BIG_REPO</string>" ;;
+    Linux) contains "$(cat "$HOME/.claude/coordinator/service/linux/orch.coord-legacy-map.service")" "\"$BIG_REPO\"" ;;
   esac
 }
 

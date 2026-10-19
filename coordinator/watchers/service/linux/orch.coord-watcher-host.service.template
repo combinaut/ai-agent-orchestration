@@ -1,9 +1,9 @@
 [Unit]
-Description=Combinaut coordinator audit watcher
+Description=Coordinator host watcher
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart="@ORCH_CLAUDE_DIR@/coordinator/watchers/coord-audit-watch.sh" "--state-dir" "@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context" "--loop" "--interval" "1800"
+ExecStart="@ORCH_CLAUDE_DIR@/coordinator/watchers/coord-host-watch.sh" "--state-dir" "@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context" "--loop" "--interval" "60"
 WorkingDirectory=@ORCH_CLAUDE_DIR@/coordinator/watchers
 Environment="ORCH_CONFIG=@ORCH_CONFIG@"
 Environment="ORCH_PYTHON3=@ORCH_SERVICE_PYTHON@"

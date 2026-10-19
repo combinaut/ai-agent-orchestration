@@ -140,7 +140,7 @@ EOF
   fresh_install
   prepare_custom_service_config "$HOME/.claude/orchestration.toml"
   install_ok
-  for unit in "$HOME"/.claude/coordinator/watchers/service/*/com.combinaut.coord-watcher-inbox-context.*; do
+  for unit in "$HOME"/.claude/coordinator/watchers/service/*/orch.coord-watcher-inbox-context.*; do
     case "$unit" in *.template) continue ;; esac
     contains "$(cat "$unit")" "$HOME/.claude/coordinator/watchers/notify-inbox.sh"
     not_contains "$(cat "$unit")" 'notify-inbox.py'
@@ -245,14 +245,14 @@ EOF
     Darwin)
       dir="$HOME/Library/LaunchAgents" suffix=plist calls=$LAUNCHCTL_CALLS state=$LAUNCHCTL_STATE PLATFORM_DIR=macos
       mkdir -p "$dir"
-      printf stale >"$dir/com.combinaut.coord-watcher-gone.plist"
-      printf stale >"$dir/com.combinaut.coord-watcher-gone.plist"
+      printf stale >"$dir/orch.coord-watcher-gone.plist"
+      printf stale >"$dir/orch.coord-watcher-gone.plist"
       ;;
     Linux)
       dir="$HOME/.config/systemd/user" suffix=service calls=$SYSTEMCTL_CALLS state=$SYSTEMCTL_STATE PLATFORM_DIR=linux
       mkdir -p "$dir"
-      printf stale >"$dir/com.combinaut.coord-context-v2.service"
-      printf stale >"$dir/com.combinaut.coord-watcher-gone.service"
+      printf stale >"$dir/orch.coord-context-v2.service"
+      printf stale >"$dir/orch.coord-watcher-gone.service"
       ;;
   esac
   printf 'other\n' >"$dir/com.example.other.$suffix"
@@ -262,14 +262,14 @@ EOF
   [ "$(printf '%s\n' "$expected" | wc -l)" -ge 8 ]
   case "$(uname -s)" in
     Darwin)
-      [ "$(find "$dir" -name 'com.combinaut.coord-*' | sed 's|.*/||' | LC_ALL=C sort)" = "$expected" ]
+      [ "$(find "$dir" -name 'orch.coord-*' | sed 's|.*/||' | LC_ALL=C sort)" = "$expected" ]
       for name in $expected; do
         cmp -s "$dir/$name" "$HOME/.claude/coordinator/watchers/service/macos/$name"
       done
       ;;
     Linux)
-      [ ! -e "$dir/com.combinaut.coord-context-v2.service" ] && [ ! -e "$dir/com.combinaut.coord-watcher-gone.service" ]
-      contains "$(cat "$calls")" 'disable --now com.combinaut.coord-context-v2.service'
+      [ ! -e "$dir/orch.coord-context-v2.service" ] && [ ! -e "$dir/orch.coord-watcher-gone.service" ]
+      contains "$(cat "$calls")" 'disable --now orch.coord-context-v2.service'
       ;;
   esac
   [ "$(LC_ALL=C sort "$state" | sed 's/\.service$//')" = "$(printf '%s\n' "$expected" | sed 's/\.[a-z]*$//')" ]
@@ -330,14 +330,14 @@ EOF
   use_service_state
   case "$(uname -s)" in
     Darwin)
-      stale="$HOME/Library/LaunchAgents/com.combinaut.coord-watcher-gone.plist"
-      printf '%s\n' com.combinaut.coord-watcher-gone >"$LAUNCHCTL_STATE"
-      use_stuck_service com.combinaut.coord-watcher-gone ""
+      stale="$HOME/Library/LaunchAgents/orch.coord-watcher-gone.plist"
+      printf '%s\n' orch.coord-watcher-gone >"$LAUNCHCTL_STATE"
+      use_stuck_service orch.coord-watcher-gone ""
       ;;
     Linux)
-      stale="$HOME/.config/systemd/user/com.combinaut.coord-context-v2.service"
-      printf '%s\n' com.combinaut.coord-context-v2.service >"$SYSTEMCTL_STATE"
-      use_stuck_service "" com.combinaut.coord-context-v2.service
+      stale="$HOME/.config/systemd/user/orch.coord-context-v2.service"
+      printf '%s\n' orch.coord-context-v2.service >"$SYSTEMCTL_STATE"
+      use_stuck_service "" orch.coord-context-v2.service
       ;;
   esac
   mkdir -p "$(dirname "$stale")"
@@ -362,28 +362,28 @@ EOF
   case "$(uname -s)" in
     Darwin)
       dir="$HOME/Library/LaunchAgents" calls=$LAUNCHCTL_CALLS
-      grep -vxF com.combinaut.coord-watcher-host "$LAUNCHCTL_STATE" >"$TMP/state" && mv "$TMP/state" "$LAUNCHCTL_STATE"
+      grep -vxF orch.coord-watcher-host "$LAUNCHCTL_STATE" >"$TMP/state" && mv "$TMP/state" "$LAUNCHCTL_STATE"
       before=$(wc -l <"$calls")
       on_tty ''
-      contains "$(sed "1,${before}d" "$calls")" "bootstrap gui/$(id -u) $dir/com.combinaut.coord-watcher-host.plist"
-      printf 'old copy\n' >"$dir/com.combinaut.coord-watcher-hog.plist"
-      LAUNCHCTL_STUCK=com.combinaut.coord-watcher-hog on_tty ''
+      contains "$(sed "1,${before}d" "$calls")" "bootstrap gui/$(id -u) $dir/orch.coord-watcher-host.plist"
+      printf 'old copy\n' >"$dir/orch.coord-watcher-hog.plist"
+      LAUNCHCTL_STUCK=orch.coord-watcher-hog on_tty ''
       contains "$output" 'not registered'
-      [ "$(cat "$dir/com.combinaut.coord-watcher-hog.plist")" = 'old copy' ]
+      [ "$(cat "$dir/orch.coord-watcher-hog.plist")" = 'old copy' ]
       ;;
     Linux)
       dir="$HOME/.config/systemd/user" calls=$SYSTEMCTL_CALLS
       before=$(wc -l <"$calls")
-      SYSTEMCTL_INACTIVE=com.combinaut.coord-watcher-host.service on_tty ''
-      contains "$(sed "1,${before}d" "$calls")" "enable --now $HOME/.claude/coordinator/watchers/service/linux/com.combinaut.coord-watcher-host.service"
+      SYSTEMCTL_INACTIVE=orch.coord-watcher-host.service on_tty ''
+      contains "$(sed "1,${before}d" "$calls")" "enable --now $HOME/.claude/coordinator/watchers/service/linux/orch.coord-watcher-host.service"
       mkdir -p "$dir"
-      : >"$dir/com.combinaut.coord-watcher-host.service"
+      : >"$dir/orch.coord-watcher-host.service"
       ;;
   esac
   config_set ORCH_WATCHERS_SERVICE 0
   on_tty ''
   [ "$status" -eq 0 ]
-  [ -z "$(find "$dir" -name 'com.combinaut.coord-watcher-*')" ]
+  [ -z "$(find "$dir" -name 'orch.coord-watcher-*')" ]
 }
 
 @test "an update restores a missing current watcher registration" {
@@ -396,7 +396,7 @@ EOF
   case "$(uname -s)" in
     Darwin)
       dir="$HOME/Library/LaunchAgents"
-      watcher=com.combinaut.coord-watcher-hog
+      watcher=orch.coord-watcher-hog
       rm "$dir/$watcher.plist"
       grep -vxF "$watcher" "$LAUNCHCTL_STATE" >"$TMP/state" && mv "$TMP/state" "$LAUNCHCTL_STATE"
       before=$(wc -l <"$LAUNCHCTL_CALLS")
@@ -413,7 +413,7 @@ EOF
       contains "$output" "not registered  $HOME/.claude/coordinator/watchers/service/macos/$watcher.plist"
       ;;
     Linux)
-      watcher=com.combinaut.coord-watcher-hog.service
+      watcher=orch.coord-watcher-hog.service
       grep -vxF "$watcher" "$SYSTEMCTL_STATE" >"$TMP/state" && mv "$TMP/state" "$SYSTEMCTL_STATE"
       before=$(wc -l <"$SYSTEMCTL_CALLS")
       on_tty ''
@@ -425,7 +425,7 @@ EOF
 }
 
 @test "macOS registration persists a missing watcher before launchd confirms it" {
-  rendered="$TMP/com.combinaut.coord-watcher-hog.plist"
+  rendered="$TMP/orch.coord-watcher-hog.plist"
   agents="$TMP/LaunchAgents"
   calls="$TMP/launchctl.calls"
   loaded=0
@@ -444,25 +444,25 @@ EOF
   }
 
   platform_register_service "$rendered"
-  [ -f "$agents/com.combinaut.coord-watcher-hog.plist" ]
-  contains "$(cat "$calls")" "bootstrap gui/$(id -u) $agents/com.combinaut.coord-watcher-hog.plist"
+  [ -f "$agents/orch.coord-watcher-hog.plist" ]
+  contains "$(cat "$calls")" "bootstrap gui/$(id -u) $agents/orch.coord-watcher-hog.plist"
 
-  rm "$agents/com.combinaut.coord-watcher-hog.plist"
+  rm "$agents/orch.coord-watcher-hog.plist"
   : >"$calls"
   platform_register_service "$rendered"
-  [ -f "$agents/com.combinaut.coord-watcher-hog.plist" ]
+  [ -f "$agents/orch.coord-watcher-hog.plist" ]
   [ "$(grep -c '^bootout ' "$calls")" -eq 1 ]
   [ "$(grep -c '^bootstrap ' "$calls")" -eq 1 ]
 }
 
 @test "macOS registration waits for a slow unload before it bootstraps" {
-  rendered="$TMP/com.combinaut.coord-watcher-hog.plist"
+  rendered="$TMP/orch.coord-watcher-hog.plist"
   agents="$TMP/LaunchAgents"
   calls="$TMP/launchctl.calls"
   prints_left=0
   mkdir -p "$agents"
   printf '<plist new/>\n' >"$rendered"
-  printf '<plist old/>\n' >"$agents/com.combinaut.coord-watcher-hog.plist"
+  printf '<plist old/>\n' >"$agents/orch.coord-watcher-hog.plist"
   # shellcheck disable=SC1090
   source "$ROOT/lib/platform/macos.sh"
   platform_launch_agents_dir() { printf '%s' "$agents"; }
@@ -475,12 +475,12 @@ EOF
     esac
   }
   platform_register_service "$rendered"
-  [ "$(cat "$agents/com.combinaut.coord-watcher-hog.plist")" = '<plist new/>' ]
+  [ "$(cat "$agents/orch.coord-watcher-hog.plist")" = '<plist new/>' ]
   [ "$(grep -c '^bootstrap ' "$calls")" -eq 1 ]
 }
 
 @test "macOS registration retries a bootstrap that fails right after the unload" {
-  rendered="$TMP/com.combinaut.coord-watcher-hog.plist"
+  rendered="$TMP/orch.coord-watcher-hog.plist"
   agents="$TMP/LaunchAgents"
   calls="$TMP/launchctl.calls"
   loaded=0
@@ -505,7 +505,7 @@ EOF
 }
 
 @test "macOS registration accepts a failed bootstrap when launchd reports the job loaded" {
-  rendered="$TMP/com.combinaut.coord-watcher-hog.plist"
+  rendered="$TMP/orch.coord-watcher-hog.plist"
   agents="$TMP/LaunchAgents"
   prints=0
   printf '<plist/>\n' >"$rendered"
@@ -538,8 +538,8 @@ EOF
   config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   use_service_state
   case "$(uname -s)" in
-    Darwin) dir="$HOME/Library/LaunchAgents" stale=com.combinaut.coord-watcher-gone.plist ;;
-    Linux) dir="$HOME/.config/systemd/user" stale=com.combinaut.coord-watcher-gone.service ;;
+    Darwin) dir="$HOME/Library/LaunchAgents" stale=orch.coord-watcher-gone.plist ;;
+    Linux) dir="$HOME/.config/systemd/user" stale=orch.coord-watcher-gone.service ;;
   esac
   mkdir -p "$dir"
   printf stale >"$dir/$stale"
@@ -563,14 +563,14 @@ EOF
   [ -e "$HOME/.claude/coordinator/watchers/.registered-revision" ]
   case "$(uname -s)" in
     Darwin)
-      stale="$HOME/Library/LaunchAgents/com.combinaut.coord-watcher-gone.plist"
-      printf '%s\n' com.combinaut.coord-watcher-gone >>"$LAUNCHCTL_STATE"
-      use_stuck_service com.combinaut.coord-watcher-gone ""
+      stale="$HOME/Library/LaunchAgents/orch.coord-watcher-gone.plist"
+      printf '%s\n' orch.coord-watcher-gone >>"$LAUNCHCTL_STATE"
+      use_stuck_service orch.coord-watcher-gone ""
       ;;
     Linux)
-      stale="$HOME/.config/systemd/user/com.combinaut.coord-watcher-gone.service"
-      printf '%s\n' com.combinaut.coord-watcher-gone.service >>"$SYSTEMCTL_STATE"
-      use_stuck_service "" com.combinaut.coord-watcher-gone.service
+      stale="$HOME/.config/systemd/user/orch.coord-watcher-gone.service"
+      printf '%s\n' orch.coord-watcher-gone.service >>"$SYSTEMCTL_STATE"
+      use_stuck_service "" orch.coord-watcher-gone.service
       ;;
   esac
   mkdir -p "$(dirname "$stale")"
@@ -588,14 +588,14 @@ EOF
   use_service_state
   case "$(uname -s)" in
     Darwin)
-      stale="$HOME/Library/LaunchAgents/com.combinaut.coord-watcher-gone.plist"
-      printf '%s\n' com.combinaut.coord-watcher-gone >"$LAUNCHCTL_STATE"
-      use_stuck_service com.combinaut.coord-watcher-gone ""
+      stale="$HOME/Library/LaunchAgents/orch.coord-watcher-gone.plist"
+      printf '%s\n' orch.coord-watcher-gone >"$LAUNCHCTL_STATE"
+      use_stuck_service orch.coord-watcher-gone ""
       ;;
     Linux)
-      stale="$HOME/.config/systemd/user/com.combinaut.coord-watcher-gone.service"
-      printf '%s\n' com.combinaut.coord-watcher-gone.service >"$SYSTEMCTL_STATE"
-      use_stuck_service "" com.combinaut.coord-watcher-gone.service
+      stale="$HOME/.config/systemd/user/orch.coord-watcher-gone.service"
+      printf '%s\n' orch.coord-watcher-gone.service >"$SYSTEMCTL_STATE"
+      use_stuck_service "" orch.coord-watcher-gone.service
       ;;
   esac
   mkdir -p "$(dirname "$stale")"

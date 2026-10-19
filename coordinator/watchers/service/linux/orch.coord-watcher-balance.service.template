@@ -1,5 +1,5 @@
 [Unit]
-Description=Combinaut coordinator balance watcher
+Description=Coordinator balance watcher
 StartLimitIntervalSec=0
 
 [Service]

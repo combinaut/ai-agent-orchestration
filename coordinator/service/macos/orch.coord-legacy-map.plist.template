@@ -8,7 +8,7 @@
 		<string>@ORCH_PATH@</string>
 	</dict>
 	<key>Label</key>
-	<string>com.combinaut.coord-legacy-map</string>
+	<string>orch.coord-legacy-map</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>@ORCH_CLAUDE_DIR@/coordinator/legacy-map.sh</string>

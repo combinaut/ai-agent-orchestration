@@ -20,12 +20,12 @@
 	<key>KeepAlive</key>
 	<true/>
 	<key>Label</key>
-	<string>com.combinaut.coord-watcher-workers</string>
+	<string>orch.coord-watcher-balance</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/watcher-log-exec.sh</string>
-		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/workers.stderr</string>
-		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/coord-worker-watch.sh</string>
+		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/balance.stderr</string>
+		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/coord-balance-watch.sh</string>
 		<string>--state-dir</string>
 		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context</string>
 		<string>--loop</string>
@@ -35,9 +35,9 @@
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
-	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/workers.stderr</string>
+	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/balance.stderr</string>
 	<key>StandardOutPath</key>
-	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/workers.stdout</string>
+	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/balance.stdout</string>
 	<key>WorkingDirectory</key>
 	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers</string>
 </dict>

@@ -1,5 +1,5 @@
 [Unit]
-Description=Combinaut legacy map, daily
+Description=Coordinator legacy map, daily
 
 [Timer]
 OnCalendar=*-*-* 06:00:00

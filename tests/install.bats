@@ -23,8 +23,8 @@ load test_helper
 
 @test "watcher service key is off by default" {
   fresh_install
-  [ ! -e "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist" ]
-  [ ! -e "$HOME/.claude/coordinator/watchers/service/linux/com.combinaut.coord-watcher-context.service" ]
+  [ ! -e "$HOME/.claude/coordinator/watchers/service/macos/orch.coord-watcher-context.plist" ]
+  [ ! -e "$HOME/.claude/coordinator/watchers/service/linux/orch.coord-watcher-context.service" ]
 }
 
 @test "second run preserves all managed links" {
@@ -254,13 +254,13 @@ CASES
   install_ok
   case "$(uname -s)" in
     Darwin)
-      [ -f "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist" ]
-      [ ! -e "$HOME/Library/LaunchAgents/com.combinaut.coord-watcher-context.plist" ]
-      contains "$(cat "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist")" "<string>$HOME/socket&amp;name</string>"
+      [ -f "$HOME/.claude/coordinator/watchers/service/macos/orch.coord-watcher-context.plist" ]
+      [ ! -e "$HOME/Library/LaunchAgents/orch.coord-watcher-context.plist" ]
+      contains "$(cat "$HOME/.claude/coordinator/watchers/service/macos/orch.coord-watcher-context.plist")" "<string>$HOME/socket&amp;name</string>"
       ;;
     Linux)
-      CONTEXT_UNIT="$HOME/.claude/coordinator/watchers/service/linux/com.combinaut.coord-watcher-context.service"
-      INBOX_UNIT="$HOME/.claude/coordinator/watchers/service/linux/com.combinaut.coord-watcher-inbox-context.service"
+      CONTEXT_UNIT="$HOME/.claude/coordinator/watchers/service/linux/orch.coord-watcher-context.service"
+      INBOX_UNIT="$HOME/.claude/coordinator/watchers/service/linux/orch.coord-watcher-inbox-context.service"
       [ -f "$CONTEXT_UNIT" ]
       contains "$(cat "$CONTEXT_UNIT")" 'Environment=HERDR_ENV=1'
       contains "$(cat "$INBOX_UNIT")" 'Environment=HERDR_ENV=1'
@@ -268,8 +268,8 @@ CASES
       ;;
   esac
   rm "$HOME/.claude/orchestration.toml"
-  rm -f "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist" \
-    "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-inbox-context.plist"
+  rm -f "$HOME/.claude/coordinator/watchers/service/macos/orch.coord-watcher-context.plist" \
+    "$HOME/.claude/coordinator/watchers/service/macos/orch.coord-watcher-inbox-context.plist"
   # shellcheck disable=SC2016 # The old file is sourced, so $HOME expands then.
   printf '%s\n' 'ORCH_V2_PR_SCOPE="org:example"' 'ORCH_V2_WORKER_MODEL="worker"' 'ORCH_V2_PRIMARY_REPO="owner/repo"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="$HOME/socket&name"' >"$HOME/.claude/orchestration.env"
   mkdir -p "$HOME/.claude/coordinator/v2/bindings" "$HOME/.claude/coordinator/v2/prod-context"
@@ -285,7 +285,7 @@ EOF
   export LAUNCHCTL_CALLS="$TMP/launchctl.calls"
   run env LAUNCHCTL_CONTEXT_ONLY=1 PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
-  [ ! -e "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist" ]
+  [ ! -e "$HOME/.claude/coordinator/watchers/service/macos/orch.coord-watcher-context.plist" ]
   contains "$output" 'renamed ORCH_V2_PR_SCOPE to ORCH_WATCHERS_PR_SCOPE'
   contains "$output" "moved           $HOME/.claude/orchestration.env -> $HOME/.claude/orchestration.env.bak"
   [ "$(config_get ORCH_WATCHERS_PR_SCOPE)" = org:example ]
@@ -294,11 +294,11 @@ EOF
   config_set ORCH_WATCHERS_SERVICE '1'
   run env LAUNCHCTL_CONTEXT_ONLY=1 PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
-  [ -f "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist" ]
-  contains "$output" "$HOME/.claude/coordinator/watchers/service/macos/com.combinaut.coord-watcher-context.plist"
+  [ -f "$HOME/.claude/coordinator/watchers/service/macos/orch.coord-watcher-context.plist" ]
+  contains "$output" "$HOME/.claude/coordinator/watchers/service/macos/orch.coord-watcher-context.plist"
   contains "$output" 'stay broken until these commands run'
-  case "$output" in *"launchctl bootout gui/$(id -u)/com.combinaut.coord-context-v2"*"install.sh"*"launchctl bootstrap gui/$(id -u) "*"com.combinaut.coord-watcher-context.plist"*) ;; *) false ;; esac
-  not_contains "$output" 'com.combinaut.coord-inbox-v2-context'
+  case "$output" in *"launchctl bootout gui/$(id -u)/orch.coord-context-v2"*"install.sh"*"launchctl bootstrap gui/$(id -u) "*"orch.coord-watcher-context.plist"*) ;; *) false ;; esac
+  not_contains "$output" 'orch.coord-inbox-v2-context'
   [ ! -e "$HOME/.claude/coordinator/watchers/bindings/coordinator.json" ]
   [ -f "$HOME/.claude/coordinator/v2/bindings/coordinator.json" ]
   run grep -Eq 'bootout|bootstrap' "$LAUNCHCTL_CALLS"
@@ -785,11 +785,11 @@ CASES
     Linux) adapter=linux; suffix=service; start='systemctl --user enable --now'; stop='systemctl --user disable --now' ;;
   esac
   services="$HOME/.claude/coordinator/watchers/service/$adapter"
-  host="$services/com.combinaut.coord-watcher-host.$suffix"
+  host="$services/orch.coord-watcher-host.$suffix"
   [ -f "$host" ]
   contains "$(cat "$host")" 'coord-host-watch.sh'
   contains "$(cat "$host")" '/prod-context'
-  contains "$(cat "$services/com.combinaut.coord-watcher-inbox-context.$suffix")" 'host'
+  contains "$(cat "$services/orch.coord-watcher-inbox-context.$suffix")" 'host'
   not_contains "$(cat "$host")" '@ORCH_'
   contains "$output" "$start"
   contains "$output" "$stop"
@@ -825,7 +825,7 @@ CASES
     Linux) adapter=linux; suffix=service; start='systemctl --user enable --now'; stop='systemctl --user disable --now' ;;
   esac
   services="$HOME/.claude/coordinator/watchers/service/$adapter"
-  hog="$services/com.combinaut.coord-watcher-hog.$suffix"
+  hog="$services/orch.coord-watcher-hog.$suffix"
   [ -f "$hog" ]
   contains "$(cat "$hog")" 'coord-hog-watch.sh'
   contains "$(cat "$hog")" '/prod-context'
@@ -833,7 +833,7 @@ CASES
     macos) contains "$(cat "$hog")" '<string>5</string>' ;;
     linux) contains "$(cat "$hog")" '"--interval" "5"' ;;
   esac
-  contains "$(cat "$services/com.combinaut.coord-watcher-inbox-context.$suffix")" 'hog'
+  contains "$(cat "$services/orch.coord-watcher-inbox-context.$suffix")" 'hog'
   not_contains "$(cat "$hog")" '@ORCH_'
   contains "$output" "$start"
   contains "$output" "$stop"
@@ -848,7 +848,7 @@ CASES
     Linux) adapter=linux; suffix=service; start='systemctl --user enable --now'; stop='systemctl --user disable --now' ;;
   esac
   services="$HOME/.claude/coordinator/watchers/service/$adapter"
-  balance="$services/com.combinaut.coord-watcher-balance.$suffix"
+  balance="$services/orch.coord-watcher-balance.$suffix"
   [ -f "$balance" ]
   contains "$(cat "$balance")" 'coord-balance-watch.sh'
   contains "$(cat "$balance")" '/prod-context'
@@ -856,7 +856,7 @@ CASES
     macos) contains "$(cat "$balance")" '<string>60</string>' ;;
     linux) contains "$(cat "$balance")" '"--interval" "60"' ;;
   esac
-  contains "$(cat "$services/com.combinaut.coord-watcher-inbox-context.$suffix")" 'balance'
+  contains "$(cat "$services/orch.coord-watcher-inbox-context.$suffix")" 'balance'
   not_contains "$(cat "$balance")" '@ORCH_'
   contains "$output" "$start"
   contains "$output" "$stop"
@@ -871,7 +871,7 @@ CASES
     Linux) adapter=linux; suffix=service; start='systemctl --user enable --now'; stop='systemctl --user disable --now' ;;
   esac
   services="$HOME/.claude/coordinator/watchers/service/$adapter"
-  workers="$services/com.combinaut.coord-watcher-workers.$suffix"
+  workers="$services/orch.coord-watcher-workers.$suffix"
   [ -f "$workers" ]
   contains "$(cat "$workers")" 'coord-worker-watch.sh'
   contains "$(cat "$workers")" '/prod-context'
@@ -879,7 +879,7 @@ CASES
     macos) contains "$(cat "$workers")" '<string>60</string>' ;;
     linux) contains "$(cat "$workers")" '"--interval" "60"' ;;
   esac
-  contains "$(cat "$services/com.combinaut.coord-watcher-inbox-context.$suffix")" 'workers'
+  contains "$(cat "$services/orch.coord-watcher-inbox-context.$suffix")" 'workers'
   not_contains "$(cat "$workers")" '@ORCH_'
   contains "$output" "$start"
   contains "$output" "$stop"
@@ -889,13 +889,13 @@ CASES
   fresh_install
   config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET '/tmp/socket'
   install_ok
-  contains "$output" 'com.combinaut.coord-watcher-audit watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
-  contains "$output" 'com.combinaut.coord-watcher-pulls watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
-  [ -z "$(find "$HOME/.claude/coordinator/watchers/service" \( -name 'com.combinaut.coord-watcher-audit.*' -o -name 'com.combinaut.coord-watcher-pulls.*' \) ! -name '*.template')" ]
-  [ -n "$(find "$HOME/.claude/coordinator/watchers/service" -name 'com.combinaut.coord-watcher-host.*' ! -name '*.template')" ]
+  contains "$output" 'orch.coord-watcher-audit watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
+  contains "$output" 'orch.coord-watcher-pulls watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
+  [ -z "$(find "$HOME/.claude/coordinator/watchers/service" \( -name 'orch.coord-watcher-audit.*' -o -name 'orch.coord-watcher-pulls.*' \) ! -name '*.template')" ]
+  [ -n "$(find "$HOME/.claude/coordinator/watchers/service" -name 'orch.coord-watcher-host.*' ! -name '*.template')" ]
   run env ORCH_PR_REPOS=o/r ORCH_PR_AUTHOR=me /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
-  contains "$output" 'com.combinaut.coord-watcher-pulls watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
+  contains "$output" 'orch.coord-watcher-pulls watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
 }
 
 @test "audit services render at thirty minutes and share the inbox" {
@@ -907,7 +907,7 @@ CASES
     Linux) adapter=linux; suffix=service ;;
   esac
   services="$HOME/.claude/coordinator/watchers/service/$adapter"
-  audit="$services/com.combinaut.coord-watcher-audit.$suffix"
+  audit="$services/orch.coord-watcher-audit.$suffix"
   [ -f "$audit" ]
   contains "$(cat "$audit")" 'coord-audit-watch.sh'
   contains "$(cat "$audit")" '/prod-context'
@@ -915,7 +915,7 @@ CASES
     macos) contains "$(cat "$audit")" '<string>1800</string>' ;;
     linux) contains "$(cat "$audit")" '"--interval" "1800"' ;;
   esac
-  contains "$(cat "$services/com.combinaut.coord-watcher-inbox-context.$suffix")" 'audit'
+  contains "$(cat "$services/orch.coord-watcher-inbox-context.$suffix")" 'audit'
   not_contains "$(cat "$audit")" '@ORCH_'
   contains "$output" 'coord-watcher-audit'
 }

@@ -5,12 +5,12 @@ recorded fixtures, and tests.  Runtime state belongs under `~/.claude/coordinato
 and is deliberately not versioned.
 
 The production service templates are in `service/macos/` and
-`service/linux/`: `com.combinaut.coord-watcher-context` produces context alerts and
-`com.combinaut.coord-watcher-inbox-context` writes context, host, hog, balance, workers, audit, pulls and todo alerts to the feed with `--deliver file --configured-only --modes context host hog balance workers audit pulls todo`; `--configured-only` leaves out audit and pulls while `ORCH_PR_REPOS` or `ORCH_PR_AUTHOR` is empty.
-`com.combinaut.coord-watcher-host` collects host metrics every 60 seconds.
-`com.combinaut.coord-watcher-hog` collects processes every 5 seconds.
-`com.combinaut.coord-watcher-pulls` polls PR events every 150 seconds.
-`com.combinaut.coord-watcher-todo` scans coordinator status files every 60 seconds, writes
+`service/linux/`: `orch.coord-watcher-context` produces context alerts and
+`orch.coord-watcher-inbox-context` writes context, host, hog, balance, workers, audit, pulls and todo alerts to the feed with `--deliver file --configured-only --modes context host hog balance workers audit pulls todo`; `--configured-only` leaves out audit and pulls while `ORCH_PR_REPOS` or `ORCH_PR_AUTHOR` is empty.
+`orch.coord-watcher-host` collects host metrics every 60 seconds.
+`orch.coord-watcher-hog` collects processes every 5 seconds.
+`orch.coord-watcher-pulls` polls PR events every 150 seconds.
+`orch.coord-watcher-todo` scans coordinator status files every 60 seconds, writes
 `~/.claude/coordinator/user-todo.md`, and batches newly added waits-on-user items into one TODO feed line.
 `user-todo.py --follow` renders that file in a pane; use a number key (or number) then Enter to jump. Clicks also jump when the terminal passes SGR mouse events; keys always work. When the items do not fit the pane, they split into pages: `n` or Page Down (or the mouse wheel down) shows the next page, `p` or Page Up the previous one, and the footer names the page. Numbers count across pages. Row counts use terminal cell widths, so wide characters wrap where the terminal wraps them; an item taller than the pane is cut to the pane. A successful jump dismisses that item from the pane and the persisted list; it returns only if its source text changes or it disappears and later reappears. Failed jumps keep the item. The rendered list has no count header: `Nothing waits on you.` is its exact empty state, while the current count is the pane's `todo=<n>` metadata token.
 All eight producers write into `prod-context/`; one notifier shares their cursor,
@@ -139,7 +139,7 @@ The Monitor's follower writes `<inode> <attached> <consumed>` into its heartbeat
 
 ### PR events
 
-`com.combinaut.coord-watcher-pulls` runs `coord-pulls-watch.sh` every 150 seconds with the audit's settings (`ORCH_PR_AUTHOR`, `ORCH_PR_REPOS`, `ORCH_PR_SINCE`, `ORCH_BOT_REVIEWER_LOGIN`, `ORCH_AUDIT_PAGE_PRS`, `ORCH_AUDIT_PAGE_NODES`, and each repo's `audit.merge_gate_checks`, read only for approved PRs on a non-default base). Each poll makes one GraphQL search per page of `ORCH_AUDIT_PAGE_PRS` open PRs, at most 10 `gh api repos/<repo>/pulls/<n>` reads for PRs that left the open list, right after the search in their own 60-second window, fewest failed reads first (the rest wait for the next poll), then one `herdr workspace list`, one `git remote get-url origin` per repository root, and one `git worktree list` for each root whose remote is a watched repository; a root that fails is skipped and named by `PULLS READFAIL owners`, and only PRs of that root's repository (its `owner/name`, or every repository of that name when its remote could not be read) keep their last known owner. A failed read is `PULLS READFAIL pr:<repo>#<n>` and does not stop the others; a PR that left the search but is still open stops being tracked, its active lines cleared; each command times out after 45 seconds. Its first read emits only `PULLS BASELINE [<n> active lines]` and saves active lines and read failures silently; a read failure that persists to the next poll then emits once. Later polls emit `<kind> <repo>#<n> owner=<workspace or ?> <title> [<detail>]` when an `APPROVED`, `APPROVED-OLDHEAD`, `APPROVED-STACKED`, `RED`, `CHANGES`, `THREADS` or `COPILOT` line appears, `<kind> <repo>#<n> cleared` when it goes, and `MERGED` or `CLOSED` when the PR leaves the open list.
+`orch.coord-watcher-pulls` runs `coord-pulls-watch.sh` every 150 seconds with the audit's settings (`ORCH_PR_AUTHOR`, `ORCH_PR_REPOS`, `ORCH_PR_SINCE`, `ORCH_BOT_REVIEWER_LOGIN`, `ORCH_AUDIT_PAGE_PRS`, `ORCH_AUDIT_PAGE_NODES`, and each repo's `audit.merge_gate_checks`, read only for approved PRs on a non-default base). Each poll makes one GraphQL search per page of `ORCH_AUDIT_PAGE_PRS` open PRs, at most 10 `gh api repos/<repo>/pulls/<n>` reads for PRs that left the open list, right after the search in their own 60-second window, fewest failed reads first (the rest wait for the next poll), then one `herdr workspace list`, one `git remote get-url origin` per repository root, and one `git worktree list` for each root whose remote is a watched repository; a root that fails is skipped and named by `PULLS READFAIL owners`, and only PRs of that root's repository (its `owner/name`, or every repository of that name when its remote could not be read) keep their last known owner. A failed read is `PULLS READFAIL pr:<repo>#<n>` and does not stop the others; a PR that left the search but is still open stops being tracked, its active lines cleared; each command times out after 45 seconds. Its first read emits only `PULLS BASELINE [<n> active lines]` and saves active lines and read failures silently; a read failure that persists to the next poll then emits once. Later polls emit `<kind> <repo>#<n> owner=<workspace or ?> <title> [<detail>]` when an `APPROVED`, `APPROVED-OLDHEAD`, `APPROVED-STACKED`, `RED`, `CHANGES`, `THREADS` or `COPILOT` line appears, `<kind> <repo>#<n> cleared` when it goes, and `MERGED` or `CLOSED` when the PR leaves the open list.
 
 The owner is the `owner` tag of the Herdr workspace whose worktree has the PR's head branch checked out, matched by the repository's `owner/name` from its `origin` remote. The owner token always follows `<repo>#<n>`, so a PR title cannot claim one and truncation cannot drop it. The notifier sends each pulls `start` with an owner to `bindings/architect-<owner>.json` through the native channel as `pulls: <kind> <repo>#<n> (start); read the PR on GitHub` — native messages never carry PR titles or details — and writes the full line to the feed; without an owner or a binding the line stays in the feed. A failed owner lookup is `PULLS READFAIL owners`; known owners are kept and events still flow.
 
@@ -167,7 +167,7 @@ The watcher kills nothing.
 
 ## Balance alerts
 
-`com.combinaut.coord-watcher-balance` runs every 60 seconds on both platforms,
+`orch.coord-watcher-balance` runs every 60 seconds on both platforms,
 sharing `prod-context/` and the existing notifier. BALANCE combines load5 > 20,
 slots > `ORCH_HEAVY_SLOTS_MAX` (default 4), worktrees with CPU >= 80% > 4,
 and free memory < 30%. The slot boundary is configured independently; changing
@@ -221,7 +221,7 @@ procedure in `skills/coordinate/SKILL.md`.
 
 ## Workers alerts
 
-`com.combinaut.coord-watcher-workers` runs `coord-worker-watch.sh` every 60 seconds
+`orch.coord-watcher-workers` runs `coord-worker-watch.sh` every 60 seconds
 on both platforms. This gives prompt blocker detection with modest agent-list polling.
 It shares `prod-context/`, the binding and the single inbox notifier with the other producers.
 Every listed agent is included, regardless of role tags. WORKER lines name the
@@ -259,7 +259,7 @@ The audit reports workspace-level blocked lines.
 
 ## Audit alerts
 
-`com.combinaut.coord-watcher-audit` runs `coord-audit-watch.sh` every 1800 seconds
+`orch.coord-watcher-audit` runs `coord-audit-watch.sh` every 1800 seconds
 on macOS and Linux, sharing `prod-context/` and the inbox notifier. Thirty minutes
 keeps GitHub cost modest; the workers service detects agent blockers every minute.
 Watcher default intervals and per-mode heartbeat grace share WATCH_TIMING in

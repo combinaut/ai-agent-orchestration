@@ -265,7 +265,7 @@ Treat smart-model quota as scarce. Prefer worker → worker → smart escalation
 
 Use `herdr agent prompt` only for a brand-new worker's first brief or for follow-up prompts to a worker pane you own that nobody types into. Every message to the Coordinator, an architect, or another live user-facing session uses the native channel: `SendMessage` for Claude and `codex queue --thread <session-UUID-or-exact-Codex-name> --message <text>` for Codex. Never type into a composer a person may be using.
 
-**Recycle-start exception (Claude panes only).** The Coordinator or an architect may use `herdr agent prompt` in a fresh successor pane it just started for `date`, the `/architect …` or `/coordinate …` brief, and startup slash commands such as `/review-prs watch --org combinaut`; slash commands cannot go through `SendMessage`. This exception applies only to that fresh successor's startup.
+**Recycle-start exception (Claude panes only).** The Coordinator or an architect may use `herdr agent prompt` in a fresh successor pane it just started for `date`, the `/architect …` or `/coordinate …` brief, and startup slash commands such as `/review-prs watch --org acme`; slash commands cannot go through `SendMessage`. This exception applies only to that fresh successor's startup.
 
 **Remote Control repair exception (Claude panes only, user OK 2026-10-11).** `/remote-control` may be sent with `herdr agent prompt` to an idle architect pane whose Remote Control failed, only after checking that its composer is empty. Do not send it unless both the idle state and empty composer are verified.
 

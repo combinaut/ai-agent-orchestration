@@ -46,7 +46,7 @@ platform_user_units_dir() { printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/syste
 # A unit still active after it was disabled keeps its file and fails the call.
 platform_remove_stale_services() {
   local file name status=0
-  for file in "$(platform_user_units_dir)"/com.combinaut.coord-*; do
+  for file in "$(platform_user_units_dir)"/orch.coord-*; do
     [ -e "$file" ] || [ -L "$file" ] || continue
     name=${file##*/}
     case "$name" in *.service | *.timer) ;; *) continue ;; esac

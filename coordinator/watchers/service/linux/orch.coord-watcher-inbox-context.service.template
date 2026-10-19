@@ -1,5 +1,5 @@
 [Unit]
-Description=Combinaut coordinator watcher inbox notifier
+Description=Coordinator watcher inbox notifier
 StartLimitIntervalSec=0
 
 [Service]

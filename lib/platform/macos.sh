@@ -19,8 +19,8 @@ platform_migrate_legacy_watchers() {
     fi
     loaded_new="$loaded_new$new_file\n"
   done <<'JOBS'
-com.combinaut.coord-context-v2 com.combinaut.coord-watcher-context
-com.combinaut.coord-inbox-v2-context com.combinaut.coord-watcher-inbox-context
+orch.coord-context-v2 orch.coord-watcher-context
+orch.coord-inbox-v2-context orch.coord-watcher-inbox-context
 JOBS
   if [ -n "$loaded_old" ]; then
     # shellcheck disable=SC2034 # Read by install.sh.
@@ -76,7 +76,7 @@ platform_launch_agents_dir() { printf '%s' "$HOME/Library/LaunchAgents"; }
 platform_remove_stale_services() {
   local file name uid status=0
   uid=$(id -u)
-  for file in "$(platform_launch_agents_dir)"/com.combinaut.coord-*.plist; do
+  for file in "$(platform_launch_agents_dir)"/orch.coord-*.plist; do
     [ -e "$file" ] || [ -L "$file" ] || continue
     name=${file##*/}
     printf '%s\n' "$1" | grep -qxF "$name" && continue

@@ -20,24 +20,38 @@
 	<key>KeepAlive</key>
 	<true/>
 	<key>Label</key>
-	<string>com.combinaut.coord-watcher-host</string>
+	<string>orch.coord-watcher-inbox-context</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/watcher-log-exec.sh</string>
-		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/host.stderr</string>
-		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/coord-host-watch.sh</string>
+		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/notifier.stderr</string>
+		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/notify-inbox.sh</string>
 		<string>--state-dir</string>
 		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context</string>
+		<string>--cursor</string>
+		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/coordinator-deliver.cursor</string>
+		<string>--binding</string>
+		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/bindings/coordinator.json</string>
+		<string>--deliver</string>
+		<string>file</string>
 		<string>--loop</string>
-		<string>--interval</string>
-		<string>60</string>
+		<string>--configured-only</string>
+		<string>--modes</string>
+		<string>context</string>
+		<string>host</string>
+		<string>hog</string>
+		<string>balance</string>
+		<string>workers</string>
+		<string>audit</string>
+		<string>pulls</string>
+		<string>todo</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
-	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/host.stderr</string>
+	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/notifier.stderr</string>
 	<key>StandardOutPath</key>
-	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/host.stdout</string>
+	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/notifier.stdout</string>
 	<key>WorkingDirectory</key>
 	<string>@ORCH_CLAUDE_DIR@/coordinator/watchers</string>
 </dict>

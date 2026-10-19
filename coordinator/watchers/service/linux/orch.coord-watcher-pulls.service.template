@@ -1,9 +1,9 @@
 [Unit]
-Description=Combinaut coordinator hog watcher
+Description=Coordinator PR events watcher
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart="@ORCH_CLAUDE_DIR@/coordinator/watchers/coord-hog-watch.sh" "--state-dir" "@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context" "--loop" "--interval" "5"
+ExecStart="@ORCH_CLAUDE_DIR@/coordinator/watchers/coord-pulls-watch.sh" "--state-dir" "@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context" "--loop" "--interval" "150"
 WorkingDirectory=@ORCH_CLAUDE_DIR@/coordinator/watchers
 Environment="ORCH_CONFIG=@ORCH_CONFIG@"
 Environment="ORCH_PYTHON3=@ORCH_SERVICE_PYTHON@"

@@ -20,7 +20,7 @@
 	<key>KeepAlive</key>
 	<true/>
 	<key>Label</key>
-	<string>com.combinaut.coord-watcher-context</string>
+	<string>orch.coord-watcher-context</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>@ORCH_CLAUDE_DIR@/coordinator/watchers/watcher-log-exec.sh</string>
