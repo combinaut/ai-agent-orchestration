@@ -43,22 +43,19 @@ def _r(key, env, kind, default, doc, **kw):
 DEFAULT_PATH = ['~/.local/bin', '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin']
 
 SETTINGS = [
-    _g('pr.repos', 'ORCH_PR_REPOS', 'list', [], 'GitHub repos (owner/name) whose PRs the audit watches; required by the audit watcher'),
-    _g('pr.author', 'ORCH_PR_AUTHOR', 'str', '', 'GitHub login whose open PRs the audit watches ("@me" works); required by the audit watcher'),
+    _g('pr.author', 'ORCH_PR_AUTHOR', 'str', '', 'GitHub login whose open PRs the audit watches in the repos of the open workspaces ("@me" works); required by the audit watcher'),
     _g('pr.since', 'ORCH_PR_SINCE', 'str', '', 'Only PRs updated on or after this date (YYYY-MM-DD); empty means no date filter'),
     _g('pr.bot_reviewer_login', 'ORCH_BOT_REVIEWER_LOGIN', 'str', 'copilot-pull-request-reviewer', 'Bot whose "Needs a closer look" review raises a COPILOT line'),
-    _g('audit.git_watch_repos', 'ORCH_GIT_WATCH_REPOS', 'list', [], 'Local clones checked for PACKS and WORKTREES pile-ups; their .orchestration.local.toml applies to PRs of the repo they clone', paths=True),
-    _g('audit.packs_max', 'ORCH_PACKS_MAX', 'int', 50, 'Pack files in a watched clone before a PACKS line'),
-    _g('audit.worktrees_max', 'ORCH_WORKTREES_MAX', 'int', 40, 'Worktrees in a watched clone before a WORKTREES line'),
+    _g('audit.packs_max', 'ORCH_PACKS_MAX', 'int', 50, 'Pack files in a clone of the open work before a PACKS line'),
+    _g('audit.worktrees_max', 'ORCH_WORKTREES_MAX', 'int', 40, 'Worktrees in a clone of the open work before a WORKTREES line'),
     _g('audit.page_prs', 'ORCH_AUDIT_PAGE_PRS', 'int', 80, 'PR search page size (1-100)'),
     _g('audit.page_nodes', 'ORCH_AUDIT_PAGE_NODES', 'int', 100, 'Nested GitHub query page size (1-100); a cut-off result prints TRUNCATED'),
     _g('legacy.scans_max', 'ORCH_LEGACY_SCANS_MAX', 'int', 10, 'PRs scanned for legacy code per audit pass; the rest wait for the next pass'),
     _g('legacy.reads_max', 'ORCH_LEGACY_READS_MAX', 'int', 20, 'File reads per PR scan for files GitHub returns without a patch'),
-    _g('legacy.map_repo', 'ORCH_LEGACY_MAP_REPO', 'str', '', 'Clone the daily legacy-map job reads; empty picks the audit.git_watch_repos clone whose repo settings turn legacy.scan on', paths=True),
+    _g('legacy.map_repo', 'ORCH_LEGACY_MAP_REPO', 'str', '', 'Clone the daily legacy-map job reads; empty picks, at install time, the clone of the open work whose repo settings turn legacy.scan on', paths=True),
     _g('heavy_slots.max', 'ORCH_HEAVY_SLOTS_MAX', 'int', 4, 'Most heavy jobs at once on the machine'),
     _g('heavy_slots.dir', 'ORCH_HEAVY_SLOTS_DIR', 'str', '', 'Slot directory; empty means ~/.claude/heavy-slots', paths=True),
     _g('heavy_slots.kill_grace', 'ORCH_HEAVY_SLOTS_KILL_GRACE', 'int', 10, 'Seconds a stopped job gets before it is killed'),
-    _g('focus.skip_architects', 'ORCH_FOCUS_SKIP_ARCHITECTS', 'list', [], 'Architect names left out of focus reports', sep=','),
     _g('models.coordinator', 'ORCH_COORDINATOR_MODEL', 'str', 'claude-opus-5-5', 'Model of the Coordinator'),
     _g('models.architect', 'ORCH_ARCHITECT_MODEL', 'str', 'claude-opus-5-5', 'Model of the architects'),
     _g('models.codex_worker', 'ORCH_CODEX_WORKER_MODEL', 'str', '<codex-worker-model>', 'Codex model for routine work; replace the placeholder'),
@@ -107,6 +104,10 @@ SETTINGS = [
 
 BY_KEY = {s.key: s for s in SETTINGS}
 BY_ENV = {s.env: s for s in SETTINGS}
+
+
+DROPPED = {'pr.repos': 'ORCH_PR_REPOS', 'audit.git_watch_repos': 'ORCH_GIT_WATCH_REPOS',
+           'focus.skip_architects': 'ORCH_FOCUS_SKIP_ARCHITECTS'}
 
 
 class ConfigError(ValueError):
@@ -186,6 +187,9 @@ def validate(data, label, scope):
         for name, value in entries.items():
             key = f'{table}.{name}'
             setting = BY_KEY.get(key)
+            if setting is None and key in DROPPED:
+                warn(f'{label}: {key}: not read (repos and architects come from the open work); run install.sh to drop it')
+                continue
             if setting is None:
                 raise ConfigError(f'{label}: {key}: unknown key')
             if setting.scope != scope:
@@ -325,10 +329,9 @@ def origin_matches(path, repo):
     return bool(url) and re.search(REMOTE_RE.format(re.escape(repo)), url, re.I) is not None
 
 
-def known_clone(repo, environ=None):
-    """The audit.git_watch_repos clone whose origin is repo, else None."""
-    environ = os.environ if environ is None else environ
-    for path in environ.get('ORCH_GIT_WATCH_REPOS', '').split():
+def known_clone(repo, clones):
+    """The clone among clones whose origin is repo, else None."""
+    for path in clones:
         if origin_matches(path, repo):
             return path
     return None
@@ -411,7 +414,7 @@ def markdown_table(scope):
 
 OLD_NAMES = {'ORCH_V2_LAUNCHD': 'ORCH_WATCHERS_SERVICE', 'ORCH_V2_PR_SCOPE': 'ORCH_WATCHERS_PR_SCOPE',
              'ORCH_V2_WORKER_MODEL': 'ORCH_WATCHERS_WORKER_MODEL', 'ORCH_V2_PRIMARY_REPO': 'ORCH_WATCHERS_PRIMARY_REPO'}
-REMOVED = {'ORCH_BIG_REPO_REMOTES', 'ORCH_LEGACY_REPOS'}
+REMOVED = {'ORCH_BIG_REPO_REMOTES', 'ORCH_LEGACY_REPOS', *DROPPED.values()}
 ASSIGN = re.compile(r'^\s*(?:export\s+)?(ORCH_[A-Z0-9_]*)=')
 
 
@@ -592,13 +595,13 @@ def migrate(env_path, toml_path, snippet_dir):
               '# An exported ORCH_* variable wins over this file.\n')
     text = render(global_values, {s: comments.get(s.env, []) for s in global_values}, header)
     validate(parse(text, str(toml_path)), str(toml_path), 'global')
-    environ = dict(os.environ, ORCH_GIT_WATCH_REPOS=values.get('ORCH_GIT_WATCH_REPOS', ''))
+    clones = values.get('ORCH_GIT_WATCH_REPOS', '').split()
     layers = sorted(repo_layers(values, report).items())
     for repo, layer in layers:
         label = f'{repo} repo settings'
         validate(parse(render(layer), label), label, 'repo')
     for repo, layer in layers:
-        write_repo_layer(repo, layer, known_clone(repo, environ), snippet_dir, report)
+        write_repo_layer(repo, layer, known_clone(repo, clones), snippet_dir, report)
     Path(toml_path).write_text(text)
     return [f'converted {env_path} -> {toml_path}'] + report
 
@@ -646,6 +649,63 @@ def set_key(path, env, text):
     Path(path).write_text(text_out)
 
 
+def bracket_depth(text):
+    depth, quote, index = 0, None, 0
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == '\\' and quote == '"':
+                index += 1
+            elif char == quote:
+                quote = None
+        elif char in '"\'':
+            quote = char
+        elif char == '#':
+            break
+        elif char in '[{':
+            depth += 1
+        elif char in ']}':
+            depth -= 1
+        index += 1
+    return depth
+
+
+def drop_keys(path):
+    """Removes the DROPPED keys and the comment lines directly above them; returns the removed keys."""
+    text = Path(path).read_text()
+    before = parse(text, str(path))
+    lines, kept, removed, table, skip = text.splitlines(), [], [], None, 0
+    header = re.compile(r'^\s*\[\s*(["\']?)([A-Za-z0-9_-]+)\1\s*\]\s*(#.*)?$')
+    key = re.compile(r'^\s*(?:(["\']?)([A-Za-z0-9_-]+)\1\s*\.\s*)?(["\']?)([A-Za-z0-9_-]+)\3\s*=(.*)$')
+    for line in lines:
+        if skip > 0:
+            skip += bracket_depth(line)
+            continue
+        if match := header.match(line):
+            table = match[2]
+        elif (match := key.match(line)) and f'{match[2] or table}.{match[4]}' in DROPPED:
+            removed.append(f'{match[2] or table}.{match[4]}')
+            while kept and kept[-1].lstrip().startswith('#'):
+                kept.pop()
+            skip = bracket_depth(match[5])
+            continue
+        kept.append(line)
+    if not removed:
+        return []
+    text_out = '\n'.join(kept) + '\n'
+    problem = ConfigError(f'{path}: cannot drop {" ".join(removed)} in place; edit it by hand')
+    try:
+        after = parse(text_out, str(path))
+    except ConfigError:
+        raise problem from None
+    expected = {table: {name: value for name, value in entries.items() if f'{table}.{name}' not in DROPPED}
+                for table, entries in before.items() if isinstance(entries, dict)}
+    if {table: entries for table, entries in after.items() if isinstance(entries, dict)} != expected:
+        raise problem
+    Path(path).write_text(text_out)
+    return removed
+
+
 def file_keys(path, scope):
     return [s.env for s in read_file(path, scope)]
 
@@ -672,13 +732,15 @@ def main(argv):
         elif command == 'set' and len(argv) >= 5 and len(argv) % 2 == 1:
             for name, value in zip(argv[3::2], argv[4::2]):
                 set_key(argv[2], name, value)
+        elif command == 'drop' and len(argv) == 3:
+            print(' '.join(drop_keys(argv[2])))
         elif command == 'keys' and len(argv) == 3:
             print(' '.join(file_keys(argv[2], 'global')))
         elif command == 'names' and len(argv) == 2:
             print(' '.join(env_names()))
         else:
             print('usage: orch_settings.py global <file> | repo <dir> | migrate <env> <toml> <snippet-dir> '
-                  '| set <file> <ORCH_NAME> <value>... | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
+                  '| set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
             return 2
     except ConfigError as error:
         print(f'ERROR: {error}', file=sys.stderr)

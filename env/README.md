@@ -26,6 +26,17 @@ Available to both:
 | `link_entry <source> <dest>` | Symlinks `dest` to `source`; anything else in the way is backed up |
 | `refuse_local_changes <dir> <label>` | Exits when a git checkout has uncommitted edits or commits not on `origin` |
 
+## Open work
+
+`env/<name>/open_work.py` defines `open_work(command)`, which the watchers call through `coordinator/watchers/discovery.py`; watcher code never asks the env directly. `command(*argv)` runs a command and returns its output, raising on failure. It returns:
+
+| Key | Rows |
+|---|---|
+| `workspaces` | `id`, `label`, `owner` (the architect's workspace id), `status`, `checkout` (the checked-out directory), `repo_root` (the main clone) |
+| `panes` | `workspace`, `pane`, `title`, `role`, `agent`, `status`, `cwd` |
+
+An env without the file, or `install.env = "none"`, has no open work: the watchers use the last saved set.
+
 ## herdr
 
 - `env_check`: checks `curl` and `python3`, with fixes for macOS or Linux.
@@ -33,5 +44,7 @@ Available to both:
 - Clones `https://github.com/combinaut/herdr-radar` into `ORCH_RADAR_PATH` (default `~/.claude/herdr-radar`), repairs a foreign origin, and checks out `env/herdr/radar.pin`. Local edits or unpushed commits are refused.
 - Creates `~/.claude/herdr-radar-runtime`, regardless of `ORCH_RADAR_PATH`, with links to the pinned checkout and a generated `herdr-plugin.toml` whose commands use the absolute mise Node executable. Runtime-root symlinks are backed up and manifest entries are replaced atomically, preserving external targets. Dangling runtime links are pruned. Manifest rendering fails if no Node command is rewritten or a bare Node command remains. The checkout stays clean. Herdr uses that interpreter for actions, startup, events, and the daemon, including in an already-running server.
 - Links the runtime as `hhdebb.herdr-radar`. A plugin from another source is uninstalled and replaced, with one printed replacement line. Starts the daemon every run, in a new session through `platform_run_detached`, and stops it first when the pin or runtime manifest changes. Herdr returns from `plugin action invoke` before the action ends, so the installer waits for the old daemon to exit before starting, then asks this Herdr session's daemon endpoint for a pid that is not the old one (one retry) and fails if none answers. Tune with `ORCH_RADAR_WAIT_TRIES` and `ORCH_RADAR_WAIT_SLEEP`. Herdr's `config.toml` (`$XDG_CONFIG_HOME/herdr`, default `~/.config/herdr`) is compared outside Radar's complete `# >>> herdr-radar … block` sections (an unmatched opening marker counts as your content) before and after the start; a change there saves the previous file under `BACKUP_DIR` and prints `WARNING`.
+
+- `open_work.py`: one `herdr workspace list` and one `herdr pane list`; a workspace without a Herdr worktree takes the checkout of its first pane's directory.
 
 To move either pin, change `env/herdr/radar.pin` (a full commit SHA from `combinaut/herdr-radar`) or `env/herdr/node.pin` (an exact Node version) in a PR.

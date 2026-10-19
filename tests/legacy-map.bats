@@ -215,9 +215,10 @@ make_webapp() {
   esac
 }
 
-@test "the legacy map repo defaults to the watched clone whose repo settings turn the legacy scan on" {
+@test "the legacy map repo defaults to the open-work clone whose repo settings turn the legacy scan on" {
   fresh_install
-  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket ORCH_GIT_WATCH_REPOS "/elsewhere/other $BIG_REPO"
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket
+  saved_open_work /elsewhere/other "$BIG_REPO"
   printf '%s\n' '[legacy]' 'scan = true' >"$BIG_REPO/.orchestration.local.toml"
   use_service_state
   install_ok
@@ -227,21 +228,23 @@ make_webapp() {
   esac
 }
 
-@test "a watched clone without the legacy scan leaves the legacy map default off" {
+@test "an open-work clone without the legacy scan leaves the legacy map default off" {
   fresh_install
-  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket ORCH_GIT_WATCH_REPOS "$BIG_REPO"
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket
+  saved_open_work "$BIG_REPO"
   install_ok
   contains "$output" 'daily legacy map job (set ORCH_LEGACY_MAP_REPO'
   [ -z "$(find "$HOME/.claude/coordinator/service" -type f)" ]
 }
 
-@test "a broken repo file in a watched clone stops install before the legacy map job changes" {
+@test "a broken repo file in an open-work clone stops install before the legacy map job changes" {
   fresh_install
-  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket ORCH_GIT_WATCH_REPOS "$BIG_REPO"
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket
+  saved_open_work "$BIG_REPO"
   printf '%s\n' '[heavy_slots]' 'max = 2' >"$BIG_REPO/.orchestration.local.toml"
   run /bin/bash "$CLONE/install.sh"
   [ "$status" -ne 0 ]
   contains "$output" "/webapp/.orchestration.local.toml: heavy_slots.max: is a global setting"
-  contains "$output" 'cannot read the repo settings of the audit.git_watch_repos clones'
+  contains "$output" 'cannot read the repo settings of the open-work clones'
   not_contains "$output" 'daily legacy map job'
 }

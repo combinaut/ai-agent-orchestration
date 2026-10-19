@@ -3,6 +3,7 @@
 import alert_policy
 import argparse
 import audit
+import discovery
 from datetime import datetime, timezone
 import fcntl
 import importlib.util
@@ -35,7 +36,7 @@ CAPPED_HISTORY = ("audit", "pulls")
 READ_FAILURES = 3
 PULLS_DEPARTED_MAX = 10
 PULLS_DEPARTED_SECONDS = 60
-GITHUB_REMOTE = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
+GITHUB_REMOTE = discovery.GITHUB_REMOTE
 
 BALANCE_LIMITS = {"free": 30, "slots": 4, "heavy": 4, "load5": 20, "cpu": 80}
 
@@ -408,7 +409,8 @@ def collect_pulls(command, before, clock=time.monotonic):
     """Departed-PR reads run right after the search with their own reserved window, before the owner lookup."""
     known = (before or {}).get("prs", {})
     page_nodes = audit.positive_setting("ORCH_AUDIT_PAGE_NODES", 100, 100)
-    prs = audit.fetch_prs(command, page_nodes)
+    found = discovery.repos(command)
+    prs = audit.fetch_prs(command, page_nodes, found["repos"])
     searched = {f"{pr['repository']['nameWithOwner']}#{pr['number']}" for pr in prs}
     departed, failed, attempted = {}, [], set()
     pending = sorted(set(known) - searched, key=lambda key: (known[key].get("misses", 0), key))
@@ -432,7 +434,7 @@ def collect_pulls(command, before, clock=time.monotonic):
     if roots:
         unreadable = ["owners"]
     unresolved = set(roots)
-    current, settings, settings_failed = {}, {}, []
+    current, settings, settings_failed = {}, {"clones": found["clones"]}, []
     for pr in prs:
         key = f"{pr['repository']['nameWithOwner']}#{pr['number']}"
 

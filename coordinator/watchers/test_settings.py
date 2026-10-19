@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from test_support import IsolatedTestCase
+from test_support import IsolatedTestCase, open_work
 import audit
 import watchers as w
 
@@ -49,14 +49,13 @@ class SettingsTest(IsolatedTestCase):
 
 class GlobalFileTest(SettingsTest):
     def test_a_valid_file_gives_the_orch_strings_scripts_read(self):
-        path = self.write('c.toml', '[pr]\nrepos = ["a/b", "c/d"]\nauthor = "me"\n'
+        path = self.write('c.toml', '[pr]\nauthor = "me"\n'
                                     '[recycle]\npark_idle = true\npct = 55.5\ntokens = 1000\n'
-                                    '[focus]\nskip_architects = ["A", "B"]\n'
                                     '[watchers]\npath = ["~/bin", "/usr/bin"]\n'
                                     '[pr_tabs]\ntopics = [{ name = "W", color = "blue", repo = ["^w$"] }]\n')
         self.assertEqual(s.load_global(path), {
-            'ORCH_PR_REPOS': 'a/b c/d', 'ORCH_PR_AUTHOR': 'me', 'ORCH_PARK_IDLE': '1', 'ORCH_RECYCLE_PCT': '55.5',
-            'ORCH_RECYCLE_TOKENS': '1000', 'ORCH_FOCUS_SKIP_ARCHITECTS': 'A,B', 'ORCH_PATH': f'{Path.home()}/bin:/usr/bin',
+            'ORCH_PR_AUTHOR': 'me', 'ORCH_PARK_IDLE': '1', 'ORCH_RECYCLE_PCT': '55.5',
+            'ORCH_RECYCLE_TOKENS': '1000', 'ORCH_PATH': f'{Path.home()}/bin:/usr/bin',
             'ORCH_PR_TABS_TOPICS': '[{"name":"W","color":"blue","repo":["^w$"]}]'})
 
     def test_a_missing_file_sets_nothing(self):
@@ -73,13 +72,11 @@ class GlobalFileTest(SettingsTest):
             '[heavy_slots]\nmax = "4"\n': 'heavy_slots.max: must be an integer, got str',
             '[heavy_slots]\nmax = true\n': 'heavy_slots.max: must be an integer, got bool',
             '[recycle]\npark_idle = 1\n': 'recycle.park_idle: must be true or false, got int',
-            '[pr]\nrepos = "a/b"\n': 'pr.repos: must be a list of strings, got str',
-            '[pr]\nrepos = [1]\n': 'pr.repos: must be a list of strings, got list',
+            '[watchers]\npath = "a/b"\n': 'watchers.path: must be a list of strings, got str',
+            '[watchers]\npath = [1]\n': 'watchers.path: must be a list of strings, got list',
             '[pr]\nauthor = "a\\u0000b"\n': 'pr.author: contains a NUL character',
-            '[audit]\ngit_watch_repos = ["/tmp/project clone"]\n': 'audit.git_watch_repos: entry "/tmp/project clone" is empty or contains whitespace',
-            '[focus]\nskip_architects = ["A,B"]\n': 'focus.skip_architects: entry "A,B" is empty or contains ","',
             '[watchers]\npath = ["/a:/b"]\n': 'watchers.path: entry "/a:/b" is empty or contains ":"',
-            '[pr]\nrepos = [""]\n': 'pr.repos: entry "" is empty',
+            '[watchers]\npath = [""]\n': 'watchers.path: entry "" is empty',
         }
         for text, problem in cases.items():
             with self.subTest(text=text):
@@ -93,8 +90,17 @@ class GlobalFileTest(SettingsTest):
         self.assertIn('.orchestration.toml', message)
 
     def test_a_global_key_in_a_repo_file_is_an_error(self):
-        message = self.error('[pr]\nrepos = []\n', 'repo')
-        self.assertIn('pr.repos: is a global setting; set it in the global ~/.claude/orchestration.toml', message)
+        message = self.error('[pr]\nauthor = "me"\n', 'repo')
+        self.assertIn('pr.author: is a global setting; set it in the global ~/.claude/orchestration.toml', message)
+
+    def test_a_dropped_key_is_skipped_with_a_warning(self):
+        stderr = io.StringIO()
+        path = self.write('c.toml', '[pr]\nrepos = ["a/b"]\nauthor = "me"\n[audit]\ngit_watch_repos = []\n'
+                                    '[focus]\nskip_architects = ["A"]\n')
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(s.load_global(path), {'ORCH_PR_AUTHOR': 'me'})
+        for key in ('pr.repos', 'audit.git_watch_repos', 'focus.skip_architects'):
+            self.assertIn(f'WARNING: {path}: {key}: not read', stderr.getvalue())
 
     def test_a_repo_list_entry_with_its_separator_is_an_error(self):
         message = self.error('[legacy]\nexempt_paths = ["a b.js"]\n', 'repo')
@@ -110,14 +116,46 @@ class GlobalFileTest(SettingsTest):
 
 class SetKeyTest(SettingsTest):
     def test_set_key_edits_dotted_quoted_and_plain_forms_in_place(self):
-        for text in ('# mine\npr.repos = []\n[herdr]\nbin = "x"\n', '# mine\n["pr"]\n"repos" = []\n[herdr]\nbin = "x"\n',
-                     '# mine\n[pr]\nrepos = []\n[herdr]\nbin = "x"\n', '# mine\n"pr"."repos" = []\n[herdr]\nbin = "x"\n'):
+        for text in ('# mine\npr.since = ""\n[herdr]\nbin = "x"\n', '# mine\n["pr"]\n"since" = ""\n[herdr]\nbin = "x"\n',
+                     '# mine\n[pr]\nsince = ""\n[herdr]\nbin = "x"\n', '# mine\n"pr"."since" = ""\n[herdr]\nbin = "x"\n'):
             with self.subTest(text=text):
                 path = self.write('c.toml', text)
-                s.set_key(path, 'ORCH_PR_REPOS', 'a/b c/d')
+                s.set_key(path, 'ORCH_PR_SINCE', '2026-10-01')
                 s.set_key(path, 'ORCH_PR_AUTHOR', 'me')
-                self.assertEqual(s.load_global(path), {'ORCH_PR_REPOS': 'a/b c/d', 'ORCH_PR_AUTHOR': 'me', 'ORCH_HERDR_BIN': 'x'})
+                self.assertEqual(s.load_global(path), {'ORCH_PR_SINCE': '2026-10-01', 'ORCH_PR_AUTHOR': 'me', 'ORCH_HERDR_BIN': 'x'})
                 self.assertTrue(path.read_text().startswith('# mine\n'))
+
+
+class DropKeysTest(SettingsTest):
+    def test_drop_removes_every_form_and_its_comment_and_keeps_the_rest(self):
+        text = ('# mine\n[pr]\n# GitHub repos\nrepos = [\n  "a/b",  # first\n  "c/d",\n]\nauthor = "me"\n'
+                '[audit]\n"git_watch_repos" = ["/x"]\npacks_max = 9\n'
+                '[focus]\n# Architect names left out of focus reports\nskip_architects = []\n'
+                '[herdr]\nbin = "x"  # kept\n')
+        path = self.write('c.toml', text)
+        self.assertEqual(s.drop_keys(path), ['pr.repos', 'audit.git_watch_repos', 'focus.skip_architects'])
+        self.assertEqual(path.read_text(), '# mine\n[pr]\nauthor = "me"\n[audit]\npacks_max = 9\n[focus]\n'
+                                           '[herdr]\nbin = "x"  # kept\n')
+        self.assertEqual(s.drop_keys(path), [])
+
+    def test_drop_handles_dotted_keys(self):
+        path = self.write('c.toml', "pr.repos = ['a/b']\npr.author = 'me'\n")
+        self.assertEqual(s.drop_keys(path), ['pr.repos'])
+        self.assertEqual(path.read_text(), "pr.author = 'me'\n")
+
+    def test_drop_leaves_a_file_without_dropped_keys_untouched(self):
+        path = self.write('c.toml', '[pr]\nauthor = "me"')
+        self.assertEqual(s.drop_keys(path), [])
+        self.assertEqual(path.read_text(), '[pr]\nauthor = "me"')
+
+    def test_drop_refuses_an_edit_it_cannot_make_cleanly(self):
+        for text in ("[pr]\nrepos = '''\nauthor = \"x\"\n'''\nauthor = \"me\"\n",
+                     "[pr]\nrepos = ['''\n[x]\n''']\nauthor = \"me\"\n"):
+            with self.subTest(text=text):
+                path = self.write('c.toml', text)
+                with self.assertRaisesRegex(s.ConfigError, 'cannot drop pr.repos in place'):
+                    s.drop_keys(path)
+                self.assertEqual(path.read_text(), text)
 
 
 class RepoFileTest(SettingsTest):
@@ -184,7 +222,7 @@ class RemoteReadTest(SettingsTest):
 
     def test_the_committed_file_comes_from_the_base_ref(self):
         run, calls = self.command('[legacy]\nscan = true\nextra_pattern = "shared"\n')
-        with patch.dict(os.environ, {'ORCH_GIT_WATCH_REPOS': ''}):
+        with open_work():
             values = audit.repo_settings(run, 'acme/webapp', 'feature/base', {})
         self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXTRA_PATTERN']), ('1', 'shared'))
         self.assertEqual(calls[0][-1], 'repos/acme/webapp/contents/.orchestration.toml?ref=feature%2Fbase')
@@ -195,7 +233,7 @@ class RemoteReadTest(SettingsTest):
         other = self.repo('other', 'https://github.com/acme/other.git')
         (other / s.LOCAL_FILE).write_text('[legacy]\nextra_pattern = "wrong clone"\n')
         run, _ = self.command('[legacy]\nscan = true\nextra_pattern = "shared"\n')
-        with patch.dict(os.environ, {'ORCH_GIT_WATCH_REPOS': f'{other} {clone}'}):
+        with open_work('', f'{other} {clone}'):
             values = audit.repo_settings(run, 'acme/webapp', 'main', {})
         self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXTRA_PATTERN']), ('1', 'mine'))
 
@@ -206,26 +244,26 @@ class RemoteReadTest(SettingsTest):
         (main / s.LOCAL_FILE).write_text('[legacy]\nscan = true\nextra_pattern = "main"\n')
         (self.base / 'side' / s.LOCAL_FILE).write_text('[legacy]\nextra_pattern = "side"\n')
         run, _ = self.command(None)
-        with patch.dict(os.environ, {'ORCH_GIT_WATCH_REPOS': str(self.base / 'side')}):
+        with open_work('', str(self.base / 'side')):
             values = audit.repo_settings(run, 'acme/webapp', 'main', {})
         self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXTRA_PATTERN']), ('1', 'side'))
 
     def test_without_a_known_clone_only_the_committed_file_applies(self):
         run, _ = self.command(None)
-        with patch.dict(os.environ, {'ORCH_GIT_WATCH_REPOS': str(self.base / 'missing')}):
+        with open_work('', str(self.base / 'missing')):
             values = audit.repo_settings(run, 'acme/webapp', 'main', {})
         self.assertEqual(values['ORCH_LEGACY_SCAN'], '0')
 
     def test_a_broken_committed_file_is_a_read_error_naming_repo_and_ref(self):
-        run, _ = self.command('[pr]\nrepos = []\n')
-        with patch.dict(os.environ, {'ORCH_GIT_WATCH_REPOS': ''}):
-            with self.assertRaisesRegex(ValueError, r'acme/webapp@main:\.orchestration\.toml: pr\.repos: is a global setting'):
+        run, _ = self.command('[pr]\nauthor = "me"\n')
+        with open_work():
+            with self.assertRaisesRegex(ValueError, r'acme/webapp@main:\.orchestration\.toml: pr\.author: is a global setting'):
                 audit.repo_settings(run, 'acme/webapp', 'main', {})
 
     def test_one_read_per_repo_and_ref(self):
         run, calls = self.command('')
         cache = {}
-        with patch.dict(os.environ, {'ORCH_GIT_WATCH_REPOS': ''}):
+        with open_work():
             for _ in range(3):
                 audit.repo_settings(run, 'acme/webapp', 'main', cache)
             audit.repo_settings(run, 'acme/webapp', 'next', cache)
@@ -246,7 +284,7 @@ class PullsSettingsTest(SettingsTest):
             if args[:3] == ('gh', 'api', 'graphql'):
                 return json.dumps(dict(data=dict(search=dict(nodes=[pr], pageInfo=dict(hasNextPage=False)))))
             return json.dumps(dict(result=dict(workspaces=[])))
-        with patch.dict(os.environ, {'ORCH_PR_AUTHOR': 'author', 'ORCH_PR_REPOS': 'owner/product', 'ORCH_GIT_WATCH_REPOS': ''}):
+        with patch.dict(os.environ, {'ORCH_PR_AUTHOR': 'author'}), open_work('owner/product'):
             os.environ.pop('ORCH_MERGE_GATE_CHECKS', None)
             pulls = w.collect_pulls(command, None)
         line = next(iter(pulls['prs'].values()))['lines'].get('APPROVED-STACKED', '')
@@ -265,10 +303,10 @@ class PullsSettingsTest(SettingsTest):
             if args[:3] == ('gh', 'api', 'graphql'):
                 return json.dumps(dict(data=dict(search=dict(nodes=[pr], pageInfo=dict(hasNextPage=False)))))
             return json.dumps(dict(result=dict(workspaces=[])))
-        with patch.dict(os.environ, {'ORCH_PR_AUTHOR': 'author', 'ORCH_PR_REPOS': 'owner/product', 'ORCH_GIT_WATCH_REPOS': ''}):
+        with patch.dict(os.environ, {'ORCH_PR_AUTHOR': 'author'}), open_work('owner/product'):
             os.environ.pop('ORCH_MERGE_GATE_CHECKS', None)
             before, _ = w.reduce_pulls(None, w.collect_pulls(command, None))
-            repo_file[0] = '[pr]\nrepos = []\n'
+            repo_file[0] = '[pr]\nauthor = "me"\n'
             broken, events = w.reduce_pulls(before, w.collect_pulls(command, before))
             self.assertEqual(events, ['PULLS READFAIL settings:owner/product#7'])
             repo_file[0] = '[audit]\nmerge_gate_checks = ["Full gate"]\n'

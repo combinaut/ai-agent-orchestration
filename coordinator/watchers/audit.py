@@ -11,6 +11,7 @@ import urllib.parse
 from pathlib import Path
 from legacy_rules import FRONTEND_EXTENSIONS, RULES_PATH, parse_rules
 import alert_policy
+import discovery
 from watcher_platform import MissingMetric, herdr_bin, read_slots
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'lib'))
 import orch_settings
@@ -67,11 +68,16 @@ def builtin_fingerprint(settings=None):
     return 'builtin:' + hashlib.sha256(values.encode()).hexdigest()
 
 
-def fetch_prs(command, page_nodes=None):
-    author, repos = os.environ.get('ORCH_PR_AUTHOR', ''), os.environ.get('ORCH_PR_REPOS', '')
-    if not author or not repos:
-        raise ValueError('ORCH_PR_AUTHOR and ORCH_PR_REPOS are required')
-    query = 'is:pr is:open author:' + author + ''.join(' repo:' + repo for repo in repos.split())
+def fetch_prs(command, page_nodes=None, repos=None):
+    """Open PRs of ORCH_PR_AUTHOR in repos, by default the repos of the open work."""
+    author = os.environ.get('ORCH_PR_AUTHOR', '')
+    if not author:
+        raise ValueError('ORCH_PR_AUTHOR is required')
+    if repos is None:
+        repos = discovery.repos(command)['repos']
+    if not repos:
+        return []
+    query = 'is:pr is:open author:' + author + ''.join(' repo:' + repo for repo in repos)
     if os.environ.get('ORCH_PR_SINCE'):
         query += ' updated:>=' + os.environ['ORCH_PR_SINCE']
     args = ['gh', 'api', 'graphql', '-f', 'query=' + QUERY, '-f', 'q=' + query,
@@ -282,8 +288,17 @@ def files_added(pages):
     return [(path, text) for path, _, text, added in files_lines(pages) if added]
 
 
+def known_clones(command, cache):
+    if 'clones' not in cache:
+        try:
+            cache['clones'] = discovery.repos(command)['clones']
+        except discovery.Unavailable:
+            cache['clones'] = []
+    return cache['clones']
+
+
 def repo_settings(command, repo, ref, cache):
-    """Repo settings for a PR: the base ref's committed file, then the personal file of a watched clone."""
+    """Repo settings for a PR: the base ref's committed file, then the personal file of its open-work clone."""
     key = ('settings', repo, ref)
     if key not in cache:
         try:
@@ -296,7 +311,7 @@ def repo_settings(command, repo, ref, cache):
                 if not NOT_FOUND.search(error_detail(error)):
                     raise
                 text = ''
-            cache[key] = orch_settings.load_remote(repo, ref, text, orch_settings.known_clone(repo))
+            cache[key] = orch_settings.load_remote(repo, ref, text, orch_settings.known_clone(repo, known_clones(command, cache)))
         except READ_ERRORS as error:
             cache[key] = error
     if isinstance(cache[key], Exception):
@@ -458,10 +473,12 @@ def legacy_entries(command, prs, cache, rules=None):
     return entries
 
 
-def github_lines(command, cache=None, entries=None):
+def github_lines(command, cache=None, entries=None, work=None):
     page_nodes = positive_setting('ORCH_AUDIT_PAGE_NODES', 100, 100)
-    prs = fetch_prs(command, page_nodes)
-    rules = {}
+    if work is None:
+        work = discovery.repos(command)
+    prs = fetch_prs(command, page_nodes, work['repos'])
+    rules = {'clones': work['clones']}
     found = legacy_entries(command, prs, cache or {}, rules)
     if entries is not None:
         entries.update(found)
@@ -524,11 +541,19 @@ def repository_lines(command, repo):
 
 
 def collect(command, slots=None, before=None):
-    legacy = {}
-    sources = {'github': lambda: github_lines(command, (before or {}).get('legacy'), legacy), 'herdr': lambda: workspace_lines(command)}
-    sources.update({'git:' + repo: lambda repo=repo: repository_lines(command, repo)
-                    for repo in os.environ.get('ORCH_GIT_WATCH_REPOS', '').split()})
-    current, unreadable = {}, {}
+    """Sources of one audit pass; without open work or a saved set the github and git sources stay unreadable."""
+    legacy, current, unreadable = {}, {}, {}
+    try:
+        found = discovery.repos(command)
+    except discovery.Unavailable as error:
+        found = None
+        unreadable['github'] = f'READFAIL github: {error_detail(error)}'
+        unreadable.update({source: f'READFAIL {source}: {error_detail(error)}'
+                           for source in (before or {}).get('sources', {}) if source.startswith('git:')})
+    sources = {'herdr': lambda: workspace_lines(command)}
+    if found is not None:
+        sources['github'] = lambda: github_lines(command, (before or {}).get('legacy'), legacy, found)
+        sources.update({'git:' + repo: lambda repo=repo: repository_lines(command, repo) for repo in found['clones']})
     for source, read in sources.items():
         try:
             current[source] = sorted(set(read()))

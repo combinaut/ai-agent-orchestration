@@ -36,13 +36,12 @@ PY
 }
 
 @test "a valid file sets the settings scripts read" {
-  printf '[pr]\nrepos = ["a/b", "c/d"]\nauthor = "me"\n[recycle]\npark_idle = true\n[watchers]\npath = ["~/bin", "/usr/bin"]\n' >"$ORCH_CONFIG"
+  printf '[pr]\nauthor = "me"\n[recycle]\npark_idle = true\n[watchers]\npath = ["~/bin", "/usr/bin"]\n' >"$ORCH_CONFIG"
 
   run load_settings global
 
   [ "$status" -eq 0 ]
-  [ "$output" = "ORCH_PR_REPOS=a/b c/d
-ORCH_PR_AUTHOR=me
+  [ "$output" = "ORCH_PR_AUTHOR=me
 ORCH_PARK_IDLE=1
 ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
 }
@@ -175,12 +174,10 @@ CASES
   # shellcheck disable=SC2016 # The old loader expands $HOME when it sources the file.
   cat >"$old" <<'ENV'
 # Watched repos
-ORCH_PR_REPOS="a/b c/d"
 ORCH_PR_AUTHOR="me"
 ORCH_PR_SINCE=""
 ORCH_PACKS_MAX="50"
 ORCH_HEAVY_SLOTS_MAX="8"
-ORCH_FOCUS_SKIP_ARCHITECTS="A::B,C"
 ORCH_RECYCLE_PCT="55"
 ORCH_PARK_IDLE="0"
 ORCH_WATCHERS_SERVICE="1"

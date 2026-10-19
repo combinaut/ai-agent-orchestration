@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from test_support import IsolatedTestCase
+from test_support import IsolatedTestCase, open_work
 import audit
 import watchers as w
 
@@ -111,11 +111,13 @@ class LegacyTests(IsolatedTestCase):
         self.pages = None
         self.view = {}
         self.versions = {}
-        self.env = patch.dict(os.environ, dict(ORCH_PR_AUTHOR='author', ORCH_PR_REPOS='owner/product',
-                            ORCH_GIT_WATCH_REPOS='', ORCH_PR_SINCE='',
+        self.env = patch.dict(os.environ, dict(ORCH_PR_AUTHOR='author', ORCH_PR_SINCE='',
                             ORCH_LEGACY_SCANS_MAX='10', ORCH_AUDIT_PAGE_PRS='80', ORCH_AUDIT_PAGE_NODES='100'))
         self.env.start()
         self.addCleanup(self.env.stop)
+        self.work = open_work('owner/product')
+        self.work.start()
+        self.addCleanup(self.work.stop)
         self.repo_files = {'owner/product': SCAN}
 
     def fake(self, *args):
@@ -832,7 +834,7 @@ class LegacyTests(IsolatedTestCase):
         script = w.ROOT.parent / 'legacy-scan.sh'
         (self.base / 'no-config').touch()
         env = dict(os.environ, PATH=f'{stubs}:{os.environ["PATH"]}', STUB_DIR=str(self.base),
-                   ORCH_CONFIG=str(config or self.base / 'no-config'))
+                   ORCH_ENV='none', ORCH_CONFIG=str(config or self.base / 'no-config'))
         return subprocess.run([str(script), *args], env=env, capture_output=True, text=True)
 
     def test_cli_prints_classified_lines_for_both_paths(self):

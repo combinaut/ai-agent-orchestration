@@ -1185,7 +1185,7 @@ class DeliveryTest(IsolatedTestCase):
         for at in (now, now + 3000):
             os.utime(self.base / "host.heartbeat", (at, at))
             with warnings.catch_warnings(), patch("sys.argv", argv), patch.object(inbox.time, "time", return_value=at), \
-                    patch.dict(os.environ, {"ORCH_PR_REPOS": "", "ORCH_PR_AUTHOR": ""}):
+                    patch.dict(os.environ, {"ORCH_PR_AUTHOR": ""}):
                 warnings.simplefilter("ignore", ResourceWarning)
                 inbox.main()
         lines = self.feed_lines() if self.feed.exists() else []

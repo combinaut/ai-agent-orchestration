@@ -38,8 +38,7 @@ The first run copies [`config/orchestration.toml.example`](config/orchestration.
 
 | Key (prompt) | Set it to |
 |---|---|
-| `[pr] repos` (`ORCH_PR_REPOS`) | the `owner/name` repos to watch, for example `["acme/webapp"]` |
-| `[pr] author` (`ORCH_PR_AUTHOR`) | your GitHub login (`"@me"` works) |
+| `[pr] author` (`ORCH_PR_AUTHOR`) | your GitHub login (`"@me"` works); the watchers find the repos from the open workspaces |
 | `[models] codex_worker`, `codex_smart` (`ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) | a Codex model name each. Fill both even without Codex: `/coordinate` and `/architect` stop while either is a placeholder |
 | `[herdr] bin`, `socket` (`ORCH_HERDR_BIN`, `ORCH_HERDR_SOCKET`) | Herdr's executable and socket; needed for the watcher services |
 

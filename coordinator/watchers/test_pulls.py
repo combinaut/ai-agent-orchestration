@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from test_support import IsolatedTestCase
+from test_support import IsolatedTestCase, open_work
 import watchers as w
 
 PR = json.loads((w.ROOT / "fixtures" / "audit-pr.json").read_text())
@@ -28,9 +28,12 @@ WORKTREES = "worktree /repo/product\nbranch refs/heads/main\n\nworktree /wt/prod
 
 class PullsTest(IsolatedTestCase):
     def setUp(self):
-        env = patch.dict(os.environ, {"ORCH_PR_AUTHOR": "author", "ORCH_PR_REPOS": PR["repository"]["nameWithOwner"]})
+        env = patch.dict(os.environ, {"ORCH_PR_AUTHOR": "author"})
         env.start()
         self.addCleanup(env.stop)
+        work = open_work(PR["repository"]["nameWithOwner"])
+        work.start()
+        self.addCleanup(work.stop)
         self.calls = []
 
     def command(self, prs, departed=None):
