@@ -326,7 +326,7 @@ NO_ORIGIN = re.compile(r'No such remote|cannot change to .*: No such file or dir
 def origin_matches(path, repo):
     """True when the clone's GitHub origin is repo; raises CalledProcessError when the origin cannot be read."""
     args = ['git', '-C', str(path), 'remote', 'get-url', 'origin']
-    result = subprocess.run(args, capture_output=True, text=True, timeout=5)
+    result = subprocess.run(args, capture_output=True, text=True, timeout=5, env=dict(os.environ, LC_ALL='C'))
     if result.returncode:
         if NO_ORIGIN.search(result.stderr):
             return False

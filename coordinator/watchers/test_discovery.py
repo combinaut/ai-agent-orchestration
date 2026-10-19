@@ -3,6 +3,8 @@ import io
 import json
 import os
 import subprocess
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
@@ -225,3 +227,27 @@ class AuditDiscoveryTest(IsolatedTestCase):
         after, events = audit.reduce(before, raw)
         self.assertEqual(after['sources']['git:/r/web'], ['PACKS web has over 50 packs'])
         self.assertFalse([event for event in events if event.startswith('CLEARED')])
+
+
+class GitLocaleTest(IsolatedTestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.git = Path(self.tmp.name) / 'git'
+        self.git.write_text('#!/bin/sh\nprintf "%s" "$LC_ALL"\n')
+        self.git.chmod(0o755)
+
+    def test_git_runs_in_the_c_locale_in_every_runner(self):
+        import focus_check
+        import watcher_runtime
+        with patch.dict(os.environ, {'LC_ALL': 'de_DE.UTF-8', 'LANG': 'de_DE.UTF-8'}):
+            self.assertEqual(watcher_runtime.run([str(self.git)]).stdout, 'C')
+            self.assertEqual(focus_check.command(str(self.git)), 'C')
+            seen = {}
+
+            def run(args, **kwargs):
+                seen.update(kwargs.get('env') or {})
+                return subprocess.CompletedProcess(args, 0, 'git@github.com:acme/web.git\n', '')
+            with patch.object(audit.orch_settings.subprocess, 'run', run):
+                self.assertTrue(audit.orch_settings.origin_matches('/r/web', 'acme/web'))
+            self.assertEqual(seen.get('LC_ALL'), 'C')

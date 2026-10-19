@@ -19,7 +19,8 @@ PAUSED = re.compile(r'^Paused:\s*\S')
 
 
 def command(*argv):
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    env = dict(os.environ, LC_ALL='C') if os.path.basename(argv[0]) == 'git' else None
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=30, env=env)
     if result.returncode:
         raise subprocess.CalledProcessError(result.returncode, argv, output=result.stdout, stderr=result.stderr)
     return result.stdout
