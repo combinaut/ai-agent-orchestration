@@ -257,3 +257,17 @@ class GitLocaleTest(IsolatedTestCase):
             with patch.object(audit.orch_settings.subprocess, 'run', run):
                 self.assertTrue(audit.orch_settings.origin_matches('/r/web', 'acme/web'))
             self.assertEqual(seen.get('LC_ALL'), 'C')
+
+
+class FocusStatusTest(IsolatedTestCase):
+    def test_a_status_file_that_cannot_be_read_is_not_an_empty_status(self):
+        import focus_check
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'Architect::A.md'
+            path.write_text('Paused: x\n')
+            with patch.dict(os.environ, {'ORCH_USER_TODO_STATUS_DIR': directory}), \
+                    patch.object(Path, 'read_text', side_effect=PermissionError('denied')):
+                with self.assertRaisesRegex(focus_check.StatusUnreadable, 'Architect::A.md: denied'):
+                    focus_check.status_lines('Architect::A', 'A')
+            with patch.dict(os.environ, {'ORCH_USER_TODO_STATUS_DIR': directory}):
+                self.assertEqual(focus_check.status_lines('Architect::B', 'B'), ([], None))

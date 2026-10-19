@@ -204,6 +204,17 @@ SH
   [[ "$output" == "FOCUS READFAIL status "*"Architect::Agent::Tooling.md"* ]]
 }
 
+@test "an unreadable status file of any architect is a focus read failure" {
+  [ "$(id -u)" -ne 0 ] || skip "root can read mode-000 files"
+  printf '## Waits on the user\n- x -> y\n' >"$HOME/.claude/coordinator/status/Architect::Other.md"
+  chmod 000 "$HOME/.claude/coordinator/status/Architect::Other.md"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FOCUS READFAIL status "*"Architect::Other.md"* ]]
+}
+
 @test "a missing status directory means no waits on the user" {
   rm -rf "$HOME/.claude/coordinator/status"
 
