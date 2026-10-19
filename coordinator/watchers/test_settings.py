@@ -410,9 +410,10 @@ class LegacyUpgradeTest(SettingsTest):
         (main / s.LOCAL_FILE).write_text('')
         (side / s.LOCAL_FILE).write_text('')
         snippet = self.write('snip.toml', '')
-        targets = s.upgrade_targets([str(side), str(main), str(snippet), str(self.base / 'gone'), str(snippet)])
+        stray = self.write('stray', 'not toml [')
+        targets = s.upgrade_targets([str(snippet), str(snippet)], [str(side), str(main), str(self.base / 'gone'), str(stray)])
         self.assertEqual([p.resolve() for p in targets],
-                         [(side / s.LOCAL_FILE).resolve(), (main / s.LOCAL_FILE).resolve(), snippet.resolve()])
+                         [snippet.resolve(), (side / s.LOCAL_FILE).resolve(), (main / s.LOCAL_FILE).resolve()])
 
     def test_upgrade_reads_quoted_table_headers(self):
         for header in ('["legacy"]', "['legacy']", '[ "legacy" ]'):

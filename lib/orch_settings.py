@@ -638,21 +638,18 @@ def configured_clones(path):
             for item in value if isinstance(item, str) and item]
 
 
-def upgrade_targets(args):
-    """Repo files to upgrade: each file argument, and for each clone its personal file and its main checkout's."""
-    files, seen = [], set()
-    for arg in args:
-        path = Path(arg)
-        if path.is_dir():
-            main = main_checkout(path)
-            candidates = [path / LOCAL_FILE] + ([main / LOCAL_FILE] if main is not None else [])
-        else:
-            candidates = [path]
-        for candidate in candidates:
-            if candidate.is_file() and candidate.resolve() not in seen:
-                seen.add(candidate.resolve())
-                files.append(candidate)
-    return files
+def upgrade_targets(files, clones=()):
+    """Repo files to upgrade: each of files, and for each clone folder its personal file and its main checkout's."""
+    candidates, targets, seen = [Path(path) for path in files], [], set()
+    for clone in map(Path, clones):
+        if clone.is_dir():
+            main = main_checkout(clone)
+            candidates += [clone / LOCAL_FILE] + ([main / LOCAL_FILE] if main is not None else [])
+    for candidate in candidates:
+        if candidate.is_file() and candidate.resolve() not in seen:
+            seen.add(candidate.resolve())
+            targets.append(candidate)
+    return targets
 
 
 def git(path, *args):
@@ -871,7 +868,8 @@ def main(argv):
             for path in configured_clones(argv[2]):
                 print(path)
         elif command == 'upgrade' and len(argv) >= 3:
-            for path in upgrade_targets(argv[2:]):
+            files, clones = (argv[2:argv.index('--clones')], argv[argv.index('--clones') + 1:]) if '--clones' in argv else (argv[2:], [])
+            for path in upgrade_targets(files, clones):
                 for line in upgrade(path):
                     print(line)
         elif command == 'example' and len(argv) == 3 and argv[2] in ('global', 'repo'):
@@ -889,7 +887,7 @@ def main(argv):
             print(' '.join(env_names()))
         else:
             print('usage: orch_settings.py global <file> | repo <dir> | migrate <env> <toml> <snippet-dir> '
-                  '| watched <file> | upgrade <repo-file-or-clone>... | set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
+                  '| watched <file> | upgrade <repo-file>... [--clones <dir>...] | set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
             return 2
     except ConfigError as error:
         print(f'ERROR: {error}', file=sys.stderr)

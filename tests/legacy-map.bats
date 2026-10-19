@@ -72,6 +72,17 @@ make_webapp() {
   git clone -q "$TMP/webapp-origin.git" "$BIG_REPO"
 }
 
+# watch_old_clone <dir>: lists <dir> in the removed audit.git_watch_repos of the installed global config.
+watch_old_clone() {
+  python3 - "$HOME/.claude/orchestration.toml" "$1" <<'PY'
+import json, sys
+path, clone = sys.argv[1:]
+lines = open(path).read().splitlines()
+lines.insert(lines.index('[audit]') + 1, f'git_watch_repos = [{json.dumps(clone)}]')
+open(path, 'w').write('\n'.join(lines) + '\n')
+PY
+}
+
 keep_previous_map() {
   mkdir -p "$(dirname "$OUT")"
   printf 'keep\n' >"$OUT"
@@ -334,7 +345,7 @@ keep_previous_map() {
   mkdir -p "$HOME/.claude/orchestration-repo-snippets/acme"
   printf '%s\n' '[legacy]' 'exempt_paths = ["b.js"]' >"$HOME/.claude/orchestration-repo-snippets/acme/tools.toml"
   install_ok
-  contains "$output" "converted $BIG_REPO/.orchestration.local.toml: legacy.extra_pattern -> [[legacy.rules]]"
+  contains "$output" "webapp/.orchestration.local.toml: legacy.extra_pattern -> [[legacy.rules]]"
   contains "$output" 'legacy.scan has no built-in rules'
   [ "$(cat "$BIG_REPO/.orchestration.local.toml")" = "$(printf '%s\n' '# mine' '[legacy]' 'scan = true' 'exempt = ["a.js"]' '' '[[legacy.rules]]' 'kind = "LEGACY"' 'pattern = "uber-select"' 'paths = ["**"]')" ]
   [ "$(cat "$HOME/.claude/orchestration-repo-snippets/acme/tools.toml")" = "$(printf '%s\n' '[legacy]' 'exempt = ["b.js"]')" ]
@@ -364,10 +375,10 @@ keep_previous_map() {
 
 @test "install.sh converts the clones the config still lists in audit.git_watch_repos before it drops the key" {
   fresh_install
-  printf '%s\n' '' '[audit]' "git_watch_repos = [\"$BIG_REPO\"]" >>"$HOME/.claude/orchestration.toml"
+  watch_old_clone "$BIG_REPO"
   printf '%s\n' '[legacy]' 'exempt_paths = ["a.js"]' >"$BIG_REPO/.orchestration.local.toml"
   install_ok
-  contains "$output" "converted $BIG_REPO/.orchestration.local.toml: legacy.exempt_paths -> legacy.exempt"
+  contains "$output" "webapp/.orchestration.local.toml: legacy.exempt_paths -> legacy.exempt"
   contains "$output" 'audit.git_watch_repos'
   not_contains "$(cat "$HOME/.claude/orchestration.toml")" 'git_watch_repos'
   [ "$(cat "$BIG_REPO/.orchestration.local.toml")" = "$(printf '%s\n' '[legacy]' 'exempt = ["a.js"]')" ]
@@ -375,7 +386,7 @@ keep_previous_map() {
 
 @test "a failed conversion keeps audit.git_watch_repos so the next install still finds the clone" {
   fresh_install
-  printf '%s\n' '' '[audit]' "git_watch_repos = [\"$BIG_REPO\"]" >>"$HOME/.claude/orchestration.toml"
+  watch_old_clone "$BIG_REPO"
   printf '%s\n' '[legacy]' 'exempt_paths = ["a.js"]' 'exempt = ["b.js"]' >"$BIG_REPO/.orchestration.local.toml"
   run /bin/bash "$CLONE/install.sh"
   [ "$status" -ne 0 ]
