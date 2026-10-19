@@ -271,3 +271,10 @@ class FocusStatusTest(IsolatedTestCase):
                     focus_check.status_lines('Architect::A', 'A')
             with patch.dict(os.environ, {'ORCH_USER_TODO_STATUS_DIR': directory}):
                 self.assertEqual(focus_check.status_lines('Architect::B', 'B'), ([], None))
+
+    def test_a_status_directory_that_cannot_be_checked_stays_unreadable(self):
+        import focus_check
+        with patch.object(focus_check.os, 'stat', side_effect=PermissionError('denied')):
+            self.assertFalse(focus_check.status_dir_absent())
+        with patch.object(focus_check.os, 'stat', side_effect=FileNotFoundError('gone')):
+            self.assertTrue(focus_check.status_dir_absent())

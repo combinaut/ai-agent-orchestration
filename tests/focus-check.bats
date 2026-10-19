@@ -215,6 +215,19 @@ SH
   [[ "$output" == "FOCUS READFAIL status "*"Architect::Other.md"* ]]
 }
 
+@test "a status directory behind an inaccessible parent is a focus read failure" {
+  [ "$(id -u)" -ne 0 ] || skip "root can read mode-000 directories"
+  mkdir -p "$TMP/locked/status"
+  export ORCH_USER_TODO_STATUS_DIR="$TMP/locked/status"
+  chmod 000 "$TMP/locked"
+
+  run focus_line
+  chmod 755 "$TMP/locked"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FOCUS READFAIL status "*"/locked/status" ]]
+}
+
 @test "a missing status directory means no waits on the user" {
   rm -rf "$HOME/.claude/coordinator/status"
 

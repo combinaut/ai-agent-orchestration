@@ -30,6 +30,17 @@ def status_dir():
     return Path(os.environ.get('ORCH_USER_TODO_STATUS_DIR') or Path.home() / '.claude/coordinator/status')
 
 
+def status_dir_absent():
+    """True only when the status directory is known not to exist; a failed check is not absence."""
+    try:
+        os.stat(status_dir())
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 class StatusUnreadable(Exception):
     """A status file exists but cannot be read."""
 
@@ -181,7 +192,7 @@ def line():
         if pane.get('status') == 'working':
             working[owner] = working.get(owner, 0) + 1
     items, unreadable = user_todo().status_items(status_dir())
-    unreadable = [path for path in unreadable if path != str(status_dir()) or status_dir().exists()]
+    unreadable = [path for path in unreadable if path != str(status_dir()) or not status_dir_absent()]
     if unreadable:
         return f'FOCUS READFAIL status {", ".join(unreadable)}'
     waits = {item['source'] for item in items}
