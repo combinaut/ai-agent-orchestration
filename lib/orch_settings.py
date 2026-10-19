@@ -320,13 +320,18 @@ def load_remote(repo, ref, committed_text, clone=None, environ=None):
 GITHUB_REMOTE = re.compile(r'^(?:[a-z][a-z0-9+.-]*://)?(?:[^@/\s]+@)?github\.com(?::\d+)?[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$', re.I)
 
 
+NO_ORIGIN = re.compile(r'No such remote|cannot change to .*: No such file or directory', re.I)
+
+
 def origin_matches(path, repo):
-    try:
-        url = subprocess.run(['git', '-C', str(path), 'remote', 'get-url', 'origin'],
-                             capture_output=True, text=True, timeout=5).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return False
-    match = GITHUB_REMOTE.search(url)
+    """True when the clone's GitHub origin is repo; raises CalledProcessError when the origin cannot be read."""
+    args = ['git', '-C', str(path), 'remote', 'get-url', 'origin']
+    result = subprocess.run(args, capture_output=True, text=True, timeout=5)
+    if result.returncode:
+        if NO_ORIGIN.search(result.stderr):
+            return False
+        raise subprocess.CalledProcessError(result.returncode, args, result.stdout, result.stderr)
+    match = GITHUB_REMOTE.search(result.stdout.strip())
     return match is not None and match[1].lower() == repo.lower()
 
 

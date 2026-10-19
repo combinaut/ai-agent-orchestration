@@ -245,6 +245,27 @@ class RemoteReadTest(SettingsTest):
         self.assertEqual(s.known_clone('acme/webapp', [str(lab), str(hub)]), str(hub))
         self.assertIsNone(s.known_clone('acme/webapp', [str(lab)]))
 
+    def test_an_unreadable_clone_origin_is_a_settings_read_error(self):
+        clone = self.repo('clone')
+        real = subprocess.run
+
+        def run(args, *rest, **kwargs):
+            if args[:4] == ['git', '-C', str(clone), 'remote']:
+                return subprocess.CompletedProcess(args, 128, '', 'fatal: detected dubious ownership in repository')
+            return real(args, *rest, **kwargs)
+        command, _ = self.command('[legacy]\nscan = false\n')
+        with open_work('', str(clone)), patch.object(s.subprocess, 'run', run):
+            with self.assertRaises(subprocess.CalledProcessError):
+                audit.repo_settings(command, 'acme/webapp', 'main', {})
+            with self.assertRaises(subprocess.CalledProcessError):
+                s.known_clone('acme/webapp', [str(clone)])
+
+    def test_a_clone_without_origin_is_not_the_known_clone(self):
+        bare = self.base / 'no-origin'
+        bare.mkdir()
+        git(bare, 'init', '-q')
+        self.assertIsNone(s.known_clone('acme/webapp', [str(bare), str(self.base / 'gone')]))
+
     def test_the_local_file_of_a_known_clone_overrides_the_base_ref(self):
         clone = self.repo('clone')
         (clone / s.LOCAL_FILE).write_text('[legacy]\nextra_pattern = "mine"\n')
