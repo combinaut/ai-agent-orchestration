@@ -170,16 +170,35 @@ class Rules:
         return self.candidates[path]
 
     def documents(self, documents):
-        """(path, kinds) for each (path, lines), one kind or None per line, in chunks of about CHUNK_LINES lines."""
-        chunk, size = [], 0
-        for path, lines in documents:
-            chunk.append((path, lines))
-            size += len(lines)
-            if size >= CHUNK_LINES:
-                yield from self.chunk(chunk)
-                chunk, size = [], 0
-        if chunk:
-            yield from self.chunk(chunk)
+        """(path, kinds) for each (path, lines), one kind or None per line; matched in chunks of at most CHUNK_LINES lines."""
+        current = None
+        for number, path, kinds in self.pieces(documents):
+            if current is not None and current[0] != number:
+                yield current[1], current[2]
+                current = None
+            if current is None:
+                current = [number, path, []]
+            current[2].extend(kinds)
+        if current is not None:
+            yield current[1], current[2]
+
+    def pieces(self, documents):
+        """(document number, path, kinds) for each piece of at most CHUNK_LINES lines, in order."""
+        batch, size = [], 0
+        for number, (path, lines) in enumerate(documents):
+            for start in range(0, max(len(lines), 1), CHUNK_LINES):
+                piece = lines[start:start + CHUNK_LINES]
+                if batch and size + len(piece) > CHUNK_LINES:
+                    yield from self.matched(batch)
+                    batch, size = [], 0
+                batch.append((number, path, piece))
+                size += len(piece)
+        if batch:
+            yield from self.matched(batch)
+
+    def matched(self, batch):
+        for (number, _, _), (path, kinds) in zip(batch, self.chunk([(path, piece) for _, path, piece in batch])):
+            yield number, path, kinds
 
     def chunk(self, documents):
         """documents() for one chunk: one rg process per rule pattern."""

@@ -177,7 +177,19 @@ class RulesTests(IsolatedTestCase):
         with patch.object(legacy_rules, 'CHUNK_LINES', 7), patch.object(legacy_rules, 'Matcher', side_effect=counted):
             self.assertEqual(list(parsed.documents(documents)), whole)
         self.assertEqual(whole[0], ('f0.js', ['A', 'B', 'B', None, 'A']))
-        self.assertEqual(len(started), 4)
+        self.assertEqual(len(started), 8)
+        big = [('big.js', ['a', 'b'] * 5), ('empty.js', []), ('small.js', ['b'])]
+        expected = list(parsed.documents(big))
+        self.assertEqual(expected, [('big.js', ['A', 'B'] * 5), ('empty.js', []), ('small.js', ['B'])])
+        fed = []
+        real_feed = legacy_rules.Matcher.feed
+
+        def feed(matcher, lines):
+            fed.append(len(lines))
+            return real_feed(matcher, lines)
+        with patch.object(legacy_rules, 'CHUNK_LINES', 3), patch.object(legacy_rules.Matcher, 'feed', feed):
+            self.assertEqual(list(parsed.documents(big)), expected)
+        self.assertLessEqual(max(fed), 3)
 
     def test_a_failing_rg_fails_the_scan(self):
         parsed = rules(rule(kind='"A"', pattern="'x'", paths='["**"]'))
