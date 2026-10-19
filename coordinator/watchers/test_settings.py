@@ -312,9 +312,11 @@ class LegacyUpgradeTest(SettingsTest):
         path = self.write('only.toml', 'legacy.extra_pattern = ""\n[guard]\nbig_repo = true\n')
         self.assertEqual(s.upgrade(path), [f'converted {path}: legacy.extra_pattern -> [[legacy.rules]] (kind LEGACY, every path)'])
         self.assertEqual(path.read_text(), '[guard]\nbig_repo = true\n')
-        path = self.write('alone.toml', 'legacy.extra_pattern = ""\n')
-        s.upgrade(path)
-        self.assertEqual(s.read_file(path, 'repo'), {})
+        for text in ('legacy.extra_pattern = ""\n', '[legacy]\nextra_pattern = ""\n', '[legacy]\nextra_pattern = ""\n[guard]\nbig_repo = true\n'):
+            path = self.write('alone.toml', text)
+            self.assertEqual(len(s.upgrade(path)), 1, text)
+            self.assertNotIn('extra_pattern', path.read_text(), text)
+            self.assertEqual(s.read_file(path, 'repo').get(s.BY_KEY['legacy.rules']), None, text)
 
     def test_upgrade_reads_quoted_table_headers(self):
         for header in ('["legacy"]', "['legacy']", '[ "legacy" ]'):

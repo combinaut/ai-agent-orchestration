@@ -600,9 +600,9 @@ def upgrade(path):
         expected['legacy']['exempt'] = exempt
     if pattern:
         expected['legacy']['rules'] = expected['legacy'].get('rules', []) + [legacy_rule(pattern)]
-    if not expected['legacy']:
-        del expected['legacy']
-    if parse(out, label) != expected:
+    def settings(data):
+        return {table: entries for table, entries in data.items() if not (table == 'legacy' and entries == {})}
+    if settings(parse(out, label)) != settings(expected):
         raise ConfigError(f'{label}: legacy.extra_pattern or legacy.exempt_paths cannot be converted in place; edit it by hand')
     written = validate(parse(out, label), label, 'repo')
     Path(path).write_text(out)
