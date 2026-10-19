@@ -401,4 +401,10 @@ keep_previous_map() {
   install_ok
   contains "$output" "webapp/.orchestration.local.toml: legacy.exempt_paths -> legacy.exempt"
   [ "$(cat "$BIG_REPO/.orchestration.local.toml")" = "$(printf '%s\n' '[legacy]' 'exempt = ["a.js"]')" ]
+  git init -q "$HOME/mapped"
+  printf '%s\n' '[legacy]' 'exempt_paths = ["b.js"]' >"$HOME/mapped/.orchestration.local.toml"
+  # shellcheck disable=SC2016 # The installer expands the literal ${HOME}.
+  config_set ORCH_LEGACY_MAP_REPO '${HOME}/mapped'
+  install_ok
+  contains "$output" "mapped/.orchestration.local.toml: legacy.exempt_paths -> legacy.exempt"
 }
