@@ -515,12 +515,12 @@ open_work_clones() {
 }
 
 # upgrade_repo_files: rewrites legacy.extra_pattern and legacy.exempt_paths as rules in the personal files of the
-# open-work clones, of the clones $CONFIG still lists in audit.git_watch_repos, of their main checkouts, and in the snippets.
+# open-work clones, of legacy.map_repo, of the clones $CONFIG still lists in audit.git_watch_repos, of their main checkouts, and in the snippets.
 upgrade_repo_files() {
   local clone file files=() clones=() line report
   while IFS= read -r clone; do
     [ -z "$clone" ] || clones+=("$clone")
-  done <<<"$(open_work_clones)"
+  done <<<"$(open_work_clones; config_value ORCH_LEGACY_MAP_REPO)"
   for file in "$SNIPPET_DIR"/*/*.toml; do
     [ ! -f "$file" ] || files+=("$file")
   done

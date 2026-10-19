@@ -393,3 +393,12 @@ keep_previous_map() {
   contains "$output" 'cannot convert the removed legacy settings'
   contains "$(cat "$HOME/.claude/orchestration.toml")" 'git_watch_repos'
 }
+
+@test "install.sh converts the personal file of the legacy.map_repo clone" {
+  fresh_install
+  config_set ORCH_LEGACY_MAP_REPO "$BIG_REPO"
+  printf '%s\n' '[legacy]' 'exempt_paths = ["a.js"]' >"$BIG_REPO/.orchestration.local.toml"
+  install_ok
+  contains "$output" "webapp/.orchestration.local.toml: legacy.exempt_paths -> legacy.exempt"
+  [ "$(cat "$BIG_REPO/.orchestration.local.toml")" = "$(printf '%s\n' '[legacy]' 'exempt = ["a.js"]')" ]
+}
