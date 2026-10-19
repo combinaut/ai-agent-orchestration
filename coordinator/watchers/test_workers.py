@@ -331,6 +331,16 @@ class WorkersTests(IsolatedTestCase):
         self.assertEqual(self.scan_panes([row], []), [])
         self.assertEqual(self.scan_panes([], None), ["WORKER pane-one dead/disappeared"])
 
+    def test_malformed_pane_list_keeps_a_disappearance_dead(self):
+        for panes in ([None], [dict(pane_id="lead")], [dict(pane_id=None, tab_id="tab-a")]):
+            with self.subTest(panes=panes):
+                self.scan_panes([dict(agent("working"), tab_id="tab-a")], [])
+                self.assertEqual(self.scan_panes([], panes), ["WORKER pane-one dead/disappeared"])
+
+    def test_missing_tab_id_keeps_a_disappearance_dead(self):
+        self.assertEqual(self.scan_panes([agent("working")], []), [])
+        self.assertEqual(self.scan_panes([], [dict(pane_id="lead", tab_id="tab-a")]), ["WORKER pane-one dead/disappeared"])
+
     def test_close_pane_mark_is_closed_without_a_pane_list(self):
         (self.base / "closed").mkdir()
         self.assertEqual(self.scan_panes([dict(agent("blocked"), tab_id="tab-a")], []), ["WORKER pane-one blocked"])

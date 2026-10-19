@@ -327,7 +327,7 @@ def worker_alerts(previous):
 
 def pane_closed(row, panes):
     """A working or waiting agent's pane was closed while the rest of its tab lives on."""
-    if panes is None or row.get("agent_status") not in ("working", "waiting"):
+    if panes is None or not row.get("tab_id") or row.get("agent_status") not in ("working", "waiting"):
         return False
     return row["pane_id"] not in {pane.get("pane_id") for pane in panes} \
         and row.get("tab_id") in {pane.get("tab_id") for pane in panes}
@@ -814,7 +814,10 @@ def live_panes(before, listed):
         panes = json.loads(command(herdr_bin(), "pane", "list"))["result"]["panes"]
     except audit.READ_ERRORS:
         return None
-    return panes if isinstance(panes, list) else None
+    if not isinstance(panes, list) or not all(isinstance(pane, dict) and isinstance(pane.get("pane_id"), str)
+                                              and isinstance(pane.get("tab_id"), str) for pane in panes):
+        return None
+    return panes
 
 
 def collect(mode, before, scope="", base=None):
