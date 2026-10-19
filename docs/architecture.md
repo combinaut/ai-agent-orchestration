@@ -170,7 +170,7 @@ The template every worker brief carries is [`worker-reports/machine-rules.md`](.
 
 ## LEGACY CHECK
 
-Projects that use the legacy-check workflow can use the audit’s `LEGACY` lines and the map and scan tools for repositories whose repo settings turn `legacy.scan` on.
+Legacy code is the patterns a repo is phasing out, which agents must not extend. Projects that use the legacy-check workflow can use the audit’s `LEGACY` lines and the map and scan tools for repositories whose repo settings turn `legacy.scan` on; both follow the repo's own `[[legacy.rules]]` ([settings](settings.md#legacy-rules)).
 
 ```mermaid
 sequenceDiagram

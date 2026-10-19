@@ -23,7 +23,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           PR: ${{ github.event.pull_request.number }}
-        run: .github/scripts/macos-scope.sh >>"$GITHUB_OUTPUT"
+        run: scripts/ci/macos-scope.sh >>"$GITHUB_OUTPUT"
 
   macos:
     name: Validate (macos-latest)
@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
-      - run: brew install shellcheck bats-core
+      - run: brew install shellcheck bats-core ripgrep parallel
       - uses: ./.github/actions/validate
 
   ubuntu:
@@ -42,8 +42,5 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck bats bubblewrap
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: scripts/ci/install-deps-ubuntu.sh
       - uses: ./.github/actions/validate

@@ -1,7 +1,6 @@
 """Own-PR, heavy-slot and repository audit; collectors only read source state."""
 import base64
 import binascii
-import hashlib
 import json
 import os
 import re
@@ -9,8 +8,9 @@ import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
-from legacy_rules import FRONTEND_EXTENSIONS, RULES_PATH, parse_rules
+import legacy_rules
 import alert_policy
+import discovery
 from watcher_platform import MissingMetric, herdr_bin, read_slots
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'lib'))
 import orch_settings
@@ -27,11 +27,6 @@ nodes{... on CheckRun{name conclusion startedAt} ... on StatusContext{context st
 QUERY = '''query($q:String!,$np:Int!,$ni:Int!,$cursor:String){
 search(query:$q,type:ISSUE,first:$np,after:$cursor){pageInfo{hasNextPage endCursor}
 nodes{... on PullRequest{''' + SELECTION + '}}}}'
-LEGACY_PATTERN = re.compile(r'\$\(|jQuery|\$\.ajax|ajax:(success|complete|error|send)|jquery_ujs|jquery-ujs|rails-ujs|data-remote|remote: *true|\.trigger\(|select2')
-BUILTIN_EXEMPT = ('scripts/legacy-deletion-ratchet.mjs', 'scripts/legacy-deletion-ratchet-rules.json')
-LEGACY_KINDS = ('JSERB', 'JQUERY', 'LEGACY', 'TEST')
-TEST_PATH = re.compile(r'(^|/)(spec|test|tests)/|[._-](spec|test)\.[^/]*$')
-NOT_FRONTEND = ('.sh', '.bash', '.md')
 NOT_FOUND = re.compile(r'HTTP 404')
 HUNK = re.compile(r'@@ -\d+(?:,\d+)? \+(\d+)')
 TOO_LARGE = re.compile(r'too_large|too large|exceeded the maximum number of files', re.I)
@@ -50,28 +45,16 @@ def positive_setting(name, default, maximum=None):
     return value
 
 
-def legacy_patterns(settings=None):
-    extra = (os.environ if settings is None else settings).get('ORCH_LEGACY_EXTRA_PATTERN', '')
-    try:
-        return (LEGACY_PATTERN, re.compile(extra)) if extra else (LEGACY_PATTERN,)
-    except re.error as error:
-        raise ValueError(f'ORCH_LEGACY_EXTRA_PATTERN is not a valid regex: {error}') from error
-
-
-def exempt_paths(settings=None):
-    return BUILTIN_EXEMPT + tuple((os.environ if settings is None else settings).get('ORCH_LEGACY_EXEMPT_PATHS', '').split())
-
-
-def builtin_fingerprint(settings=None):
-    values = json.dumps([(os.environ if settings is None else settings).get('ORCH_LEGACY_EXTRA_PATTERN', ''), exempt_paths(settings)])
-    return 'builtin:' + hashlib.sha256(values.encode()).hexdigest()
-
-
-def fetch_prs(command, page_nodes=None):
-    author, repos = os.environ.get('ORCH_PR_AUTHOR', ''), os.environ.get('ORCH_PR_REPOS', '')
-    if not author or not repos:
-        raise ValueError('ORCH_PR_AUTHOR and ORCH_PR_REPOS are required')
-    query = 'is:pr is:open author:' + author + ''.join(' repo:' + repo for repo in repos.split())
+def fetch_prs(command, page_nodes=None, repos=None):
+    """Open PRs of ORCH_PR_AUTHOR in repos, by default the repos of the open work."""
+    author = os.environ.get('ORCH_PR_AUTHOR', '')
+    if not author:
+        raise ValueError('ORCH_PR_AUTHOR is required')
+    if repos is None:
+        repos = discovery.repos(command)['repos']
+    if not repos:
+        return []
+    query = 'is:pr is:open author:' + author + ''.join(' repo:' + repo for repo in repos)
     if os.environ.get('ORCH_PR_SINCE'):
         query += ' updated:>=' + os.environ['ORCH_PR_SINCE']
     args = ['gh', 'api', 'graphql', '-f', 'query=' + QUERY, '-f', 'q=' + query,
@@ -91,18 +74,6 @@ def fetch_prs(command, page_nodes=None):
         if not next_cursor or next_cursor == cursor:
             raise ValueError('search cursor did not advance')
         cursor = next_cursor
-
-
-def classify(path, text, settings=None):
-    if path.endswith('.js.erb'):
-        return 'JSERB'
-    if path.endswith(NOT_FRONTEND):
-        return None
-    if path.endswith(FRONTEND_EXTENSIONS) and any(pattern.search(text) for pattern in legacy_patterns(settings)):
-        if TEST_PATH.search(path):
-            return 'TEST'
-        return 'LEGACY' if path.startswith('app/assets/javascripts/') else 'JQUERY'
-    return 'LEGACY' if path.startswith('app/assets/javascripts/') else None
 
 
 ESCAPES = {'a': 7, 'b': 8, 't': 9, 'n': 10, 'v': 11, 'f': 12, 'r': 13, '"': 34, '\\': 92}
@@ -282,8 +253,17 @@ def files_added(pages):
     return [(path, text) for path, _, text, added in files_lines(pages) if added]
 
 
+def known_clones(command, cache):
+    if 'clones' not in cache:
+        try:
+            cache['clones'] = discovery.repos(command)['clones']
+        except discovery.Unavailable:
+            cache['clones'] = []
+    return cache['clones']
+
+
 def repo_settings(command, repo, ref, cache):
-    """Repo settings for a PR: the base ref's committed file, then the personal file of a watched clone."""
+    """Repo settings for a PR: the base ref's committed file, then the personal file of its open-work clone."""
     key = ('settings', repo, ref)
     if key not in cache:
         try:
@@ -296,7 +276,7 @@ def repo_settings(command, repo, ref, cache):
                 if not NOT_FOUND.search(error_detail(error)):
                     raise
                 text = ''
-            cache[key] = orch_settings.load_remote(repo, ref, text, orch_settings.known_clone(repo))
+            cache[key] = orch_settings.load_remote(repo, ref, text, orch_settings.known_clone(repo, known_clones(command, cache)))
         except READ_ERRORS as error:
             cache[key] = error
     if isinstance(cache[key], Exception):
@@ -304,27 +284,12 @@ def repo_settings(command, repo, ref, cache):
     return cache[key]
 
 
-def base_rules(command, repo, base, cache):
-    default = base['repository']['defaultBranchRef']['name']
-    key = (repo, default)
+def repo_rules(command, repo, ref, cache):
+    """The legacy rules of a PR's repo settings; None when they define none."""
+    key = ('rules', repo, ref)
     if key not in cache:
         try:
-            ref = urllib.parse.quote(default, safe='')
-            try:
-                try:
-                    text = command('gh', 'api', '-H', RAW,
-                                   f'repos/{repo}/contents/{RULES_PATH}?ref={ref}')
-                except MissingMetric:
-                    text = ''
-            except subprocess.CalledProcessError as error:
-                if not NOT_FOUND.search(error_detail(error)):
-                    raise
-                cache[key] = (None, '')
-            else:
-                try:
-                    cache[key] = (parse_rules(text), hashlib.sha256(text.encode()).hexdigest())
-                except ValueError as error:
-                    raise ValueError(f'{repo}@{default} {RULES_PATH}: {error}') from error
+            cache[key] = legacy_rules.from_settings(repo_settings(command, repo, ref, cache))
         except READ_ERRORS as error:
             cache[key] = error
     if isinstance(cache[key], Exception):
@@ -332,19 +297,22 @@ def base_rules(command, repo, base, cache):
     return cache[key]
 
 
-def legacy_scan(command, repo, number, base=None, cache=None, bridged=None):
-    if base is None:
-        base = json.loads(command('gh', 'pr', 'view', str(number), '-R', repo, '--json',
-                                  'baseRefName,headRefOid,headRepository,headRepositoryOwner'))
+def no_rules_line(repo, ref):
+    return f'NORULES LEGACY {repo}@{ref} [legacy.scan is on but the repo settings have no [[legacy.rules]]; its PRs are not scanned]'
+
+
+def legacy_scan(command, repo, number, base=None, cache=None):
+    """(kind, path, text) for each added line the repo's legacy rules count; None when it has no rules."""
+    base = {} if base is None else base
+    if not base:
+        base.update(json.loads(command('gh', 'pr', 'view', str(number), '-R', repo, '--json',
+                                       'baseRefName,headRefOid,headRepository,headRepositoryOwner')))
         owner, head = base.pop('headRepositoryOwner', None), base.pop('headRepository', None)
         if owner and head:
             base['headRepository'] = dict(nameWithOwner=f"{owner['login']}/{head['name']}")
-    if 'repository' not in base:
-        default = command('gh', 'api', f'repos/{repo}', '--jq', '.default_branch').strip()
-        base['repository'] = dict(defaultBranchRef=dict(name=default))
-    cache = {} if cache is None else cache
-    settings = repo_settings(command, repo, base['baseRefName'], cache)
-    rules = base_rules(command, repo, base, cache)[0]
+    rules = repo_rules(command, repo, base['baseRefName'], {} if cache is None else cache)
+    if rules is None:
+        return None
     try:
         lines = list(diff_lines(command('gh', 'pr', 'diff', str(number), '-R', repo)))
     except subprocess.CalledProcessError as error:
@@ -352,18 +320,13 @@ def legacy_scan(command, repo, number, base=None, cache=None, bridged=None):
             raise
         pages = command('gh', 'api', '--paginate', f'repos/{repo}/pulls/{number}/files?per_page=100')
         lines = list(files_lines(pages, ContentReader(command, repo, base)))
-    if rules:
-        return rules.scan(lines, bridged)
-    legacy_patterns(settings)
-    exempt = exempt_paths(settings)
-    return [(kind, path, text) for path, _, text, added in lines
-            if added and path not in exempt and (kind := classify(path, text, settings))]
+    return rules.scan(lines)
 
 
-def legacy_line(label, hits):
+def legacy_line(label, hits, kinds):
     if not hits:
         return ''
-    counts = {kind: sum(hit[0] == kind for hit in hits) for kind in LEGACY_KINDS}
+    counts = {kind: sum(hit[0] == kind for hit in hits) for kind in kinds}
     return f'LEGACY {label} [{len(hits)} lines: ' + ', '.join(f'{kind} {count}' for kind, count in counts.items()) + ']'
 
 
@@ -443,13 +406,18 @@ def legacy_entries(command, prs, cache, rules=None):
             settings = repo_settings(command, repo, pr['baseRefName'], rules)
             if settings['ORCH_LEGACY_SCAN'] != '1':
                 continue
-            fingerprint = base_rules(command, repo, pr, rules)[1] or builtin_fingerprint(settings)
+            parsed = repo_rules(command, repo, pr['baseRefName'], rules)
+            if parsed is None:
+                entries[f"{repo}@{pr['baseRefName']}"] = dict(head='', base=pr['baseRefName'],
+                                                             line=no_rules_line(repo, pr['baseRefName']))
+                continue
+            fingerprint = parsed.fingerprint
             if old and old['head'] == pr['headRefOid'] and old.get('rules') == fingerprint and old.get('base') == pr['baseRefName']:
                 entries[key] = old
             elif budget > 0:
                 budget -= 1
                 hits = legacy_scan(command, repo, pr['number'], pr, rules)
-                entries[key] = dict(head=pr['headRefOid'], base=pr['baseRefName'], rules=fingerprint, line=legacy_line(f"{key} {pr['title']}", hits))
+                entries[key] = dict(head=pr['headRefOid'], base=pr['baseRefName'], rules=fingerprint, line=legacy_line(f"{key} {pr['title']}", hits, parsed.kinds))
             elif old:
                 entries[key] = old
         except READ_ERRORS as error:
@@ -458,10 +426,12 @@ def legacy_entries(command, prs, cache, rules=None):
     return entries
 
 
-def github_lines(command, cache=None, entries=None):
+def github_lines(command, cache=None, entries=None, work=None):
     page_nodes = positive_setting('ORCH_AUDIT_PAGE_NODES', 100, 100)
-    prs = fetch_prs(command, page_nodes)
-    rules = {}
+    if work is None:
+        work = discovery.repos(command)
+    prs = fetch_prs(command, page_nodes, work['repos'])
+    rules = {'clones': work['clones']}
     found = legacy_entries(command, prs, cache or {}, rules)
     if entries is not None:
         entries.update(found)
@@ -524,11 +494,19 @@ def repository_lines(command, repo):
 
 
 def collect(command, slots=None, before=None):
-    legacy = {}
-    sources = {'github': lambda: github_lines(command, (before or {}).get('legacy'), legacy), 'herdr': lambda: workspace_lines(command)}
-    sources.update({'git:' + repo: lambda repo=repo: repository_lines(command, repo)
-                    for repo in os.environ.get('ORCH_GIT_WATCH_REPOS', '').split()})
-    current, unreadable = {}, {}
+    """Sources of one audit pass; without open work or a saved set the github and git sources stay unreadable."""
+    legacy, current, unreadable = {}, {}, {}
+    try:
+        found = discovery.repos(command)
+    except discovery.Unavailable as error:
+        found = None
+        unreadable['github'] = f'READFAIL github: {error_detail(error)}'
+        known = {**(before or {}).get('sources', {}), **(before or {}).get('unreadable', {})}
+        unreadable.update({source: f'READFAIL {source}: {error_detail(error)}' for source in known if source.startswith('git:')})
+    sources = {'herdr': lambda: workspace_lines(command)}
+    if found is not None:
+        sources['github'] = lambda: github_lines(command, (before or {}).get('legacy'), legacy, found)
+        sources.update({'git:' + repo: lambda repo=repo: repository_lines(command, repo) for repo in found['clones']})
     for source, read in sources.items():
         try:
             current[source] = sorted(set(read()))
@@ -597,16 +575,17 @@ def main(argv):
         print(
             "usage: audit.py <pr-number> [repo] (or set watchers.primary_repo)", file=sys.stderr)
         return 2
-    bridged = []
+    base = {}
     try:
-        hits = legacy_scan(command, repo, int(argv[1]), bridged=bridged)
+        hits = legacy_scan(command, repo, int(argv[1]), base)
     except READ_ERRORS as error:
         print(f'legacy-scan failed: {error_detail(error)}', file=sys.stderr)
         return 1
+    if hits is None:
+        print(f"legacy-scan: {repo}@{base['baseRefName']} has no [[legacy.rules]] in its repo settings; nothing to scan", file=sys.stderr)
+        return 0
     for kind, path, text in hits:
         print(f'{kind:<6} {path}: {text}')
-    for path, text in bridged:
-        print(f'{"BRIDGE":<6} {path}: {text}')
     return 0
 
 

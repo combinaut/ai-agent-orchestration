@@ -15,7 +15,7 @@ STUB
 
 teardown() { rm -rf "$BIN"; }
 
-scope() { run /bin/bash "$BATS_TEST_DIRNAME/../.github/scripts/macos-scope.sh"; }
+scope() { run /bin/bash "$BATS_TEST_DIRNAME/../scripts/ci/macos-scope.sh"; }
 
 @test "docs-only changes skip macOS" {
   GH_JSON='[{"filename":"README.md"},{"filename":"docs/a.sh"},{"filename":"LICENSE"}]' scope

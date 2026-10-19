@@ -30,19 +30,18 @@ every_value() {
 import sys
 sys.path.insert(0, sys.argv[1])
 import orch_settings as s
-values = {'str': 'from-file', 'int': 7, 'number': 7.5, 'bool': True, 'list': ['a', 'b'], 'json': [{'name': 'file'}]}
+values = {'str': 'from-file', 'int': 7, 'number': 7.5, 'bool': True, 'list': ['a', 'b'], 'json': [{'name': 'file'}], 'tables': [{'name': 'file'}]}
 print(s.render({setting: values[setting.kind] for setting in s.scoped(sys.argv[2])}), end='')
 PY
 }
 
 @test "a valid file sets the settings scripts read" {
-  printf '[pr]\nrepos = ["a/b", "c/d"]\nauthor = "me"\n[recycle]\npark_idle = true\n[watchers]\npath = ["~/bin", "/usr/bin"]\n' >"$ORCH_CONFIG"
+  printf '[pr]\nauthor = "me"\n[recycle]\npark_idle = true\n[watchers]\npath = ["~/bin", "/usr/bin"]\n' >"$ORCH_CONFIG"
 
   run load_settings global
 
   [ "$status" -eq 0 ]
-  [ "$output" = "ORCH_PR_REPOS=a/b c/d
-ORCH_PR_AUTHOR=me
+  [ "$output" = "ORCH_PR_AUTHOR=me
 ORCH_PARK_IDLE=1
 ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
 }
@@ -175,12 +174,10 @@ CASES
   # shellcheck disable=SC2016 # The old loader expands $HOME when it sources the file.
   cat >"$old" <<'ENV'
 # Watched repos
-ORCH_PR_REPOS="a/b c/d"
 ORCH_PR_AUTHOR="me"
 ORCH_PR_SINCE=""
 ORCH_PACKS_MAX="50"
 ORCH_HEAVY_SLOTS_MAX="8"
-ORCH_FOCUS_SKIP_ARCHITECTS="A::B,C"
 ORCH_RECYCLE_PCT="55"
 ORCH_PARK_IDLE="0"
 ORCH_WATCHERS_SERVICE="1"
@@ -188,7 +185,6 @@ ORCH_ALERT_ESCALATE_RATIO="1.5"
 ORCH_HOG_GB="0.5"
 ORCH_PATH="$HOME/.local/bin:/usr/bin:/bin"
 ORCH_PR_TABS_OPEN_ALL="is:pr is:open author:me"
-ORCH_PR_TABS_TOPICS='[{"name":"W","color":"blue","any":["\\bw\\b","a|b"]}]'
 ORCH_REPO_PATH=""
 ENV
   # shellcheck disable=SC2016 # The child shell expands these.
@@ -235,15 +231,16 @@ ENV
   [[ "$output" == *"created $CLONE/.orchestration.local.toml (acme/webapp)"* ]]
   [[ "$output" == *"added .orchestration.local.toml to the info/exclude of $CLONE"* ]]
   [[ "$output" == *"wrote $TMP/snippets/acme/tools.toml"* ]]
-  [ "$(grep -cE '^\[guard\]|^(big_repo|scan|extra_pattern|exempt_paths|merge_gate_checks|pattern|architect) =' "$ORCH_CONFIG")" = 0 ]
+  [[ "$output" == *'acme/webapp: legacy.scan has no built-in rules; add the [[legacy.rules]] this repo needs'* ]]
+  [ "$(grep -cE '^\[guard\]|^(big_repo|scan|rules|exempt|merge_gate_checks|pattern|architect) =' "$ORCH_CONFIG")" = 0 ]
   grep -qx 'pr_scope = "org:acme"' "$ORCH_CONFIG"
   run load_settings "$CLONE"
   [ "$status" -eq 0 ]
   [ "$output" = "ORCH_BIG_REPO=1
 ORCH_MERGE_GATE_CHECKS=Gate A|Gate B
 ORCH_LEGACY_SCAN=1
-ORCH_LEGACY_EXTRA_PATTERN=old-widget
-ORCH_LEGACY_EXEMPT_PATHS=a.js b.js
+ORCH_LEGACY_RULES=[{\"kind\":\"LEGACY\",\"pattern\":\"old-widget\",\"paths\":[\"**\"]}]
+ORCH_LEGACY_EXEMPT=a.js b.js
 ORCH_FOCUS_PATTERN=billing
 ORCH_FOCUS_ARCHITECT=Billing" ]
   [ "$(cat "$TMP/snippets/acme/tools.toml")" = '# Repo settings for acme/tools, converted from orchestration.env.

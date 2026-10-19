@@ -13,7 +13,7 @@ A repo key in the global file, a global key in a repo file, an unknown key, a va
 Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestration.local.toml`, an exported variable. A later file replaces a key of an earlier one; a list is replaced, not merged.
 
 - A tool acting in a checkout (the Bash guard, the focus report for the repo an architect works in) reads the two files at the root of that checkout, found from its working directory.
-- A tool acting on a PR (the audit and `legacy-scan.sh`) reads `.orchestration.toml` from the PR's base branch, then `.orchestration.local.toml` from your clone of that repo when `audit.git_watch_repos` lists one (matched by its `origin` remote).
+- A tool acting on a PR (the audit and `legacy-scan.sh`) reads `.orchestration.toml` from the PR's base branch, then `.orchestration.local.toml` from your clone of that repo when an open workspace has one (matched by its GitHub `origin` remote).
 - A linked worktree also reads the `.orchestration.local.toml` of its main checkout; its own local file wins over it.
 - No file means the built-in defaults: every repo feature is off.
 
@@ -23,22 +23,19 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 
 | Key | Variable | Default | Meaning |
 |---|---|---|---|
-| `pr.repos` | `ORCH_PR_REPOS` | empty | GitHub repos (owner/name) whose PRs the audit watches; required by the audit watcher |
-| `pr.author` | `ORCH_PR_AUTHOR` | empty | GitHub login whose open PRs the audit watches ("@me" works); required by the audit watcher |
+| `pr.author` | `ORCH_PR_AUTHOR` | empty | GitHub login whose open PRs the audit watches in the repos of the open workspaces ("@me" works); required by the audit watcher |
 | `pr.since` | `ORCH_PR_SINCE` | empty | Only PRs updated on or after this date (YYYY-MM-DD); empty means no date filter |
 | `pr.bot_reviewer_login` | `ORCH_BOT_REVIEWER_LOGIN` | `"copilot-pull-request-reviewer"` | Bot whose "Needs a closer look" review raises a COPILOT line |
-| `audit.git_watch_repos` | `ORCH_GIT_WATCH_REPOS` | empty | Local clones checked for PACKS and WORKTREES pile-ups; their .orchestration.local.toml applies to PRs of the repo they clone |
-| `audit.packs_max` | `ORCH_PACKS_MAX` | `50` | Pack files in a watched clone before a PACKS line |
-| `audit.worktrees_max` | `ORCH_WORKTREES_MAX` | `40` | Worktrees in a watched clone before a WORKTREES line |
+| `audit.packs_max` | `ORCH_PACKS_MAX` | `50` | Pack files in a clone of the open work before a PACKS line |
+| `audit.worktrees_max` | `ORCH_WORKTREES_MAX` | `40` | Worktrees in a clone of the open work before a WORKTREES line |
 | `audit.page_prs` | `ORCH_AUDIT_PAGE_PRS` | `80` | PR search page size (1-100) |
 | `audit.page_nodes` | `ORCH_AUDIT_PAGE_NODES` | `100` | Nested GitHub query page size (1-100); a cut-off result prints TRUNCATED |
 | `legacy.scans_max` | `ORCH_LEGACY_SCANS_MAX` | `10` | PRs scanned for legacy code per audit pass; the rest wait for the next pass |
 | `legacy.reads_max` | `ORCH_LEGACY_READS_MAX` | `20` | File reads per PR scan for files GitHub returns without a patch |
-| `legacy.map_repo` | `ORCH_LEGACY_MAP_REPO` | empty | Clone the daily legacy-map job reads; empty picks the audit.git_watch_repos clone whose repo settings turn legacy.scan on |
+| `legacy.map_repo` | `ORCH_LEGACY_MAP_REPO` | empty | Clone the daily legacy-map job reads; empty picks, at install time, the clone of the open work whose repo settings turn legacy.scan on |
 | `heavy_slots.max` | `ORCH_HEAVY_SLOTS_MAX` | `4` | Most heavy jobs at once on the machine |
 | `heavy_slots.dir` | `ORCH_HEAVY_SLOTS_DIR` | empty | Slot directory; empty means ~/.claude/heavy-slots |
 | `heavy_slots.kill_grace` | `ORCH_HEAVY_SLOTS_KILL_GRACE` | `10` | Seconds a stopped job gets before it is killed |
-| `focus.skip_architects` | `ORCH_FOCUS_SKIP_ARCHITECTS` | empty | Architect names left out of focus reports |
 | `models.coordinator` | `ORCH_COORDINATOR_MODEL` | `"claude-opus-5-5"` | Model of the Coordinator |
 | `models.architect` | `ORCH_ARCHITECT_MODEL` | `"claude-opus-5-5"` | Model of the architects |
 | `models.codex_worker` | `ORCH_CODEX_WORKER_MODEL` | `"<codex-worker-model>"` | Codex model for routine work; replace the placeholder |
@@ -75,7 +72,6 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `pr_tabs.org` | `ORCH_PR_TABS_ORG` | empty | Organization the PR tabs extension manages; empty turns org actions off |
 | `pr_tabs.default_repo` | `ORCH_PR_TABS_DEFAULT_REPO` | empty | Repo name for bare PR numbers; empty turns number jumps off |
 | `pr_tabs.open_all` | `ORCH_PR_TABS_OPEN_ALL` | empty | GitHub search behind the Open all button; empty turns it off |
-| `pr_tabs.topics` | `ORCH_PR_TABS_TOPICS` | empty | Tab-group rules: tables with name, color and repo/title/any regex lists |
 
 ## Repo settings
 
@@ -83,11 +79,40 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 |---|---|---|---|
 | `guard.big_repo` | `ORCH_BIG_REPO` | `false` | Broad Git reads (git grep, cat-file over all objects) are blocked in this repo |
 | `audit.merge_gate_checks` | `ORCH_MERGE_GATE_CHECKS` | empty | Check names that only run on a full CI run; an approved PR on a non-default base reports "full CI ran" or "full CI not run" |
-| `legacy.scan` | `ORCH_LEGACY_SCAN` | `false` | Open PRs of this repo are scanned for lines that build on legacy front-end code (LEGACY line) |
-| `legacy.extra_pattern` | `ORCH_LEGACY_EXTRA_PATTERN` | empty | Regex searched in addition to the built-in jQuery/ujs patterns of the legacy scan |
-| `legacy.exempt_paths` | `ORCH_LEGACY_EXEMPT_PATHS` | empty | Paths the built-in legacy scan skips, in addition to the two ratchet guard files under scripts/ |
+| `legacy.scan` | `ORCH_LEGACY_SCAN` | `false` | Open PRs of this repo are scanned for added lines that legacy.rules count (LEGACY line) |
+| `legacy.rules` | `ORCH_LEGACY_RULES` | empty | Legacy rules ([[legacy.rules]]: kind, paths, optional pattern and exclude); the first rule that counts a line names its kind. No rules: nothing is scanned or mapped |
+| `legacy.exempt` | `ORCH_LEGACY_EXEMPT` | empty | Path globs no legacy rule counts |
 | `focus.pattern` | `ORCH_FOCUS_PATTERN` | empty | Case-insensitive regex matched against the labels of the workers of an architect working in this repo; empty turns the focus check off |
 | `focus.architect` | `ORCH_FOCUS_ARCHITECT` | empty | Architect name never listed as lacking a focus worker |
+
+## Legacy rules
+
+Legacy code is the patterns a repo is phasing out, which agents must not extend. The tool ships no rules: each repo lists its own under `[legacy]`, and with none the scan and the map do nothing and say so in one line.
+
+Each `[[legacy.rules]]` has a `kind` (one word), `paths` (globs: `*`, `?`, `**`, `{a,b}`; a trailing `/` means everything below), an optional `pattern` (a [ripgrep](https://github.com/BurntSushi/ripgrep) regex, matched in time linear in the line, so no look-around or backreferences; searched in the first 2000 characters of a line; `(?i)` for case-insensitive) and optional `exclude` globs. A line counts under the first rule whose `paths` cover its file, whose `exclude` does not, and whose `pattern` matches it; a rule without a `pattern` counts every line it covers. `legacy.exempt` lists files no rule counts. The scan reads the rules of the PR's base branch and your clone's `.orchestration.local.toml`, whose rules replace the committed ones; `legacy-map.sh` reads them from `origin/main` and the clone.
+
+Example for a Rails app moving off jQuery:
+
+```toml
+[legacy]
+scan = true
+exempt = ["scripts/legacy-guard.mjs"]
+
+[[legacy.rules]]
+kind = "JSERB"
+paths = ["**/*.js.erb"]
+
+[[legacy.rules]]
+kind = "LEGACY"
+paths = ["app/assets/javascripts/**"]
+exclude = ["**/*.md"]
+
+[[legacy.rules]]
+kind = "JQUERY"
+pattern = '\$\(|jQuery|\$\.ajax|rails-ujs|data-remote|remote: *true|select2'
+paths = ["**/*.{js,coffee,erb,haml,rb}"]
+exclude = ["spec/**"]
+```
 
 ## Environment only
 
@@ -106,4 +131,12 @@ These are read from the environment and never from a file.
 
 When `~/.claude/orchestration.toml` is missing and `~/.claude/orchestration.env` exists, `install.sh` converts the old file once, keeps its comments where they sit above a key, and renames it to `orchestration.env.bak`. When both exist, the TOML file wins and the installer warns. The old `ORCH_V2_*` names are converted to their `ORCH_WATCHERS_*` names.
 
-Repo values in the old file are not written to the global file. `ORCH_BIG_REPO_REMOTES` becomes `guard.big_repo = true` and `ORCH_LEGACY_REPOS` becomes `legacy.scan = true` (with `ORCH_LEGACY_EXTRA_PATTERN` and `ORCH_LEGACY_EXEMPT_PATHS`) for each listed repo; `ORCH_MERGE_GATE_CHECKS` goes to each `ORCH_PR_REPOS` repo; `ORCH_FOCUS_PATTERN` and `ORCH_FOCUS_ARCHITECT` go to `ORCH_WATCHERS_PRIMARY_REPO`. For a repo with a clone in `ORCH_GIT_WATCH_REPOS` they are written to that clone's `.orchestration.local.toml`, and the file is added to the clone's `.git/info/exclude` unless Git already ignores it. An existing local file is never overwritten. Every other repo gets a snippet in `~/.claude/orchestration-repo-snippets/<owner>/<repo>.toml` to commit as `.orchestration.toml` or keep as `.orchestration.local.toml`.
+Repo values in the old file are not written to the global file. `ORCH_BIG_REPO_REMOTES` becomes `guard.big_repo = true` and `ORCH_LEGACY_REPOS` becomes `legacy.scan = true` for each listed repo, `ORCH_LEGACY_EXTRA_PATTERN` one `LEGACY` rule over every path and `ORCH_LEGACY_EXEMPT_PATHS` `legacy.exempt`; `ORCH_MERGE_GATE_CHECKS` goes to each `ORCH_PR_REPOS` repo; `ORCH_FOCUS_PATTERN` and `ORCH_FOCUS_ARCHITECT` go to `ORCH_WATCHERS_PRIMARY_REPO`. For a repo with a clone in `ORCH_GIT_WATCH_REPOS` they are written to that clone's `.orchestration.local.toml`, and the file is added to the clone's `.git/info/exclude` unless Git already ignores it. An existing local file is never overwritten. Every other repo gets a snippet in `~/.claude/orchestration-repo-snippets/<owner>/<repo>.toml` to commit as `.orchestration.toml` or keep as `.orchestration.local.toml`.
+
+The removed `legacy.extra_pattern` and `legacy.exempt_paths` keys are errors. `install.sh` rewrites them, before it drops `audit.git_watch_repos`, in the `.orchestration.local.toml` of each clone of the open work, of the `legacy.map_repo` clone, of each clone `audit.git_watch_repos` still lists, of their main checkouts, and in the snippets, keeping every other line: `extra_pattern` becomes one `LEGACY` rule over every path, `exempt_paths` becomes `exempt`. The built-in jQuery rules are gone, so add the rules the repo needs.
+
+## Repos and architects from the open work
+
+The audit and pulls watchers watch the open PRs of `pr.author` in the GitHub repos of the open workspaces (the `origin` of each workspace's repo root), and check those clones for PACKS and WORKTREES. The env adapter reports the workspaces (`env/<name>/open_work.py`, see [env/README.md](../env/README.md)). When it cannot, the watchers use the last set saved in `~/.claude/coordinator/open-work.json` and say so in their log.
+
+`pr.repos`, `audit.git_watch_repos` and `focus.skip_architects` are not settings. `install.sh` drops them from an existing file and prints one `dropped` line; one it cannot remove in place (an inline table) gets a `warning` line to edit it by hand. Until then the readers skip them with a warning. To leave an architect out of the focus report, see the pause line in [watchers.md](watchers.md#focus-report).

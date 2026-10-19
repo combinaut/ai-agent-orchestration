@@ -56,12 +56,12 @@ test("fetched states are recorded, missing PRs keep what was known", () => {
 
 test("opening a PR seeds OPEN only where no state is recorded yet", () => {
   const opened = [
-    { hit: { title: "One", headRefName: "a" }, pr: { key: "acme/webapp#1" } },
+    { hit: { title: "One", headRefName: "a", headRepository: { nameWithOwner: "fork/webapp" } }, pr: { key: "acme/webapp#1" } },
     { hit: { title: "Two", headRefName: "b" }, pr: { key: "acme/webapp#2" } },
   ];
   const next = seedOpen({ "acme/webapp#2": { state: "CLOSED", title: "Two", headRefName: "b" } }, opened);
   assert.deepEqual(next, {
-    "acme/webapp#1": { state: "OPEN", title: "One", headRefName: "a" },
+    "acme/webapp#1": { state: "OPEN", title: "One", headRefName: "a", headRepository: { nameWithOwner: "fork/webapp" } },
     "acme/webapp#2": { state: "CLOSED", title: "Two", headRefName: "b" },
   });
 });

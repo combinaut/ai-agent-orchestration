@@ -1,183 +1,28 @@
-"""Reads a repository's legacy-deletion-ratchet rules file and applies it to added lines."""
+"""The legacy rules of a repo's [legacy] settings: classifies added lines and maps the files they count."""
+import codecs
+import collections
+import hashlib
+import itertools
 import json
 import re
-import struct
-import warnings
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+from pathlib import Path
 
-RULES_PATH = 'scripts/legacy-deletion-ratchet-rules.json'
-KINDS = ('jquery', 'ujs', 'ajax', 'selectWidgets')
-TEST_PATH = re.compile(r'(^|/)(spec|test|tests)/|[._-](spec|test)\.[^/]*$')
-FRONTEND_EXTENSIONS = ('.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.vue', '.erb', '.haml', '.hbs', '.ejs', '.coffee', '.rb')
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'lib'))
+import orch_settings
+
 LINE_SEARCH_LIMIT = 2000
-LINE_END = r'\n\r\u2028\u2029'
-JS_SPACE = r'\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff'
-GROUP_NAME = re.compile(r'\(\?<([A-Za-z_][A-Za-z0-9_]*)>')
-REPEAT = re.compile(r'\{\d+(,\d*)?\}')
-LOOKS = ('(?:', '(?=', '(?!', '(?<=', '(?<!')
-
-
-def unbounded_repeat(pattern, index):
-    match = REPEAT.match(pattern, index)
-    if not match:
-        return False
-    low, comma, high = match[0][1:-1].partition(',')
-    return int(high or 99) > 1 if comma else int(low) > 1
-
-
-def js_escape(pattern, index, in_class, unicode_mode, ignore_case):
-    if index + 1 >= len(pattern):
-        raise ValueError('trailing backslash')
-    char = pattern[index + 1]
-    if char in 'dDwWbtnrfv' or (char == 'B' and not in_class):
-        return '\\' + char, index + 2
-    if char == 's':
-        return (JS_SPACE if in_class else f'[{JS_SPACE}]'), index + 2
-    if char == 'S' and not in_class:
-        return f'[^{JS_SPACE}]', index + 2
-    if char == '0' and not pattern[index + 2:index + 3].isdigit():
-        return '\\x00', index + 2
-    if ignore_case and (re.fullmatch(r'x[89A-Fa-f][0-9A-Fa-f]', pattern[index + 1:index + 4])
-                        or re.fullmatch(r'u(?!00[0-7])[0-9A-Fa-f]{4}', pattern[index + 1:index + 6])):
-        raise ValueError('non-ASCII escape with the i flag')
-    if char == 'x' and re.fullmatch(r'[0-9A-Fa-f]{2}', pattern[index + 2:index + 4]):
-        return pattern[index:index + 4], index + 4
-    if char == 'u' and re.fullmatch(r'[0-9A-Fa-f]{4}', pattern[index + 2:index + 6]):
-        pair = re.match(r'\\u(D[89AB][0-9A-Fa-f]{2})\\u(D[C-F][0-9A-Fa-f]{2})', pattern[index:index + 12], re.I)
-        if unicode_mode and pair:
-            high, low = int(pair[1], 16), int(pair[2], 16)
-            return f'\\U{0x10000 + ((high - 0xD800) << 10) + low - 0xDC00:08x}', index + 12
-        return pattern[index:index + 6], index + 6
-    if not (char.isascii() and char.isalnum()):
-        if unicode_mode and char not in '^$\\.*+?()[]{}|/' + '-' * in_class:
-            raise ValueError(f'invalid escape \\{char} with the u flag')
-        return re.escape(char), index + 2
-    raise ValueError(f'unsupported escape \\{char}')
-
-
-def translate_regex(pattern, flags=''):
-    """Python regex with the same matches as the JavaScript `pattern`, or ValueError."""
-    if set(flags) - set('imsu') or len(set(flags)) != len(flags):
-        raise ValueError(f'unsupported flags {flags!r}')
-    if 'i' in flags and not pattern.isascii():
-        raise ValueError('non-ASCII text with the i flag')
-    multiline, dotall, unicode_mode, ignore_case = 'm' in flags, 's' in flags, 'u' in flags, 'i' in flags
-    out, index, repeated = [], 0, [False]
-    while index < len(pattern):
-        char = pattern[index]
-        if char == '\\':
-            text, index = js_escape(pattern, index, False, unicode_mode, ignore_case)
-            out.append(text)
-        elif char == '[':
-            index += 1
-            negated = pattern[index:index + 1] == '^'
-            index += negated
-            if pattern[index:index + 1] == ']':
-                raise ValueError('empty character class')
-            body = []
-            while index < len(pattern) and pattern[index] != ']':
-                if pattern[index] == '\\':
-                    text, index = js_escape(pattern, index, True, unicode_mode, ignore_case)
-                else:
-                    text = '\\' + pattern[index] if pattern[index] in '[&~|' else pattern[index]
-                    index += 1
-                body.append(text)
-            if index >= len(pattern):
-                raise ValueError('unterminated character class')
-            out.append('[' + ('^' if negated else '') + ''.join(body) + ']')
-            index += 1
-        elif char == '(':
-            repeated.append(False)
-            named = GROUP_NAME.match(pattern, index)
-            if pattern[index + 1:index + 2] != '?':
-                out.append('(')
-                index += 1
-            elif named:
-                out.append(f'(?P<{named[1]}>')
-                index = named.end()
-            elif pattern.startswith(LOOKS, index):
-                size = 4 if pattern.startswith('(?<', index) else 3
-                out.append(pattern[index:index + size])
-                index += size
-            else:
-                raise ValueError('unsupported group syntax')
-        elif char == '|':
-            repeated[-1] = True
-            out.append(char)
-            index += 1
-        elif char == ')':
-            inner = repeated.pop() if len(repeated) > 1 else False
-            out.append(char)
-            index += 1
-            again = pattern[index:index + 1] in ('*', '+') or unbounded_repeat(pattern, index)
-            if inner and again:
-                raise ValueError('quantified group containing a quantifier or alternation')
-            repeated[-1] = repeated[-1] or inner or again
-        elif char == '.':
-            out.append('(?s:.)' if dotall else f'[^{LINE_END}]')
-            index += 1
-        elif char == '^':
-            out.append(f'(?<![^{LINE_END}])' if multiline else '^')
-            index += 1
-        elif char == '$':
-            out.append(f'(?![^{LINE_END}])' if multiline else r'\Z')
-            index += 1
-        elif char in '*+?{':
-            repeat = REPEAT.match(pattern, index) if char == '{' else None
-            if char == '{' and not repeat:
-                if unicode_mode:
-                    raise ValueError('lone { with the u flag')
-                out.append(r'\{')
-                index += 1
-                continue
-            end = repeat.end() if repeat else index + 1
-            repeated[-1] = True
-            out.append(pattern[index:end])
-            if pattern[end:end + 1] == '?':
-                out.append('?')
-                end += 1
-            if pattern[end:end + 1] in ('+', '*', '?', '{'):
-                raise ValueError('unsupported repeat syntax')
-            index = end
-        elif char in '}]' and unicode_mode:
-            raise ValueError(f'lone {char} with the u flag')
-        elif char == '}':
-            out.append(r'\}')
-            index += 1
-        else:
-            out.append(char)
-            index += 1
-    return ''.join(out)
-
-
-def utf16_units(text):
-    raw = text.encode('utf-16-le', 'surrogatepass')
-    return ''.join(chr(unit) for unit in struct.unpack(f'<{len(raw) // 2}H', raw))
-
-
-class JsRegex:
-    """Searches like a JavaScript RegExp: UTF-16 code units unless the u flag is set."""
-
-    def __init__(self, compiled, units):
-        self.compiled, self.units = compiled, units
-
-    def search(self, text):
-        text = text[:LINE_SEARCH_LIMIT]
-        return self.compiled.search(utf16_units(text) if self.units else text)
-
-
-def compile_js(pattern, flags=''):
-    if not isinstance(pattern, str) or not isinstance(flags, str):
-        raise ValueError('pattern and flags must be strings')
-    if 'i' in flags and 'u' in flags:
-        raise ValueError('flags i and u together')
-    units = 'u' not in flags
-    translated = translate_regex(utf16_units(pattern) if units else pattern, flags)
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter('error')
-            return JsRegex(re.compile(translated, re.ASCII | (re.IGNORECASE if 'i' in flags else 0)), units)
-    except (re.error, Warning, RecursionError, OverflowError) as error:
-        raise ValueError(f'not expressible in Python: {error}') from error
+RULES_MAX = 64
+CHUNK_LINES = 10_000
+READ_BYTES = 1 << 20
+RG_FLAGS = ('--no-config', '--text', '--line-number', '--no-filename', '--max-columns', '1')
+RULE_KEYS = ('kind', 'pattern', 'paths', 'exclude')
+KIND = re.compile(r'[A-Za-z][A-Za-z0-9_-]*')
+NO_RULES = 3
 
 
 def glob_body(glob):
@@ -213,106 +58,294 @@ def compile_glob(glob):
     return re.compile(glob_body(glob + '**' if glob.endswith('/') else glob))
 
 
-def compile_extension(extension):
-    if not isinstance(extension, str) or not extension:
-        raise ValueError('extension must be a non-empty string')
-    return extension
+def globs(value, key, required=False):
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value) or (required and not value):
+        raise ValueError(f"{key} must be a {'non-empty ' if required else ''}list of non-empty strings")
+    try:
+        return [compile_glob(item) for item in value]
+    except ValueError as error:
+        raise ValueError(f'{key}: {error}') from error
 
 
-def string_list(raw, key, convert):
-    value = raw.get(key, [])
-    if not isinstance(value, list):
-        raise ValueError(f'{key} must be a list')
-    return [convert(item) for item in value]
+def rg():
+    path = shutil.which('rg')
+    if path is None:
+        raise ValueError('legacy rules need rg (ripgrep) on PATH')
+    return path
+
+
+def compile_pattern(pattern):
+    """The pattern when rg accepts it; rg matches in time linear in the input."""
+    if pattern is None:
+        return None
+    if not isinstance(pattern, str) or not pattern or '\0' in pattern:
+        raise ValueError('pattern must be a non-empty string')
+    problem = orch_settings.rg_problem(pattern, rg())
+    if problem:
+        raise ValueError(f'pattern is not a valid rg regex: {problem}')
+    return pattern
+
+
+class Matcher:
+    """One rg process for one pattern: numbers the lines fed to it and collects the numbers it matches."""
+
+    def __init__(self, pattern):
+        self.errors = tempfile.TemporaryFile()
+        self.process = subprocess.Popen([rg(), *RG_FLAGS, '--regexp', pattern, '-'],
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.errors)
+        self.fed, self.hits = 0, set()
+        self.reader = threading.Thread(target=self.read, daemon=True)
+        self.reader.start()
+
+    def read(self):
+        for raw in self.process.stdout:
+            number = raw.split(b':', 1)[0]
+            if number.isdigit():
+                self.hits.add(int(number))
+
+    def feed(self, lines):
+        """Line number of the first of `lines`."""
+        start = self.fed + 1
+        self.process.stdin.write(b''.join(line.encode(errors='replace') + b'\n' for line in lines))
+        self.fed += len(lines)
+        return start
+
+    def finish(self):
+        self.process.stdin.close()
+        self.reader.join()
+        self.process.stdout.close()
+        status = self.process.wait()
+        self.errors.seek(0)
+        reason = ' '.join(self.errors.read().decode(errors='replace').split())
+        self.errors.close()
+        if status not in (0, 1):
+            raise ValueError(f'rg failed with status {status}: {reason}')
+        return self.hits
+
+    def kill(self):
+        self.process.kill()
+        self.process.wait()
+        for stream in (self.process.stdin, self.process.stdout, self.errors):
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+
+class Rule:
+    def __init__(self, raw):
+        extra = [key for key in raw if key not in RULE_KEYS]
+        if extra:
+            raise ValueError(f'unknown key {extra[0]!r}')
+        self.pattern = compile_pattern(raw.get('pattern'))
+        self.paths = globs(raw.get('paths', []), 'paths', required=True)
+        self.exclude = globs(raw.get('exclude', []), 'exclude')
+
+    def covers(self, path):
+        return any(glob.fullmatch(path) for glob in self.paths) and not any(glob.fullmatch(path) for glob in self.exclude)
 
 
 class Rules:
-    def __init__(self, raw):
-        if not isinstance(raw, dict) or type(raw.get('version')) is not int or raw['version'] != 1:
-            raise ValueError('rules file must be an object with version 1')
-        self.legacy_paths = string_list(raw, 'legacyPaths', compile_glob)
-        self.scanned = string_list(raw, 'scannedPaths', compile_glob)
-        self.exempt = string_list(raw, 'selfExempt', compile_glob)
-        self.extensions = string_list(raw, 'legacyExtensions', compile_extension)
-        bridge = raw.get('bridgeMarker')
-        self.bridge, self.bridge_lines = None, 0
-        if bridge is not None:
-            lines = bridge.get('fileLevelLines') if isinstance(bridge, dict) else None
-            if not isinstance(lines, int) or isinstance(lines, bool) or lines < 1:
-                raise ValueError('bridgeMarker needs a pattern and a positive fileLevelLines')
-            self.bridge = self.compiled('bridgeMarker', bridge.get('pattern'), bridge.get('flags', ''))
-            if self.bridge.search(''):
-                raise ValueError('bridgeMarker must not match the empty string')
-            self.bridge_lines = lines
-        groups = raw.get('patterns')
-        if not isinstance(groups, dict) or set(groups) - set(KINDS):
-            raise ValueError('patterns must be an object keyed by ' + ', '.join(KINDS))
-        self.patterns = []
-        for kind, entries in groups.items():
-            if not isinstance(entries, list):
-                raise ValueError(f'patterns.{kind} must be a list')
-            for entry in entries:
-                if not isinstance(entry, dict) or not isinstance(entry.get('id'), str) or not entry['id']:
-                    raise ValueError(f'patterns.{kind} entries need an id')
-                self.patterns.append(self.compiled(entry['id'], entry.get('pattern'), entry.get('flags', '')))
+    def __init__(self, entries, exempt=()):
+        if not isinstance(entries, list) or not entries or not all(isinstance(entry, dict) for entry in entries):
+            raise ValueError('legacy.rules must be a non-empty array of tables ([[legacy.rules]])')
+        self.exempt = globs(list(exempt), 'legacy.exempt')
+        if len(entries) > RULES_MAX:
+            raise ValueError(f'legacy.rules has {len(entries)} rules; at most {RULES_MAX}')
+        self.rules = []
+        for number, entry in enumerate(entries, 1):
+            kind = entry.get('kind')
+            if not isinstance(kind, str) or not KIND.fullmatch(kind):
+                raise ValueError(f'legacy.rules[{number}]: kind must be a word (letters, digits, _ or -), got {kind!r}')
+            try:
+                self.rules.append((kind, Rule(entry)))
+            except ValueError as error:
+                raise ValueError(f'legacy.rules[{number}] ({kind}): {error}') from error
+        self.kinds = tuple(dict.fromkeys(kind for kind, _ in self.rules))
+        self.fingerprint = hashlib.sha256(json.dumps([entries, list(exempt)], sort_keys=True).encode()).hexdigest()
+        self.candidates = {}
 
-        if not self.patterns:
-            raise ValueError('patterns must contain at least one pattern')
+    def for_path(self, path):
+        """Indexes of the rules that cover path, in rule order."""
+        if path not in self.candidates:
+            exempt = any(glob.fullmatch(path) for glob in self.exempt)
+            self.candidates[path] = [] if exempt else [index for index, (_, rule) in enumerate(self.rules) if rule.covers(path)]
+        return self.candidates[path]
 
-    @staticmethod
-    def compiled(name, pattern, flags):
+    def documents(self, documents):
+        """(path, kinds) for each (path, lines), one kind or None per line; matched in chunks of at most CHUNK_LINES lines."""
+        current = None
+        for number, path, kinds in self.pieces(documents):
+            if current is not None and current[0] != number:
+                yield current[1], current[2]
+                current = None
+            if current is None:
+                current = [number, path, []]
+            current[2].extend(kinds)
+        if current is not None:
+            yield current[1], current[2]
+
+    def pieces(self, documents):
+        """(document number, path, kinds) for each piece of at most CHUNK_LINES lines, in order."""
+        batch, size = [], 0
+        for number, (path, lines) in enumerate(documents):
+            for start in range(0, max(len(lines), 1), CHUNK_LINES):
+                piece = [line[:LINE_SEARCH_LIMIT] for line in lines[start:start + CHUNK_LINES]]
+                if batch and size + len(piece) > CHUNK_LINES:
+                    yield from self.matched(batch)
+                    batch, size = [], 0
+                batch.append((number, path, piece))
+                size += len(piece)
+        if batch:
+            yield from self.matched(batch)
+
+    def matched(self, batch):
+        for (number, _, _), (path, kinds) in zip(batch, self.chunk([(path, piece) for _, path, piece in batch])):
+            yield number, path, kinds
+
+    def chunk(self, documents):
+        """documents() for one chunk: one rg process per rule pattern."""
+        matchers, fed = {}, []
         try:
-            return compile_js(pattern, flags)
-        except ValueError as error:
-            raise ValueError(f'pattern {name}: {error}') from error
-
-    def exempted(self, path):
-        return any(glob.fullmatch(path) for glob in self.exempt)
-
-    def in_legacy_path(self, path):
-        return any(glob.fullmatch(path) for glob in self.legacy_paths)
+            for index, (_, rule) in enumerate(self.rules):
+                if rule.pattern is not None:
+                    matchers[index] = Matcher(rule.pattern)
+            for path, lines in documents:
+                fed.append((path, len(lines), {index: matchers[index].feed(lines)
+                                               for index in self.for_path(path) if index in matchers}))
+            hits = {index: matcher.finish() for index, matcher in matchers.items()}
+        except BaseException:
+            for matcher in matchers.values():
+                if matcher.process.returncode is None:
+                    matcher.kill()
+            raise
+        for path, count, starts in fed:
+            covering = self.for_path(path)
+            yield path, [next((self.rules[index][0] for index in covering
+                               if index not in starts or starts[index] + number in hits[index]), None)
+                         for number in range(count)]
 
     def classify(self, path, text):
-        if '.js.erb' in self.extensions and path.endswith('.js.erb'):
-            return 'JSERB'
-        if path.endswith(tuple(self.extensions)):
-            return 'LEGACY'
-        scanned = path.endswith(FRONTEND_EXTENSIONS) and (
-            not self.scanned or any(glob.fullmatch(path) for glob in self.scanned))
-        legacy = self.in_legacy_path(path)
-        if scanned and any(pattern.search(text) for pattern in self.patterns):
-            if TEST_PATH.search(path):
-                return 'TEST'
-            return 'LEGACY' if legacy else 'JQUERY'
-        return 'LEGACY' if legacy else None
+        return next(self.documents([(path, [text])]))[1][0]
 
-    def bridge_files(self, lines):
-        if not self.bridge:
-            return set()
-        return {path for path, number, text, _ in lines
-                if number <= self.bridge_lines and not self.exempted(path) and self.bridge.search(text)}
-
-    def scan(self, lines, bridged=None):
-        files, hits = self.bridge_files(lines), []
-        for path, _, text, added in lines:
-            if not added or self.exempted(path):
-                continue
-            if path in files or (self.bridge and self.bridge.search(text)):
-                if bridged is not None:
-                    bridged.append((path, text))
-            elif kind := self.classify(path, text):
-                hits.append((kind, path, text))
-        return hits
+    def scan(self, lines):
+        added = [(path, text) for path, _, text, is_added in lines if is_added]
+        runs = [(path, [text for _, text in group]) for path, group in itertools.groupby(added, key=lambda item: item[0])]
+        return [(kind, path, text) for (path, texts), (_, kinds) in zip(runs, self.documents(runs))
+                for text, kind in zip(texts, kinds) if kind]
 
 
-def reject_constant(name):
-    raise ValueError(f'{name} is not JSON')
-
-
-def parse_rules(text):
+def from_settings(settings):
+    """Rules of a repo's ORCH_* settings; None when they define none."""
     try:
-        return Rules(json.loads(text, parse_constant=reject_constant))
+        entries = json.loads(settings.get('ORCH_LEGACY_RULES') or '[]')
     except json.JSONDecodeError as error:
-        raise ValueError(f'rules file is not JSON: {error}') from error
-    except RecursionError as error:
-        raise ValueError('rules file is nested too deeply') from error
+        raise ValueError(f'ORCH_LEGACY_RULES is not JSON: {error}') from None
+    if entries == []:
+        return None
+    return Rules(entries, settings.get('ORCH_LEGACY_EXEMPT', '').split())
+
+
+def git(repo, *args):
+    return subprocess.run(['git', '-C', repo, *args], capture_output=True, check=True).stdout
+
+
+def clone_rules(repo, ref):
+    """Rules of the clone: its committed settings on `ref`, then its personal files."""
+    try:
+        listed = git(repo, 'ls-tree', '--name-only', ref, '--', orch_settings.REPO_FILE)
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f'cannot read {ref} in {repo}: {error.stderr.decode(errors="replace").strip()}') from None
+    text = git(repo, 'show', f'{ref}:{orch_settings.REPO_FILE}').decode() if listed else ''
+    return from_settings(orch_settings.load_remote(repo, ref, text, repo))
+
+
+def map_rows(repo, ref, rules):
+    """(kind, path) for every file on `ref` with a line a rule counts."""
+    entries = [entry.split(b'\t', 1) for entry in git(repo, 'ls-tree', '-r', '-z', ref).split(b'\0') if entry]
+    blobs = [(meta.split()[2].decode(), path.decode(errors='replace')) for meta, path in entries if meta.split()[1] == b'blob']
+    blobs = [(oid, path) for oid, path in blobs if rules.for_path(path)]
+    found, skipped, order = {}, set(), collections.deque()
+    with subprocess.Popen(['git', '-C', repo, 'cat-file', '--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as batch:
+        for _, kinds in rules.documents(blob_lines(batch, blobs, ref, skipped, order)):
+            found.setdefault(order.popleft(), set()).update(kind for kind in kinds if kind)
+        batch.stdin.close()
+        if batch.wait() != 0:
+            raise ValueError(f'git cat-file failed with status {batch.returncode} on {ref}')
+    return sorted((kind, blobs[number][1]) for number, kinds in found.items() if number not in skipped for kind in kinds)
+
+
+def blob_lines(batch, blobs, ref, skipped, order):
+    """(path, lines) pieces of at most CHUNK_LINES lines cut to LINE_SEARCH_LIMIT, read READ_BYTES at a time.
+
+    Each piece's blob number goes to order; a binary or non-UTF-8 blob's number goes to skipped."""
+    for number, (oid, path) in enumerate(blobs):
+        batch.stdin.write(f'{oid}\n'.encode())
+        batch.stdin.flush()
+        header = batch.stdout.readline().split()
+        if len(header) != 3 or header[0].decode() != oid or header[1] != b'blob' or not header[2].isdigit():
+            raise ValueError(f'cannot read {path} on {ref}')
+        left, decoder, tail, lines, emitted = int(header[2]), codecs.getincrementaldecoder('utf-8')(), '', [], False
+        while left:
+            data = batch.stdout.read(min(left, READ_BYTES))
+            if not data:
+                raise ValueError(f'cannot read {path} on {ref}: short read')
+            left -= len(data)
+            if number in skipped:
+                continue
+            try:
+                text = decoder.decode(data)
+            except UnicodeDecodeError:
+                skipped.add(number)
+                continue
+            if '\0' in text:
+                skipped.add(number)
+                continue
+            parts = (tail + text).split('\n')
+            for line in parts[:-1]:
+                lines.append(line[:LINE_SEARCH_LIMIT])
+                if len(lines) >= CHUNK_LINES:
+                    order.append(number)
+                    yield path, lines
+                    lines, emitted = [], True
+            tail = parts[-1][:LINE_SEARCH_LIMIT]
+        if batch.stdout.read(1) != b'\n':
+            raise ValueError(f'cannot read {path} on {ref}: short read')
+        if number in skipped:
+            continue
+        try:
+            tail += decoder.decode(b'', final=True)
+        except UnicodeDecodeError:
+            skipped.add(number)
+            continue
+        if tail or not (lines or emitted):
+            lines.append(tail[:LINE_SEARCH_LIMIT])
+        if lines:
+            order.append(number)
+            yield path, lines
+
+
+def main(argv):
+    if len(argv) != 4 or argv[1] != 'map':
+        print('usage: legacy_rules.py map <repo> <ref>', file=sys.stderr)
+        return 2
+    repo, ref = argv[2], argv[3]
+    try:
+        rules = clone_rules(repo, ref)
+        if rules is None:
+            print(f'legacy-map.sh: {repo} has no [[legacy.rules]] in its repo settings; nothing to map', file=sys.stderr)
+            return NO_RULES
+        rows = map_rows(repo, ref, rules)
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        print(f'legacy-map.sh: {error}', file=sys.stderr)
+        return 1
+    for kind, path in rows:
+        if '\t' in path or '\n' in path:
+            print(f'legacy-map.sh: skipped {path!r}: a tab or newline in the name does not fit the TSV', file=sys.stderr)
+        else:
+            sys.stdout.write(f'{kind}\t{path}\n')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))

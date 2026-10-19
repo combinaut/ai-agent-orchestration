@@ -10,15 +10,31 @@ big_repo = false
 merge_gate_checks = []
 
 [legacy]
-# Open PRs of this repo are scanned for lines that build on legacy front-end code (LEGACY line)
+# Open PRs of this repo are scanned for added lines that legacy.rules count (LEGACY line)
 scan = false
-# Regex searched in addition to the built-in jQuery/ujs patterns of the legacy scan
-extra_pattern = ""
-# Paths the built-in legacy scan skips, in addition to the two ratchet guard files under scripts/
-exempt_paths = []
+# Path globs no legacy rule counts
+exempt = []
 
 [focus]
 # Case-insensitive regex matched against the labels of the workers of an architect working in this repo; empty turns the focus check off
 pattern = ""
 # Architect name never listed as lacking a focus worker
 architect = ""
+
+# Legacy rules ([[legacy.rules]]): the tool ships none. The first rule whose paths cover a file and whose
+# pattern matches a line names the line's kind; a rule without a pattern counts every line it covers.
+# Example for a Rails app moving off jQuery:
+#
+# [[legacy.rules]]
+# kind = "JSERB"
+# paths = ["**/*.js.erb"]
+#
+# [[legacy.rules]]
+# kind = "LEGACY"
+# paths = ["app/assets/javascripts/**"]
+#
+# [[legacy.rules]]
+# kind = "JQUERY"
+# pattern = '\$\(|jQuery|rails-ujs|data-remote|remote: *true'
+# paths = ["**/*.{js,coffee,erb,rb}"]
+# exclude = ["spec/**"]

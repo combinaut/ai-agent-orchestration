@@ -5,9 +5,7 @@
 # (committed) and .orchestration.local.toml (personal, git-ignored). See docs/settings.md.
 
 [pr]
-# GitHub repos (owner/name) whose PRs the audit watches; required by the audit watcher
-repos = []
-# GitHub login whose open PRs the audit watches ("@me" works); required by the audit watcher
+# GitHub login whose open PRs the audit watches in the repos of the open workspaces ("@me" works); required by the audit watcher
 author = ""
 # Only PRs updated on or after this date (YYYY-MM-DD); empty means no date filter
 since = ""
@@ -15,11 +13,9 @@ since = ""
 bot_reviewer_login = "copilot-pull-request-reviewer"
 
 [audit]
-# Local clones checked for PACKS and WORKTREES pile-ups; their .orchestration.local.toml applies to PRs of the repo they clone
-git_watch_repos = []
-# Pack files in a watched clone before a PACKS line
+# Pack files in a clone of the open work before a PACKS line
 packs_max = 50
-# Worktrees in a watched clone before a WORKTREES line
+# Worktrees in a clone of the open work before a WORKTREES line
 worktrees_max = 40
 # PR search page size (1-100)
 page_prs = 80
@@ -31,7 +27,7 @@ page_nodes = 100
 scans_max = 10
 # File reads per PR scan for files GitHub returns without a patch
 reads_max = 20
-# Clone the daily legacy-map job reads; empty picks the audit.git_watch_repos clone whose repo settings turn legacy.scan on
+# Clone the daily legacy-map job reads; empty picks, at install time, the clone of the open work whose repo settings turn legacy.scan on
 map_repo = ""
 
 [heavy_slots]
@@ -41,10 +37,6 @@ max = 4
 dir = ""
 # Seconds a stopped job gets before it is killed
 kill_grace = 10
-
-[focus]
-# Architect names left out of focus reports
-skip_architects = []
 
 [models]
 # Model of the Coordinator
@@ -145,5 +137,3 @@ org = ""
 default_repo = ""
 # GitHub search behind the Open all button; empty turns it off
 open_all = ""
-# Tab-group rules: tables with name, color and repo/title/any regex lists
-topics = []

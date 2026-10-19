@@ -459,7 +459,7 @@ settings_cli() { "$INSTALL_PYTHON" -I "$ORCH_REPO/lib/orch_settings.py" "$@"; }
 ask_config_keys() {
   local key value
   interactive || return 0
-  for key in ORCH_PR_REPOS ORCH_PR_AUTHOR ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL ORCH_HERDR_BIN ORCH_HERDR_SOCKET; do
+  for key in ORCH_PR_AUTHOR ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL ORCH_HERDR_BIN ORCH_HERDR_SOCKET; do
     value=$(config_value "$key")
     [ -n "$value" ] || value=$(unset "$key" && config_value "$key")
     case "$value" in
@@ -501,6 +501,48 @@ convert_old_config() {
   say "moved" "$OLD_CONFIG -> $backup"
 }
 
+# open_work_clones: the clones of the open work, one per line; none when the env adapter cannot answer.
+open_work_clones() {
+  local bin socket
+  bin=$(placeholder_value ORCH_HERDR_BIN)
+  socket=$(placeholder_value ORCH_HERDR_SOCKET)
+  # shellcheck disable=SC2030 # Set for the discovery call only.
+  (
+    [ -z "$bin" ] || export HERDR_BIN_PATH="$bin"
+    [ -z "$socket" ] || export HERDR_SOCKET_PATH="$socket"
+    ORCH_ENV="${ENV_NAME:-$(config_value ORCH_ENV)}" "$INSTALL_PYTHON" "$ORCH_REPO/coordinator/watchers/discovery.py" clones 2>/dev/null
+  ) || true
+}
+
+# upgrade_repo_files: rewrites legacy.extra_pattern and legacy.exempt_paths as rules in the personal files of the
+# open-work clones, of legacy.map_repo, of the clones $CONFIG still lists in audit.git_watch_repos, of their main checkouts, and in the snippets.
+upgrade_repo_files() {
+  local clone file files=() clones=() line report map
+  map=$(config_value ORCH_LEGACY_MAP_REPO)
+  [ -z "$map" ] || map=$(placeholder_value ORCH_LEGACY_MAP_REPO)
+  while IFS= read -r clone; do
+    [ -z "$clone" ] || clones+=("$clone")
+  done <<<"$(open_work_clones; printf '%s\n' "$map")"
+  for file in "$SNIPPET_DIR"/*/*.toml; do
+    [ ! -f "$file" ] || files+=("$file")
+  done
+  report=$(settings_cli upgrade --watched "$CONFIG" ${files[@]+"${files[@]}"} --clones ${clones[@]+"${clones[@]}"}) || die "cannot convert the removed legacy settings (see above); edit the file by hand (docs/settings.md, \"Legacy rules\")"
+  [ -n "$report" ] || return 0
+  while IFS= read -r line; do
+    say "migrated" "$line"
+  done <<<"$report"
+}
+
+# drop_removed_keys: removes the settings the open work replaced from $CONFIG, with one printed line.
+drop_removed_keys() {
+  local dropped
+  if ! dropped=$(settings_cli drop "$CONFIG" 2>&1); then
+    say "warning" "${dropped#ERROR: }"
+    return 0
+  fi
+  [ -z "$dropped" ] || say "dropped" "$CONFIG: $dropped (repos and architects come from the open work)"
+}
+
 personal_config() {
   local example="$ORCH_REPO/config/orchestration.toml.example" k v fill="" new="" have error
   convert_old_config
@@ -511,15 +553,20 @@ personal_config() {
     cp "$example" "$CONFIG"
     say "created" "$CONFIG"
   fi
+  local removed
+  removed=$(settings_cli drop-removed "$CONFIG" 2>&1) || die "${removed#ERROR: }"
+  [ -z "$removed" ] || say "migrated" "$removed"
+  upgrade_repo_files
+  drop_removed_keys
   have=$(settings_cli keys "$CONFIG" 2>&1) || die "${have#ERROR: }"
   have=" $have "
   load_config_cache
   local missing_project_keys=""
-  for k in ORCH_PR_TABS_ORG ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS ORCH_FOCUS_SKIP_ARCHITECTS; do
+  for k in ORCH_PR_TABS_ORG ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL; do
     case "$have" in *" $k "*) ;; *) missing_project_keys="$missing_project_keys $k" ;; esac
   done
   [ -z "$missing_project_keys" ] || say "configure" "Project features are off until you configure missing keys in $CONFIG:$missing_project_keys"
-  for k in ORCH_PR_REPOS ORCH_PR_AUTHOR ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL ORCH_HERDR_BIN ORCH_HERDR_SOCKET; do
+  for k in ORCH_PR_AUTHOR ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL ORCH_HERDR_BIN ORCH_HERDR_SOCKET; do
     v=$(config_value "$k")
     case "$v" in "" | "<"*">") fill="$fill $k" ;; esac
   done
@@ -695,9 +742,9 @@ render_services() {
     [ "$enabled" = 1 ] || continue
     case "$t" in
       *coord-watcher-audit.* | *coord-watcher-pulls.*)
-        if [ -z "$(config_file_value ORCH_PR_REPOS)" ] || [ -z "$(config_file_value ORCH_PR_AUTHOR)" ]; then
+        if [ -z "$(config_file_value ORCH_PR_AUTHOR)" ]; then
           label=$(basename "$t" .template)
-          skip "${label%.*} watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR in $CONFIG)"
+          skip "${label%.*} watcher (set ORCH_PR_AUTHOR in $CONFIG)"
           continue
         fi
         ;;
@@ -780,10 +827,12 @@ register_services() {
   fi
 }
 
-# legacy_map_default_repo: the ORCH_GIT_WATCH_REPOS clone whose repo settings turn legacy.scan on, else empty.
+# legacy_map_default_repo: the clone of the open work whose repo settings turn legacy.scan on, else empty.
 legacy_map_default_repo() {
-  local path scan
-  for path in $(config_value ORCH_GIT_WATCH_REPOS); do
+  local path scan clones
+  clones=$(open_work_clones)
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
     scan=${ORCH_LEGACY_SCAN-}
     if [ -z "${ORCH_LEGACY_SCAN+x}" ]; then
       scan=$(settings_cli repo "$path") || return 2
@@ -793,14 +842,14 @@ legacy_map_default_repo() {
       printf '%s' "$path"
       return
     fi
-  done
+  done <<<"$clones"
 }
 
 # Renders the daily legacy map units of the current platform for registration; off until a repo to map is known.
 render_legacy_map_service() {
   local t start dest repo
   [ "$(config_value ORCH_WATCHERS_SERVICE)" = 1 ] || return 0
-  repo=$(placeholder_value ORCH_LEGACY_MAP_REPO) || die "cannot read the repo settings of the audit.git_watch_repos clones (see above); fix them or set legacy.map_repo in $CONFIG"
+  repo=$(placeholder_value ORCH_LEGACY_MAP_REPO) || die "cannot read the repo settings of the open-work clones (see above); fix them or set legacy.map_repo in $CONFIG"
   if [ -z "$repo" ]; then
     skip "daily legacy map job (set ORCH_LEGACY_MAP_REPO in $CONFIG to the local clone to map)"
     return 0
