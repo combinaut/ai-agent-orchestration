@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from test_support import IsolatedTestCase
+from test_support import IsolatedTestCase, open_work
 import alert_policy
 import audit
 import watchers as w
@@ -25,10 +25,12 @@ class IndependentReviewTests(IsolatedTestCase):
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
         self.pr = copy.deepcopy(PR)
-        env = patch.dict(os.environ, {'ORCH_PR_AUTHOR': 'author', 'ORCH_PR_REPOS': 'owner/product',
-                                     'ORCH_GIT_WATCH_REPOS': '', 'ORCH_AUDIT_PAGE_NODES': '100'})
+        env = patch.dict(os.environ, {'ORCH_PR_AUTHOR': 'author', 'ORCH_AUDIT_PAGE_NODES': '100'})
         env.start()
         self.addCleanup(env.stop)
+        work = open_work('owner/product')
+        work.start()
+        self.addCleanup(work.stop)
         settings = patch.object(audit, 'repo_settings', lambda command, repo, ref, cache: audit.orch_settings.merged([], os.environ))
         settings.start()
         self.addCleanup(settings.stop)
@@ -46,7 +48,7 @@ class IndependentReviewTests(IsolatedTestCase):
 
     def test_m1_real_subprocess_stderr_for_every_command_source(self):
         detail = 'HTTP 401: Bad credentials ' + 'x' * 250
-        with patch.dict(os.environ, {'ORCH_GIT_WATCH_REPOS': '/repo'}):
+        with open_work('owner/product', '/repo'):
             for source in ('github', 'herdr', 'git:/repo'):
                 with self.subTest(source=source):
                     def command(*args):

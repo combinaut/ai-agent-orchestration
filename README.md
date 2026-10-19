@@ -38,8 +38,7 @@ The first run copies [`config/orchestration.toml.example`](config/orchestration.
 
 | Key (prompt) | Set it to |
 |---|---|
-| `[pr] repos` (`ORCH_PR_REPOS`) | the `owner/name` repos to watch, for example `["acme/webapp"]` |
-| `[pr] author` (`ORCH_PR_AUTHOR`) | your GitHub login (`"@me"` works) |
+| `[pr] author` (`ORCH_PR_AUTHOR`) | your GitHub login (`"@me"` works); the watchers find the repos from the open workspaces |
 | `[models] codex_worker`, `codex_smart` (`ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) | a Codex model name each. Fill both even without Codex: `/coordinate` and `/architect` stop while either is a placeholder |
 | `[herdr] bin`, `socket` (`ORCH_HERDR_BIN`, `ORCH_HERDR_SOCKET`) | Herdr's executable and socket; needed for the watcher services |
 
@@ -102,6 +101,6 @@ If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`
 - [`docs/workers.md`](docs/workers.md): workers, recycles, handoffs and owner tags.
 - [`docs/heavy-slot.md`](docs/heavy-slot.md): the shared cap on heavy jobs and how slots work.
 - [`docs/bash-guard.md`](docs/bash-guard.md): what the Bash guard denies and where it logs.
-- [`docs/pr-tabs.md`](docs/pr-tabs.md): the Chrome PR tabs extension: install, use and troubleshooting.
+- [`docs/pr-tabs.md`](docs/pr-tabs.md): the Chrome PR tabs extension: automatic architect groups (repo fallback), install, use and troubleshooting.
 - [`env/README.md`](env/README.md): the env adapters (`herdr` and how to add one).
 - [`docs/contributing.md`](docs/contributing.md): running the tests and sending changes.

@@ -3,6 +3,7 @@
 import alert_policy
 import argparse
 import audit
+import discovery
 from datetime import datetime, timezone
 import fcntl
 import importlib.util
@@ -35,7 +36,7 @@ CAPPED_HISTORY = ("audit", "pulls")
 READ_FAILURES = 3
 PULLS_DEPARTED_MAX = 10
 PULLS_DEPARTED_SECONDS = 60
-GITHUB_REMOTE = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
+GITHUB_REMOTE = discovery.GITHUB_REMOTE
 
 BALANCE_LIMITS = {"free": 30, "slots": 4, "heavy": 4, "load5": 20, "cpu": 80}
 
@@ -367,16 +368,20 @@ def reduce_workers(before, raw):
                 present=present, unreadable=unreadable, seen=seen), events
 
 
-def pull_owners(command, prs, failed=None):
-    """Owner tag of the Herdr workspace whose worktree has each PR's head branch checked out, by <repo>#<n>.
+def pull_owners(command, prs, failed=None, work=None):
+    """Owner tag of the open workspace whose checkout has each PR's head branch, by <repo>#<n>.
+    work is the open work already read (discovery.open_work), or the Unavailable it raised.
     Each root is identified by its `origin` remote; only roots of watched repositories have their worktrees listed.
     A root that fails is skipped and listed in `failed` by its `owner/name`, or as `*/<name>` when its remote could not
     be read."""
-    rows = json.loads(command(herdr_bin(), "workspace", "list"))["result"]["workspaces"]
-    by_path = {(row.get("worktree") or {}).get("checkout_path"): row for row in rows if row.get("worktree")}
+    work = discovery.open_work(command) if work is None else work
+    if isinstance(work, discovery.Unavailable):
+        raise work
+    rows = work["workspaces"]
+    by_path = {row["checkout"]: row for row in rows if row.get("checkout") and row.get("owner")}
     watched = {pr["repository"]["nameWithOwner"].lower() for pr in prs}
     branches = {}
-    for root in sorted({row["worktree"]["repo_root"] for row in rows if (row.get("worktree") or {}).get("repo_root")}):
+    for root in sorted({row["repo_root"] for row in rows if row.get("repo_root")}):
         identity = "*/" + Path(root).name.lower()
         try:
             remote = GITHUB_REMOTE.search(command("git", "-C", root, "remote", "get-url", "origin").strip())
@@ -384,7 +389,9 @@ def pull_owners(command, prs, failed=None):
                 continue
             identity = remote.group(1).lower()
             listing = command("git", "-C", root, "worktree", "list", "--porcelain")
-        except audit.READ_ERRORS:
+        except audit.READ_ERRORS as error:
+            if isinstance(error, subprocess.CalledProcessError) and audit.orch_settings.NO_ORIGIN.search(str(error.stderr or "")):
+                continue
             if failed is not None:
                 failed.append(identity)
             continue
@@ -392,13 +399,12 @@ def pull_owners(command, prs, failed=None):
         for line in listing.splitlines():
             if line.startswith("worktree "):
                 path = line[9:]
-            elif line.startswith("branch refs/heads/") and path:
+            elif line.startswith("branch refs/heads/") and path in by_path:
                 branches[(remote.group(1).lower(), line[18:])] = path
     owners = {}
     for pr in prs:
         repo = pr["repository"]["nameWithOwner"]
-        row = by_path.get(branches.get((repo.lower(), pr.get("headRefName"))))
-        owner = ((row or {}).get("tokens") or {}).get("owner")
+        owner = (by_path.get(branches.get((repo.lower(), pr.get("headRefName")))) or {}).get("owner")
         if owner:
             owners[f"{repo}#{pr['number']}"] = owner
     return owners
@@ -408,7 +414,12 @@ def collect_pulls(command, before, clock=time.monotonic):
     """Departed-PR reads run right after the search with their own reserved window, before the owner lookup."""
     known = (before or {}).get("prs", {})
     page_nodes = audit.positive_setting("ORCH_AUDIT_PAGE_NODES", 100, 100)
-    prs = audit.fetch_prs(command, page_nodes)
+    try:
+        work = discovery.open_work(command)
+    except discovery.Unavailable as error:
+        work = error
+    found = discovery.repos(command, work)
+    prs = audit.fetch_prs(command, page_nodes, found["repos"])
     searched = {f"{pr['repository']['nameWithOwner']}#{pr['number']}" for pr in prs}
     departed, failed, attempted = {}, [], set()
     pending = sorted(set(known) - searched, key=lambda key: (known[key].get("misses", 0), key))
@@ -426,13 +437,13 @@ def collect_pulls(command, before, clock=time.monotonic):
     waiting = [key for key in pending if key not in attempted and known[key].get("misses", 0)]
     unreadable, roots, lookup_failed = [], [], False
     try:
-        owners = pull_owners(command, prs, roots)
-    except audit.READ_ERRORS:
+        owners = pull_owners(command, prs, roots, work)
+    except (*audit.READ_ERRORS, discovery.Unavailable):
         owners, unreadable, lookup_failed = {}, ["owners"], True
     if roots:
         unreadable = ["owners"]
     unresolved = set(roots)
-    current, settings, settings_failed = {}, {}, []
+    current, settings, settings_failed = {}, {"clones": found["clones"]}, []
     for pr in prs:
         key = f"{pr['repository']['nameWithOwner']}#{pr['number']}"
 

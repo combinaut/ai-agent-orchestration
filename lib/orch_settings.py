@@ -43,22 +43,19 @@ def _r(key, env, kind, default, doc, **kw):
 DEFAULT_PATH = ['~/.local/bin', '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin']
 
 SETTINGS = [
-    _g('pr.repos', 'ORCH_PR_REPOS', 'list', [], 'GitHub repos (owner/name) whose PRs the audit watches; required by the audit watcher'),
-    _g('pr.author', 'ORCH_PR_AUTHOR', 'str', '', 'GitHub login whose open PRs the audit watches ("@me" works); required by the audit watcher'),
+    _g('pr.author', 'ORCH_PR_AUTHOR', 'str', '', 'GitHub login whose open PRs the audit watches in the repos of the open workspaces ("@me" works); required by the audit watcher'),
     _g('pr.since', 'ORCH_PR_SINCE', 'str', '', 'Only PRs updated on or after this date (YYYY-MM-DD); empty means no date filter'),
     _g('pr.bot_reviewer_login', 'ORCH_BOT_REVIEWER_LOGIN', 'str', 'copilot-pull-request-reviewer', 'Bot whose "Needs a closer look" review raises a COPILOT line'),
-    _g('audit.git_watch_repos', 'ORCH_GIT_WATCH_REPOS', 'list', [], 'Local clones checked for PACKS and WORKTREES pile-ups; their .orchestration.local.toml applies to PRs of the repo they clone', paths=True),
-    _g('audit.packs_max', 'ORCH_PACKS_MAX', 'int', 50, 'Pack files in a watched clone before a PACKS line'),
-    _g('audit.worktrees_max', 'ORCH_WORKTREES_MAX', 'int', 40, 'Worktrees in a watched clone before a WORKTREES line'),
+    _g('audit.packs_max', 'ORCH_PACKS_MAX', 'int', 50, 'Pack files in a clone of the open work before a PACKS line'),
+    _g('audit.worktrees_max', 'ORCH_WORKTREES_MAX', 'int', 40, 'Worktrees in a clone of the open work before a WORKTREES line'),
     _g('audit.page_prs', 'ORCH_AUDIT_PAGE_PRS', 'int', 80, 'PR search page size (1-100)'),
     _g('audit.page_nodes', 'ORCH_AUDIT_PAGE_NODES', 'int', 100, 'Nested GitHub query page size (1-100); a cut-off result prints TRUNCATED'),
     _g('legacy.scans_max', 'ORCH_LEGACY_SCANS_MAX', 'int', 10, 'PRs scanned for legacy code per audit pass; the rest wait for the next pass'),
     _g('legacy.reads_max', 'ORCH_LEGACY_READS_MAX', 'int', 20, 'File reads per PR scan for files GitHub returns without a patch'),
-    _g('legacy.map_repo', 'ORCH_LEGACY_MAP_REPO', 'str', '', 'Clone the daily legacy-map job reads; empty picks the audit.git_watch_repos clone whose repo settings turn legacy.scan on', paths=True),
+    _g('legacy.map_repo', 'ORCH_LEGACY_MAP_REPO', 'str', '', 'Clone the daily legacy-map job reads; empty picks, at install time, the clone of the open work whose repo settings turn legacy.scan on', paths=True),
     _g('heavy_slots.max', 'ORCH_HEAVY_SLOTS_MAX', 'int', 4, 'Most heavy jobs at once on the machine'),
     _g('heavy_slots.dir', 'ORCH_HEAVY_SLOTS_DIR', 'str', '', 'Slot directory; empty means ~/.claude/heavy-slots', paths=True),
     _g('heavy_slots.kill_grace', 'ORCH_HEAVY_SLOTS_KILL_GRACE', 'int', 10, 'Seconds a stopped job gets before it is killed'),
-    _g('focus.skip_architects', 'ORCH_FOCUS_SKIP_ARCHITECTS', 'list', [], 'Architect names left out of focus reports', sep=','),
     _g('models.coordinator', 'ORCH_COORDINATOR_MODEL', 'str', 'claude-opus-5-5', 'Model of the Coordinator'),
     _g('models.architect', 'ORCH_ARCHITECT_MODEL', 'str', 'claude-opus-5-5', 'Model of the architects'),
     _g('models.codex_worker', 'ORCH_CODEX_WORKER_MODEL', 'str', '<codex-worker-model>', 'Codex model for routine work; replace the placeholder'),
@@ -95,7 +92,6 @@ SETTINGS = [
     _g('pr_tabs.org', 'ORCH_PR_TABS_ORG', 'str', '', 'Organization the PR tabs extension manages; empty turns org actions off'),
     _g('pr_tabs.default_repo', 'ORCH_PR_TABS_DEFAULT_REPO', 'str', '', 'Repo name for bare PR numbers; empty turns number jumps off'),
     _g('pr_tabs.open_all', 'ORCH_PR_TABS_OPEN_ALL', 'str', '', 'GitHub search behind the Open all button; empty turns it off'),
-    _g('pr_tabs.topics', 'ORCH_PR_TABS_TOPICS', 'json', [], 'Tab-group rules: tables with name, color and repo/title/any regex lists'),
     _r('guard.big_repo', 'ORCH_BIG_REPO', 'bool', False, 'Broad Git reads (git grep, cat-file over all objects) are blocked in this repo'),
     _r('audit.merge_gate_checks', 'ORCH_MERGE_GATE_CHECKS', 'list', [], 'Check names that only run on a full CI run; an approved PR on a non-default base reports "full CI ran" or "full CI not run"', sep='|'),
     _r('legacy.scan', 'ORCH_LEGACY_SCAN', 'bool', False, 'Open PRs of this repo are scanned for lines that build on legacy front-end code (LEGACY line)'),
@@ -107,6 +103,10 @@ SETTINGS = [
 
 BY_KEY = {s.key: s for s in SETTINGS}
 BY_ENV = {s.env: s for s in SETTINGS}
+
+
+DROPPED = {'pr.repos': 'ORCH_PR_REPOS', 'audit.git_watch_repos': 'ORCH_GIT_WATCH_REPOS',
+           'focus.skip_architects': 'ORCH_FOCUS_SKIP_ARCHITECTS'}
 
 
 class ConfigError(ValueError):
@@ -186,6 +186,9 @@ def validate(data, label, scope):
         for name, value in entries.items():
             key = f'{table}.{name}'
             setting = BY_KEY.get(key)
+            if setting is None and key in DROPPED:
+                warn(f'{label}: {key}: not read (repos and architects come from the open work); run install.sh to drop it')
+                continue
             if setting is None:
                 raise ConfigError(f'{label}: {key}: unknown key')
             if setting.scope != scope:
@@ -313,22 +316,28 @@ def load_remote(repo, ref, committed_text, clone=None, environ=None):
     return merged(layers, environ)
 
 
-REMOTE_RE = r'(?:^|[/:]){}(?:\.git)?/?$'
+GITHUB_REMOTE = re.compile(r'^(?:[a-z][a-z0-9+.-]*://(?:[^@/\s]+@)?github\.com(?::\d+)?/|(?:[^@/\s]+@)?github\.com:/?)'
+                           r'([^/\s]+/[^/\s]+?)(?:\.git)?/?$', re.I)
+
+
+NO_ORIGIN = re.compile(r'No such remote|cannot change to .*: No such file or directory', re.I)
 
 
 def origin_matches(path, repo):
-    try:
-        url = subprocess.run(['git', '-C', str(path), 'remote', 'get-url', 'origin'],
-                             capture_output=True, text=True, timeout=5).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return bool(url) and re.search(REMOTE_RE.format(re.escape(repo)), url, re.I) is not None
+    """True when the clone's GitHub origin is repo; raises CalledProcessError when the origin cannot be read."""
+    args = ['git', '-C', str(path), 'remote', 'get-url', 'origin']
+    result = subprocess.run(args, capture_output=True, text=True, timeout=5, env=dict(os.environ, LC_ALL='C'))
+    if result.returncode:
+        if NO_ORIGIN.search(result.stderr):
+            return False
+        raise subprocess.CalledProcessError(result.returncode, args, result.stdout, result.stderr)
+    match = GITHUB_REMOTE.search(result.stdout.strip())
+    return match is not None and match[1].lower() == repo.lower()
 
 
-def known_clone(repo, environ=None):
-    """The audit.git_watch_repos clone whose origin is repo, else None."""
-    environ = os.environ if environ is None else environ
-    for path in environ.get('ORCH_GIT_WATCH_REPOS', '').split():
+def known_clone(repo, clones):
+    """The clone among clones whose origin is repo, else None."""
+    for path in clones:
         if origin_matches(path, repo):
             return path
     return None
@@ -411,7 +420,7 @@ def markdown_table(scope):
 
 OLD_NAMES = {'ORCH_V2_LAUNCHD': 'ORCH_WATCHERS_SERVICE', 'ORCH_V2_PR_SCOPE': 'ORCH_WATCHERS_PR_SCOPE',
              'ORCH_V2_WORKER_MODEL': 'ORCH_WATCHERS_WORKER_MODEL', 'ORCH_V2_PRIMARY_REPO': 'ORCH_WATCHERS_PRIMARY_REPO'}
-REMOVED = {'ORCH_BIG_REPO_REMOTES', 'ORCH_LEGACY_REPOS'}
+REMOVED = {'ORCH_BIG_REPO_REMOTES', 'ORCH_LEGACY_REPOS', 'ORCH_PR_TABS_TOPICS', *DROPPED.values()}
 ASSIGN = re.compile(r'^\s*(?:export\s+)?(ORCH_[A-Z0-9_]*)=')
 
 
@@ -592,13 +601,13 @@ def migrate(env_path, toml_path, snippet_dir):
               '# An exported ORCH_* variable wins over this file.\n')
     text = render(global_values, {s: comments.get(s.env, []) for s in global_values}, header)
     validate(parse(text, str(toml_path)), str(toml_path), 'global')
-    environ = dict(os.environ, ORCH_GIT_WATCH_REPOS=values.get('ORCH_GIT_WATCH_REPOS', ''))
+    clones = values.get('ORCH_GIT_WATCH_REPOS', '').split()
     layers = sorted(repo_layers(values, report).items())
     for repo, layer in layers:
         label = f'{repo} repo settings'
         validate(parse(render(layer), label), label, 'repo')
     for repo, layer in layers:
-        write_repo_layer(repo, layer, known_clone(repo, environ), snippet_dir, report)
+        write_repo_layer(repo, layer, known_clone(repo, clones), snippet_dir, report)
     Path(toml_path).write_text(text)
     return [f'converted {env_path} -> {toml_path}'] + report
 
@@ -646,6 +655,153 @@ def set_key(path, env, text):
     Path(path).write_text(text_out)
 
 
+def drop_removed_keys(path):
+    """Drop retired rules, including disjoint blocks and inline table members.
+
+    Candidate edits are accepted only when TOML proves every other value is
+    unchanged. This keeps formatting/comments without introducing a TOML writer.
+    """
+    path = Path(path)
+    with path.open(encoding="utf-8", newline="") as source:
+        text = source.read()
+    data = parse(text, str(path))
+    if not isinstance(data.get('pr_tabs'), dict) or 'topics' not in data['pr_tabs']:
+        return False
+
+    def without_topics(value):
+        result = dict(value)
+        if isinstance(result.get('pr_tabs'), dict):
+            tabs = dict(result['pr_tabs'])
+            tabs.pop('topics', None)
+            if tabs:
+                result['pr_tabs'] = tabs
+            else:
+                result.pop('pr_tabs')
+        return result
+
+    expected = without_topics(data)
+    validate(expected, str(path), 'global')
+
+    def ranges(source):
+        lines = source.splitlines(keepends=True)
+        offsets = [0]
+        for line in lines:
+            offsets.append(offsets[-1] + len(line))
+        table = None
+        for index, line in enumerate(lines):
+            header = re.match(r"^\s*\[\s*['\"]?([\w-]+)['\"]?\s*\]\s*(?:#.*)?$", line)
+            if header:
+                table = header[1]
+            plain = table == 'pr_tabs' and re.match(r"^\s*['\"]?topics['\"]?\s*=", line)
+            dotted = table is None and re.match(r"^\s*['\"]?pr_tabs['\"]?\s*\.\s*['\"]?topics['\"]?\s*=", line)
+            block = re.match(r"^\s*\[\[?\s*['\"]?pr_tabs['\"]?\s*\.\s*['\"]?topics['\"]?\s*\]", line)
+            if plain or dotted or block:
+                for end in offsets[index + 1:]:
+                    start = index
+                    if index and lines[index - 1].rstrip("\r\n") == '# Tab-group rules: tables with name, color and repo/title/any regex lists':
+                        start -= 1
+                    yield offsets[start], end
+        # Inline members can be first, middle or last, with nested arrays/tables.
+        # The parser/comparison below rejects matches inside strings or comments.
+        for match in re.finditer(r"(?<![\w.-])['\"]?topics['\"]?\s*=", source):
+            start = match.start()
+            previous = start - 1
+            while previous >= 0 and source[previous].isspace():
+                previous -= 1
+            for end in range(match.end(), len(source)):
+                if source[end] not in ',}\n':
+                    continue
+                yield start, end + (source[end] == ',')
+                if previous >= 0 and source[previous] == ',':
+                    yield previous, end
+
+    while 'topics' in data.get('pr_tabs', {}):
+        size = len(json.dumps(data['pr_tabs']['topics']))
+        for start, end in ranges(text):
+            candidate = text[:start] + text[end:]
+            try:
+                parsed = parse(candidate, str(path))
+            except ConfigError:
+                continue
+            remaining = parsed.get('pr_tabs', {}).get('topics')
+            removed = 'topics' not in parsed.get('pr_tabs', {})
+            if without_topics(parsed) == expected and (removed or len(json.dumps(remaining)) < size):
+                text, data = candidate, parsed
+                break
+        else:
+            raise ConfigError(f'{path}: cannot remove retired pr_tabs.topics in place')
+    with path.open("w", encoding="utf-8", newline="") as destination:
+        destination.write(text)
+    return True
+
+
+def bracket_depth(text):
+    depth, quote, index = 0, None, 0
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == '\\' and quote == '"':
+                index += 1
+            elif char == quote:
+                quote = None
+        elif char in '"\'':
+            quote = char
+        elif char == '#':
+            break
+        elif char in '[{':
+            depth += 1
+        elif char in ']}':
+            depth -= 1
+        index += 1
+    return depth
+
+
+def tables(data, keep_dropped=True):
+    """{table: entries} of parsed TOML without empty tables, and without the DROPPED keys unless keep_dropped."""
+    found = {}
+    for table, entries in data.items():
+        if isinstance(entries, dict):
+            entries = {name: value for name, value in entries.items() if keep_dropped or f'{table}.{name}' not in DROPPED}
+            if entries:
+                found[table] = entries
+    return found
+
+
+def drop_keys(path):
+    """Removes the DROPPED keys and the comment lines directly above them; returns the removed keys."""
+    text = Path(path).read_text()
+    before = parse(text, str(path))
+    present = [f'{table}.{name}' for table, entries in tables(before).items() for name in entries if f'{table}.{name}' in DROPPED]
+    if not present:
+        return []
+    problem = ConfigError(f'{path}: cannot drop {" ".join(present)} in place; edit it by hand')
+    lines, kept, removed, table, skip = text.splitlines(), [], [], None, 0
+    header = re.compile(r'^\s*\[\s*(["\']?)([A-Za-z0-9_-]+)\1\s*\]\s*(#.*)?$')
+    key = re.compile(r'^\s*(?:(["\']?)([A-Za-z0-9_-]+)\1\s*\.\s*)?(["\']?)([A-Za-z0-9_-]+)\3\s*=(.*)$')
+    for line in lines:
+        if skip > 0:
+            skip += bracket_depth(line)
+            continue
+        if match := header.match(line):
+            table = match[2]
+        elif (match := key.match(line)) and f'{match[2] or table}.{match[4]}' in DROPPED:
+            removed.append(f'{match[2] or table}.{match[4]}')
+            while kept and kept[-1].lstrip().startswith('#'):
+                kept.pop()
+            skip = bracket_depth(match[5])
+            continue
+        kept.append(line)
+    text_out = '\n'.join(kept) + '\n'
+    try:
+        after = parse(text_out, str(path))
+    except ConfigError:
+        raise problem from None
+    if tables(after) != tables(before, keep_dropped=False):
+        raise problem
+    Path(path).write_text(text_out)
+    return removed
+
+
 def file_keys(path, scope):
     return [s.env for s in read_file(path, scope)]
 
@@ -672,13 +828,18 @@ def main(argv):
         elif command == 'set' and len(argv) >= 5 and len(argv) % 2 == 1:
             for name, value in zip(argv[3::2], argv[4::2]):
                 set_key(argv[2], name, value)
+        elif command == 'drop-removed' and len(argv) == 3:
+            if drop_removed_keys(argv[2]):
+                print('removed pr_tabs.topics (architect grouping is automatic)')
+        elif command == 'drop' and len(argv) == 3:
+            print(' '.join(drop_keys(argv[2])))
         elif command == 'keys' and len(argv) == 3:
             print(' '.join(file_keys(argv[2], 'global')))
         elif command == 'names' and len(argv) == 2:
             print(' '.join(env_names()))
         else:
             print('usage: orch_settings.py global <file> | repo <dir> | migrate <env> <toml> <snippet-dir> '
-                  '| set <file> <ORCH_NAME> <value>... | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
+                  '| set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
             return 2
     except ConfigError as error:
         print(f'ERROR: {error}', file=sys.stderr)

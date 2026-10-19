@@ -1,11 +1,12 @@
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from test_support import IsolatedTestCase
+from test_support import IsolatedTestCase, open_work
 import watchers as w
 
 PR = json.loads((w.ROOT / "fixtures" / "audit-pr.json").read_text())
@@ -22,15 +23,19 @@ WORKSPACES = {"result": {"workspaces": [
     {"workspace_id": "wW", "tokens": {"owner": "wArch"},
      "worktree": {"checkout_path": "/wt/product/feature", "repo_root": "/repo/product"}},
     {"workspace_id": "wArch", "tokens": {}, "worktree": {"checkout_path": "/repo/product", "repo_root": "/repo/product"}}]}}
+PANES = []
 REMOTES = {"/repo/product": "git@github.com:owner/product.git\n", "/repo/other": "git@github.com:owner/other.git\n"}
 WORKTREES = "worktree /repo/product\nbranch refs/heads/main\n\nworktree /wt/product/feature\nbranch refs/heads/feature\n"
 
 
 class PullsTest(IsolatedTestCase):
     def setUp(self):
-        env = patch.dict(os.environ, {"ORCH_PR_AUTHOR": "author", "ORCH_PR_REPOS": PR["repository"]["nameWithOwner"]})
+        env = patch.dict(os.environ, {"ORCH_PR_AUTHOR": "author"})
         env.start()
         self.addCleanup(env.stop)
+        work = open_work(PR["repository"]["nameWithOwner"])
+        work.start()
+        self.addCleanup(work.stop)
         self.calls = []
 
     def command(self, prs, departed=None):
@@ -40,6 +45,12 @@ class PullsTest(IsolatedTestCase):
                 return json.dumps({"data": {"search": {"nodes": prs, "pageInfo": {"hasNextPage": False}}}})
             if argv[1:3] == ("workspace", "list"):
                 return json.dumps(WORKSPACES)
+            if argv[1:3] == ("pane", "list"):
+                return json.dumps({"result": {"panes": PANES}})
+            if argv[0] == "git" and argv[3:] == ("rev-parse", "--show-toplevel"):
+                return "/wt/product/pane\n"
+            if argv[0] == "git" and argv[-1] == "--git-common-dir":
+                return "/repo/product/.git\n"
             if argv[0] == "git" and argv[3:5] == ("remote", "get-url"):
                 return REMOTES[argv[2]]
             if argv[0] == "git":
@@ -211,6 +222,51 @@ class PullsTest(IsolatedTestCase):
         for _ in range(3):
             state, events = w.reduce_pulls(before, w.collect_pulls(slow, before, clock=lambda: elapsed[0]))
             self.assertEqual(events[-1], f"MERGED {repo}#7 owner=wArch Fix")
+
+    def test_a_workspace_found_through_its_pane_directory_has_its_owner(self):
+        pane_workspace = {"workspace_id": "wP", "tokens": {"owner": "wArch2"}}
+        pane = {"workspace_id": "wP", "pane_id": "wP:p1", "cwd": "/wt/product/pane/sub"}
+        listing = WORKTREES + "\nworktree /wt/product/pane\nbranch refs/heads/pane-branch\n"
+        with patch.dict(WORKSPACES["result"], {"workspaces": WORKSPACES["result"]["workspaces"] + [pane_workspace]}), \
+                patch(__name__ + ".PANES", [pane]), patch(__name__ + ".WORKTREES", listing):
+            owners = w.pull_owners(self.command([]), [pr(7), pr(9, branch="pane-branch")])
+        self.assertEqual(owners, {"owner/product#7": "wArch", "owner/product#9": "wArch2"})
+
+    def test_an_ownerless_workspace_on_the_same_checkout_keeps_the_owner(self):
+        reviewer = {"workspace_id": "wR", "tokens": {}, "worktree": {"checkout_path": "/wt/product/feature", "repo_root": "/repo/product"}}
+        with patch.dict(WORKSPACES["result"], {"workspaces": WORKSPACES["result"]["workspaces"] + [reviewer]}):
+            owners = w.pull_owners(self.command([]), [pr(7)])
+        self.assertEqual(owners, {"owner/product#7": "wArch"})
+
+    def test_an_unowned_worktree_of_a_second_clone_keeps_the_owner(self):
+        second = {"workspace_id": "wS", "tokens": {}, "worktree": {"checkout_path": "/wt/second/feature", "repo_root": "/repo/second"}}
+        run = self.command([])
+
+        def command(*argv):
+            if argv[0] == "git" and argv[2] == "/repo/second" and argv[3:5] == ("remote", "get-url"):
+                return REMOTES["/repo/product"]
+            if argv[0] == "git" and argv[2] == "/repo/second" and argv[3] == "worktree":
+                return "worktree /repo/second\nbranch refs/heads/main\n\nworktree /wt/second/feature\nbranch refs/heads/feature\n"
+            return run(*argv)
+        with patch.dict(WORKSPACES["result"], {"workspaces": WORKSPACES["result"]["workspaces"] + [second]}):
+            owners = w.pull_owners(command, [pr(7)])
+        self.assertEqual(owners, {"owner/product#7": "wArch"})
+
+    def test_a_root_without_origin_or_folder_is_no_owner_failure(self):
+        extra = [{"workspace_id": "wL", "tokens": {"owner": "wX"}, "worktree": {"checkout_path": "/repo/local", "repo_root": "/repo/local"}},
+                 {"workspace_id": "wG", "tokens": {"owner": "wX"}, "worktree": {"checkout_path": "/repo/gone", "repo_root": "/repo/gone"}}]
+        run = self.command([])
+
+        def command(*argv):
+            if argv[0] == "git" and argv[2] == "/repo/local":
+                raise subprocess.CalledProcessError(2, argv, stderr="error: No such remote 'origin'")
+            if argv[0] == "git" and argv[2] == "/repo/gone":
+                raise subprocess.CalledProcessError(128, argv, stderr="fatal: cannot change to '/repo/gone': No such file or directory")
+            return run(*argv)
+        failed = []
+        with patch.dict(WORKSPACES["result"], {"workspaces": WORKSPACES["result"]["workspaces"] + extra}):
+            owners = w.pull_owners(command, [pr(7)], failed)
+        self.assertEqual((owners, failed), ({"owner/product#7": "wArch"}, []))
 
     def test_owner_lookup_lists_worktrees_only_for_watched_repos(self):
         unrelated = {"workspace_id": "wU", "tokens": {"owner": "wX"},

@@ -81,41 +81,19 @@ export function duplicateText(closed) {
   return `Closed ${closed} duplicate PR tab${closed === 1 ? "" : "s"}.`;
 }
 
-function compile(patterns) {
-  return (patterns || []).map((source) => {
-    try { return new RegExp(source, "i"); }
-    catch (error) { throw new Error(`ORCH_PR_TABS_TOPICS contains an invalid regex ${JSON.stringify(source)}: ${error.message}`); }
-  });
+const GROUP_COLORS = ["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"];
+
+// FNV-1a over the group name, independent of tab order and ownership refreshes.
+export function groupColor(name) {
+  let hash = 2166136261;
+  for (const char of name) hash = Math.imul(hash ^ char.codePointAt(0), 16777619) >>> 0;
+  return GROUP_COLORS[hash % GROUP_COLORS.length];
 }
 
-export function compileRules(rules) {
-  return {
-    ...rules,
-    topics: rules.topics.map((topic) => ({
-      name: topic.name,
-      color: topic.color,
-      repo: compile(topic.repo),
-      branch: compile(topic.branch),
-      title: compile(topic.title),
-      any: compile(topic.any),
-    })),
-  };
-}
-
-function hits(patterns, value) {
-  return patterns.some((pattern) => pattern.test(value));
-}
-
-// The first topic whose patterns match the PR; `any` patterns test title, branch and repo.
-export function topicFor(rules, { repo = "", branch = "", title = "" }) {
-  const topic = rules.topics.find(
-    (t) =>
-      hits(t.repo, repo) ||
-      hits(t.branch, branch) ||
-      hits(t.title, title) ||
-      [title, branch, repo].some((value) => hits(t.any, value)),
-  );
-  return topic ? { name: topic.name, color: topic.color } : rules.fallback;
+export function groupForPr(owners, { owner, repo, branch = "", headRepository }) {
+  const repository = (headRepository?.nameWithOwner || `${owner}/${repo}`).toLowerCase();
+  const name = (headRepository !== null && owners[`${repository}:${branch}`]) || repo;
+  return { name, color: groupColor(name) };
 }
 
 // A PR tab closes once its PR is merged or closed, unless it is the tab in view.
@@ -142,7 +120,7 @@ export function recordStates(meta, states) {
 // Metadata with an OPEN state for each opened PR that has none yet.
 export function seedOpen(meta, opened) {
   const next = { ...meta };
-  for (const { hit, pr } of opened) next[pr.key] ??= { state: "OPEN", title: hit.title, headRefName: hit.headRefName };
+  for (const { hit, pr } of opened) next[pr.key] ??= { state: "OPEN", title: hit.title, headRefName: hit.headRefName, headRepository: hit.headRepository };
   return next;
 }
 

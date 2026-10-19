@@ -73,13 +73,12 @@ EOF
   fresh_install
   mkdir -p "$HOME/.codex"
   printf 'model = "codex-fixture"\n' >"$HOME/.codex/config.toml"
-  on_tty $'owner/a owner/b\n\n\nsmart-fixture\n\n-'
+  on_tty $'\n\nsmart-fixture\n\n-'
   [ "$status" -eq 0 ]
   contains "$output" 'ORCH_PR_AUTHOR (- leaves it empty) [octo-login]: '
   stub=$(cd "$BATS_SERVICE_STUB_BIN" && pwd -P)/herdr
   contains "$output" "ORCH_HERDR_BIN (- leaves it empty) [$stub]: "
   contains "$output" 'ORCH_HERDR_SOCKET (- leaves it empty) []: '
-  [ "$(config_line ORCH_PR_REPOS)" = 'ORCH_PR_REPOS="owner/a owner/b"' ]
   [ "$(config_line ORCH_PR_AUTHOR)" = 'ORCH_PR_AUTHOR="octo-login"' ]
   [ "$(config_line ORCH_CODEX_WORKER_MODEL)" = 'ORCH_CODEX_WORKER_MODEL="codex-fixture"' ]
   [ "$(config_line ORCH_CODEX_SMART_MODEL)" = 'ORCH_CODEX_SMART_MODEL="smart-fixture"' ]
@@ -89,7 +88,7 @@ EOF
 
 @test "a dash empties a placeholder key" {
   fresh_install
-  on_tty $'-\n-\n-\n-\n-\n-'
+  on_tty $'-\n-\n-\n-\n-'
   [ "$status" -eq 0 ]
   [ "$(config_line ORCH_CODEX_WORKER_MODEL)" = 'ORCH_CODEX_WORKER_MODEL=""' ]
   [ "$(config_line ORCH_CODEX_SMART_MODEL)" = 'ORCH_CODEX_SMART_MODEL=""' ]
@@ -98,7 +97,7 @@ EOF
 @test "an answer replaces the placeholder line of its key" {
   fresh_install
   config_set ORCH_HERDR_BIN '<later-placeholder>'
-  on_tty $'-\n-\n-\n-\n/opt/herdr/bin/herdr\n-'
+  on_tty $'-\n-\n-\n/opt/herdr/bin/herdr\n-'
   [ "$status" -eq 0 ]
   [ "$(grep -c '^bin = ' "$HOME/.claude/orchestration.toml")" = 1 ]
   [ "$(config_get ORCH_HERDR_BIN)" = /opt/herdr/bin/herdr ]
@@ -107,7 +106,7 @@ EOF
 @test "an answer wins over an empty exported value for the rest of the run" {
   fresh_install
   : >"$HOME/.claude/orchestration.toml"
-  config_set ORCH_WATCHERS_SERVICE 1 ORCH_PR_AUTHOR a ORCH_PR_REPOS o/r ORCH_CODEX_WORKER_MODEL w ORCH_CODEX_SMART_MODEL s ORCH_HERDR_BIN "" ORCH_HERDR_SOCKET ""
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_PR_AUTHOR a ORCH_CODEX_WORKER_MODEL w ORCH_CODEX_SMART_MODEL s ORCH_HERDR_BIN "" ORCH_HERDR_SOCKET ""
   ORCH_HERDR_BIN="" ORCH_HERDR_SOCKET="" LAUNCHCTL_NOT_LOADED=1 on_tty "$BIN/herdr"$'\n/tmp/herdr-fixture.sock\n'
   [ "$status" -eq "$(unloaded_status)" ]
   contains "$output" 'rendered'
@@ -151,7 +150,7 @@ EOF
   fresh_install
   before=$(grep -c '^#' "$HOME/.claude/orchestration.toml")
   keys=$(python3 "$ROOT/lib/orch_settings.py" keys "$HOME/.claude/orchestration.toml")
-  on_tty $'-\n-\n-\n-\n/opt/herdr/bin/herdr\n-'
+  on_tty $'-\n-\n-\n/opt/herdr/bin/herdr\n-'
   [ "$status" -eq 0 ]
   [ "$(grep -c '^#' "$HOME/.claude/orchestration.toml")" = "$before" ]
   [ "$(python3 "$ROOT/lib/orch_settings.py" keys "$HOME/.claude/orchestration.toml")" = "$keys" ]
@@ -183,7 +182,7 @@ EOF
   printf '#!/bin/sh\necho "herdr 0.9.1"\n' >"$TMP/rel-bin/herdr"
   chmod +x "$TMP/rel-bin/herdr"
   cd "$TMP"
-  PATH="rel-bin:$PATH" on_tty $'-\n-\n-\n-\n\n-'
+  PATH="rel-bin:$PATH" on_tty $'-\n-\n-\n\n-'
   [ "$status" -eq 0 ]
   contains "$output" "ORCH_HERDR_BIN (- leaves it empty) [$(cd "$TMP/rel-bin" && pwd -P)/herdr]: "
   [ "$(config_line ORCH_HERDR_BIN)" = "ORCH_HERDR_BIN=\"$(cd "$TMP/rel-bin" && pwd -P)/herdr\"" ]
@@ -208,12 +207,12 @@ EOF
 
 @test "filled keys are never asked or overwritten" {
   fresh_install
-  config_set ORCH_PR_REPOS mine/kept ORCH_CODEX_SMART_MODEL kept-model
-  on_tty $'-\n-\n-\n-'
+  config_set ORCH_PR_AUTHOR mine-kept ORCH_CODEX_SMART_MODEL kept-model
+  on_tty $'-\n-\n-'
   [ "$status" -eq 0 ]
-  not_contains "$output" 'ORCH_PR_REPOS ('
+  not_contains "$output" 'ORCH_PR_AUTHOR ('
   not_contains "$output" 'ORCH_CODEX_SMART_MODEL ('
-  [ "$(config_line ORCH_PR_REPOS)" = 'ORCH_PR_REPOS="mine/kept"' ]
+  [ "$(config_line ORCH_PR_AUTHOR)" = 'ORCH_PR_AUTHOR="mine-kept"' ]
   [ "$(config_line ORCH_CODEX_SMART_MODEL)" = 'ORCH_CODEX_SMART_MODEL="kept-model"' ]
 }
 
@@ -221,9 +220,9 @@ EOF
   fresh_install
   # shellcheck disable=SC2016 # The literal value is the point.
   value='own"er/$HOME`x`\a'
-  on_tty "$value"$'\n-\n-\n-\n-\n-'
+  on_tty "$value"$'\n-\n-\n-\n-'
   [ "$status" -eq 0 ]
-  [ "$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["pr"]["repos"][0], end="")' "$HOME/.claude/orchestration.toml")" = "$value" ]
+  [ "$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["pr"]["author"], end="")' "$HOME/.claude/orchestration.toml")" = "$value" ]
 }
 
 @test "a run without a terminal never asks and leaves the config alone" {
@@ -781,9 +780,9 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/inst
 
 @test "setup answers a key written as a dotted top-level key" {
   fresh_install
-  printf '%s\n' 'pr.repos = []' 'pr.author = "me"' '[models]' 'codex_worker = "w"' 'codex_smart = "s"' \
+  printf '%s\n' 'pr.since = ""' 'pr.author = ""' '[models]' 'codex_worker = "w"' 'codex_smart = "s"' \
     '[herdr]' 'bin = "/opt/herdr"' 'socket = "/tmp/sock"' >"$HOME/.claude/orchestration.toml"
-  on_tty $'owner/a\n'
+  on_tty $'owner-a\n'
   [ "$status" -eq 0 ]
-  [ "$(config_get ORCH_PR_REPOS)" = owner/a ]
+  [ "$(config_get ORCH_PR_AUTHOR)" = owner-a ]
 }
