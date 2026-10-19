@@ -1,35 +1,48 @@
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
-from unittest.mock import patch
+from pathlib import Path
 
 from test_support import IsolatedTestCase
 import legacy_rules
+import orch_settings
 import watchers as w
 
 RULES = (w.ROOT / 'fixtures/legacy-rules.toml').read_text()
-SOURCE = 'owner/product@main .orchestration/legacy-rules.toml'
 
 
 def rules(text):
-    return legacy_rules.parse_rules(text, SOURCE)
+    """Rules of a repo settings file, read the way the scan and the map read them."""
+    return legacy_rules.from_settings(orch_settings.load_remote('owner/product', 'main', text, environ={}))
 
 
 def rule(**fields):
     body = ''.join(f'{key} = {value}\n' for key, value in fields.items())
-    return f'version = 1\n[[rules]]\n{body}'
+    return f'[[legacy.rules]]\n{body}'
 
 
-class RulesFileTests(IsolatedTestCase):
-    def test_valid_file_lists_kinds_in_file_order(self):
+class RulesTests(IsolatedTestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_no_rules_is_none(self):
+        self.assertIsNone(rules(''))
+        self.assertIsNone(rules('[legacy]\nscan = true\nexempt = ["a"]\n'))
+        self.assertIsNone(legacy_rules.from_settings({}))
+
+    def test_kinds_follow_rule_order(self):
         self.assertEqual(rules(RULES).kinds, ('JSERB', 'JQUERY', 'LEGACY', 'TEST'))
-        text = rule(kind='"B"', paths='["**"]') + '[[rules]]\nkind = "A"\npaths = ["**"]\n[[rules]]\nkind = "B"\npaths = ["x"]\n'
+        text = rule(kind='"B"', paths='["**"]') + rule(kind='"A"', paths='["**"]') + rule(kind='"B"', paths='["x"]')
         self.assertEqual(rules(text).kinds, ('B', 'A'))
 
     def test_fixture_rules_classify_like_the_jquery_conventions(self):
         parsed = rules(RULES)
         for text in ('$(', 'jQuery', '$.ajax', 'ajax:success', 'jquery_ujs', 'jquery-ujs', 'rails-ujs',
-                     'data-remote', 'remote:true', 'remote:  true', '.trigger(', 'select2'):
+                     'data-remote', 'remote:true', 'remote:  true', '.trigger(', 'select2', 'legacy-select'):
             self.assertEqual(parsed.classify('app/a.rb', text), 'JQUERY', text)
         self.assertIsNone(parsed.classify('app/a.rb', 'plain'))
         self.assertEqual(parsed.classify('app/assets/javascripts/a.js', 'plain'), 'LEGACY')
@@ -46,7 +59,7 @@ class RulesFileTests(IsolatedTestCase):
         for path in ('bin/build.sh', 'bin/x.bash', 'docs/a.md', '.codex/hooks.json', 'app/b.yml'):
             self.assertIsNone(parsed.classify(path, 'value=$(command)'), path)
         self.assertIsNone(parsed.classify('spec/a.rb', 'plain'))
-        self.assertIsNone(parsed.classify('.orchestration/legacy-rules.toml', '$('))
+        self.assertIsNone(parsed.classify('.orchestration.toml', '$('))
         self.assertIsNone(parsed.classify('scripts/legacy-guard.test.mjs', '$('))
 
     def test_rule_without_pattern_counts_every_line(self):
@@ -57,76 +70,71 @@ class RulesFileTests(IsolatedTestCase):
 
     def test_exclude_skips_paths_for_that_rule_only(self):
         parsed = rules(rule(kind='"A"', pattern="'x'", paths='["**/*.js"]', exclude='["vendor/**"]')
-                       + '[[rules]]\nkind = "B"\npaths = ["vendor/**"]\n')
+                       + rule(kind='"B"', paths='["vendor/**"]'))
         self.assertEqual(parsed.classify('app/a.js', 'x'), 'A')
         self.assertEqual(parsed.classify('vendor/a.js', 'x'), 'B')
 
     def test_exempt_paths_are_never_counted(self):
-        parsed = rules('version = 1\nexempt = ["tools/guard.mjs", "gen/**"]\n'
-                       '[[rules]]\nkind = "A"\npaths = ["**"]\n')
+        parsed = rules('[legacy]\nexempt = ["tools/guard.mjs", "gen/**"]\n' + rule(kind='"A"', paths='["**"]'))
         self.assertIsNone(parsed.classify('tools/guard.mjs', 'x'))
         self.assertIsNone(parsed.classify('gen/a/b.js', 'x'))
         self.assertEqual(parsed.classify('tools/other.mjs', 'x'), 'A')
 
     def test_first_matching_rule_wins_per_line(self):
         parsed = rules(rule(kind='"FIRST"', pattern="'jQuery'", paths='["**"]')
-                       + '[[rules]]\nkind = "SECOND"\npattern = \'jQuery|\\$\\(\'\npaths = ["**"]\n')
+                       + rule(kind='"SECOND"', pattern="'jQuery|\\$\\('", paths='["**"]'))
         self.assertEqual(parsed.classify('a.js', 'jQuery $('), 'FIRST')
         self.assertEqual(parsed.classify('a.js', '$('), 'SECOND')
         lines = [('a.js', 1, 'jQuery', True), ('a.js', 2, '$(x)', True), ('a.js', 3, '$(y)', False), ('a.js', 4, 'plain', True)]
         self.assertEqual(parsed.scan(lines), [('FIRST', 'a.js', 'jQuery'), ('SECOND', 'a.js', '$(x)')])
 
-    def test_flags(self):
-        self.assertEqual(rules(rule(kind='"A"', pattern="'jquery'", flags='"i"', paths='["**"]')).classify('a', 'JQuery'), 'A')
+    def test_inline_flags_work_in_patterns(self):
+        self.assertEqual(rules(rule(kind='"A"', pattern="'(?i)jquery'", paths='["**"]')).classify('a', 'JQuery'), 'A')
         self.assertIsNone(rules(rule(kind='"A"', pattern="'jquery'", paths='["**"]')).classify('a', 'JQuery'))
-        self.assertEqual(rules(rule(kind='"A"', pattern="'a.b'", flags='"s"', paths='["**"]')).classify('a', 'a\rb'), 'A')
-        self.assertEqual(rules(rule(kind='"A"', pattern="'^b'", flags='"im"', paths='["**"]')).classify('a', 'a \nB'), 'A')
 
-    def test_each_validation_error_names_the_file_rule_and_problem(self):
+    def test_personal_rules_replace_the_committed_ones(self):
+        root = self.base / 'clone'
+        root.mkdir()
+        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        (root / orch_settings.LOCAL_FILE).write_text(rule(kind='"MINE"', paths='["**"]'))
+        settings = orch_settings.load_remote('owner/product', 'main', rule(kind='"SHARED"', paths='["**"]'), str(root), environ={})
+        self.assertEqual(legacy_rules.from_settings(settings).kinds, ('MINE',))
+
+    def test_fingerprint_follows_rules_and_exempt(self):
+        base = rule(kind='"A"', paths='["**"]')
+        prints = {rules(text).fingerprint for text in (base, base, rule(kind='"B"', paths='["**"]'), '[legacy]\nexempt = ["x"]\n' + base)}
+        self.assertEqual(len(prints), 3)
+
+    def test_each_validation_error_names_the_rule_and_problem(self):
         cases = {
-            'not valid TOML': 'version = ',
-            "unknown key 'kinds'": 'version = 1\nkinds = []\n[[rules]]\nkind = "A"\npaths = ["**"]\n',
-            "rules[1] (A): unknown key 'path'": rule(kind='"A"', path='["**"]'),
-            'unsupported version 2 (expected 1)': 'version = 2\n[[rules]]\nkind = "A"\npaths = ["**"]\n',
-            "unsupported version '1' (expected 1)": 'version = "1"\n[[rules]]\nkind = "A"\npaths = ["**"]\n',
-            'unsupported version True (expected 1)': 'version = true\n[[rules]]\nkind = "A"\npaths = ["**"]\n',
-            'unsupported version None (expected 1)': '[[rules]]\nkind = "A"\npaths = ["**"]\n',
-            'exempt must be a list of non-empty strings': 'version = 1\nexempt = "x"\n[[rules]]\nkind = "A"\npaths = ["**"]\n',
-            'rules must be a non-empty array of tables': 'version = 1\n',
-            'rules[1]: kind must be a word': rule(kind='"two words"', paths='["**"]'),
-            'rules[1]: kind must be a word ': rule(kind='1', paths='["**"]'),
-            'rules[1] (A): paths must be a non-empty list of non-empty strings': rule(kind='"A"'),
-            'rules[1] (A): paths must be a non-empty list of non-empty strings ': rule(kind='"A"', paths='[]'),
-            'rules[1] (A): exclude must be a list of non-empty strings': rule(kind='"A"', paths='["**"]', exclude='[1]'),
-            'rules[1] (A): pattern must be a non-empty string': rule(kind='"A"', paths='["**"]', pattern='1'),
-            'rules[1] (A): pattern is not a valid regex': rule(kind='"A"', paths='["**"]', pattern="'('"),
-            "rules[1] (A): unsupported flags 'g' (use i, m, s)": rule(kind='"A"', paths='["**"]', pattern="'a'", flags='"g"'),
-            "rules[1] (A): unsupported flags 'ii' (use i, m, s)": rule(kind='"A"', paths='["**"]', pattern="'a'", flags='"ii"'),
-            'rules[1] (A): flags need a pattern': rule(kind='"A"', paths='["**"]', flags='"i"'),
-            "rules[1] (A): paths: bad brace group in '{a'": rule(kind='"A"', paths='["{a"]'),
+            "legacy.rules[1] (A): unknown key 'path'": rule(kind='"A"', path='["**"]'),
+            "legacy.rules[1] (A): unknown key 'flags'": rule(kind='"A"', paths='["**"]', flags='"i"'),
+            'legacy.rules[1]: kind must be a word': rule(kind='"two words"', paths='["**"]'),
+            'legacy.rules[1]: kind must be a word ': rule(kind='1', paths='["**"]'),
+            'legacy.rules[1] (A): paths must be a non-empty list of non-empty strings': rule(kind='"A"'),
+            'legacy.rules[1] (A): paths must be a non-empty list of non-empty strings ': rule(kind='"A"', paths='[]'),
+            'legacy.rules[1] (A): exclude must be a list of non-empty strings': rule(kind='"A"', paths='["**"]', exclude='[1]'),
+            'legacy.rules[1] (A): pattern must be a non-empty string': rule(kind='"A"', paths='["**"]', pattern='1'),
+            'legacy.rules[1] (A): pattern is not a valid regex': rule(kind='"A"', paths='["**"]', pattern="'('"),
+            "legacy.rules[1] (A): paths: bad brace group in '{a'": rule(kind='"A"', paths='["{a"]'),
+            "legacy.exempt: bad brace group in '{a'": '[legacy]\nexempt = ["{a"]\n' + rule(kind='"A"', paths='["**"]'),
         }
         for message, text in cases.items():
             with self.assertRaises(ValueError, msg=message) as caught:
                 rules(text)
-            self.assertTrue(str(caught.exception).startswith(SOURCE + ': '), caught.exception)
             self.assertIn(message.strip(), str(caught.exception))
-        text = rule(kind='"A"', paths='["**"]') + '[[rules]]\nkind = "B"\npaths = ["**"]\npattern = "["\n'
-        with self.assertRaisesRegex(ValueError, r'rules\[2\] \(B\): pattern is not a valid regex'):
-            rules(text)
+        with self.assertRaisesRegex(ValueError, r'legacy\.rules\[2\] \(B\): pattern is not a valid regex'):
+            rules(rule(kind='"A"', paths='["**"]') + rule(kind='"B"', paths='["**"]', pattern='"["'))
 
-    def test_old_python_says_it_needs_tomllib(self):
-        with patch.object(legacy_rules, 'tomllib', None):
-            self.assertRegex(legacy_rules.python_problem(), r'^legacy scan needs Python 3\.11\+ for tomllib; .+ is \d+\.\d+')
-            with self.assertRaisesRegex(ValueError, 'needs Python 3.11'):
-                rules(RULES)
-        self.assertIsNone(legacy_rules.python_problem())
+    def test_settings_reject_rules_that_are_not_tables(self):
+        with self.assertRaisesRegex(orch_settings.ConfigError, 'legacy.rules: must be an array of tables'):
+            rules('[legacy]\nrules = ["x"]\n')
 
-    def test_module_imports_without_tomllib(self):
-        code = ("import sys; sys.modules['tomllib'] = None; import legacy_rules, audit; "
-                "print(legacy_rules.python_problem())")
-        result = subprocess.run([sys.executable, '-c', code], cwd=w.ROOT, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('legacy scan needs Python 3.11+ for tomllib', result.stdout)
+    def test_exported_rules_must_be_json(self):
+        with self.assertRaisesRegex(ValueError, 'ORCH_LEGACY_RULES is not JSON'):
+            legacy_rules.from_settings({'ORCH_LEGACY_RULES': '[{'})
+        self.assertEqual(legacy_rules.from_settings(
+            {'ORCH_LEGACY_RULES': '[{"kind":"A","paths":["**"]}]', 'ORCH_LEGACY_EXEMPT': 'x y'}).classify('y', ''), None)
 
     def test_long_lines_are_searched_up_to_a_limit(self):
         parsed = rules(rule(kind='"A"', pattern="'needle'", paths='["**"]'))
@@ -145,6 +153,20 @@ class RulesFileTests(IsolatedTestCase):
         self.assertFalse(match('a/{b,c}/x?.rb', 'a/d/x1.rb'))
         self.assertFalse(match('app/x.rb', 'app/xarb'))
         self.assertTrue(match('**/*.js', 'a.js'))
+
+    def test_map_without_rules_exits_with_its_own_status(self):
+        root = self.base / 'repo'
+        root.mkdir()
+        git = ['git', '-C', str(root), '-c', 'user.email=t@example.invalid', '-c', 'user.name=t']
+        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        (root / 'a.js').write_text('$(x)\n')
+        subprocess.run([*git, 'add', '-A'], check=True)
+        subprocess.run([*git, 'commit', '-qm', 'seed'], check=True)
+        env = {key: value for key, value in os.environ.items() if not key.startswith('ORCH_LEGACY_')}
+        result = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'HEAD'],
+                                capture_output=True, text=True, env=env)
+        self.assertEqual((result.returncode, result.stdout), (legacy_rules.NO_RULES, ''))
+        self.assertIn('has no [[legacy.rules]]', result.stderr)
 
 
 if __name__ == '__main__':

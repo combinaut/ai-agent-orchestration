@@ -98,12 +98,14 @@ SETTINGS = [
     _g('pr_tabs.topics', 'ORCH_PR_TABS_TOPICS', 'json', [], 'Tab-group rules: tables with name, color and repo/title/any regex lists'),
     _r('guard.big_repo', 'ORCH_BIG_REPO', 'bool', False, 'Broad Git reads (git grep, cat-file over all objects) are blocked in this repo'),
     _r('audit.merge_gate_checks', 'ORCH_MERGE_GATE_CHECKS', 'list', [], 'Check names that only run on a full CI run; an approved PR on a non-default base reports "full CI ran" or "full CI not run"', sep='|'),
-    _r('legacy.scan', 'ORCH_LEGACY_SCAN', 'bool', False, 'Open PRs of this repo are scanned for lines that build on legacy front-end code (LEGACY line)'),
-    _r('legacy.extra_pattern', 'ORCH_LEGACY_EXTRA_PATTERN', 'str', '', 'Regex searched in addition to the built-in jQuery/ujs patterns of the legacy scan'),
-    _r('legacy.exempt_paths', 'ORCH_LEGACY_EXEMPT_PATHS', 'list', [], 'Paths the built-in legacy scan skips, in addition to the two ratchet guard files under scripts/'),
+    _r('legacy.scan', 'ORCH_LEGACY_SCAN', 'bool', False, 'Open PRs of this repo are scanned for added lines that legacy.rules count (LEGACY line)'),
+    _r('legacy.rules', 'ORCH_LEGACY_RULES', 'tables', [], 'Legacy rules ([[legacy.rules]]: kind, paths, optional pattern and exclude); the first rule that counts a line names its kind. No rules: nothing is scanned or mapped'),
+    _r('legacy.exempt', 'ORCH_LEGACY_EXEMPT', 'list', [], 'Path globs no legacy rule counts'),
     _r('focus.pattern', 'ORCH_FOCUS_PATTERN', 'str', '', 'Case-insensitive regex matched against the labels of the workers of an architect working in this repo; empty turns the focus check off'),
     _r('focus.architect', 'ORCH_FOCUS_ARCHITECT', 'str', '', 'Architect name never listed as lacking a focus worker'),
 ]
+
+REMOVED_KEYS = {'legacy.extra_pattern': '[[legacy.rules]]', 'legacy.exempt_paths': 'legacy.exempt'}
 
 BY_KEY = {s.key: s for s in SETTINGS}
 BY_ENV = {s.env: s for s in SETTINGS}
@@ -139,11 +141,13 @@ def check_type(setting, value):
         return isinstance(value, bool)
     if kind == 'list':
         return isinstance(value, list) and all(isinstance(item, str) for item in value)
+    if kind == 'tables':
+        return isinstance(value, list) and all(isinstance(item, dict) for item in value)
     return isinstance(value, (list, dict))
 
 
 TYPE_NAMES = {'str': 'a string', 'int': 'an integer', 'number': 'a number', 'bool': 'true or false',
-              'list': 'a list of strings', 'json': 'an array or table'}
+              'list': 'a list of strings', 'json': 'an array or table', 'tables': 'an array of tables'}
 
 
 def env_value(setting, value):
@@ -155,7 +159,7 @@ def env_value(setting, value):
         return repr(value) if isinstance(value, float) else str(value)
     if kind == 'list':
         return setting.sep.join(expand(item, setting) for item in value)
-    if kind == 'json':
+    if kind in ('json', 'tables'):
         return json.dumps(value, separators=(',', ':'), ensure_ascii=False)
     return expand(value, setting)
 
@@ -186,6 +190,8 @@ def validate(data, label, scope):
         for name, value in entries.items():
             key = f'{table}.{name}'
             setting = BY_KEY.get(key)
+            if key in REMOVED_KEYS:
+                raise ConfigError(f'{label}: {key}: was removed; run install.sh to convert it to {REMOVED_KEYS[key]}')
             if setting is None:
                 raise ConfigError(f'{label}: {key}: unknown key')
             if setting.scope != scope:
@@ -378,8 +384,9 @@ def render(values, comments=None, header=''):
 
 
 def example(scope):
+    """The generated part of a config example; array-of-tables settings are left to the example's own comments."""
     lines = {s: [s.doc] for s in scoped(scope)}
-    values = {s: s.default for s in scoped(scope)}
+    values = {s: s.default for s in scoped(scope) if s.kind != 'tables'}
     if scope == 'global':
         header = ('# Global settings for the Coordinator / architect setup. install.sh copies this file to\n'
                   f'# {GLOBAL_FILE} on the first run only and never overwrites it.\n'
@@ -411,7 +418,7 @@ def markdown_table(scope):
 
 OLD_NAMES = {'ORCH_V2_LAUNCHD': 'ORCH_WATCHERS_SERVICE', 'ORCH_V2_PR_SCOPE': 'ORCH_WATCHERS_PR_SCOPE',
              'ORCH_V2_WORKER_MODEL': 'ORCH_WATCHERS_WORKER_MODEL', 'ORCH_V2_PRIMARY_REPO': 'ORCH_WATCHERS_PRIMARY_REPO'}
-REMOVED = {'ORCH_BIG_REPO_REMOTES', 'ORCH_LEGACY_REPOS'}
+REMOVED = {'ORCH_BIG_REPO_REMOTES', 'ORCH_LEGACY_REPOS', 'ORCH_LEGACY_EXTRA_PATTERN', 'ORCH_LEGACY_EXEMPT_PATHS'}
 ASSIGN = re.compile(r'^\s*(?:export\s+)?(ORCH_[A-Z0-9_]*)=')
 
 
@@ -475,6 +482,23 @@ def from_env(setting, text):
     return json.loads(text)
 
 
+NO_BUILTIN_RULES = 'legacy.scan has no built-in rules; add the [[legacy.rules]] this repo needs (docs/settings.md, "Legacy rules")'
+
+
+def legacy_rule(pattern):
+    return {'kind': 'LEGACY', 'pattern': pattern, 'paths': ['**']}
+
+
+def legacy_layer(pattern, exempt):
+    """legacy.rules and legacy.exempt for the removed extra pattern and exempt paths."""
+    layer = {}
+    if pattern:
+        layer[BY_KEY['legacy.rules']] = [legacy_rule(pattern)]
+    if exempt:
+        layer[BY_KEY['legacy.exempt']] = list(exempt)
+    return layer
+
+
 def repo_layers(values, report):
     """{owner/name: {setting: value}} the old global values meant for each repo."""
     def repo_setting(key, env):
@@ -496,10 +520,8 @@ def repo_layers(values, report):
     for repo in legacy:
         layer = repos.setdefault(repo, {})
         layer[BY_KEY['legacy.scan']] = True
-        for key, env in (('legacy.extra_pattern', 'ORCH_LEGACY_EXTRA_PATTERN'), ('legacy.exempt_paths', 'ORCH_LEGACY_EXEMPT_PATHS')):
-            value = repo_setting(key, env)
-            if value is not None:
-                layer[BY_KEY[key]] = value
+        layer.update(legacy_layer(values.get('ORCH_LEGACY_EXTRA_PATTERN', ''), values.get('ORCH_LEGACY_EXEMPT_PATHS', '').split()))
+        report.append(f'{repo}: {NO_BUILTIN_RULES}')
     gates = repo_setting('audit.merge_gate_checks', 'ORCH_MERGE_GATE_CHECKS')
     if gates is not None:
         for repo in values.get('ORCH_PR_REPOS', '').split():
@@ -518,6 +540,48 @@ def repo_layers(values, report):
         if values.get(env) and not legacy:
             report.append(f'not converted: {env} (no ORCH_LEGACY_REPOS repo to put it in)')
     return repos
+
+
+LEGACY_KEY = re.compile(r'^\s*(?:(?:"legacy"|\'legacy\'|legacy)\s*\.\s*)?(?:"|\')?(extra_pattern|exempt_paths)(?:"|\')?\s*=')
+TABLE = re.compile(r'^\s*\[\[?\s*([^\]]*?)\s*\]\]?\s*(#.*)?$')
+
+
+def upgrade(path):
+    """Rewrites legacy.extra_pattern and legacy.exempt_paths of a repo settings file as rules; report lines."""
+    label = os.fspath(path)
+    text = Path(path).read_text()
+    legacy = parse(text, label).get('legacy')
+    old = {key: legacy[key] for key in ('extra_pattern', 'exempt_paths') if key in legacy} if isinstance(legacy, dict) else {}
+    if not old:
+        return []
+    pattern, exempt = old.get('extra_pattern', ''), old.get('exempt_paths', [])
+    if not isinstance(pattern, str) or not check_type(BY_KEY['legacy.exempt'], exempt):
+        raise ConfigError(f'{label}: legacy.extra_pattern must be a string and legacy.exempt_paths a list of strings; edit it by hand')
+    lines, table = [], None
+    for line in text.splitlines():
+        header = TABLE.match(line)
+        if header:
+            table = header[1]
+        match = LEGACY_KEY.match(line)
+        dotted = match is not None and line.lstrip().startswith(('legacy', '"legacy', "'legacy"))
+        if match and ((table == 'legacy' and not dotted) or (table is None and dotted)):
+            if match[1] == 'exempt_paths':
+                lines.append(line[:match.start(1)] + 'exempt' + line[match.end(1):])
+            elif line[match.end():].lstrip()[:3] in ('"""', "'''"):
+                raise ConfigError(f'{label}: legacy.extra_pattern spans several lines; edit it by hand')
+            continue
+        lines.append(line)
+    if pattern:
+        lines += ['', '[[legacy.rules]]'] + [f'{key} = {toml_value(value)}' for key, value in legacy_rule(pattern).items()]
+    out = '\n'.join(lines) + '\n'
+    written = validate(parse(out, label), label, 'repo')
+    Path(path).write_text(out)
+    report = [f'converted {label}: ' + ', '.join(
+        part for part, present in (('legacy.extra_pattern -> [[legacy.rules]] (kind LEGACY, every path)', 'extra_pattern' in old),
+                                   ('legacy.exempt_paths -> legacy.exempt', 'exempt_paths' in old)) if present)]
+    if written.get(BY_KEY['legacy.scan']):
+        report.append(f'{label}: {NO_BUILTIN_RULES}')
+    return report
 
 
 def git(path, *args):
@@ -665,6 +729,10 @@ def main(argv):
             sys.stdout.write(shell_lines(load_repo(argv[2], {})))
         elif command == 'migrate' and len(argv) == 5:
             print('\n'.join(migrate(*argv[2:])))
+        elif command == 'upgrade' and len(argv) >= 3:
+            for path in argv[2:]:
+                for line in upgrade(path):
+                    print(line)
         elif command == 'example' and len(argv) == 3 and argv[2] in ('global', 'repo'):
             sys.stdout.write(example(argv[2]))
         elif command == 'table' and len(argv) == 3 and argv[2] in ('global', 'repo'):
@@ -678,7 +746,7 @@ def main(argv):
             print(' '.join(env_names()))
         else:
             print('usage: orch_settings.py global <file> | repo <dir> | migrate <env> <toml> <snippet-dir> '
-                  '| set <file> <ORCH_NAME> <value>... | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
+                  '| upgrade <repo-file>... | set <file> <ORCH_NAME> <value>... | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
             return 2
     except ConfigError as error:
         print(f'ERROR: {error}', file=sys.stderr)

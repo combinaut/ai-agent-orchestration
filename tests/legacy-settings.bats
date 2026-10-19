@@ -22,35 +22,35 @@ classify_after_config() {
     orch_load_repo_config "$TMP/repo/app"
     orch_export_config
     # shellcheck disable=SC2016 # Python source, not shell.
-    cd "$ROOT/coordinator/watchers" && python3 -c 'import audit; print(audit.classify("app/a.rb", "file-name"), audit.classify("app/a.rb", "env-name"), audit.classify("scripts/x.js", "$(x)"))'
+    cd "$ROOT/coordinator/watchers" && python3 -c 'import os, legacy_rules; r = legacy_rules.from_settings(os.environ); print(r and (r.classify("app/a.rb", "file-name"), r.classify("app/a.rb", "env-name"), r.classify("vendor/x.rb", "file-name")))'
   )
 }
 
-@test "a legacy pattern set only in the repo file reaches the scan" {
-  printf '[legacy]\nextra_pattern = "file-name"\n' >"$TMP/repo/.orchestration.toml"
+@test "rules set only in the repo file reach the scan" {
+  printf '[legacy]\nexempt = ["vendor/**"]\n[[legacy.rules]]\nkind = "OLD"\npattern = "file-name"\npaths = ["**"]\n' >"$TMP/repo/.orchestration.toml"
 
   run classify_after_config
 
   [ "$status" -eq 0 ]
-  [ "$output" = "JQUERY None JQUERY" ]
+  [ "$output" = "('OLD', None, None)" ]
 }
 
-@test "an exported legacy pattern overrides the repo file" {
-  printf '[legacy]\nextra_pattern = "file-name"\n' >"$TMP/repo/.orchestration.toml"
-  export ORCH_LEGACY_EXTRA_PATTERN="env-name"
+@test "exported rules override the repo file" {
+  printf '[[legacy.rules]]\nkind = "OLD"\npattern = "file-name"\npaths = ["**"]\n' >"$TMP/repo/.orchestration.toml"
+  export ORCH_LEGACY_RULES='[{"kind":"ENV","pattern":"env-name","paths":["**"]}]'
 
   run classify_after_config
 
   [ "$status" -eq 0 ]
-  [ "$output" = "None JQUERY JQUERY" ]
+  [ "$output" = "(None, 'ENV', None)" ]
 }
 
-@test "an exported empty legacy pattern overrides the repo file" {
-  printf '[legacy]\nextra_pattern = "file-name"\n' >"$TMP/repo/.orchestration.toml"
-  export ORCH_LEGACY_EXTRA_PATTERN=""
+@test "exported empty rules turn the rules of the repo file off" {
+  printf '[[legacy.rules]]\nkind = "OLD"\npattern = "file-name"\npaths = ["**"]\n' >"$TMP/repo/.orchestration.toml"
+  export ORCH_LEGACY_RULES=""
 
   run classify_after_config
 
   [ "$status" -eq 0 ]
-  [ "$output" = "None None JQUERY" ]
+  [ "$output" = "None" ]
 }

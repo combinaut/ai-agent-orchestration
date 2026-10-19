@@ -501,6 +501,23 @@ convert_old_config() {
   say "moved" "$OLD_CONFIG -> $backup"
 }
 
+# upgrade_repo_files: rewrites legacy.extra_pattern and legacy.exempt_paths as rules in the watched clones' personal files and the snippets.
+upgrade_repo_files() {
+  local clone file files=() line report
+  for clone in $(config_value ORCH_GIT_WATCH_REPOS); do
+    [ ! -f "$clone/.orchestration.local.toml" ] || files+=("$clone/.orchestration.local.toml")
+  done
+  for file in "$SNIPPET_DIR"/*/*.toml; do
+    [ ! -f "$file" ] || files+=("$file")
+  done
+  [ ${#files[@]} -gt 0 ] || return 0
+  report=$(settings_cli upgrade "${files[@]}") || die "cannot convert the removed legacy settings (see above); edit the file by hand (docs/settings.md, \"Legacy rules\")"
+  [ -n "$report" ] || return 0
+  while IFS= read -r line; do
+    say "migrated" "$line"
+  done <<<"$report"
+}
+
 personal_config() {
   local example="$ORCH_REPO/config/orchestration.toml.example" k v fill="" new="" have error
   convert_old_config
@@ -514,6 +531,7 @@ personal_config() {
   have=$(settings_cli keys "$CONFIG" 2>&1) || die "${have#ERROR: }"
   have=" $have "
   load_config_cache
+  upgrade_repo_files
   local missing_project_keys=""
   for k in ORCH_PR_TABS_ORG ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS ORCH_FOCUS_SKIP_ARCHITECTS; do
     case "$have" in *" $k "*) ;; *) missing_project_keys="$missing_project_keys $k" ;; esac

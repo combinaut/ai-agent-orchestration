@@ -43,7 +43,7 @@ The first run copies [`config/orchestration.toml.example`](config/orchestration.
 | `[models] codex_worker`, `codex_smart` (`ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) | a Codex model name each. Fill both even without Codex: `/coordinate` and `/architect` stop while either is a placeholder |
 | `[herdr] bin`, `socket` (`ORCH_HERDR_BIN`, `ORCH_HERDR_SOCKET`) | Herdr's executable and socket; needed for the watcher services |
 
-Settings for one repo (big-repo guard, legacy scan, focus) go in that repo's `.orchestration.toml`, or `.orchestration.local.toml` for your own. Restart Claude Code afterwards so it loads the hooks and skills. Every key: [`docs/settings.md`](docs/settings.md). Watcher services: [`docs/watchers.md`](docs/watchers.md).
+Settings for one repo (big-repo guard, legacy scan and its rules, focus) go in that repo's `.orchestration.toml`, or `.orchestration.local.toml` for your own. Restart Claude Code afterwards so it loads the hooks and skills. Every key: [`docs/settings.md`](docs/settings.md). Watcher services: [`docs/watchers.md`](docs/watchers.md).
 
 To update, run the install command again. At session start a hook prints `ai-agent-orchestration setup out of date, run install.sh` when you are behind. Nothing updates on its own. The clone is never updated over local work: with uncommitted edits or commits that are not on origin the installer prints `REFUSED: … has local changes` and stops. It never stashes or resets. Put your changes in a PR, then run it again.
 

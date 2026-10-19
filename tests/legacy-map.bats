@@ -3,33 +3,28 @@
 load test_helper
 
 setup() {
-  local python
-  python=$(command -v python3)
   setup_fixture
-  # The fixture PATH starts at /usr/bin, whose macOS python3 has no tomllib.
-  ln -s "$python" "$BIN/python3"
   MAP="$ROOT/coordinator/legacy-map.sh"
   OUT="$TMP/out/legacy-map.tsv"
   export ORCH_LEGACY_MAP_OUT="$OUT"
   make_webapp
 }
 
-# write_rules <dir>: the rules file the map follows.
+# write_rules <dir>: the committed repo settings whose rules the map follows.
 write_rules() {
-  mkdir -p "$1/.orchestration"
-  cat >"$1/.orchestration/legacy-rules.toml" <<'EOF2'
-version = 1
-exempt = [".orchestration/**", "app/js/exempt.js"]
+  cat >"$1/.orchestration.toml" <<'EOF2'
+[legacy]
+exempt = [".orchestration.toml", "app/js/exempt.js"]
 
-[[rules]]
+[[legacy.rules]]
 kind = "JSERB"
 paths = ["**/*.js.erb"]
 
-[[rules]]
+[[legacy.rules]]
 kind = "ASSETJS"
 paths = ["**/app/assets/javascripts/**/*.{js,coffee}"]
 
-[[rules]]
+[[legacy.rules]]
 kind = "JQUERY"
 pattern = '\bjQuery\b|\$\(|\$\.ajax|ajax:(success|complete)|data-remote|remote: *true'
 paths = ["{app,lib,clients}/**"]
@@ -79,7 +74,7 @@ keep_previous_map() {
   printf 'keep\n' >"$OUT"
 }
 
-@test "writes a row per file and kind the rules file on origin/main counts" {
+@test "writes a row per file and kind the rules on origin/main count" {
   run "$MAP" "$BIG_REPO"
   [ "$status" -eq 0 ]
   [ "$(cat "$OUT")" = "$(printf 'ASSETJS\tapp/assets/javascripts/inside.js\nASSETJS\tapp/assets/javascripts/old.js\nASSETJS\tclients/acme/app/assets/javascripts/legacy.coffee\nJQUERY\tapp/js/uses_dollar.js\nJQUERY\tclients/acme/app/js/remote.js\nJQUERY\tlib/uses_jquery.rb\nJSERB\tapp/views/a/empty.js.erb\nJSERB\tapp/views/a/show.js.erb')" ]
@@ -99,16 +94,23 @@ keep_previous_map() {
   not_contains "$(cat "$OUT")" 'extra.js.erb'
 }
 
-@test "the rules come from origin/main, not the working copy" {
-  printf 'version = 1\n[[rules]]\nkind = "ALL"\npaths = ["**"]\n' >"$BIG_REPO/.orchestration/legacy-rules.toml"
+@test "the committed rules come from origin/main, not the working copy" {
+  printf '[[legacy.rules]]\nkind = "ALL"\npaths = ["**"]\n' >"$BIG_REPO/.orchestration.toml"
   run "$MAP" "$BIG_REPO"
   [ "$status" -eq 0 ]
   not_contains "$(cat "$OUT")" 'ALL'
-  printf 'version = 1\n[[rules]]\nkind = "DOCS"\npaths = ["docs/**"]\n' >"$TMP/webapp-seed/.orchestration/legacy-rules.toml"
+  printf '[[legacy.rules]]\nkind = "DOCS"\npaths = ["docs/**"]\n' >"$TMP/webapp-seed/.orchestration.toml"
   push_seed 'docs rule'
   run "$MAP" "$BIG_REPO"
   [ "$status" -eq 0 ]
   [ "$(cat "$OUT")" = "$(printf 'DOCS\tdocs/outside_scan.js')" ]
+}
+
+@test "rules in the clone's personal file win over the committed ones" {
+  printf '[[legacy.rules]]\nkind = "MINE"\npaths = ["docs/**"]\n' >"$BIG_REPO/.orchestration.local.toml"
+  run "$MAP" "$BIG_REPO"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT")" = "$(printf 'MINE\tdocs/outside_scan.js')" ]
 }
 
 @test "a commit that reaches origin/main after the clone is fetched" {
@@ -122,36 +124,32 @@ keep_previous_map() {
   contains "$(cat "$OUT")" 'app/views/a/new.js.erb'
 }
 
-@test "no rules file on origin/main stops and keeps the previous map" {
-  git -C "$TMP/webapp-seed" rm -q .orchestration/legacy-rules.toml
+@test "no rules says so in one line, succeeds and keeps the previous map" {
+  printf '[legacy]\nscan = true\n' >"$TMP/webapp-seed/.orchestration.toml"
   push_seed 'no rules'
   keep_previous_map
   run "$MAP" "$BIG_REPO"
-  [ "$status" -ne 0 ]
-  contains "$output" "has no .orchestration/legacy-rules.toml on origin/main"
+  [ "$status" -eq 0 ]
+  [ "$output" = "legacy-map.sh: $BIG_REPO has no [[legacy.rules]] in its repo settings; nothing to map" ]
   [ "$(cat "$OUT")" = keep ]
 }
 
-@test "an invalid rules file stops with the reason and keeps the previous map" {
-  printf 'version = 1\n[[rules]]\nkind = "A"\npaths = ["**"]\npattern = "("\n' >"$TMP/webapp-seed/.orchestration/legacy-rules.toml"
+@test "an invalid rule stops with the reason and keeps the previous map" {
+  printf '[[legacy.rules]]\nkind = "A"\npaths = ["**"]\npattern = "("\n' >"$TMP/webapp-seed/.orchestration.toml"
   push_seed 'bad rules'
   keep_previous_map
   run "$MAP" "$BIG_REPO"
-  [ "$status" -ne 0 ]
-  contains "$output" 'origin/main:.orchestration/legacy-rules.toml: rules[1] (A): pattern is not a valid regex'
+  [ "$status" -eq 1 ]
+  contains "$output" 'legacy-map.sh: legacy.rules[1] (A): pattern is not a valid regex'
   [ "$(cat "$OUT")" = keep ]
 }
 
-@test "a Python without tomllib says so and keeps the previous map" {
-  cat >"$TMP/old-python" <<EOF2
-#!/bin/sh
-exec "$(command -v python3)" -c 'import runpy, sys; sys.modules["tomllib"] = None; sys.argv = sys.argv[1:]; sys.path.insert(0, sys.argv[0].rsplit("/", 1)[0]); runpy.run_path(sys.argv[0], run_name="__main__")' "\$@"
-EOF2
-  chmod +x "$TMP/old-python"
+@test "a removed legacy key stops with the conversion hint and keeps the previous map" {
+  printf '[legacy]\nextra_pattern = "x"\n' >"$BIG_REPO/.orchestration.local.toml"
   keep_previous_map
-  run env ORCH_PYTHON3="$TMP/old-python" "$MAP" "$BIG_REPO"
-  [ "$status" -ne 0 ]
-  contains "$output" 'legacy scan needs Python 3.11+ for tomllib'
+  run "$MAP" "$BIG_REPO"
+  [ "$status" -eq 1 ]
+  contains "$output" 'legacy.extra_pattern: was removed; run install.sh to convert it to [[legacy.rules]]'
   [ "$(cat "$OUT")" = keep ]
 }
 
@@ -202,7 +200,6 @@ EOF2
       contains "$(cat "$unit")" "<string>$HOME/.claude/coordinator/legacy-map.sh</string>"
       contains "$(cat "$unit")" "<string>$BIG_REPO</string>"
       contains "$(cat "$unit")" '<key>StartCalendarInterval</key>'
-      contains "$(cat "$unit")" '<key>ORCH_PYTHON3</key>'
       contains "$output" 'launchctl bootstrap'
       units=$(cat "$unit")
       ;;
@@ -210,7 +207,6 @@ EOF2
       dir="$HOME/.claude/coordinator/service/linux"
       contains "$(cat "$dir/com.combinaut.coord-legacy-map.service")" "ExecStart=\"$HOME/.claude/coordinator/legacy-map.sh\" \"$BIG_REPO\""
       contains "$(cat "$dir/com.combinaut.coord-legacy-map.timer")" 'OnCalendar=*-*-* 06:00:00'
-      contains "$(cat "$dir/com.combinaut.coord-legacy-map.service")" 'Environment="ORCH_PYTHON3='
       contains "$output" 'systemctl --user link'
       units=$(cat "$dir"/com.combinaut.coord-legacy-map.service "$dir"/com.combinaut.coord-legacy-map.timer)
       contains "$output" 'systemctl --user enable --now'
@@ -276,4 +272,29 @@ EOF2
   contains "$output" "/webapp/.orchestration.local.toml: heavy_slots.max: is a global setting"
   contains "$output" 'cannot read the repo settings of the audit.git_watch_repos clones'
   not_contains "$output" 'daily legacy map job'
+}
+
+@test "install.sh converts removed legacy keys in a watched clone's personal file and in the snippets" {
+  fresh_install
+  config_set ORCH_GIT_WATCH_REPOS "$BIG_REPO"
+  printf '%s\n' '# mine' '[legacy]' 'scan = true' 'extra_pattern = "uber-select"' 'exempt_paths = ["a.js"]' >"$BIG_REPO/.orchestration.local.toml"
+  mkdir -p "$HOME/.claude/orchestration-repo-snippets/acme"
+  printf '%s\n' '[legacy]' 'exempt_paths = ["b.js"]' >"$HOME/.claude/orchestration-repo-snippets/acme/tools.toml"
+  install_ok
+  contains "$output" "converted $BIG_REPO/.orchestration.local.toml: legacy.extra_pattern -> [[legacy.rules]]"
+  contains "$output" 'legacy.scan has no built-in rules'
+  [ "$(cat "$BIG_REPO/.orchestration.local.toml")" = "$(printf '%s\n' '# mine' '[legacy]' 'scan = true' 'exempt = ["a.js"]' '' '[[legacy.rules]]' 'kind = "LEGACY"' 'pattern = "uber-select"' 'paths = ["**"]')" ]
+  [ "$(cat "$HOME/.claude/orchestration-repo-snippets/acme/tools.toml")" = "$(printf '%s\n' '[legacy]' 'exempt = ["b.js"]')" ]
+  install_ok
+  not_contains "$output" 'converted'
+}
+
+@test "install.sh stops on a removed legacy key it cannot convert and leaves the file" {
+  fresh_install
+  config_set ORCH_GIT_WATCH_REPOS "$BIG_REPO"
+  printf '%s\n' '[legacy]' 'exempt_paths = ["a.js"]' 'exempt = ["b.js"]' >"$BIG_REPO/.orchestration.local.toml"
+  run /bin/bash "$CLONE/install.sh"
+  [ "$status" -ne 0 ]
+  contains "$output" 'cannot convert the removed legacy settings'
+  [ "$(cat "$BIG_REPO/.orchestration.local.toml")" = "$(printf '%s\n' '[legacy]' 'exempt_paths = ["a.js"]' 'exempt = ["b.js"]')" ]
 }

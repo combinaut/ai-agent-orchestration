@@ -1,22 +1,22 @@
-version = 1
-exempt = [".orchestration/**", "scripts/legacy-guard*.mjs"]
+[legacy]
+exempt = [".orchestration.toml", "scripts/legacy-guard*.mjs"]
 
-[[rules]]
+[[legacy.rules]]
 kind = "JSERB"
 paths = ["**/*.js.erb"]
 
-[[rules]]
+[[legacy.rules]]
 kind = "JQUERY"
 pattern = '\$\(|jQuery|\$\.ajax|ajax:(success|complete|error|send)|jquery[_-]ujs|rails-ujs|data-remote|remote: *true|\.trigger\(|select2|legacy-select'
 paths = ["**/*.{js,mjs,cjs,jsx,ts,tsx,vue,erb,haml,hbs,ejs,coffee,rb}"]
 exclude = ["app/assets/javascripts/**", "**/{spec,test,tests}/**", "**/*{.,_,-}{spec,test}.*"]
 
-[[rules]]
+[[legacy.rules]]
 kind = "LEGACY"
 paths = ["app/assets/javascripts/**"]
 exclude = ["**/*.{sh,bash,md}", "**/{spec,test,tests}/**", "**/*{.,_,-}{spec,test}.*"]
 
-[[rules]]
+[[legacy.rules]]
 kind = "TEST"
 pattern = '\$\(|jQuery|\$\.ajax|ajax:(success|complete|error|send)|jquery[_-]ujs|rails-ujs|data-remote|remote: *true|\.trigger\(|select2|legacy-select'
 paths = [
@@ -25,7 +25,7 @@ paths = [
   "**/*{.,_,-}{spec,test}.*.{js,mjs,cjs,jsx,ts,tsx,vue,erb,haml,hbs,ejs,coffee,rb}",
 ]
 
-[[rules]]
+[[legacy.rules]]
 kind = "LEGACY"
 paths = ["app/assets/javascripts/**"]
 exclude = ["**/*.{sh,bash,md}"]

@@ -1,27 +1,19 @@
-"""Reads a repository's .orchestration/legacy-rules.toml and classifies added lines with it."""
-import platform
+"""The legacy rules of a repo's [legacy] settings: classifies added lines and maps the files they count."""
+import hashlib
+import json
 import re
 import subprocess
 import sys
 import warnings
+from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    tomllib = None
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'lib'))
+import orch_settings
 
-RULES_PATH = '.orchestration/legacy-rules.toml'
 LINE_SEARCH_LIMIT = 2000
-FLAGS = {'i': re.IGNORECASE, 'm': re.MULTILINE, 's': re.DOTALL}
-TOP_KEYS = ('version', 'exempt', 'rules')
-RULE_KEYS = ('kind', 'pattern', 'flags', 'paths', 'exclude')
+RULE_KEYS = ('kind', 'pattern', 'paths', 'exclude')
 KIND = re.compile(r'[A-Za-z][A-Za-z0-9_-]*')
-
-
-def python_problem():
-    if tomllib is None:
-        return f'legacy scan needs Python 3.11+ for tomllib; {sys.executable} is {platform.python_version()}'
-    return None
+NO_RULES = 3
 
 
 def glob_body(glob):
@@ -57,8 +49,7 @@ def compile_glob(glob):
     return re.compile(glob_body(glob + '**' if glob.endswith('/') else glob))
 
 
-def globs(raw, key, required=False):
-    value = raw.get(key, [])
+def globs(value, key, required=False):
     if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value) or (required and not value):
         raise ValueError(f"{key} must be a {'non-empty ' if required else ''}list of non-empty strings")
     try:
@@ -67,63 +58,48 @@ def globs(raw, key, required=False):
         raise ValueError(f'{key}: {error}') from error
 
 
-def compile_pattern(pattern, flags):
-    if not isinstance(flags, str) or set(flags) - set(FLAGS) or len(set(flags)) != len(flags):
-        raise ValueError(f'unsupported flags {flags!r} (use i, m, s)')
+def compile_pattern(pattern):
     if pattern is None:
-        if flags:
-            raise ValueError('flags need a pattern')
         return None
     if not isinstance(pattern, str) or not pattern:
         raise ValueError('pattern must be a non-empty string')
-    bits = 0
-    for flag in flags:
-        bits |= FLAGS[flag]
     try:
         with warnings.catch_warnings():
             warnings.simplefilter('error')
-            return re.compile(pattern, bits)
+            return re.compile(pattern)
     except (re.error, Warning, RecursionError, OverflowError) as error:
         raise ValueError(f'pattern is not a valid regex: {error}') from error
 
 
-def unknown(raw, keys):
-    extra = [key for key in raw if key not in keys]
-    if extra:
-        raise ValueError(f'unknown key {extra[0]!r}')
-
-
 class Rule:
     def __init__(self, raw):
-        unknown(raw, RULE_KEYS)
-        self.pattern = compile_pattern(raw.get('pattern'), raw.get('flags', ''))
-        self.paths = globs(raw, 'paths', required=True)
-        self.exclude = globs(raw, 'exclude')
+        extra = [key for key in raw if key not in RULE_KEYS]
+        if extra:
+            raise ValueError(f'unknown key {extra[0]!r}')
+        self.pattern = compile_pattern(raw.get('pattern'))
+        self.paths = globs(raw.get('paths', []), 'paths', required=True)
+        self.exclude = globs(raw.get('exclude', []), 'exclude')
 
     def covers(self, path):
         return any(glob.fullmatch(path) for glob in self.paths) and not any(glob.fullmatch(path) for glob in self.exclude)
 
 
 class Rules:
-    def __init__(self, raw):
-        unknown(raw, TOP_KEYS)
-        version = raw.get('version')
-        if type(version) is not int or version != 1:
-            raise ValueError(f'unsupported version {version!r} (expected 1)')
-        self.exempt = globs(raw, 'exempt')
-        entries = raw.get('rules')
+    def __init__(self, entries, exempt=()):
         if not isinstance(entries, list) or not entries or not all(isinstance(entry, dict) for entry in entries):
-            raise ValueError('rules must be a non-empty array of tables ([[rules]])')
+            raise ValueError('legacy.rules must be a non-empty array of tables ([[legacy.rules]])')
+        self.exempt = globs(list(exempt), 'legacy.exempt')
         self.rules = []
         for number, entry in enumerate(entries, 1):
             kind = entry.get('kind')
             if not isinstance(kind, str) or not KIND.fullmatch(kind):
-                raise ValueError(f'rules[{number}]: kind must be a word (letters, digits, _ or -), got {kind!r}')
+                raise ValueError(f'legacy.rules[{number}]: kind must be a word (letters, digits, _ or -), got {kind!r}')
             try:
                 self.rules.append((kind, Rule(entry)))
             except ValueError as error:
-                raise ValueError(f'rules[{number}] ({kind}): {error}') from error
+                raise ValueError(f'legacy.rules[{number}] ({kind}): {error}') from error
         self.kinds = tuple(dict.fromkeys(kind for kind, _ in self.rules))
+        self.fingerprint = hashlib.sha256(json.dumps([entries, list(exempt)], sort_keys=True).encode()).hexdigest()
         self.candidates = {}
 
     def for_path(self, path):
@@ -143,31 +119,32 @@ class Rules:
         return [(kind, path, text) for path, _, text, added in lines if added and (kind := self.classify(path, text))]
 
 
-def parse_rules(text, source=RULES_PATH):
+def from_settings(settings):
+    """Rules of a repo's ORCH_* settings; None when they define none."""
     try:
-        problem = python_problem()
-        if problem:
-            raise ValueError(problem)
-        try:
-            raw = tomllib.loads(text)
-        except tomllib.TOMLDecodeError as error:
-            raise ValueError(f'not valid TOML: {error}') from error
-        return Rules(raw)
-    except ValueError as error:
-        raise ValueError(f'{source}: {error}') from error
+        entries = json.loads(settings.get('ORCH_LEGACY_RULES') or '[]')
+    except json.JSONDecodeError as error:
+        raise ValueError(f'ORCH_LEGACY_RULES is not JSON: {error}') from None
+    if entries == []:
+        return None
+    return Rules(entries, settings.get('ORCH_LEGACY_EXEMPT', '').split())
 
 
 def git(repo, *args):
     return subprocess.run(['git', '-C', repo, *args], capture_output=True, check=True).stdout
 
 
-def map_rows(repo, ref):
-    """(kind, path) for every file on `ref` whose lines a rule of the rules file on `ref` counts."""
+def clone_rules(repo, ref):
+    """Rules of the clone: its committed settings on `ref`, then its personal files."""
     try:
-        text = git(repo, 'show', f'{ref}:{RULES_PATH}').decode()
+        text = git(repo, 'show', f'{ref}:{orch_settings.REPO_FILE}').decode()
     except subprocess.CalledProcessError:
-        raise ValueError(f'{repo} has no {RULES_PATH} on {ref}') from None
-    rules = parse_rules(text, f'{ref}:{RULES_PATH}')
+        text = ''
+    return from_settings(orch_settings.load_remote(repo, ref, text, repo))
+
+
+def map_rows(repo, ref, rules):
+    """(kind, path) for every file on `ref` with a line a rule counts."""
     paths = [path.decode() for path in git(repo, 'ls-tree', '-r', '-z', '--name-only', ref).split(b'\0') if path]
     paths = [path for path in paths if rules.for_path(path)]
     rows = set()
@@ -197,8 +174,13 @@ def main(argv):
     if len(argv) != 4 or argv[1] != 'map':
         print('usage: legacy_rules.py map <repo> <ref>', file=sys.stderr)
         return 2
+    repo, ref = argv[2], argv[3]
     try:
-        rows = map_rows(argv[2], argv[3])
+        rules = clone_rules(repo, ref)
+        if rules is None:
+            print(f'legacy-map.sh: {repo} has no [[legacy.rules]] in its repo settings; nothing to map', file=sys.stderr)
+            return NO_RULES
+        rows = map_rows(repo, ref, rules)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f'legacy-map.sh: {error}', file=sys.stderr)
         return 1
