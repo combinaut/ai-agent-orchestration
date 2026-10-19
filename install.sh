@@ -509,9 +509,9 @@ upgrade_repo_files() {
     [ ! -f "$clone/.orchestration.local.toml" ] || files+=("$clone/.orchestration.local.toml")
     common=$(git -C "$clone" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || continue
     dir=${common%/.git}
-    [ "$dir" != "$common" ] && [ -f "$dir/.orchestration.local.toml" ] || continue
-    [ "$(cd "$dir" && pwd -P)" != "$(cd "$clone" && pwd -P)" ] || continue
-    files+=("$dir/.orchestration.local.toml")
+    if [ "$dir" != "$common" ] && [ -f "$dir/.orchestration.local.toml" ] && [ "$(cd "$dir" && pwd -P)" != "$(cd "$clone" && pwd -P)" ]; then
+      files+=("$dir/.orchestration.local.toml")
+    fi
   done
   for file in "$SNIPPET_DIR"/*/*.toml; do
     [ ! -f "$file" ] || files+=("$file")
