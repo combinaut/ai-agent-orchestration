@@ -177,15 +177,17 @@ sequenceDiagram
     participant A as Architect
     participant C as Coordinator
     participant W as Worker
-    A->>C: LEGACY CHECK (files, old code, what happens to it)
-    C->>C: check against ~/.claude/coordinator/legacy-map.tsv
+    A->>A: verify the clone's origin, generate a fresh task map
+    A->>C: LEGACY CHECK (repo, clone, map path, generation result, files, old code, what happens to it)
+    C->>C: check the files against the task map
     C-->>A: LEGACY OK, or what must change
     A->>W: go ahead, code starts
 ```
 
-- The architect sends the Coordinator a 3-line `LEGACY CHECK`: the files the task touches, the old code in them (`grep -F <path> ~/.claude/coordinator/legacy-map.tsv`), and what happens to it (removed, untouched, or a named bridge with a ticket). Never extended.
+- Before every check the architect verifies the source clone's origin identifies the task repository, then generates a fresh task map: `ORCH_LEGACY_MAP_OUT="<task-map-path>" ~/.claude/coordinator/legacy-map.sh "<task-clone>"`. The daily map is never used for this gate: it has no source metadata and may belong to a previous clone.
+- The architect sends the Coordinator a `LEGACY CHECK`: the repo, source clone, map path, the successful generation result, the files the task touches, the old code in them, and what happens to it (removed, untouched, or a named bridge with a ticket). Never extended. The Coordinator checks the files against that task map; if it cannot confirm the generation, it regenerates the map or withholds `LEGACY OK`.
 - No code starts until the answer is `LEGACY OK`.
-- [`legacy-map.sh`](../coordinator/legacy-map.sh) writes the map from `origin/main` of a repository; it runs daily only with `watchers.service = true` and a resolvable `legacy.map_repo`. [`legacy-scan.sh`](../coordinator/legacy-scan.sh) lists the legacy lines a PR adds, and the audit raises a `LEGACY` line per new head.
+- [`legacy-map.sh`](../coordinator/legacy-map.sh) writes a map from `origin/main` of a repository. [`legacy-scan.sh`](../coordinator/legacy-scan.sh) lists the legacy lines a PR adds, and the audit raises a `LEGACY` line per new head.
 
 ## Remote Control
 
