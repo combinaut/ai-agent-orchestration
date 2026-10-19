@@ -186,6 +186,16 @@ class AuditDiscoveryTest(IsolatedTestCase):
             raise AssertionError(argv)
         self.assertEqual(audit.fetch_prs(command, repos=[]), [])
 
+    def test_without_open_work_a_git_source_that_only_failed_stays_unreadable(self):
+        def command(*argv):
+            raise subprocess.CalledProcessError(1, argv, stderr='herdr: no server')
+        before = dict(sources={'github': [], 'herdr': []}, unreadable={'git:/r/web': 'READFAIL git:/r/web: denied'})
+        with patch.object(audit, 'workspace_lines', lambda command: []), patch.object(audit, 'slot_sources', lambda slots: ({}, {})):
+            raw = audit.collect(command, before=before)
+        self.assertIn('git:/r/web', raw['unreadable'])
+        _, events = audit.reduce(before, raw)
+        self.assertNotIn('git:/r/web READFAIL cleared', events)
+
     def test_without_open_work_or_a_saved_set_github_and_known_git_sources_stay_unreadable(self):
         def command(*argv):
             if argv[1:] == ('workspace', 'list') and len(argv) == 3:

@@ -548,8 +548,8 @@ def collect(command, slots=None, before=None):
     except discovery.Unavailable as error:
         found = None
         unreadable['github'] = f'READFAIL github: {error_detail(error)}'
-        unreadable.update({source: f'READFAIL {source}: {error_detail(error)}'
-                           for source in (before or {}).get('sources', {}) if source.startswith('git:')})
+        known = {**(before or {}).get('sources', {}), **(before or {}).get('unreadable', {})}
+        unreadable.update({source: f'READFAIL {source}: {error_detail(error)}' for source in known if source.startswith('git:')})
     sources = {'herdr': lambda: workspace_lines(command)}
     if found is not None:
         sources['github'] = lambda: github_lines(command, (before or {}).get('legacy'), legacy, found)

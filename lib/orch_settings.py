@@ -317,7 +317,7 @@ def load_remote(repo, ref, committed_text, clone=None, environ=None):
     return merged(layers, environ)
 
 
-REMOTE_RE = r'(?:^|[/:]){}(?:\.git)?/?$'
+GITHUB_REMOTE = re.compile(r'^(?:[a-z][a-z0-9+.-]*://)?(?:[^@/\s]+@)?github\.com(?::\d+)?[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$', re.I)
 
 
 def origin_matches(path, repo):
@@ -326,7 +326,8 @@ def origin_matches(path, repo):
                              capture_output=True, text=True, timeout=5).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return False
-    return bool(url) and re.search(REMOTE_RE.format(re.escape(repo)), url, re.I) is not None
+    match = GITHUB_REMOTE.search(url)
+    return match is not None and match[1].lower() == repo.lower()
 
 
 def known_clone(repo, clones):

@@ -177,6 +177,8 @@ def line():
             continue
         if running.get(ws, 0) or source in waits or open_pr(workspaces, ws, prs):
             idle.append(name)
+        else:
+            del live[ws]
     nofocus = [name for ws, name in live.items() if focus[ws][0] and fwork.get(ws, 0) == 0 and name != focus[ws][1]]
     try:
         listing = subprocess.run(['heavy-slot', 'list'], capture_output=True, text=True, timeout=30).stdout

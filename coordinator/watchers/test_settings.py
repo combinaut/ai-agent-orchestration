@@ -239,6 +239,12 @@ class RemoteReadTest(SettingsTest):
         self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXTRA_PATTERN']), ('1', 'shared'))
         self.assertEqual(calls[0][-1], 'repos/acme/webapp/contents/.orchestration.toml?ref=feature%2Fbase')
 
+    def test_a_clone_of_the_same_name_on_another_host_is_not_the_github_clone(self):
+        lab = self.repo('lab', 'git@gitlab.com:acme/webapp.git')
+        hub = self.repo('hub', 'ssh://git@github.com:22/acme/webapp.git')
+        self.assertEqual(s.known_clone('acme/webapp', [str(lab), str(hub)]), str(hub))
+        self.assertIsNone(s.known_clone('acme/webapp', [str(lab)]))
+
     def test_the_local_file_of_a_known_clone_overrides_the_base_ref(self):
         clone = self.repo('clone')
         (clone / s.LOCAL_FILE).write_text('[legacy]\nextra_pattern = "mine"\n')

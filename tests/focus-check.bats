@@ -345,6 +345,7 @@ fi
 SH
   export ORCH_CONFIG="$TMP/orchestration.toml"
   : >"$ORCH_CONFIG"
+  printf '## Waits on the user\n- a decision -> Coordinator\n' >"$HOME/.claude/coordinator/status/Architect::Beta.md"
   export FOCUS_REPO="$TMP/repo"
   mkdir -p "$FOCUS_REPO/sub"
   git -C "$FOCUS_REPO" init -q
@@ -403,6 +404,17 @@ SH
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"focus_workers_live=1"* ]]
+  [[ "$output" == *"no_focus_worker=none"* ]]
+}
+
+@test "a resting architect is left out of the no-focus list" {
+  focus_fixture
+  printf '[focus]\npattern = "billing"\n' >"$FOCUS_REPO/.orchestration.toml"
+  rm "$HOME/.claude/coordinator/status/Architect::Beta.md"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
   [[ "$output" == *"no_focus_worker=none"* ]]
 }
 
