@@ -297,8 +297,8 @@ EOF
   [ -f "$HOME/.claude/coordinator/watchers/service/macos/orch.coord-watcher-context.plist" ]
   contains "$output" "$HOME/.claude/coordinator/watchers/service/macos/orch.coord-watcher-context.plist"
   contains "$output" 'stay broken until these commands run'
-  case "$output" in *"launchctl bootout gui/$(id -u)/orch.coord-context-v2"*"install.sh"*"launchctl bootstrap gui/$(id -u) "*"orch.coord-watcher-context.plist"*) ;; *) false ;; esac
-  not_contains "$output" 'orch.coord-inbox-v2-context'
+  case "$output" in *"launchctl bootout gui/$(id -u)/com.combinaut.coord-context-v2"*"install.sh"*"launchctl bootstrap gui/$(id -u) "*"orch.coord-watcher-context.plist"*) ;; *) false ;; esac
+  not_contains "$output" 'com.combinaut.coord-inbox-v2-context'
   [ ! -e "$HOME/.claude/coordinator/watchers/bindings/coordinator.json" ]
   [ -f "$HOME/.claude/coordinator/v2/bindings/coordinator.json" ]
   run grep -Eq 'bootout|bootstrap' "$LAUNCHCTL_CALLS"

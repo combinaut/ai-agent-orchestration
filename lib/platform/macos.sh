@@ -18,9 +18,9 @@ platform_migrate_legacy_watchers() {
       continue
     fi
     loaded_new="$loaded_new$new_file\n"
-  done <<'JOBS'
-orch.coord-context-v2 orch.coord-watcher-context
-orch.coord-inbox-v2-context orch.coord-watcher-inbox-context
+  done <<JOBS
+${LEGACY_LABEL_PREFIX}context-v2 orch.coord-watcher-context
+${LEGACY_LABEL_PREFIX}inbox-v2-context orch.coord-watcher-inbox-context
 JOBS
   if [ -n "$loaded_old" ]; then
     # shellcheck disable=SC2034 # Read by install.sh.
@@ -71,12 +71,12 @@ os.execvp(sys.argv[1], sys.argv[1:])' "$@" </dev/null
 
 platform_launch_agents_dir() { printf '%s' "$HOME/Library/LaunchAgents"; }
 
-# platform_remove_stale_services <current file names>: boots out and deletes our LaunchAgents that no template renders.
+# platform_remove_stale_services <current file names>: boots out and deletes our LaunchAgents, old and new names, that no template renders.
 # A job still loaded after its bootout keeps its file and fails the call.
 platform_remove_stale_services() {
   local file name uid status=0
   uid=$(id -u)
-  for file in "$(platform_launch_agents_dir)"/orch.coord-*.plist; do
+  for file in "$(platform_launch_agents_dir)"/orch.coord-*.plist "$(platform_launch_agents_dir)/${LEGACY_LABEL_PREFIX:?}"*.plist; do
     [ -e "$file" ] || [ -L "$file" ] || continue
     name=${file##*/}
     printf '%s\n' "$1" | grep -qxF "$name" && continue

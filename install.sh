@@ -25,6 +25,7 @@ MANAGED_GUARD_RE='^ORCH_CONFIG=.*[[:space:]]+python3[[:space:]]+~/.claude/hooks/
 # shellcheck disable=SC2016 # The regex matches a literal $HOME in hook commands.
 SUPPORTED_GUARD_RE='^[[:space:]]*(?:(?:(?:[^[:space:]]*/)?env(?:[[:space:]]+(?:[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+|-[^[:space:]]+))*[[:space:]]+)?[^[:space:]]*python[0-9.]*[[:space:]]+)?(?:~/.claude|[\"]?\$HOME/.claude|/[^[:space:]]*\.claude)/hooks/guard-bash\.py\"?[[:space:]]*$'
 CHROME_HOST="orch.pr_tabs"
+LEGACY_LABEL_PREFIX="com.combinaut.coord-"
 
 n_linked=0
 SERVICES_FAILED=0

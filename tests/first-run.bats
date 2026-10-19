@@ -250,7 +250,7 @@ EOF
     Linux)
       dir="$HOME/.config/systemd/user" suffix=service calls=$SYSTEMCTL_CALLS state=$SYSTEMCTL_STATE PLATFORM_DIR=linux
       mkdir -p "$dir"
-      printf stale >"$dir/orch.coord-context-v2.service"
+      printf stale >"$dir/com.combinaut.coord-context-v2.service"
       printf stale >"$dir/orch.coord-watcher-gone.service"
       ;;
   esac
@@ -267,8 +267,8 @@ EOF
       done
       ;;
     Linux)
-      [ ! -e "$dir/orch.coord-context-v2.service" ] && [ ! -e "$dir/orch.coord-watcher-gone.service" ]
-      contains "$(cat "$calls")" 'disable --now orch.coord-context-v2.service'
+      [ ! -e "$dir/com.combinaut.coord-context-v2.service" ] && [ ! -e "$dir/orch.coord-watcher-gone.service" ]
+      contains "$(cat "$calls")" 'disable --now com.combinaut.coord-context-v2.service'
       ;;
   esac
   [ "$(LC_ALL=C sort "$state" | sed 's/\.service$//')" = "$(printf '%s\n' "$expected" | sed 's/\.[a-z]*$//')" ]
@@ -334,9 +334,9 @@ EOF
       use_stuck_service orch.coord-watcher-gone ""
       ;;
     Linux)
-      stale="$HOME/.config/systemd/user/orch.coord-context-v2.service"
-      printf '%s\n' orch.coord-context-v2.service >"$SYSTEMCTL_STATE"
-      use_stuck_service "" orch.coord-context-v2.service
+      stale="$HOME/.config/systemd/user/com.combinaut.coord-context-v2.service"
+      printf '%s\n' com.combinaut.coord-context-v2.service >"$SYSTEMCTL_STATE"
+      use_stuck_service "" com.combinaut.coord-context-v2.service
       ;;
   esac
   mkdir -p "$(dirname "$stale")"

@@ -42,11 +42,11 @@ platform_run_detached() { setsid --wait "$@" </dev/null; }
 
 platform_user_units_dir() { printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"; }
 
-# platform_remove_stale_services <current file names>: disables and deletes our user units that no template renders.
+# platform_remove_stale_services <current file names>: disables and deletes our user units, old and new names, that no template renders.
 # A unit still active after it was disabled keeps its file and fails the call.
 platform_remove_stale_services() {
   local file name status=0
-  for file in "$(platform_user_units_dir)"/orch.coord-*; do
+  for file in "$(platform_user_units_dir)"/orch.coord-* "$(platform_user_units_dir)/${LEGACY_LABEL_PREFIX:?}"*; do
     [ -e "$file" ] || [ -L "$file" ] || continue
     name=${file##*/}
     case "$name" in *.service | *.timer) ;; *) continue ;; esac
