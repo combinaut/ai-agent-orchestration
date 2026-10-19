@@ -158,6 +158,12 @@ class RulesTests(IsolatedTestCase):
             with self.assertRaisesRegex(ValueError, r'legacy rules need rg \(ripgrep\) on PATH'):
                 rules(rule(kind='"A"', pattern="'x'", paths='["**"]'))
 
+    def test_zero_width_matches_count_and_keep_rule_order(self):
+        parsed = rules(rule(kind='"EMPTY"', pattern="'^$'", paths='["**"]') + rule(kind='"WORD"', pattern="'\\b'", paths='["**"]')
+                       + rule(kind='"ANY"', paths='["**"]'))
+        lines = [('a.js', 1, '', True), ('a.js', 2, 'ab', True), ('a.js', 3, '  ', True), ('a.js', 4, 'a' * 3000, True)]
+        self.assertEqual([kind for kind, _, _ in parsed.scan(lines)], ['EMPTY', 'WORD', 'ANY', 'WORD'])
+
     def test_a_failing_rg_fails_the_scan(self):
         parsed = rules(rule(kind='"A"', pattern="'x'", paths='["**"]'))
         fake = self.base / 'rg'

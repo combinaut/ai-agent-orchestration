@@ -15,7 +15,7 @@ import orch_settings
 
 LINE_SEARCH_LIMIT = 2000
 RULES_MAX = 64
-RG_FLAGS = ('--no-config', '--text', '--line-number', '--no-filename', '--only-matching', '--replace', '')
+RG_FLAGS = ('--no-config', '--text', '--line-number', '--no-filename', '--max-columns', '1')
 RULE_KEYS = ('kind', 'pattern', 'paths', 'exclude')
 KIND = re.compile(r'[A-Za-z][A-Za-z0-9_-]*')
 NO_RULES = 3
