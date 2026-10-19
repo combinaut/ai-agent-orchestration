@@ -60,26 +60,25 @@ def globs(value, key, required=False):
         raise ValueError(f'{key}: {error}') from error
 
 
+def groups(arg):
+    """Every parsed group nested in an opcode argument."""
+    if isinstance(arg, sre_parse.SubPattern):
+        yield arg
+    elif isinstance(arg, (tuple, list)):
+        for item in arg:
+            yield from groups(item)
+
+
 def nested_repeat(items, repeated=False):
-    """True when a group repeated more than once holds a repeat, even an optional one, or an alternation (catastrophic backtracking)."""
+    """True when a group repeated more than once holds a repeat, even an optional one, or a choice (catastrophic backtracking)."""
     for op, arg in items:
         if op in (sre.MAX_REPEAT, sre.MIN_REPEAT, sre.POSSESSIVE_REPEAT):
-            low, high, body = arg
-            many = high > 1
-            if repeated or nested_repeat(body, many):
+            if repeated or nested_repeat(arg[2], arg[1] > 1):
                 return True
-        elif op is sre.BRANCH:
-            if repeated or any(nested_repeat(branch, repeated) for branch in arg[1]):
-                return True
-        elif op is sre.SUBPATTERN:
-            if nested_repeat(arg[3], repeated):
-                return True
-        elif op in (sre.ASSERT, sre.ASSERT_NOT):
-            if nested_repeat(arg[1], repeated):
-                return True
-        elif op is sre.ATOMIC_GROUP:
-            if nested_repeat(arg, repeated):
-                return True
+        elif op is sre.BRANCH and repeated:
+            return True
+        elif any(nested_repeat(group, repeated) for group in groups(arg)):
+            return True
     return False
 
 

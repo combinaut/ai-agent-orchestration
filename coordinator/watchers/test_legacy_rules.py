@@ -138,7 +138,8 @@ class RulesTests(IsolatedTestCase):
             {'ORCH_LEGACY_RULES': '[{"kind":"A","paths":["**"]}]', 'ORCH_LEGACY_EXEMPT': 'x y'}).classify('y', ''), None)
 
     def test_patterns_that_backtrack_without_bound_are_rejected(self):
-        for pattern in ('(a+)+$', '(a|aa)*', '(a*)*', '(?:x+y?)+', '((a)+)+', '(?=(a+)+)b', '(a|ab)+?', '^(a?){40}a{40}$'):
+        for pattern in ('(a+)+$', '(a|aa)*', '(a*)*', '(?:x+y?)+', '((a)+)+', '(?=(a+)+)b', '(a|ab)+?', '^(a?){40}a{40}$',
+                        '^(a)?(?(1)(b+)+|c)$', '^(a)?(?(1)c|(b+)+)$', '(?:(a)?(?(1)b|c))+', '(?>(a+)+)'):
             with self.assertRaisesRegex(ValueError, 'catastrophic backtracking', msg=pattern):
                 legacy_rules.compile_pattern(pattern)
         for pattern in ('a+b+', '(ab)+', '(a|b)*', '(ab)?c*', 'ajax:(success|error)', 'remote: *true', '(?:ab){2}'):
