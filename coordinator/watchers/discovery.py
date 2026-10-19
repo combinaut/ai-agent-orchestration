@@ -13,6 +13,7 @@ from watcher_platform import MissingMetric
 ROOT = Path(__file__).resolve().parents[2]
 GITHUB_REMOTE = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
 NO_REMOTE = re.compile(r"No such remote", re.I)
+GONE = re.compile(r"cannot change to", re.I)
 READ_ERRORS = (OSError, ValueError, KeyError, TypeError, AttributeError, MissingMetric, subprocess.SubprocessError)
 ADAPTERS = {}
 
@@ -49,12 +50,16 @@ def open_work(command):
 
 
 def github_repo(command, clone):
-    """owner/name of the clone's GitHub origin; None without one. Raises Unavailable when the origin cannot be read."""
+    """owner/name of the clone's GitHub origin; None without one, False when the clone's directory is gone.
+
+    Raises Unavailable when the origin cannot be read."""
     try:
         url = command('git', '-C', clone, 'remote', 'get-url', 'origin').strip()
     except subprocess.CalledProcessError as error:
         if NO_REMOTE.search(str(error.stderr or '')):
             return None
+        if GONE.search(str(error.stderr or '')):
+            return False
         raise Unavailable(f'origin of {clone} unreadable: {str(error.stderr or error).strip()[:200]}') from error
     except READ_ERRORS as error:
         raise Unavailable(f'origin of {clone} unreadable: {str(error)[:200]}') from error
@@ -63,10 +68,12 @@ def github_repo(command, clone):
 
 
 def discover(command, work):
-    clones = sorted({row['repo_root'] for row in work['workspaces'] if row.get('repo_root')})
-    names = {}
-    for clone in clones:
+    clones, names = [], {}
+    for clone in sorted({row['repo_root'] for row in work['workspaces'] if row.get('repo_root')}):
         repo = github_repo(command, clone)
+        if repo is False:
+            continue
+        clones.append(clone)
         if repo:
             names.setdefault(repo.lower(), repo)
     return dict(clones=clones, repos=sorted(names.values(), key=str.lower))

@@ -1,7 +1,10 @@
 """Open work of the running Herdr session, for the watchers: workspaces with their repo and owner, and agent panes."""
 import json
 import os
+import re
 from pathlib import Path
+
+NOT_A_CHECKOUT = re.compile(r'not a git repository|cannot change to', re.I)
 
 
 def herdr_bin():
@@ -23,7 +26,8 @@ def checkout_of(command, path):
 def open_work(command):
     """{'workspaces': [{id, label, owner, status, checkout, repo_root}], 'panes': [{workspace, pane, title, role, agent, status, cwd}]}.
 
-    A workspace Herdr reports without a worktree takes the checkout of its first pane's directory; none when that is no checkout."""
+    A workspace Herdr reports without a worktree takes the checkout of its first pane's directory; none when git says it is
+    no checkout or the directory is gone. Any other failure raises."""
     workspaces = result(command, 'workspace', 'list')['workspaces']
     panes = result(command, 'pane', 'list')['panes']
     if not isinstance(workspaces, list) or not isinstance(panes, list):
@@ -39,7 +43,9 @@ def open_work(command):
         if not root and cwd:
             try:
                 checkout, root = checkout_of(command, cwd)
-            except Exception:
+            except Exception as error:
+                if not NOT_A_CHECKOUT.search(str(getattr(error, 'stderr', None) or '')):
+                    raise
                 checkout, root = None, None
         rows.append(dict(id=row['workspace_id'], label=row.get('label', ''), owner=(row.get('tokens') or {}).get('owner'),
                          status=row.get('agent_status'), checkout=checkout, repo_root=root))

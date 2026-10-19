@@ -65,7 +65,7 @@ class OpenPrs:
         """owner/name of the clone's GitHub origin, None without one, False when it cannot be read."""
         if root not in self.repos:
             try:
-                self.repos[root] = discovery.github_repo(command, root)
+                self.repos[root] = discovery.github_repo(command, root) or None
             except discovery.Unavailable:
                 self.repos[root] = False
         return self.repos[root]

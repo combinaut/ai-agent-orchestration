@@ -16,14 +16,19 @@ WORKSPACES = [
     dict(workspace_id='w3', label='gitlab', worktree=dict(checkout_path='/r/lab', repo_root='/r/lab')),
     dict(workspace_id='w4', label='no worktree'),
     dict(workspace_id='w5', label='no checkout'),
+    dict(workspace_id='w6', label='directory gone'),
+    dict(workspace_id='w7', label='moved clone', worktree=dict(checkout_path='/r/moved', repo_root='/r/moved')),
 ]
 PANES = [dict(workspace_id='w4', pane_id='w4:p1', cwd='/wt/tools/x/sub', agent='claude', agent_status='idle'),
-         dict(workspace_id='w5', pane_id='w5:p1', cwd='/tmp')]
+         dict(workspace_id='w5', pane_id='w5:p1', cwd='/tmp'),
+         dict(workspace_id='w6', pane_id='w6:p1', cwd='/gone')]
 REMOTES = {'/r/web': 'git@github.com:acme/web.git', '/r/WEB2': 'https://github.com/ACME/Web', '/r/lab': 'git@gitlab.com:acme/lab.git',
            '/r/tools': 'https://github.com/acme/tools.git'}
 
 
 def open_work_command(*argv):
+    if argv[0] == 'git' and argv[2] in ('/gone', '/r/moved'):
+        raise subprocess.CalledProcessError(128, argv, stderr="fatal: cannot change to '/gone': No such file or directory")
     if argv[1:] == ('workspace', 'list'):
         return json.dumps(dict(result=dict(workspaces=WORKSPACES)))
     if argv[1:] == ('pane', 'list'):
@@ -35,7 +40,7 @@ def open_work_command(*argv):
     if argv[0] == 'git' and argv[2] == '/wt/tools/x/sub' and argv[-1] == '--git-common-dir':
         return '/r/tools/.git\n'
     if argv[0] == 'git':
-        raise subprocess.CalledProcessError(128, argv, stderr='not a git repository')
+        raise subprocess.CalledProcessError(128, argv, stderr='fatal: not a git repository (or any of the parent directories): .git')
     raise AssertionError(argv)
 
 
@@ -64,7 +69,19 @@ class DiscoveryTest(IsolatedTestCase):
         rows = {row['id']: row for row in discovery.open_work(self.command)['workspaces']}
         self.assertEqual((rows['w4']['checkout'], rows['w4']['repo_root']), ('/wt/tools/x', '/r/tools'))
         self.assertEqual((rows['w5']['checkout'], rows['w5']['repo_root']), (None, None))
+        self.assertEqual((rows['w6']['checkout'], rows['w6']['repo_root']), (None, None))
         self.assertEqual(rows['w1']['owner'], 'a')
+
+    def test_an_unreadable_pane_checkout_keeps_the_saved_set(self):
+        found = discovery.repos(self.command)
+
+        def timeout(*argv):
+            if argv[0] == 'git' and argv[2] == '/wt/tools/x/sub':
+                raise subprocess.TimeoutExpired(argv, 45)
+            return self.command(*argv)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(discovery.repos(timeout), found)
+        self.assertEqual(discovery.saved(), found)
 
     def test_an_unreadable_adapter_falls_back_to_the_saved_set_and_logs_it(self):
         found = discovery.repos(self.command)
