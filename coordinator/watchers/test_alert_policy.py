@@ -226,6 +226,16 @@ class PolicyTest(IsolatedTestCase):
         self.assertIn("clearing_at", self.state["keys"]["audit:readfail:git:/first"])
         self.assertNotIn("clearing_at", self.state["keys"]["audit:readfail:git:/second"])
 
+    def test_a_git_source_with_a_space_fails_and_recovers(self):
+        self.run_at(0, {"mode": "audit", "events": ["READFAIL git:/work/my clone: denied", "PACKS my clone has over 50 packs; automatic cleanup is not keeping up",
+                                                   "AUDIT BASELINE git:/work/my clone [0 active lines; see audit.json before.sources]"]})
+        self.run_at(5, {"mode": "audit", "events": ["PACKS my clone has over 100 packs; automatic cleanup is not keeping up"]})
+        self.assertEqual([key for key in self.state["keys"] if key.startswith("audit:PACKS")], ["audit:PACKS my clone"])
+        self.assertIn("audit:baseline:git:/work/my clone", self.state["keys"])
+        self.run_at(10, {"mode": "audit", "events": ["git:/work/my clone READFAIL cleared"]})
+        self.assertIn("clearing_at", self.state["keys"]["audit:readfail:git:/work/my clone"])
+        self.assertNotIn("audit:git:/work/my clone READFAIL cleared", self.state["keys"])
+
     def test_clear_of_one_pane_leaves_similar_pane_active(self):
         self.run_at(0, workers("WORKER pane-1 blocked", "WORKER pane-10 blocked"))
         self.run_at(10, workers("WORKER pane-1 RECOVERED blocked"))
@@ -1185,7 +1195,7 @@ class DeliveryTest(IsolatedTestCase):
         for at in (now, now + 3000):
             os.utime(self.base / "host.heartbeat", (at, at))
             with warnings.catch_warnings(), patch("sys.argv", argv), patch.object(inbox.time, "time", return_value=at), \
-                    patch.dict(os.environ, {"ORCH_PR_REPOS": "", "ORCH_PR_AUTHOR": ""}):
+                    patch.dict(os.environ, {"ORCH_PR_AUTHOR": ""}):
                 warnings.simplefilter("ignore", ResourceWarning)
                 inbox.main()
         lines = self.feed_lines() if self.feed.exists() else []

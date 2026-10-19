@@ -40,8 +40,10 @@ def run(argv, timeout=None):
     previous_handler = signal.signal(signal.SIGALRM, defer_alarm)
     try:
         try:
+            # Git diagnostics are matched in English.
+            env = dict(os.environ, LC_ALL='C') if os.path.basename(argv[0]) == 'git' else None
             process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                       start_new_session=True)
+                                       start_new_session=True, env=env)
             _ACTIVE_PROCESS = process
         finally:
             signal.signal(signal.SIGALRM, previous_handler)

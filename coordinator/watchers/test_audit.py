@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from test_support import IsolatedTestCase
+from test_support import IsolatedTestCase, open_work
 import audit
 import watchers as w
 from test_watchers import reader
@@ -24,12 +24,14 @@ class AuditTests(IsolatedTestCase):
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
         self.pr = copy.deepcopy(PR)
-        self.env = patch.dict(os.environ, dict(ORCH_PR_AUTHOR='author', ORCH_PR_REPOS='owner/product owner/other',
-                            ORCH_GIT_WATCH_REPOS='', ORCH_PR_SINCE='2026-10-01', ORCH_MERGE_GATE_CHECKS='',
+        self.env = patch.dict(os.environ, dict(ORCH_PR_AUTHOR='author', ORCH_PR_SINCE='2026-10-01', ORCH_MERGE_GATE_CHECKS='',
                             ORCH_BOT_REVIEWER_LOGIN='robot', ORCH_PACKS_MAX='50', ORCH_WORKTREES_MAX='40',
                             ORCH_AUDIT_PAGE_PRS='80', ORCH_AUDIT_PAGE_NODES='100'))
         self.env.start()
         self.addCleanup(self.env.stop)
+        self.work = open_work('owner/product owner/other')
+        self.work.start()
+        self.addCleanup(self.work.stop)
         settings = patch.object(audit, 'repo_settings', lambda command, repo, ref, cache: audit.orch_settings.merged([], os.environ))
         settings.start()
         self.addCleanup(settings.stop)
@@ -283,7 +285,7 @@ class AuditTests(IsolatedTestCase):
             if str(path).endswith('objects/pack'):
                 raise PermissionError('pack denied')
             return real_scandir(path)
-        with patch.dict(os.environ, {'ORCH_GIT_WATCH_REPOS': '/repo'}), \
+        with open_work('owner/product owner/other', '/repo'), \
                 patch('audit.os.scandir', side_effect=scandir):
             raw = audit.collect(command, self.base / 'slots')
         self.assertEqual(raw['unreadable']['git:/repo'], 'READFAIL git:/repo: pack denied')
@@ -302,7 +304,7 @@ class AuditTests(IsolatedTestCase):
                 audit.repository_lines(command, '/repo')
 
     def test_watched_repos_and_git_readfail(self):
-        with patch.dict(os.environ, {'ORCH_GIT_WATCH_REPOS': '/first /second'}):
+        with open_work('owner/product owner/other', '/first /second'):
             def command(*args):
                 if args[0] == 'git':
                     raise subprocess.CalledProcessError(128, args, stderr='not a git repo')
