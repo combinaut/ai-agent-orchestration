@@ -326,3 +326,14 @@ class RemovedKeysTest(SettingsTest):
             path = self.write('removed.toml', text)
             self.assertTrue(s.drop_removed_keys(path))
             self.assertEqual(path.read_text(), expected)
+
+    def test_disjoint_topic_blocks_and_inline_table_keep_unrelated_settings(self):
+        for text, expected in [
+            ('[[pr_tabs.topics]]\nname="One"\n[pr]\nauthor="me" # keep\n[[pr_tabs.topics]]\nname="Two"\n', {'pr': {'author': 'me'}}),
+            ('pr_tabs = { org = "acme", topics = [] } # keep\n', {'pr_tabs': {'org': 'acme'}}),
+            ('pr_tabs = { topics = [{name="One"}], org = "acme" } # keep\n', {'pr_tabs': {'org': 'acme'}}),
+        ]:
+            path = self.write('removed.toml', text)
+            self.assertTrue(s.drop_removed_keys(path))
+            self.assertEqual(s.parse(path.read_text(), str(path)), expected)
+            self.assertIn('# keep', path.read_text())

@@ -92,7 +92,7 @@ export function groupColor(name) {
 
 export function groupForPr(owners, { owner, repo, branch = "", headRepository }) {
   const repository = (headRepository?.nameWithOwner || `${owner}/${repo}`).toLowerCase();
-  const name = owners[`${repository}:${branch}`] || repo;
+  const name = (headRepository !== null && owners[`${repository}:${branch}`]) || repo;
   return { name, color: groupColor(name) };
 }
 

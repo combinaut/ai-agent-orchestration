@@ -335,3 +335,14 @@ test("existing check cadence regroups tabs after ownership changes or disappears
   await chromeMessageCheck();
   assert.equal(grouped.at(-1).title, "webapp");
 });
+
+test("a restarted worker restores ownership before grouping persisted PR metadata", async () => {
+  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
+  store = { owners: { "acme/webapp:feature": "Finder" }, meta: {
+    "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
+  } };
+  grouped = [];
+  await import("../extension/background.js?ownership-restart");
+  await installedListener();
+  assert.equal(grouped.at(-1).title, "Finder");
+});

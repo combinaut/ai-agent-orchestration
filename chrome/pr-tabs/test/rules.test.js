@@ -18,3 +18,7 @@ test("name hash produces stable Chrome colours independent of repository", () =>
   const colors = new Set(["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"]);
   for (const name of ["Finder", "Agent::Tooling", "webapp", "📚 Docs"]) assert.ok(colors.has(groupColor(name)));
 });
+
+test("an explicitly unavailable head repository never matches the base checkout", () => {
+  assert.equal(groupForPr({ "acme/webapp:feature": "Finder" }, { ...pr, headRepository: null }).name, "webapp");
+});

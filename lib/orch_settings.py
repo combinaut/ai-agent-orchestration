@@ -646,41 +646,78 @@ def set_key(path, env, text):
 
 
 def drop_removed_keys(path):
-    """Remove retired topic rules while preserving every unrelated byte/value."""
+    """Drop retired rules, including disjoint blocks and inline table members.
+
+    Candidate edits are accepted only when TOML proves every other value is
+    unchanged. This keeps formatting/comments without introducing a TOML writer.
+    """
     path = Path(path)
     text = path.read_text()
     data = parse(text, str(path))
     if not isinstance(data.get('pr_tabs'), dict) or 'topics' not in data['pr_tabs']:
         return False
-    del data['pr_tabs']['topics']
-    lines = text.splitlines(keepends=True)
-    # Locate an assignment or array-table block, then let TOML verify its extent.
-    # Comparing parsed data protects unrelated keys and handles multiline strings.
-    table = None
-    for start, line in enumerate(lines):
-        header = re.match(r"^\s*\[\s*['\"]?([\w-]+)['\"]?\s*\]\s*(?:#.*)?$", line)
-        if header:
-            table = header[1]
-        plain = table == 'pr_tabs' and re.match(r"^\s*['\"]?topics['\"]?\s*=", line)
-        dotted = table is None and re.match(r"^\s*['\"]?pr_tabs['\"]?\s*\.\s*['\"]?topics['\"]?\s*=", line)
-        block = re.match(r"^\s*\[\[?\s*['\"]?pr_tabs['\"]?\s*\.\s*['\"]?topics['\"]?\s*\]", line)
-        if not (plain or dotted or block):
-            continue
-        for end in range(start + 1, len(lines) + 1):
-            candidate = ''.join(lines[:start] + lines[end:])
+
+    def without_topics(value):
+        result = dict(value)
+        if isinstance(result.get('pr_tabs'), dict):
+            tabs = dict(result['pr_tabs'])
+            tabs.pop('topics', None)
+            if tabs:
+                result['pr_tabs'] = tabs
+            else:
+                result.pop('pr_tabs')
+        return result
+
+    expected = without_topics(data)
+    validate(expected, str(path), 'global')
+
+    def ranges(source):
+        lines = source.splitlines(keepends=True)
+        offsets = [0]
+        for line in lines:
+            offsets.append(offsets[-1] + len(line))
+        table = None
+        for index, line in enumerate(lines):
+            header = re.match(r"^\s*\[\s*['\"]?([\w-]+)['\"]?\s*\]\s*(?:#.*)?$", line)
+            if header:
+                table = header[1]
+            plain = table == 'pr_tabs' and re.match(r"^\s*['\"]?topics['\"]?\s*=", line)
+            dotted = table is None and re.match(r"^\s*['\"]?pr_tabs['\"]?\s*\.\s*['\"]?topics['\"]?\s*=", line)
+            block = re.match(r"^\s*\[\[?\s*['\"]?pr_tabs['\"]?\s*\.\s*['\"]?topics['\"]?\s*\]", line)
+            if plain or dotted or block:
+                for end in offsets[index + 1:]:
+                    yield offsets[index], end
+        # Inline members can be first, middle or last, with nested arrays/tables.
+        # The parser/comparison below rejects matches inside strings or comments.
+        for match in re.finditer(r"(?<![\w.-])['\"]?topics['\"]?\s*=", source):
+            start = match.start()
+            previous = start - 1
+            while previous >= 0 and source[previous].isspace():
+                previous -= 1
+            for end in range(match.end(), len(source)):
+                if source[end] not in ',}\n':
+                    continue
+                yield start, end + (source[end] == ',')
+                if previous >= 0 and source[previous] == ',':
+                    yield previous, end
+
+    while 'topics' in data.get('pr_tabs', {}):
+        size = len(json.dumps(data['pr_tabs']['topics']))
+        for start, end in ranges(text):
+            candidate = text[:start] + text[end:]
             try:
                 parsed = parse(candidate, str(path))
             except ConfigError:
                 continue
-            # Removing a table can also remove its now-empty parent.
-            expected = dict(data)
-            if expected.get('pr_tabs') == {} and 'pr_tabs' not in parsed:
-                del expected['pr_tabs']
-            if parsed == expected:
-                validate(parsed, str(path), 'global')
-                path.write_text(candidate)
-                return True
-    raise ConfigError(f'{path}: cannot remove retired pr_tabs.topics in place')
+            remaining = parsed.get('pr_tabs', {}).get('topics')
+            removed = 'topics' not in parsed.get('pr_tabs', {})
+            if without_topics(parsed) == expected and (removed or len(json.dumps(remaining)) < size):
+                text, data = candidate, parsed
+                break
+        else:
+            raise ConfigError(f'{path}: cannot remove retired pr_tabs.topics in place')
+    path.write_text(text)
+    return True
 
 
 def file_keys(path, scope):

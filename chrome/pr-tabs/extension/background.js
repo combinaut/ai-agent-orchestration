@@ -30,7 +30,7 @@ const POLL_SOON_MS = 5000;
 const SEARCH_LIMIT = 100;
 
 const SETTINGS_RETRY_MS = 60000;
-let owners = {};
+let owners;
 let rulesPromise;
 let retryRulesAt = 0;
 function loadRules() {
@@ -123,6 +123,7 @@ async function groupFor(windowId, groupInfo) {
 // Moves the tab into its architect group; a tab already there is left alone.
 async function groupTab(tab, pr, rules, meta) {
   if (tab.pinned) return;
+  owners ??= (await chrome.storage.local.get({ owners: {} })).owners;
   const info = meta[pr.key] || {};
   const groupInfo = groupForPr(owners, { ...pr, branch: info.headRefName, headRepository: info.headRepository });
   const group = await groupFor(tab.windowId, groupInfo);
@@ -223,6 +224,7 @@ async function checkOnce() {
     return { error: `GitHub check failed: ${error.message}` };
   }
   owners = reply.owners || {};
+  await chrome.storage.local.set({ owners });
   const keyById = new Map(entries.map(({ tab, pr }) => [tab.id, pr.key]));
   const closed = [];
   for (const id of tabsToClose(entries, reply.prs)) {
@@ -272,6 +274,7 @@ export async function openAll() {
   for (let page = 0; page < MAX_SEARCH_PAGES; page++) {
     const reply = await askHost({ type: "search", query: rules.openAll, limit: SEARCH_LIMIT, ...(after && { after }) });
     owners = reply.owners || {};
+    await chrome.storage.local.set({ owners });
     search.total = reply.total;
     search.prs.push(...reply.prs);
     if (!reply.hasNextPage || planOpenAll(search, openKeys, rules.org).open.length >= OPEN_ALL_CAP) break;
