@@ -554,11 +554,14 @@ personal_config() {
   fi
   upgrade_repo_files
   drop_removed_keys
+  local removed
+  removed=$(settings_cli drop-removed "$CONFIG" 2>&1) || die "${removed#ERROR: }"
+  [ -z "$removed" ] || say "migrated" "$removed"
   have=$(settings_cli keys "$CONFIG" 2>&1) || die "${have#ERROR: }"
   have=" $have "
   load_config_cache
   local missing_project_keys=""
-  for k in ORCH_PR_TABS_ORG ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS; do
+  for k in ORCH_PR_TABS_ORG ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL; do
     case "$have" in *" $k "*) ;; *) missing_project_keys="$missing_project_keys $k" ;; esac
   done
   [ -z "$missing_project_keys" ] || say "configure" "Project features are off until you configure missing keys in $CONFIG:$missing_project_keys"

@@ -34,9 +34,9 @@ load test_helper
   printf '%s\n' '[pr_tabs]' 'org = ""' >>"$TMP/old.toml"
   cp "$TMP/old.toml" "$HOME/.claude/orchestration.toml"
   install_ok
-  contains "$output" "Project features are off until you configure missing keys in $HOME/.claude/orchestration.toml: ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS"
+  contains "$output" "Project features are off until you configure missing keys in $HOME/.claude/orchestration.toml: ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL"
   cmp "$TMP/old.toml" "$HOME/.claude/orchestration.toml"
-  config_set ORCH_PR_TABS_DEFAULT_REPO "" ORCH_PR_TABS_OPEN_ALL "" ORCH_PR_TABS_TOPICS ""
+  config_set ORCH_PR_TABS_DEFAULT_REPO "" ORCH_PR_TABS_OPEN_ALL ""
   install_ok
   not_contains "$output" 'Project features are off until you configure missing keys'
   after=$(find "$HOME/.claude" -type l -exec sh -c 'printf "%s -> %s\\n" "$1" "$(readlink "$1")"' sh {} \; | sort)
@@ -1170,4 +1170,41 @@ EOF
   run env ORCH_CONFIG="$TMP/bad.toml" bash "$BATS_TEST_DIRNAME/../hooks/orch-update-check.sh"
   [ "$status" -ne 0 ]
   contains "$output" "orch-update-check: $TMP/bad.toml: pr.nope: unknown key"
+}
+
+@test "installer drops retired multiline topic rules once and preserves personal settings" {
+  fresh_install
+  cat >>"$HOME/.claude/orchestration.toml" <<'TOML'
+topics = [
+  { name = "Old", color = "blue", repo = ["webapp"] },
+]
+TOML
+  install_ok
+  contains "$output" 'removed pr_tabs.topics (architect grouping is automatic)'
+  run grep '^topics' "$HOME/.claude/orchestration.toml"
+  [ "$status" -eq 1 ]
+  install_ok
+  not_contains "$output" 'removed pr_tabs.topics'
+}
+
+@test "install retires discovered-work settings and PR topic rules together" {
+  fresh_install
+  cat >"$HOME/.claude/orchestration.toml" <<'TOML'
+[pr]
+author = "me"
+repos = ["acme/web"]
+[focus]
+skip_architects = ["Old"]
+[pr_tabs]
+org = "acme"
+topics = []
+TOML
+  install_ok
+  contains "$output" 'repos and architects come from the open work'
+  contains "$output" 'removed pr_tabs.topics (architect grouping is automatic)'
+  run python3 -c 'import sys,tomllib; c=tomllib.load(open(sys.argv[1], "rb")); assert c["pr"] == {"author":"me"}; assert c["pr_tabs"] == {"org":"acme"}; assert not c.get("focus")' "$HOME/.claude/orchestration.toml"
+  [ "$status" -eq 0 ]
+  install_ok
+  not_contains "$output" 'removed pr_tabs.topics'
+  not_contains "$output" 'repos and architects come from the open work'
 }

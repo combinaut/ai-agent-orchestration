@@ -185,7 +185,6 @@ ORCH_ALERT_ESCALATE_RATIO="1.5"
 ORCH_HOG_GB="0.5"
 ORCH_PATH="$HOME/.local/bin:/usr/bin:/bin"
 ORCH_PR_TABS_OPEN_ALL="is:pr is:open author:me"
-ORCH_PR_TABS_TOPICS='[{"name":"W","color":"blue","any":["\\bw\\b","a|b"]}]'
 ORCH_REPO_PATH=""
 ENV
   # shellcheck disable=SC2016 # The child shell expands these.

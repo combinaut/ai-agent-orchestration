@@ -93,7 +93,6 @@ SETTINGS = [
     _g('pr_tabs.org', 'ORCH_PR_TABS_ORG', 'str', '', 'Organization the PR tabs extension manages; empty turns org actions off'),
     _g('pr_tabs.default_repo', 'ORCH_PR_TABS_DEFAULT_REPO', 'str', '', 'Repo name for bare PR numbers; empty turns number jumps off'),
     _g('pr_tabs.open_all', 'ORCH_PR_TABS_OPEN_ALL', 'str', '', 'GitHub search behind the Open all button; empty turns it off'),
-    _g('pr_tabs.topics', 'ORCH_PR_TABS_TOPICS', 'json', [], 'Tab-group rules: tables with name, color and repo/title/any regex lists'),
     _r('guard.big_repo', 'ORCH_BIG_REPO', 'bool', False, 'Broad Git reads (git grep, cat-file over all objects) are blocked in this repo'),
     _r('audit.merge_gate_checks', 'ORCH_MERGE_GATE_CHECKS', 'list', [], 'Check names that only run on a full CI run; an approved PR on a non-default base reports "full CI ran" or "full CI not run"', sep='|'),
     _r('legacy.scan', 'ORCH_LEGACY_SCAN', 'bool', False, 'Open PRs of this repo are scanned for added lines that legacy.rules count (LEGACY line)'),
@@ -429,7 +428,7 @@ def markdown_table(scope):
 
 OLD_NAMES = {'ORCH_V2_LAUNCHD': 'ORCH_WATCHERS_SERVICE', 'ORCH_V2_PR_SCOPE': 'ORCH_WATCHERS_PR_SCOPE',
              'ORCH_V2_WORKER_MODEL': 'ORCH_WATCHERS_WORKER_MODEL', 'ORCH_V2_PRIMARY_REPO': 'ORCH_WATCHERS_PRIMARY_REPO'}
-REMOVED = {'ORCH_BIG_REPO_REMOTES', 'ORCH_LEGACY_REPOS', 'ORCH_LEGACY_EXTRA_PATTERN', 'ORCH_LEGACY_EXEMPT_PATHS', *DROPPED.values()}
+REMOVED = {'ORCH_BIG_REPO_REMOTES', 'ORCH_LEGACY_REPOS', 'ORCH_LEGACY_EXTRA_PATTERN', 'ORCH_LEGACY_EXEMPT_PATHS', 'ORCH_PR_TABS_TOPICS', *DROPPED.values()}
 ASSIGN = re.compile(r'^\s*(?:export\s+)?(ORCH_[A-Z0-9_]*)=')
 
 
@@ -778,6 +777,86 @@ def set_key(path, env, text):
     Path(path).write_text(text_out)
 
 
+def drop_removed_keys(path):
+    """Drop retired rules, including disjoint blocks and inline table members.
+
+    Candidate edits are accepted only when TOML proves every other value is
+    unchanged. This keeps formatting/comments without introducing a TOML writer.
+    """
+    path = Path(path)
+    with path.open(encoding="utf-8", newline="") as source:
+        text = source.read()
+    data = parse(text, str(path))
+    if not isinstance(data.get('pr_tabs'), dict) or 'topics' not in data['pr_tabs']:
+        return False
+
+    def without_topics(value):
+        result = dict(value)
+        if isinstance(result.get('pr_tabs'), dict):
+            tabs = dict(result['pr_tabs'])
+            tabs.pop('topics', None)
+            if tabs:
+                result['pr_tabs'] = tabs
+            else:
+                result.pop('pr_tabs')
+        return result
+
+    expected = without_topics(data)
+    validate(expected, str(path), 'global')
+
+    def ranges(source):
+        lines = source.splitlines(keepends=True)
+        offsets = [0]
+        for line in lines:
+            offsets.append(offsets[-1] + len(line))
+        table = None
+        for index, line in enumerate(lines):
+            header = re.match(r"^\s*\[\s*['\"]?([\w-]+)['\"]?\s*\]\s*(?:#.*)?$", line)
+            if header:
+                table = header[1]
+            plain = table == 'pr_tabs' and re.match(r"^\s*['\"]?topics['\"]?\s*=", line)
+            dotted = table is None and re.match(r"^\s*['\"]?pr_tabs['\"]?\s*\.\s*['\"]?topics['\"]?\s*=", line)
+            block = re.match(r"^\s*\[\[?\s*['\"]?pr_tabs['\"]?\s*\.\s*['\"]?topics['\"]?\s*\]", line)
+            if plain or dotted or block:
+                for end in offsets[index + 1:]:
+                    start = index
+                    if index and lines[index - 1].rstrip("\r\n") == '# Tab-group rules: tables with name, color and repo/title/any regex lists':
+                        start -= 1
+                    yield offsets[start], end
+        # Inline members can be first, middle or last, with nested arrays/tables.
+        # The parser/comparison below rejects matches inside strings or comments.
+        for match in re.finditer(r"(?<![\w.-])['\"]?topics['\"]?\s*=", source):
+            start = match.start()
+            previous = start - 1
+            while previous >= 0 and source[previous].isspace():
+                previous -= 1
+            for end in range(match.end(), len(source)):
+                if source[end] not in ',}\n':
+                    continue
+                yield start, end + (source[end] == ',')
+                if previous >= 0 and source[previous] == ',':
+                    yield previous, end
+
+    while 'topics' in data.get('pr_tabs', {}):
+        size = len(json.dumps(data['pr_tabs']['topics']))
+        for start, end in ranges(text):
+            candidate = text[:start] + text[end:]
+            try:
+                parsed = parse(candidate, str(path))
+            except ConfigError:
+                continue
+            remaining = parsed.get('pr_tabs', {}).get('topics')
+            removed = 'topics' not in parsed.get('pr_tabs', {})
+            if without_topics(parsed) == expected and (removed or len(json.dumps(remaining)) < size):
+                text, data = candidate, parsed
+                break
+        else:
+            raise ConfigError(f'{path}: cannot remove retired pr_tabs.topics in place')
+    with path.open("w", encoding="utf-8", newline="") as destination:
+        destination.write(text)
+    return True
+
+
 def bracket_depth(text):
     depth, quote, index = 0, None, 0
     while index < len(text):
@@ -879,6 +958,9 @@ def main(argv):
         elif command == 'set' and len(argv) >= 5 and len(argv) % 2 == 1:
             for name, value in zip(argv[3::2], argv[4::2]):
                 set_key(argv[2], name, value)
+        elif command == 'drop-removed' and len(argv) == 3:
+            if drop_removed_keys(argv[2]):
+                print('removed pr_tabs.topics (architect grouping is automatic)')
         elif command == 'drop' and len(argv) == 3:
             print(' '.join(drop_keys(argv[2])))
         elif command == 'keys' and len(argv) == 3:

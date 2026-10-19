@@ -14,9 +14,6 @@ let createdAlarms = [];
 let alarmListener;
 let installedListener;
 let hostSettings = {
-  topics: JSON.parse(
-    readFileSync(new URL("./fixtures/topics.json", import.meta.url)),
-  ),
   ok: true,
   org: "acme",
   defaultRepo: "webapp",
@@ -72,7 +69,7 @@ globalThis.chrome = {
       ).then(callback),
   },
 };
-const { closeDuplicates, goTo, openAll, prEntries } = await import("../extension/background.js");
+const { closeDuplicates, goTo, openAll, prEntries, checkNow: chromeMessageCheck } = await import("../extension/background.js");
 
 test("PR tabs whose URL differs from the org in case are kept; other orgs are dropped", async () => {
   const configured = hostSettings;
@@ -95,7 +92,7 @@ test("PR tabs whose URL differs from the org in case are kept; other orgs are dr
   Date.now = () => now;
   try {
     tabs = []; store = {}; grouped = []; settingsCalls = 0;
-    hostSettings = { ...configured, topics: [{ name: "Cached", color: "blue", repo: ["^webapp$"] }] };
+    hostSettings = { ...configured, defaultRepo: "cached" };
     const seed = await import("../extension/background.js?cache-seed");
     await seed.goTo("1");
     assert.deepEqual(store.prTabsSettings, hostSettings);
@@ -104,7 +101,7 @@ test("PR tabs whose URL differs from the org in case are kept; other orgs are dr
     const offline = await import("../extension/background.js?cache-offline");
     const before = settingsCalls;
     await offline.goTo("2");
-    assert.equal(grouped.at(-1).title, "Cached");
+    assert.equal(grouped.at(-1).title, "cached");
     for (let i = 0; i < 5; i++) await offline.goTo("2");
     assert.equal(settingsCalls, before + 1, "failed host retries are backed off");
     assert.deepEqual(store.prTabsSettings, good);
@@ -319,4 +316,95 @@ test("Close duplicate tabs keeps the active tab of the focused window (window 1)
   ];
   await closeDuplicates();
   assert.deepEqual(ids(), [2]);
+});
+
+
+test("existing check cadence regroups tabs after ownership changes or disappears", async () => {
+  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
+  store = {}; grouped = [];
+  let owners = { "acme/webapp:feature": "Finder" };
+  nativeHandler = async () => ({ ok: true, owners, prs: {
+    "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
+  } });
+  await chromeMessageCheck();
+  assert.equal(grouped.at(-1).title, "Finder");
+  owners = { "acme/webapp:feature": "Agent::Tooling" };
+  await chromeMessageCheck();
+  assert.equal(grouped.at(-1).title, "Agent::Tooling");
+  owners = {};
+  await chromeMessageCheck();
+  assert.equal(grouped.at(-1).title, "webapp");
+});
+
+test("a restarted worker restores ownership before grouping persisted PR metadata", async () => {
+  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
+  store = { owners: { "acme/webapp:feature": "Finder" }, meta: {
+    "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
+  } };
+  grouped = [];
+  await import("../extension/background.js?ownership-restart");
+  await installedListener();
+  assert.equal(grouped.at(-1).title, "Finder");
+});
+
+test("a delayed persisted restore cannot overwrite fresh ownership from a check", async () => {
+  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
+  store = { owners: { "acme/webapp:feature": "Old" }, meta: {
+    "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
+  } };
+  const get = chrome.storage.local.get;
+  const set = chrome.storage.local.set;
+  let release, signalRead, signalFresh;
+  const held = new Promise(resolve => { release = resolve; });
+  const reading = new Promise(resolve => { signalRead = resolve; });
+  const fresh = new Promise(resolve => { signalFresh = resolve; });
+  let intercepted = false;
+  chrome.storage.local.get = async defaults => {
+    const snapshot = await get(defaults);
+    if ("owners" in defaults && !intercepted) {
+      intercepted = true;
+      signalRead();
+      await held;
+    }
+    return snapshot;
+  };
+  chrome.storage.local.set = async values => {
+    await set(values);
+    if (values.owners?.["acme/webapp:feature"] === "Fresh") signalFresh();
+  };
+  nativeHandler = async () => ({ ok: true, owners: { "acme/webapp:feature": "Fresh" }, prs: {
+    "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
+  } });
+  try {
+    const worker = await import("../extension/background.js?ownership-restore-race");
+    const starting = installedListener();
+    await reading;
+    const checking = worker.checkNow();
+    await fresh;
+    release();
+    await Promise.all([starting, checking]);
+    assert.equal(grouped.at(-1).title, "Fresh");
+  } finally {
+    release();
+    chrome.storage.local.get = get;
+    chrome.storage.local.set = set;
+  }
+});
+
+
+test("failed scans preserve the last good map for checks and Open all, including after restart", async () => {
+  const good = { "acme/webapp:feature": "Finder" };
+  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
+  store = { owners: good, meta: { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } } };
+  grouped = [];
+  nativeHandler = async message => message.type === "states"
+    ? { ok: true, owners: null, prs: { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } } }
+    : { ok: true, owners: null, total: 1, prs: [{ url: `${PR}/8`, headRefName: "feature" }], hasNextPage: false };
+  const worker = await import("../extension/background.js?failed-ownership-scan");
+  await worker.checkNow();
+  assert.equal(grouped.at(-1).title, "Finder");
+  assert.deepEqual(store.owners, good);
+  await worker.openAll();
+  assert.equal(grouped.at(-1).title, "Finder");
+  assert.deepEqual(store.owners, good);
 });

@@ -137,5 +137,3 @@ org = ""
 default_repo = ""
 # GitHub search behind the Open all button; empty turns it off
 open_all = ""
-# Tab-group rules: tables with name, color and repo/title/any regex lists
-topics = []

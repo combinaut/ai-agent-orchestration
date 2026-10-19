@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Chrome native messaging host for PR tabs: one request, at most one gh call, one reply, then exit."""
+from contextlib import contextmanager
 from pathlib import Path
+import importlib.util
+import hashlib
+import tempfile
 import json
 import os
 import re
@@ -15,10 +19,10 @@ GH_TIMEOUT_SECONDS = 30
 MAX_STATES = 100
 MAX_SEARCH = 100
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
-PR_FIELDS = "state title headRefName"
+PR_FIELDS = "state title headRefName headRepository { nameWithOwner }"
 SEARCH = (
     "query($q: String!, $n: Int!, $a: String) { search(query: $q, type: ISSUE, first: $n, after: $a) { issueCount"
-    " pageInfo { endCursor hasNextPage } nodes { ... on PullRequest { url title headRefName } } } }"
+    " pageInfo { endCursor hasNextPage } nodes { ... on PullRequest { url title headRefName headRepository { nameWithOwner } } } } }"
 )
 
 
@@ -103,7 +107,7 @@ def states(request):
         result[key] = node if isinstance(node, dict) else None
     if not any(result.values()):
         raise RequestError(failure)
-    return {"ok": True, "prs": result}
+    return {"ok": True, "prs": result, "owners": ownership()}
 
 
 def search(request):
@@ -124,6 +128,7 @@ def search(request):
     page = found.get("pageInfo") or {}
     return {
         "ok": True,
+        "owners": ownership(),
         "total": found.get("issueCount") or len(prs),
         "prs": prs,
         "endCursor": page.get("endCursor"),
@@ -139,7 +144,7 @@ def project_settings():
             "/bin/bash",
             "-e",
             "-c",
-            '. "$1"; orch_load_config; printf "%s\\0" "$ORCH_PR_TABS_ORG" "$ORCH_PR_TABS_DEFAULT_REPO" "$ORCH_PR_TABS_OPEN_ALL" "$ORCH_PR_TABS_TOPICS"',
+            '. "$1"; orch_load_config; printf "%s\\0" "$ORCH_PR_TABS_ORG" "$ORCH_PR_TABS_DEFAULT_REPO" "$ORCH_PR_TABS_OPEN_ALL"',
             "orch-config",
             str(library),
         ],
@@ -148,12 +153,12 @@ def project_settings():
         timeout=2,
         check=True,
     )
-    return result.stdout.split("\0")[:4]
+    return result.stdout.split("\0")[:3]
 
 
 def settings(request):
     try:
-        org, repo, query, raw_topics = project_settings()
+        org, repo, query = project_settings()
     except (OSError, subprocess.SubprocessError, UnicodeError) as error:
         config = os.environ.get(
             "ORCH_CONFIG", str(Path.home() / ".claude/orchestration.toml")
@@ -161,42 +166,6 @@ def settings(request):
         raise RequestError(
             f"Cannot load PR-tabs settings from {config}: {type(error).__name__}"
         ) from None
-    try:
-        topics = json.loads(raw_topics) if raw_topics else []
-    except ValueError:
-        raise RequestError(
-            "pr_tabs.topics (ORCH_PR_TABS_TOPICS) must be an array of topic tables"
-        ) from None
-    if not isinstance(topics, list) or any(
-        not isinstance(topic, dict)
-        or not isinstance(topic.get("name"), str)
-        or not isinstance(topic.get("color"), str)
-        or any(
-            not isinstance(topic.get(field, []), list)
-            or any(not isinstance(pattern, str) for pattern in topic.get(field, []))
-            for field in ("any", "repo", "title", "branch")
-        )
-        for topic in topics
-    ):
-        raise RequestError(
-            "ORCH_PR_TABS_TOPICS must list named, colored topics with arrays of regex strings"
-        )
-    # Chrome's tabGroups.Color enum; validate before any browser mutation.
-    colors = {
-        "grey",
-        "blue",
-        "red",
-        "yellow",
-        "green",
-        "pink",
-        "purple",
-        "cyan",
-        "orange",
-    }
-    if any(topic["color"] not in colors for topic in topics):
-        raise RequestError(
-            "ORCH_PR_TABS_TOPICS color must be one of: " + ", ".join(sorted(colors))
-        )
     if org and not re.fullmatch(r"[A-Za-z0-9-]{1,39}", org):
         raise RequestError(
             "ORCH_PR_TABS_ORG must be a GitHub owner name (1-39 letters, digits, or hyphens)"
@@ -210,8 +179,106 @@ def settings(request):
         "org": org,
         "defaultRepo": repo,
         "openAll": query,
-        "topics": topics,
     }
+
+
+OWNER_CACHE_SECONDS = 30
+
+
+def is_owner_map(value):
+    return isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
+
+
+@contextmanager
+def discovery_settings(values):
+    # Main's adapter reads these process settings. Restore them for in-process callers.
+    updates = {key: values.get(key, "") for key in ("ORCH_ENV", "ORCH_HERDR_BIN")}
+    if values.get("ORCH_HERDR_SOCKET"):
+        updates["HERDR_SOCKET_PATH"] = values["ORCH_HERDR_SOCKET"]
+    before = {key: os.environ.get(key) for key in updates}
+    try:
+        os.environ.update(updates)
+        yield
+    finally:
+        for key, value in before.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def discover_owners(root, values):
+    sys.path.insert(0, str(root / "coordinator/watchers"))
+    discovery = importlib.import_module("discovery")
+    deadline = time.monotonic() + 5
+
+    def command(*args):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(args, 5)
+        return subprocess.run(args, capture_output=True, text=True, timeout=remaining, check=True,
+                              env=dict(os.environ, LC_ALL="C")).stdout.strip()
+
+    with discovery_settings(values):
+        return discovery.branch_owners(command)
+
+
+def ownership():
+    """The optional env adapter owns runtime discovery; cache across one-shot hosts."""
+    root = Path(__file__).resolve().parents[3]
+    try:
+        spec = importlib.util.spec_from_file_location("orch_settings", root / "lib/orch_settings.py")
+        config = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = config
+        spec.loader.exec_module(config)
+        values = config.load_global(os.environ.get("ORCH_CONFIG", str(Path.home() / ".claude/orchestration.toml")))
+        values.update({key: value for key, value in os.environ.items() if key.startswith("ORCH_")})
+        adapter = values.get("ORCH_ENV") or "herdr"
+        if not NAME.fullmatch(adapter):
+            return {}
+        path = root / "env" / adapter / "open_work.py"
+        if not path.is_file():
+            return {}
+        identity = json.dumps([str(root), str(path.stat().st_mtime_ns),
+                               str((root / "coordinator/watchers/discovery.py").stat().st_mtime_ns), values,
+                               os.environ.get("HERDR_SOCKET_PATH"), os.environ.get("HERDR_BIN_PATH")], sort_keys=True)
+        key = hashlib.sha256(identity.encode()).hexdigest()[:20]
+        cache = Path(log_path()).parent / "owners.json"
+        try:
+            saved = json.loads(cache.read_text())
+            age = time.time() - saved["time"]
+            if saved["key"] == key and 0 <= age < OWNER_CACHE_SECONDS and (saved["owners"] is None or is_owner_map(saved["owners"])):
+                return saved["owners"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        try:
+            owners = discover_owners(root, values)
+            if not is_owner_map(owners):
+                owners = None
+        except Exception:  # Cache failed scans without replacing Chrome's last good map.
+            owners = None
+        temporary = None
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(mode="w", dir=cache.parent, delete=False) as out:
+                temporary = Path(out.name)
+                json.dump({"key": key, "time": time.time(), "owners": owners}, out)
+            os.replace(out.name, cache)
+            # Retire the old per-config cache files; the current format is bounded.
+            for old in cache.parent.glob("owners-*.json"):
+                if re.fullmatch(r"owners-[0-9a-f]{20}\.json", old.name):
+                    old.unlink(missing_ok=True)
+        except OSError:
+            pass
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        return owners
+    except Exception:  # Optional runtime discovery must never break GitHub checks.
+        return None
 
 
 HANDLERS = {"states": states, "search": search, "settings": settings}

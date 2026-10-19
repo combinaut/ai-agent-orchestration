@@ -70,6 +70,31 @@ def github_repo(command, clone):
     return match[1] if match else None
 
 
+def branch_owners(command, work=None):
+    """Architect labels for repo:branch, using the same open-work snapshot and origin parser as repo discovery."""
+    work = open_work(command) if work is None else work
+    labels = {row['id']: row.get('label') for row in work['workspaces']}
+    owners, ambiguous = {}, set()
+    for row in work['workspaces']:
+        label, checkout = labels.get(row.get('owner')), row.get('checkout')
+        if not label or not checkout:
+            continue
+        try:
+            branch = command('git', '-C', checkout, 'symbolic-ref', '--quiet', 'HEAD').strip().removeprefix('refs/heads/')
+        except subprocess.CalledProcessError as error:
+            if error.returncode == 1 or GONE.search(str(error.stderr or '')):
+                continue  # Detached or confirmed closed checkout; other workspaces still contribute.
+            raise Unavailable(f'branch of {checkout} unreadable: {str(error.stderr or error).strip()[:200]}') from error
+        repo = github_repo(command, checkout)
+        if not repo or not branch:
+            continue
+        key = f'{repo.lower()}:{branch}'
+        if key in owners and owners[key] != label:
+            ambiguous.add(key)
+        owners[key] = label
+    return {key: label for key, label in owners.items() if key not in ambiguous}
+
+
 def discover(command, work):
     clones, names = [], {}
     for clone in sorted({row['repo_root'] for row in work['workspaces'] if row.get('repo_root')}):

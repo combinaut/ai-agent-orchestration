@@ -52,11 +52,11 @@ class GlobalFileTest(SettingsTest):
         path = self.write('c.toml', '[pr]\nauthor = "me"\n'
                                     '[recycle]\npark_idle = true\npct = 55.5\ntokens = 1000\n'
                                     '[watchers]\npath = ["~/bin", "/usr/bin"]\n'
-                                    '[pr_tabs]\ntopics = [{ name = "W", color = "blue", repo = ["^w$"] }]\n')
+                                    '[pr_tabs]\norg = "acme"\n')
         self.assertEqual(s.load_global(path), {
             'ORCH_PR_AUTHOR': 'me', 'ORCH_PARK_IDLE': '1', 'ORCH_RECYCLE_PCT': '55.5',
             'ORCH_RECYCLE_TOKENS': '1000', 'ORCH_PATH': f'{Path.home()}/bin:/usr/bin',
-            'ORCH_PR_TABS_TOPICS': '[{"name":"W","color":"blue","repo":["^w$"]}]'})
+            'ORCH_PR_TABS_ORG': 'acme'})
 
     def test_a_missing_file_sets_nothing(self):
         self.assertEqual(s.load_global(self.base / 'missing.toml'), {})
@@ -481,3 +481,65 @@ class DriftTest(SettingsTest):
         values = {setting: example_value(setting) for setting in s.scoped('global')}
         path = self.write('round.toml', s.render(values))
         self.assertEqual(s.read_file(path, 'global'), values)
+
+
+class RemovedKeysTest(SettingsTest):
+    def test_drop_retired_rules_preserves_other_lines_and_is_idempotent(self):
+        for rules in ['topics = []\n', '"topics" = [\n {name="Old", any=["foo"]},\n]\n']:
+            text = '# personal\n[pr_tabs]\norg = "acme" # keep\n' + rules + 'open_all = "is:pr"\n'
+            path = self.write('removed.toml', text)
+            self.assertTrue(s.drop_removed_keys(path))
+            self.assertEqual(path.read_text(), text.replace(rules, ''))
+            self.assertFalse(s.drop_removed_keys(path))
+
+    def test_dotted_and_array_table_rules_are_removed(self):
+        for text, expected in [
+            ('pr_tabs.topics = []\n[pr]\nauthor = "me"\n', '[pr]\nauthor = "me"\n'),
+            ('[pr_tabs]\norg = "acme"\n[[pr_tabs.topics]]\nname="Old"\n[[pr_tabs.topics]]\nname="Two"\n', '[pr_tabs]\norg = "acme"\n'),
+        ]:
+            path = self.write('removed.toml', text)
+            self.assertTrue(s.drop_removed_keys(path))
+            self.assertEqual(path.read_text(), expected)
+
+    def test_disjoint_topic_blocks_and_inline_table_keep_unrelated_settings(self):
+        for text, expected in [
+            ('[[pr_tabs.topics]]\nname="One"\n[pr]\nauthor="me" # keep\n[[pr_tabs.topics]]\nname="Two"\n', {'pr': {'author': 'me'}}),
+            ('pr_tabs = { org = "acme", topics = [] } # keep\n', {'pr_tabs': {'org': 'acme'}}),
+            ('pr_tabs = { topics = [{name="One"}], org = "acme" } # keep\n', {'pr_tabs': {'org': 'acme'}}),
+        ]:
+            path = self.write('removed.toml', text)
+            self.assertTrue(s.drop_removed_keys(path))
+            self.assertEqual(s.parse(path.read_text(), str(path)), expected)
+            self.assertIn('# keep', path.read_text())
+
+
+    def test_only_the_immediately_preceding_retired_example_comment_is_removed(self):
+        retired = '# Tab-group rules: tables with name, color and repo/title/any regex lists\n'
+        text = retired + '# Personal note\n[pr_tabs]\norg = "acme"\n' + retired + 'topics = []\n'
+        path = self.write('removed.toml', text)
+        self.assertTrue(s.drop_removed_keys(path))
+        self.assertEqual(path.read_text(), retired + '# Personal note\n[pr_tabs]\norg = "acme"\n')
+
+    def test_retired_key_migration_preserves_crlf_bytes(self):
+        path = self.base / 'crlf.toml'
+        path.write_bytes(b'# personal\r\n[pr_tabs]\r\norg = "acme"\r\ntopics = []\r\n')
+        self.assertTrue(s.drop_removed_keys(path))
+        self.assertEqual(path.read_bytes(), b'# personal\r\n[pr_tabs]\r\norg = "acme"\r\n')
+
+    def test_legacy_topic_variable_is_retired_without_an_unknown_key_warning(self):
+        old = self.write('old.env', 'ORCH_PR_TABS_TOPICS=old\nORCH_PR_TABS_ORG=acme\n')
+        target = self.base / 'converted.toml'
+        with patch.object(s, 'env_file_values', return_value={'ORCH_PR_TABS_TOPICS': 'old', 'ORCH_PR_TABS_ORG': 'acme'}):
+            report = s.migrate(old, target, self.base / 'snippets')
+        self.assertNotIn('unknown keys', '\n'.join(report))
+        self.assertEqual(s.load_global(target), {'ORCH_PR_TABS_ORG': 'acme'})
+
+
+    def test_both_retirement_migrations_keep_supported_settings(self):
+        path = self.write('both.toml', '[pr]\nrepos=["acme/web"]\nauthor="me"\n'
+                          '[focus]\nskip_architects=["Old"]\n[pr_tabs]\norg="acme"\ntopics=[]\n')
+        self.assertEqual(set(s.drop_keys(path)), {'pr.repos', 'focus.skip_architects'})
+        self.assertTrue(s.drop_removed_keys(path))
+        self.assertEqual(s.load_global(path), {'ORCH_PR_AUTHOR': 'me', 'ORCH_PR_TABS_ORG': 'acme'})
+        self.assertEqual(s.drop_keys(path), [])
+        self.assertFalse(s.drop_removed_keys(path))
