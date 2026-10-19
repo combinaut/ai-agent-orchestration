@@ -33,7 +33,7 @@ for unit in units:
 assert audit
 # Launch the actual rendered entrypoint once, with only the service's config selection.
 environment = dict(os.environ)
-for key in ('ORCH_CONFIG', 'ORCH_PR_AUTHOR', 'ORCH_PR_REPOS', 'ORCH_GIT_WATCH_REPOS', 'ORCH_PYTHON3', 'ORCH_LOADER_PYTHON'):
+for key in ('ORCH_CONFIG', 'ORCH_PR_AUTHOR', 'ORCH_PYTHON3', 'ORCH_LOADER_PYTHON'):
     environment.pop(key, None)
 environment.update(audit[0])
 argv = [arg for arg in audit[1] if arg != '--loop']

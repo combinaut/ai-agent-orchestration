@@ -26,6 +26,17 @@ Available to both:
 | `link_entry <source> <dest>` | Symlinks `dest` to `source`; anything else in the way is backed up |
 | `refuse_local_changes <dir> <label>` | Exits when a git checkout has uncommitted edits or commits not on `origin` |
 
+## Open work
+
+`env/<name>/open_work.py` defines `open_work(command)`, which the watchers call through `coordinator/watchers/discovery.py`; watcher code never asks the env directly. `command(*argv)` runs a command and returns its output, raising on failure. It returns:
+
+| Key | Rows |
+|---|---|
+| `workspaces` | `id`, `label`, `owner` (the architect's workspace id), `status`, `checkout` (the checked-out directory), `repo_root` (the main clone), `gone` (true when the directory the checkout came from no longer exists, or its worktree lost its main clone) |
+| `panes` | `workspace`, `pane`, `title`, `role`, `agent`, `status`, `cwd` |
+
+An env without the file, or `install.env = "none"`, has no open work: the watchers use the last saved set.
+
 ## herdr
 
 - `env_check`: checks `curl` and `python3`, with fixes for macOS or Linux.
@@ -34,8 +45,12 @@ Available to both:
 - Creates `~/.claude/herdr-radar-runtime`, regardless of `ORCH_RADAR_PATH`, with links to the pinned checkout and a generated `herdr-plugin.toml` whose commands use the absolute mise Node executable. Runtime-root symlinks are backed up and manifest entries are replaced atomically, preserving external targets. Dangling runtime links are pruned. Manifest rendering fails if no Node command is rewritten or a bare Node command remains. The checkout stays clean. Herdr uses that interpreter for actions, startup, events, and the daemon, including in an already-running server.
 - Links the runtime as `hhdebb.herdr-radar`. A plugin from another source is uninstalled and replaced, with one printed replacement line. Starts the daemon every run, in a new session through `platform_run_detached`, and stops it first when the pin or runtime manifest changes. Herdr returns from `plugin action invoke` before the action ends, so the installer waits for the old daemon to exit before starting, then asks this Herdr session's daemon endpoint for a pid that is not the old one (one retry) and fails if none answers. Tune with `ORCH_RADAR_WAIT_TRIES` and `ORCH_RADAR_WAIT_SLEEP`. Herdr's `config.toml` (`$XDG_CONFIG_HOME/herdr`, default `~/.config/herdr`) is compared outside Radar's complete `# >>> herdr-radar … block` sections (an unmatched opening marker counts as your content) before and after the start; a change there saves the previous file under `BACKUP_DIR` and prints `WARNING`.
 
+- `open_work.py`: one `herdr workspace list` and one `herdr pane list`; a workspace without a Herdr worktree takes the checkout of its first pane's directory.
+
 To move either pin, change `env/herdr/radar.pin` (a full commit SHA from `combinaut/herdr-radar`) or `env/herdr/node.pin` (an exact Node version) in a PR.
 
-## Optional PR-tabs runtime adapter
+## PR tab ownership
 
-`env/<name>/pr_tabs.py` may expose `branch_owners(settings)`, returning a dictionary from `lowercase-owner/repo:branch` to architect label. `settings` contains global ORCH values with environment overrides. The native host selects `install.env` (default `herdr`), caches the result for 30 seconds in a single `owners.json` file (replacing retired per-config cache files), and uses repo grouping when the adapter is absent. A failed scan returns `owners: null` so Chrome retains its last good map; a successful empty map clears ownership. Failures are also cached for 30 seconds. The Herdr adapter reads workspace owner tokens, labels, checkout paths (pane directories when absent), and Git branches/origins; it has a five-second scan deadline. Conflicting owners for one repository/branch are omitted.
+The native host calls `coordinator/watchers/discovery.branch_owners`, using the same `open_work` adapter contract, workspace/pane snapshot and GitHub-origin parser as repository discovery. No separate PR-tabs adapter is required. It resolves architect labels and checked-out branches, omitting conflicting owners for one repository/branch. The host bounds the whole scan to five seconds.
+
+Results are cached for 30 seconds in one identity-checked `owners.json`; retired per-config caches are removed. Failed scans return `owners: null` so Chrome retains its last good map; a successful empty map clears ownership. Failures are also cached for 30 seconds. An absent adapter uses repository groups.

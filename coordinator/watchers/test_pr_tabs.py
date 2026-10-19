@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+import discovery
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -20,49 +21,31 @@ def load(name, path):
     return module
 
 
-adapter = load('pr_tabs_adapter_test', ROOT / 'env/herdr/pr_tabs.py')
 host = load('pr_tabs_host_test', ROOT / 'chrome/pr-tabs/host/pr_tabs_host.py')
 
 
 class PrTabsTest(IsolatedTestCase):
     def test_adapter_scopes_branch_to_repo_and_resolves_owner_label(self):
-        workspaces = [
-            {'workspace_id': 'a', 'label': 'Finder'},
-            {'workspace_id': 'b', 'label': 'Agent::Tooling'},
-            {'workspace_id': 'worker', 'tokens': {'owner': 'a'}, 'worktree': {'checkout_path': '/web'}},
-            {'workspace_id': 'panes', 'tokens': {'owner': 'b'}},
-            {'workspace_id': 'orphan', 'tokens': {'owner': 'gone'}},
-        ]
-
-        def run(args, **kwargs):
-            self.assertLessEqual(kwargs['timeout'], 5)
-            self.assertEqual(kwargs['env']['HERDR_SOCKET_PATH'], '/fixture/socket')
-            if args[1:] == ['workspace', 'list']:
-                return SimpleNamespace(stdout=json.dumps({'result': {'workspaces': workspaces}}))
-            if args[1:3] == ['pane', 'list']:
-                return SimpleNamespace(stdout=json.dumps({'result': {'panes': [{'cwd': '/docs'}]}}))
-            if args[3] == 'symbolic-ref':
-                return SimpleNamespace(stdout='feature\n')
-            return SimpleNamespace(stdout='git@github.com:Acme/' + ('webapp.git' if args[2] == '/web' else 'docs.git'))
-
-        with patch.object(adapter.subprocess, 'run', side_effect=run):
-            self.assertEqual(adapter.branch_owners({'ORCH_HERDR_SOCKET': '/fixture/socket'}),
-                             {'acme/webapp:feature': 'Finder', 'acme/docs:feature': 'Agent::Tooling'})
+        work = {'workspaces': [
+            {'id': 'a', 'label': 'Finder'}, {'id': 'b', 'label': 'Agent::Tooling'},
+            {'id': 'w1', 'owner': 'a', 'checkout': '/web'},
+            {'id': 'w2', 'owner': 'b', 'checkout': '/docs'},
+            {'id': 'orphan', 'owner': 'gone', 'checkout': '/orphan'},
+        ]}
+        def command(*args):
+            return 'feature' if args[3] == 'symbolic-ref' else 'git@github.com:Acme/' + ('webapp.git' if args[2] == '/web' else 'docs.git')
+        self.assertEqual(discovery.branch_owners(command, work),
+                         {'acme/webapp:feature': 'Finder', 'acme/docs:feature': 'Agent::Tooling'})
 
     def test_conflicting_owners_and_detached_checkouts_are_omitted(self):
-        workspaces = [{'workspace_id': 'a', 'label': 'A'}, {'workspace_id': 'b', 'label': 'B'}] + [
-            {'workspace_id': str(i), 'tokens': {'owner': owner}, 'worktree': {'checkout_path': path}}
-            for i, (owner, path) in enumerate([('a', '/one'), ('b', '/two'), ('a', '/detached')])]
-
-        def run(args, **kwargs):
-            if args[1:] == ['workspace', 'list']:
-                return SimpleNamespace(stdout=json.dumps({'result': {'workspaces': workspaces}}))
+        work = {'workspaces': [{'id': 'a', 'label': 'A'}, {'id': 'b', 'label': 'B'}] + [
+            {'id': str(i), 'owner': owner, 'checkout': path}
+            for i, (owner, path) in enumerate([('a', '/one'), ('b', '/two'), ('a', '/detached')])]}
+        def command(*args):
             if args[2] == '/detached':
                 raise subprocess.CalledProcessError(1, args)
-            return SimpleNamespace(stdout='feature' if args[3] == 'symbolic-ref' else 'https://github.com/acme/webapp.git')
-
-        with patch.object(adapter.subprocess, 'run', side_effect=run):
-            self.assertEqual(adapter.branch_owners({}), {})
+            return 'feature' if args[3] == 'symbolic-ref' else 'https://github.com/acme/webapp.git'
+        self.assertEqual(discovery.branch_owners(command, work), {})
 
     def test_host_cache_expires_and_missing_or_broken_adapter_falls_back(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -70,23 +53,14 @@ class PrTabsTest(IsolatedTestCase):
             config.write_text('[install]\nenv = "herdr"\n')
             environ = {'ORCH_CONFIG': str(config), 'PR_TABS_LOG': str(Path(directory) / 'host.log'), 'ORCH_ENV': 'herdr'}
             with patch.dict(os.environ, environ), patch.object(host.subprocess, 'run', return_value=SimpleNamespace(stdout='{}')) as run:
-                # A malformed adapter response must not break states/search.
                 self.assertIsNone(host.ownership())
                 self.assertTrue(run.called)
-            fake = SimpleNamespace(branch_owners=lambda _: {'acme/webapp:feature': 'Finder'})
-            original = host.importlib.util.module_from_spec
-
-            def module(spec):
-                if spec.name == 'pr_tabs_adapter':
-                    # Keep exec_module from replacing the fake function.
-                    spec.loader.exec_module = lambda _: None
-                    return fake
-                return original(spec)
-
-            with patch.dict(os.environ, environ), patch.object(host.importlib.util, 'module_from_spec', side_effect=module), patch.object(host.time, 'time', return_value=100):
-                self.assertEqual(host.ownership(), {'acme/webapp:feature': 'Finder'})
-                fake.branch_owners = lambda _: {'acme/webapp:feature': 'Tooling'}
-                self.assertEqual(host.ownership(), {'acme/webapp:feature': 'Finder'})
+            good = {'acme/webapp:feature': 'Finder'}
+            with patch.dict(os.environ, environ), patch.object(host, 'discover_owners', return_value=good) as discover, patch.object(host.time, 'time', return_value=100):
+                self.assertEqual(host.ownership(), good)
+                discover.return_value = {'acme/webapp:feature': 'Tooling'}
+                self.assertEqual(host.ownership(), good)
+                self.assertEqual(discover.call_count, 1)
                 with patch.object(host.time, 'time', return_value=131):
                     self.assertEqual(host.ownership(), {'acme/webapp:feature': 'Tooling'})
                 with patch.dict(os.environ, {'ORCH_ENV': 'none'}):
@@ -106,23 +80,15 @@ class PrTabsTest(IsolatedTestCase):
                     self.assertEqual(run.call_count, 2)
 
 
-    def test_one_closed_workspace_and_null_tokens_do_not_discard_other_owners(self):
-        workspaces = [
-            {'workspace_id': 'a', 'label': 'Finder'},
-            {'workspace_id': 'null', 'tokens': None},
-            {'workspace_id': 'closing', 'tokens': {'owner': 'a'}},
-            {'workspace_id': 'good', 'tokens': {'owner': 'a'}, 'worktree': {'checkout_path': '/web'}},
-        ]
-
-        def run(args, **kwargs):
-            if args[1:] == ['workspace', 'list']:
-                return SimpleNamespace(stdout=json.dumps({'result': {'workspaces': workspaces}}))
-            if args[1:3] == ['pane', 'list']:
-                raise subprocess.CalledProcessError(1, args)
-            return SimpleNamespace(stdout='feature' if args[3] == 'symbolic-ref' else 'git@github.com:acme/webapp.git')
-
-        with patch.object(adapter.subprocess, 'run', side_effect=run):
-            self.assertEqual(adapter.branch_owners({}), {'acme/webapp:feature': 'Finder'})
+    def test_one_closed_workspace_does_not_discard_other_owners(self):
+        work = {'workspaces': [{'id': 'a', 'label': 'Finder'}, {'id': 'null', 'owner': None},
+                              {'id': 'closing', 'owner': 'a', 'checkout': '/closed'},
+                              {'id': 'good', 'owner': 'a', 'checkout': '/web'}]}
+        def command(*args):
+            if args[2] == '/closed':
+                raise subprocess.CalledProcessError(128, args)
+            return 'feature' if args[3] == 'symbolic-ref' else 'git@github.com:acme/webapp.git'
+        self.assertEqual(discovery.branch_owners(command, work), {'acme/webapp:feature': 'Finder'})
 
     def test_cache_reuses_one_file_across_config_edits_and_removes_legacy_files(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -133,20 +99,17 @@ class PrTabsTest(IsolatedTestCase):
             unrelated = base / 'preferences.json'
             unrelated.write_text('keep')
             environ = {'ORCH_CONFIG': str(config), 'PR_TABS_LOG': str(base / 'host.log'), 'ORCH_ENV': 'herdr'}
-            reply = SimpleNamespace(stdout=json.dumps({'result': {'workspaces': []}}))
+            reply = SimpleNamespace(stdout=json.dumps({'result': {'workspaces': [], 'panes': []}}))
             with patch.dict(os.environ, environ), patch.object(host.subprocess, 'run', return_value=reply) as run:
                 for org in ('acme', 'other'):
                     config.write_text('[pr_tabs]\norg = "' + org + '"\n')
                     self.assertEqual(host.ownership(), {})
-                self.assertEqual(run.call_count, 2, 'changed settings invalidate the cached identity')
+                self.assertEqual(run.call_count, 4, 'each changed config takes a fresh shared workspace/pane snapshot')
             self.assertEqual(list(base.glob('owners*.json')), [base / 'owners.json'])
             self.assertEqual(unrelated.read_text(), 'keep')
 
     def test_github_origin_host_case_ports_and_exact_host_matching(self):
-        workspaces = [
-            {'workspace_id': 'a', 'label': 'Finder'},
-            {'workspace_id': 'worker', 'tokens': {'owner': 'a'}, 'worktree': {'checkout_path': '/web'}},
-        ]
+        work = {'workspaces': [{'id': 'a', 'label': 'Finder'}, {'id': 'w', 'owner': 'a', 'checkout': '/web'}]}
         accepted = (
             'git@github.com:acme/webapp.git',
             'https://GitHub.com/acme/webapp.git',
@@ -163,10 +126,53 @@ class PrTabsTest(IsolatedTestCase):
             'git@github-work:acme/webapp.git',
         )
         for remote in accepted + rejected:
-            def run(args, **kwargs):
-                if args[1:] == ['workspace', 'list']:
-                    return SimpleNamespace(stdout=json.dumps({'result': {'workspaces': workspaces}}))
-                return SimpleNamespace(stdout='feature' if args[3] == 'symbolic-ref' else remote)
-            with self.subTest(remote=remote), patch.object(adapter.subprocess, 'run', side_effect=run):
+            def command(*args):
+                return 'feature' if args[3] == 'symbolic-ref' else remote
+            with self.subTest(remote=remote):
                 expected = {'acme/webapp:feature': 'Finder'} if remote in accepted else {}
-                self.assertEqual(adapter.branch_owners({}), expected)
+                self.assertEqual(discovery.branch_owners(command, work), expected)
+
+    def test_host_uses_shared_open_work_discovery(self):
+        work = {'workspaces': [
+            {'id': 'a', 'label': 'Finder', 'owner': None, 'checkout': None},
+            {'id': 'w', 'label': 'Worker', 'owner': 'a', 'checkout': '/web'},
+        ], 'panes': []}
+        def run(args, **kwargs):
+            self.assertLessEqual(kwargs['timeout'], 5)
+            self.assertEqual(kwargs['env']['HERDR_SOCKET_PATH'], '/fixture/socket')
+            return SimpleNamespace(stdout='feature' if args[3] == 'symbolic-ref' else 'ssh://git@GitHub.com:22/acme/webapp.git')
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / 'config.toml'
+            config.write_text('[install]\nenv="herdr"\n')
+            environ = {'ORCH_CONFIG': str(config), 'ORCH_ENV': 'herdr', 'ORCH_HERDR_SOCKET': '/fixture/socket',
+                       'PR_TABS_LOG': str(Path(directory) / 'host.log')}
+            with patch.dict(os.environ, environ), patch.object(discovery, 'open_work', return_value=work) as read, patch.object(host.subprocess, 'run', side_effect=run):
+                self.assertEqual(host.ownership(), {'acme/webapp:feature': 'Finder'})
+                read.assert_called_once()
+
+
+    def test_real_shared_snapshot_uses_bulk_panes_and_normalizes_checkout(self):
+        calls = []
+        workspaces = [{'workspace_id': 'a', 'label': 'Finder'}, {'workspace_id': 'null', 'tokens': None},
+                      {'workspace_id': 'w', 'tokens': {'owner': 'a'}}]
+        def run(args, **kwargs):
+            calls.append(args)
+            self.assertLessEqual(kwargs['timeout'], 5)
+            self.assertEqual(kwargs['env']['HERDR_SOCKET_PATH'], '/fixture/socket')
+            if args[1:] == ('workspace', 'list'):
+                value = json.dumps({'result': {'workspaces': workspaces}})
+            elif args[1:] == ('pane', 'list'):
+                value = json.dumps({'result': {'panes': [{'workspace_id': 'w', 'cwd': '/docs/sub'}]}})
+            elif args[3] == 'rev-parse':
+                value = '/docs/.git' if '--git-common-dir' in args else '/docs'
+            elif args[3] == 'symbolic-ref':
+                value = 'feature'
+            else:
+                value = 'https://GitHub.com:443/acme/docs.git'
+            return SimpleNamespace(stdout=value)
+        before = {key: os.environ.get(key) for key in ('ORCH_ENV', 'ORCH_HERDR_BIN', 'HERDR_SOCKET_PATH')}
+        with patch.object(host.subprocess, 'run', side_effect=run):
+            self.assertEqual(host.discover_owners(ROOT, {'ORCH_ENV': 'herdr', 'ORCH_HERDR_SOCKET': '/fixture/socket'}),
+                             {'acme/docs:feature': 'Finder'})
+        self.assertEqual([args[1:] for args in calls if args[0] != 'git'], [('workspace', 'list'), ('pane', 'list')])
+        self.assertEqual(before, {key: os.environ.get(key) for key in before})

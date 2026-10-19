@@ -30,13 +30,13 @@ load test_helper
 @test "second run preserves all managed links" {
   fresh_install
   before=$(find "$HOME/.claude" -type l -exec sh -c 'printf "%s -> %s\\n" "$1" "$(readlink "$1")"' sh {} \; | sort)
-  sed '/^\[pr_tabs\]/,$d; /^skip_architects = /d' "$HOME/.claude/orchestration.toml" >"$TMP/old.toml"
+  sed '/^\[pr_tabs\]/,$d' "$HOME/.claude/orchestration.toml" >"$TMP/old.toml"
   printf '%s\n' '[pr_tabs]' 'org = ""' >>"$TMP/old.toml"
   cp "$TMP/old.toml" "$HOME/.claude/orchestration.toml"
   install_ok
-  contains "$output" "Project features are off until you configure missing keys in $HOME/.claude/orchestration.toml: ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_FOCUS_SKIP_ARCHITECTS"
+  contains "$output" "Project features are off until you configure missing keys in $HOME/.claude/orchestration.toml: ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL"
   cmp "$TMP/old.toml" "$HOME/.claude/orchestration.toml"
-  config_set ORCH_PR_TABS_DEFAULT_REPO "" ORCH_PR_TABS_OPEN_ALL "" ORCH_FOCUS_SKIP_ARCHITECTS ""
+  config_set ORCH_PR_TABS_DEFAULT_REPO "" ORCH_PR_TABS_OPEN_ALL ""
   install_ok
   not_contains "$output" 'Project features are off until you configure missing keys'
   after=$(find "$HOME/.claude" -type l -exec sh -c 'printf "%s -> %s\\n" "$1" "$(readlink "$1")"' sh {} \; | sort)
@@ -885,22 +885,55 @@ CASES
   contains "$output" "$stop"
 }
 
+@test "install drops the settings the open work replaced, in one line" {
+  fresh_install
+  cfg="$HOME/.claude/orchestration.toml"
+  python3 - "$cfg" <<'PY'
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+text = path.read_text()
+for header, line in (('[pr]', 'repos = [\n  "acme/web",\n]'), ('[audit]', 'git_watch_repos = ["/tmp/x"]'),
+                     ('[focus]', '# Architect names left out of focus reports\nskip_architects = ["A"]')):
+    text = text.replace(header + '\n', header + '\n' + line + '\n', 1) if header + '\n' in text else text + f'\n{header}\n{line}\n'
+path.write_text(text)
+PY
+  install_ok
+  [ "$(printf '%s\n' "$output" | grep -c '^dropped ')" = 1 ]
+  contains "$output" "dropped         $cfg: pr.repos audit.git_watch_repos focus.skip_architects (repos and architects come from the open work)"
+  not_contains "$(cat "$cfg")" 'repos = '
+  not_contains "$(cat "$cfg")" 'skip_architects'
+  not_contains "$(cat "$cfg")" 'Architect names left out'
+  contains "$(cat "$cfg")" 'author = '
+  install_ok
+  not_contains "$output" 'dropped '
+}
+
+@test "a key install cannot drop is named and install goes on" {
+  fresh_install
+  cfg="$HOME/.claude/orchestration.toml"
+  printf '%s\n' 'pr = { repos = ["acme/web"], author = "me" }' >"$cfg"
+  install_ok
+  contains "$output" "cannot drop pr.repos in place; edit it by hand"
+  [ "$(cat "$cfg")" = 'pr = { repos = ["acme/web"], author = "me" }' ]
+}
+
 @test "PR watchers are not registered until their settings are filled" {
   fresh_install
   config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET '/tmp/socket'
   install_ok
-  contains "$output" 'com.combinaut.coord-watcher-audit watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
-  contains "$output" 'com.combinaut.coord-watcher-pulls watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
+  contains "$output" 'com.combinaut.coord-watcher-audit watcher (set ORCH_PR_AUTHOR in'
+  contains "$output" 'com.combinaut.coord-watcher-pulls watcher (set ORCH_PR_AUTHOR in'
   [ -z "$(find "$HOME/.claude/coordinator/watchers/service" \( -name 'com.combinaut.coord-watcher-audit.*' -o -name 'com.combinaut.coord-watcher-pulls.*' \) ! -name '*.template')" ]
   [ -n "$(find "$HOME/.claude/coordinator/watchers/service" -name 'com.combinaut.coord-watcher-host.*' ! -name '*.template')" ]
-  run env ORCH_PR_REPOS=o/r ORCH_PR_AUTHOR=me /bin/bash "$CLONE/install.sh"
+  run env ORCH_PR_AUTHOR=me /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
-  contains "$output" 'com.combinaut.coord-watcher-pulls watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR'
+  contains "$output" 'com.combinaut.coord-watcher-pulls watcher (set ORCH_PR_AUTHOR in'
 }
 
 @test "audit services render at thirty minutes and share the inbox" {
   fresh_install
-  config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET '/tmp/socket' ORCH_PR_REPOS 'o/r' ORCH_PR_AUTHOR 'me'
+  config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET '/tmp/socket' ORCH_PR_AUTHOR 'me'
   install_ok
   case "$(uname -s)" in
     Darwin) adapter=macos; suffix=plist ;;
@@ -922,7 +955,9 @@ CASES
 
 @test "installed audit entrypoint exports own-PR config to the collector" {
   fresh_install
-  config_set ORCH_PR_REPOS 'owner/product' ORCH_PR_AUTHOR 'author'
+  config_set ORCH_PR_AUTHOR 'author'
+  git init -q "$TMP/product"
+  git -C "$TMP/product" remote add origin git@github.com:owner/product.git
   python3 -c 'import json,sys; pr=json.load(open(sys.argv[1])); pr["mergeable"]="CONFLICTING"; print(json.dumps({"data":{"search":{"nodes":[pr],"pageInfo":{"hasNextPage":False}}}}))' "$ROOT/coordinator/watchers/fixtures/audit-pr.json" >"$TMP/audit-gh.json"
   cat >"$BIN/gh" <<'EOF'
 #!/bin/bash
@@ -930,16 +965,19 @@ case "$*" in *"/contents/"*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; esac
 printf '%s\n' "$*" >"$AUDIT_ARGS"
 cat "$AUDIT_FIXTURE"
 EOF
-  cat >"$BIN/herdr" <<'EOF'
+  cat >"$BIN/herdr" <<EOF
 #!/bin/bash
-printf '{"result":{"workspaces":[]}}'
+case "\$1" in
+  workspace) printf '{"result":{"workspaces":[{"workspace_id":"w1","label":"x","worktree":{"checkout_path":"$TMP/product","repo_root":"$TMP/product"}}]}}' ;;
+  *) printf '{"result":{"panes":[]}}' ;;
+esac
 EOF
-  run env AUDIT_ARGS="$TMP/audit-args" AUDIT_FIXTURE="$TMP/audit-gh.json" "$HOME/.claude/coordinator/watchers/coord-audit-watch.sh" --state-dir "$TMP/audit-state"
+  run env ORCH_ENV=herdr ORCH_HERDR_BIN="$BIN/herdr" AUDIT_ARGS="$TMP/audit-args" AUDIT_FIXTURE="$TMP/audit-gh.json" "$HOME/.claude/coordinator/watchers/coord-audit-watch.sh" --state-dir "$TMP/audit-state"
   [ "$status" -eq 0 ]
   contains "$output" 'AUDIT BASELINE github [1 active lines'
   contains "$(cat "$TMP/audit-args")" 'author:author repo:owner/product'
   contains "$(cat "$TMP/audit-state/audit.json")" 'CONFLICT owner/product#7 Fix menu'
-  run env AUDIT_ARGS="$TMP/audit-args" AUDIT_FIXTURE="$TMP/audit-gh.json" "$HOME/.claude/coordinator/watchers/coord-audit-watch.sh" --state-dir "$TMP/audit-state"
+  run env ORCH_ENV=herdr ORCH_HERDR_BIN="$BIN/herdr" AUDIT_ARGS="$TMP/audit-args" AUDIT_FIXTURE="$TMP/audit-gh.json" "$HOME/.claude/coordinator/watchers/coord-audit-watch.sh" --state-dir "$TMP/audit-state"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
@@ -1147,4 +1185,26 @@ TOML
   [ "$status" -eq 1 ]
   install_ok
   not_contains "$output" 'removed pr_tabs.topics'
+}
+
+@test "install retires discovered-work settings and PR topic rules together" {
+  fresh_install
+  cat >"$HOME/.claude/orchestration.toml" <<'TOML'
+[pr]
+author = "me"
+repos = ["acme/web"]
+[focus]
+skip_architects = ["Old"]
+[pr_tabs]
+org = "acme"
+topics = []
+TOML
+  install_ok
+  contains "$output" 'repos and architects come from the open work'
+  contains "$output" 'removed pr_tabs.topics (architect grouping is automatic)'
+  run python3 -c 'import sys,tomllib; c=tomllib.load(open(sys.argv[1], "rb")); assert c["pr"] == {"author":"me"}; assert c["pr_tabs"] == {"org":"acme"}; assert not c.get("focus")' "$HOME/.claude/orchestration.toml"
+  [ "$status" -eq 0 ]
+  install_ok
+  not_contains "$output" 'removed pr_tabs.topics'
+  not_contains "$output" 'repos and architects come from the open work'
 }

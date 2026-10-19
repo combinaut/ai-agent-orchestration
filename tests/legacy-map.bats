@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# shellcheck disable=SC2154,SC2016 # bats provides status and output; fixture file bodies stay literal.
+# shellcheck disable=SC2154,SC2016,SC2030,SC2031 # bats provides status and output and runs each test in a subshell; fixture file bodies stay literal.
 load test_helper
 
 setup() {
@@ -215,9 +215,10 @@ make_webapp() {
   esac
 }
 
-@test "the legacy map repo defaults to the watched clone whose repo settings turn the legacy scan on" {
+@test "the legacy map repo defaults to the open-work clone whose repo settings turn the legacy scan on" {
   fresh_install
-  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket ORCH_GIT_WATCH_REPOS "/elsewhere/other $BIG_REPO"
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket
+  saved_open_work /elsewhere/other "$BIG_REPO"
   printf '%s\n' '[legacy]' 'scan = true' >"$BIG_REPO/.orchestration.local.toml"
   use_service_state
   install_ok
@@ -227,21 +228,68 @@ make_webapp() {
   esac
 }
 
-@test "a watched clone without the legacy scan leaves the legacy map default off" {
+@test "an open-work clone whose path has a space is read as one path" {
   fresh_install
-  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket ORCH_GIT_WATCH_REPOS "$BIG_REPO"
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket
+  spaced="$TMP/my clone"
+  mv "$BIG_REPO" "$spaced"
+  printf '%s\n' '[legacy]' 'scan = true' >"$spaced/.orchestration.local.toml"
+  saved_open_work "$spaced"
+  use_service_state
+  install_ok
+  case "$(uname -s)" in
+    Darwin) contains "$(cat "$HOME/.claude/coordinator/service/macos/com.combinaut.coord-legacy-map.plist")" "<string>$spaced</string>" ;;
+    Linux) contains "$(cat "$HOME/.claude/coordinator/service/linux/com.combinaut.coord-legacy-map.service")" "$spaced" ;;
+  esac
+}
+
+@test "the legacy map default asks the configured Herdr session of the env this install runs" {
+  fresh_install
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN "$BIN/herdr" ORCH_HERDR_SOCKET "$TMP/herdr.sock"
+  printf '%s\n' '[legacy]' 'scan = true' >"$BIG_REPO/.orchestration.local.toml"
+  export HERDR_WORKSPACES="[{\"workspace_id\":\"w1\",\"label\":\"x\",\"worktree\":{\"checkout_path\":\"$BIG_REPO\",\"repo_root\":\"$BIG_REPO\"}}]"
+  use_service_state
+  install_ok --env herdr
+  grep -qxF "socket=$TMP/herdr.sock" "$HERDR_CALLS"
+  case "$(uname -s)" in
+    Darwin) contains "$(cat "$HOME/.claude/coordinator/service/macos/com.combinaut.coord-legacy-map.plist")" "<string>$BIG_REPO</string>" ;;
+    Linux) contains "$(cat "$HOME/.claude/coordinator/service/linux/com.combinaut.coord-legacy-map.service")" "\"$BIG_REPO\"" ;;
+  esac
+}
+
+@test "the legacy map default expands \$HOME in the configured Herdr paths" {
+  fresh_install
+  ln -s "$BIN/herdr" "$HOME/herdr-link"
+  # shellcheck disable=SC2016 # The config holds the literal placeholder.
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN '$HOME/herdr-link' ORCH_HERDR_SOCKET '${HOME}/herdr.sock'
+  printf '%s\n' '[legacy]' 'scan = true' >"$BIG_REPO/.orchestration.local.toml"
+  export HERDR_WORKSPACES="[{\"workspace_id\":\"w1\",\"label\":\"x\",\"worktree\":{\"checkout_path\":\"$BIG_REPO\",\"repo_root\":\"$BIG_REPO\"}}]"
+  use_service_state
+  install_ok --env herdr
+  grep -qxF "socket=$HOME/herdr.sock" "$HERDR_CALLS"
+  case "$(uname -s)" in
+    Darwin) contains "$(cat "$HOME/.claude/coordinator/service/macos/com.combinaut.coord-legacy-map.plist")" "<string>$BIG_REPO</string>" ;;
+    Linux) contains "$(cat "$HOME/.claude/coordinator/service/linux/com.combinaut.coord-legacy-map.service")" "\"$BIG_REPO\"" ;;
+  esac
+}
+
+@test "an open-work clone without the legacy scan leaves the legacy map default off" {
+  fresh_install
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket
+  saved_open_work "$BIG_REPO"
   install_ok
   contains "$output" 'daily legacy map job (set ORCH_LEGACY_MAP_REPO'
   [ -z "$(find "$HOME/.claude/coordinator/service" -type f)" ]
 }
 
-@test "a broken repo file in a watched clone stops install before the legacy map job changes" {
+@test "a broken repo file in an open-work clone stops install before the legacy map job changes" {
   fresh_install
-  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket ORCH_GIT_WATCH_REPOS "$BIG_REPO"
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket
+  saved_open_work "$BIG_REPO"
   printf '%s\n' '[heavy_slots]' 'max = 2' >"$BIG_REPO/.orchestration.local.toml"
   run /bin/bash "$CLONE/install.sh"
   [ "$status" -ne 0 ]
   contains "$output" "/webapp/.orchestration.local.toml: heavy_slots.max: is a global setting"
-  contains "$output" 'cannot read the repo settings of the audit.git_watch_repos clones'
+  contains "$output" 'cannot read the repo settings of the open-work clones'
   not_contains "$output" 'daily legacy map job'
 }

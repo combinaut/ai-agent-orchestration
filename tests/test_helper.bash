@@ -66,6 +66,11 @@ EOF
 #!/usr/bin/env bash
 printf 'herdr %s\n' "$*" >>"$HERDR_CALLS"
 case "$1 ${2:-}" in
+  'workspace list')
+    printf 'socket=%s\n' "${HERDR_SOCKET_PATH:-}" >>"$HERDR_CALLS"
+    printf '{"result":{"workspaces":%s}}\n' "${HERDR_WORKSPACES:-[]}"
+    ;;
+  'pane list') printf '{"result":{"panes":[]}}\n' ;;
   '--version ') case "$0" in */.local/bin/*) echo "herdr ${HERDR_INSTALLED_VERSION:-0.9.1}" ;; *) echo "herdr ${HERDR_VERSION:-0.9.1}" ;; esac ;;
   'plugin list') [ -f "$HERDR_PLUGIN" ] && printf -- '- hhdebb.herdr-radar (Radar) enabled [local:%s%s]\n' "$(cat "$HERDR_PLUGIN")" "${HERDR_PLUGIN_DIAGNOSTIC:-}" ;;
   'plugin uninstall') rm -f "$HERDR_PLUGIN" ;;
@@ -261,8 +266,15 @@ not_contains() {
 
 prepare_custom_service_config() {
   : >"$1"
-  CONFIG_FILE="$1" config_set ORCH_WATCHERS_SERVICE 1 ORCH_PR_AUTHOR custom-author ORCH_PR_REPOS owner/custom ORCH_GIT_WATCH_REPOS "" \
+  CONFIG_FILE="$1" config_set ORCH_WATCHERS_SERVICE 1 ORCH_PR_AUTHOR custom-author \
     ORCH_HERDR_BIN "$BIN/herdr" ORCH_HERDR_SOCKET /tmp/socket ORCH_PATH "$BIN:/usr/bin:/bin"
+}
+
+# saved_open_work <clone>...: the open-work set the watchers saved last, with these clones.
+saved_open_work() {
+  mkdir -p "$HOME/.claude/coordinator"
+  python3 -c 'import json, sys; json.dump(dict(clones=sys.argv[2:], repos=[]), open(sys.argv[1], "w"))' \
+    "$HOME/.claude/coordinator/open-work.json" "$@"
 }
 
 # config_set <ORCH_NAME> <value> ...: sets settings in $CONFIG_FILE (default the installed global config).
@@ -286,9 +298,14 @@ case "$*" in *"/contents/"*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; esac
 printf '%s\n' "$*" >"$AUDIT_ARGS"
 cat "$AUDIT_FIXTURE"
 EOF
-  cat >"$BIN/herdr" <<'EOF'
+  git init -q "$TMP/custom"
+  git -C "$TMP/custom" remote add origin git@github.com:owner/custom.git
+  cat >"$BIN/herdr" <<EOF
 #!/bin/bash
-printf '{"result":{"workspaces":[]}}'
+case "\$1" in
+  workspace) printf '{"result":{"workspaces":[{"workspace_id":"w1","label":"x","worktree":{"checkout_path":"$TMP/custom","repo_root":"$TMP/custom"}}]}}' ;;
+  *) printf '{"result":{"panes":[]}}' ;;
+esac
 EOF
 }
 
@@ -296,7 +313,7 @@ EOF
 check_service_config() {
   local adapter
   adapter=${AO_TEST_SANDBOX:?Run tests through tests/run.sh}
-  run env AUDIT_ARGS="$TMP/audit-args" AUDIT_FIXTURE="$TMP/audit-gh.json" python3 "$ROOT/tests/service_config.py" "$HOME/.claude/coordinator/watchers/service/$adapter" "$1"
+  run env ORCH_ENV=herdr AUDIT_ARGS="$TMP/audit-args" AUDIT_FIXTURE="$TMP/audit-gh.json" python3 "$ROOT/tests/service_config.py" "$HOME/.claude/coordinator/watchers/service/$adapter" "$1"
   [ "$status" -eq 0 ]
   contains "$output" 'audit wrapper reads its custom keys'
 }

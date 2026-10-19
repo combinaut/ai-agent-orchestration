@@ -34,7 +34,7 @@ After an update, run the install command, then click the reload icon on the exte
 
 `pr_tabs.org` selects the organization, `pr_tabs.default_repo` is the repo for bare numbers, and `pr_tabs.open_all` is the GitHub search behind the button. Their environment overrides are `ORCH_PR_TABS_ORG`, `ORCH_PR_TABS_DEFAULT_REPO` and `ORCH_PR_TABS_OPEN_ALL`. Reload the extension after changing settings.
 
-The native host asks the selected environment adapter for checked-out branches and their workspace owners, caching results for 30 seconds. Herdr resolves the worker workspace's `owner` token to the architect workspace label. Repository identity and branch must both match; missing owners, unavailable adapters and conflicting ownership use the repo name. Failed scans retain the last good owner map until a successful check; a successful scan with no owners restores repo grouping. Pinned tabs stay untouched. The installer removes retired topic rules from existing personal config, printing one migration line.
+The native host uses shared open-work discovery to ask the selected environment adapter for checked-out branches and their workspace owners, caching results for 30 seconds. Herdr resolves the worker workspace's `owner` token to the architect workspace label. Repository identity and branch must both match; missing owners, unavailable adapters and conflicting ownership use the repo name. Failed scans retain the last good owner map until a successful check; a successful scan with no owners restores repo grouping. Pinned tabs stay untouched. The installer removes retired topic rules from existing personal config, printing one migration line.
 
 ## Troubleshooting
 

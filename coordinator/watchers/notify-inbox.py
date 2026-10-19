@@ -456,9 +456,9 @@ def main():
     parser.add_argument("--loop", action="store_true")
     parser.add_argument("--modes", nargs="+", choices=w.MODES, default=w.MODES)
     parser.add_argument("--configured-only", action="store_true",
-                        help="leave out audit and pulls while ORCH_PR_REPOS or ORCH_PR_AUTHOR is empty")
+                        help="leave out audit and pulls while ORCH_PR_AUTHOR is empty")
     args = parser.parse_args()
-    if args.configured_only and not (os.environ.get("ORCH_PR_REPOS") and os.environ.get("ORCH_PR_AUTHOR")):
+    if args.configured_only and not os.environ.get("ORCH_PR_AUTHOR"):
         args.modes = [mode for mode in args.modes if mode not in PR_MODES]
     with runtime.deadline(runtime.ITERATION_TIMEOUT, "notifier startup"):
         args.cursor.parent.mkdir(parents=True, exist_ok=True)

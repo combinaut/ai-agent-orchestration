@@ -8,7 +8,9 @@ setup() {
   export HOME="$TMP/home"
   export ORCH_HEAVY_SLOTS_DIR="$TMP/slots"
   export PATH="$TMP/bin:$PATH"
-  mkdir -p "$HOME" "$ORCH_HEAVY_SLOTS_DIR" "$TMP/bin"
+  export STATUS="$HOME/.claude/coordinator/status/Architect::Agent::Tooling.md"
+  mkdir -p "$HOME/.claude/coordinator/status" "$ORCH_HEAVY_SLOTS_DIR" "$TMP/bin"
+  printf '# Architect::Agent::Tooling\n\n## Waits on the user\n- PR 7 review -> https://github.com/acme/web/pull/7\n' >"$STATUS"
 
   cat >"$TMP/bin/herdr" <<'SH'
 #!/bin/sh
@@ -183,15 +185,283 @@ SH
   [[ "$output" == *"slots=?"* ]]
 }
 
-@test "focus reporting excludes only configured architects" {
-  export ORCH_CONFIG="$TMP/orchestration.toml"
-  printf '[focus]\nskip_architects = ["Agent::Tooling"]\n' >"$ORCH_CONFIG"
+@test "an idle architect without open work is resting and not reported" {
+  printf '# Architect::Agent::Tooling\n\n## Waits on the user\n\n## Next\n- later\n' >"$STATUS"
 
   run focus_line
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"idle_no_worker=none"* ]]
-  [[ "$output" == *"no_focus_worker=none"* ]]
+}
+
+@test "an unreadable status file is a focus read failure" {
+  [ "$(id -u)" -ne 0 ] || skip "root can read mode-000 files"
+  chmod 000 "$STATUS"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FOCUS READFAIL status "*"Architect::Agent::Tooling.md"* ]]
+}
+
+@test "an unreadable status file of any architect is a focus read failure" {
+  [ "$(id -u)" -ne 0 ] || skip "root can read mode-000 files"
+  printf '## Waits on the user\n- x -> y\n' >"$HOME/.claude/coordinator/status/Architect::Other.md"
+  chmod 000 "$HOME/.claude/coordinator/status/Architect::Other.md"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FOCUS READFAIL status "*"Architect::Other.md"* ]]
+}
+
+@test "a status directory behind an inaccessible parent is a focus read failure" {
+  [ "$(id -u)" -ne 0 ] || skip "root can read mode-000 directories"
+  mkdir -p "$TMP/locked/status"
+  export ORCH_USER_TODO_STATUS_DIR="$TMP/locked/status"
+  chmod 000 "$TMP/locked"
+
+  run focus_line
+  chmod 755 "$TMP/locked"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FOCUS READFAIL status "*"/locked/status" ]]
+}
+
+@test "a missing status directory means no waits on the user" {
+  rm -rf "$HOME/.claude/coordinator/status"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=none"* ]]
+}
+
+@test "a missing status file means no waits on the user" {
+  rm "$STATUS"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=none"* ]]
+}
+
+@test "a paused architect is left out of the focus report" {
+  printf 'Paused: on leave until Monday\n' >>"$STATUS"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=none"* ]]
+}
+
+@test "a pause line inside a code block does not pause" {
+  fence='```'
+  printf '%s\nPaused: example\n%s\n' "$fence" "$fence" >>"$STATUS"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+}
+
+@test "an unreadable env adapter is a focus read failure" {
+  printf '#!/bin/sh\nexit 1\n' >"$TMP/bin/herdr"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FOCUS READFAIL open work: "* ]]
+}
+
+open_work_fixture() {
+  rm "$STATUS"
+  export WORK_REPO="$TMP/web"
+  git init -q -b main "$WORK_REPO"
+  git -C "$WORK_REPO" remote add origin git@github.com:acme/web.git
+  git -C "$WORK_REPO" -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m init
+  git -C "$WORK_REPO" worktree add -q -b feature "$TMP/web-feature"
+  cat >"$TMP/bin/herdr" <<'SH'
+#!/bin/sh
+if [ "$1" = pane ]; then
+  printf '{"result":{"panes":[{"workspace_id":"tooling","terminal_title_stripped":"Architect::Agent::Tooling","tokens":{"role":"architect"},"agent_status":"idle"}%s]}}\n' "${WORKER_PANE:-}"
+else
+  printf '{"result":{"workspaces":[{"workspace_id":"w1","label":"feature","tokens":{"owner":"tooling"},"worktree":{"checkout_path":"%s","repo_root":"%s"}}%s]}}\n' "${WORK_CHECKOUT:-$TMP/web-feature}" "${WORK_ROOT:-$WORK_REPO}" "${EXTRA_WORKSPACE:-}"
+fi
+SH
+  cat >"$TMP/bin/gh" <<'SH'
+#!/bin/sh
+printf '%s\n' "$*" >>"$TMP/gh-calls"
+[ -z "${GH_FAIL:-}" ] || exit 1
+printf '%s\n' "${GH_PRS:-[]}"
+SH
+  chmod +x "$TMP/bin/herdr" "$TMP/bin/gh"
+  export TMP
+}
+
+@test "an open PR on a branch of an owned workspace is open work" {
+  open_work_fixture
+  export GH_PRS='[{"headRefName":"other"},{"headRefName":"feature"}]'
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+  [ "$(cat "$TMP/gh-calls")" = "pr list -R acme/web --state open --json headRefName,isCrossRepository --limit 200" ]
+}
+
+@test "a fork PR with the same branch name is not open work" {
+  open_work_fixture
+  export GH_PRS='[{"headRefName":"feature","isCrossRepository":true}]'
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=none"* ]]
+}
+
+@test "clones of one repo in different case share one PR lookup" {
+  open_work_fixture
+  git init -q -b main "$TMP/web2"
+  git -C "$TMP/web2" remote add origin git@github.com:ACME/Web.git
+  git -C "$TMP/web2" -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m init
+  export EXTRA_WORKSPACE=",{\"workspace_id\":\"w2\",\"label\":\"x\",\"tokens\":{\"owner\":\"tooling\"},\"worktree\":{\"checkout_path\":\"$TMP/web2\",\"repo_root\":\"$TMP/web2\"}}"
+  export GH_PRS='[{"headRefName":"other","isCrossRepository":false}]'
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=none"* ]]
+  [ "$(wc -l <"$TMP/gh-calls")" -eq 1 ]
+}
+
+@test "an owned workspace without an open PR is not open work" {
+  open_work_fixture
+  export GH_PRS='[{"headRefName":"other"}]'
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=none"* ]]
+}
+
+@test "a PR list at the lookup limit counts as open work" {
+  open_work_fixture
+  GH_PRS=$(python3 -c 'import json; print(json.dumps([{"headRefName": f"other-{n}"} for n in range(200)]))')
+  export GH_PRS
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+}
+
+@test "a branch that cannot be read counts as open work" {
+  open_work_fixture
+  export WORK_CHECKOUT="$TMP/no-such-checkout"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+  [ ! -e "$TMP/gh-calls" ]
+}
+
+@test "an owned workspace whose clone folder is gone counts as open work" {
+  open_work_fixture
+  export WORK_ROOT="$TMP/moved-away"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+  [ ! -e "$TMP/gh-calls" ]
+}
+
+@test "an owned workspace whose pane directory is gone counts as open work" {
+  rm "$STATUS"
+  cat >"$TMP/bin/herdr" <<SH
+#!/bin/sh
+if [ "\$1" = pane ]; then
+  printf '%s\n' '{"result":{"panes":[{"workspace_id":"tooling","terminal_title_stripped":"Architect::Agent::Tooling","tokens":{"role":"architect"},"agent_status":"idle"},{"workspace_id":"w1","pane_id":"w1:p1","cwd":"$TMP/gone/repo"}]}}'
+else
+  printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"w1","label":"shell","tokens":{"owner":"tooling"}}]}}'
+fi
+SH
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+}
+
+@test "an owned workspace whose worktree lost its main clone counts as open work" {
+  rm "$STATUS"
+  mkdir -p "$TMP/orphan"
+  printf 'gitdir: %s\n' "$TMP/removed-clone/.git/worktrees/orphan" >"$TMP/orphan/.git"
+  cat >"$TMP/bin/herdr" <<SH
+#!/bin/sh
+if [ "\$1" = pane ]; then
+  printf '%s\n' '{"result":{"panes":[{"workspace_id":"tooling","terminal_title_stripped":"Architect::Agent::Tooling","tokens":{"role":"architect"},"agent_status":"idle"},{"workspace_id":"w1","pane_id":"w1:p1","cwd":"$TMP/orphan"}]}}'
+else
+  printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"w1","label":"shell","tokens":{"owner":"tooling"}}]}}'
+fi
+SH
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+}
+
+@test "an owned shell workspace outside any checkout is not open work" {
+  rm "$STATUS"
+  mkdir -p "$TMP/plain"
+  cat >"$TMP/bin/herdr" <<SH
+#!/bin/sh
+if [ "\$1" = pane ]; then
+  printf '%s\n' '{"result":{"panes":[{"workspace_id":"tooling","terminal_title_stripped":"Architect::Agent::Tooling","tokens":{"role":"architect"},"agent_status":"idle"},{"workspace_id":"w1","pane_id":"w1:p1","cwd":"$TMP/plain"}]}}'
+else
+  printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"w1","label":"shell","tokens":{"owner":"tooling"}}]}}'
+fi
+SH
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=none"* ]]
+}
+
+@test "a PR lookup that fails counts as open work" {
+  open_work_fixture
+  export GH_FAIL=1
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+}
+
+@test "a worker pane that is not working is open work" {
+  open_work_fixture
+  export WORKER_PANE=',{"workspace_id":"w1","terminal_title_stripped":"worker","agent":"claude","tokens":{},"agent_status":"done"}'
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+  [ ! -e "$TMP/gh-calls" ]
+}
+
+@test "a working worker keeps its architect out of the idle list" {
+  open_work_fixture
+  export WORKER_PANE=',{"workspace_id":"w1","terminal_title_stripped":"worker","agent":"claude","tokens":{},"agent_status":"working"}'
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"workers=1 "* ]]
+  [[ "$output" == *"idle_no_worker=none"* ]]
 }
 
 focus_fixture() {
@@ -208,6 +478,7 @@ fi
 SH
   export ORCH_CONFIG="$TMP/orchestration.toml"
   : >"$ORCH_CONFIG"
+  printf '## Waits on the user\n- a decision -> Coordinator\n' >"$HOME/.claude/coordinator/status/Architect::Beta.md"
   export FOCUS_REPO="$TMP/repo"
   mkdir -p "$FOCUS_REPO/sub"
   git -C "$FOCUS_REPO" init -q
@@ -266,6 +537,28 @@ SH
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"focus_workers_live=1"* ]]
+  [[ "$output" == *"no_focus_worker=none"* ]]
+}
+
+@test "a resting architect is left out of the no-focus list" {
+  focus_fixture
+  printf '[focus]\npattern = "billing"\n' >"$FOCUS_REPO/.orchestration.toml"
+  rm "$HOME/.claude/coordinator/status/Architect::Beta.md"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no_focus_worker=none"* ]]
+}
+
+@test "a paused architect is left out of the no-focus list" {
+  focus_fixture
+  printf '[focus]\npattern = "billing"\n' >"$FOCUS_REPO/.orchestration.toml"
+  printf 'Paused: holiday\n' >"$HOME/.claude/coordinator/status/Architect::Beta.md"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
   [[ "$output" == *"no_focus_worker=none"* ]]
 }
 

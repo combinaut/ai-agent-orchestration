@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Chrome native messaging host for PR tabs: one request, at most one gh call, one reply, then exit."""
+from contextlib import contextmanager
 from pathlib import Path
 import importlib.util
 import hashlib
@@ -188,6 +189,40 @@ def is_owner_map(value):
     return isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
 
 
+@contextmanager
+def discovery_settings(values):
+    # Main's adapter reads these process settings. Restore them for in-process callers.
+    updates = {key: values.get(key, "") for key in ("ORCH_ENV", "ORCH_HERDR_BIN")}
+    if values.get("ORCH_HERDR_SOCKET"):
+        updates["HERDR_SOCKET_PATH"] = values["ORCH_HERDR_SOCKET"]
+    before = {key: os.environ.get(key) for key in updates}
+    try:
+        os.environ.update(updates)
+        yield
+    finally:
+        for key, value in before.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def discover_owners(root, values):
+    sys.path.insert(0, str(root / "coordinator/watchers"))
+    discovery = importlib.import_module("discovery")
+    deadline = time.monotonic() + 5
+
+    def command(*args):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(args, 5)
+        return subprocess.run(args, capture_output=True, text=True, timeout=remaining, check=True,
+                              env=dict(os.environ, LC_ALL="C")).stdout.strip()
+
+    with discovery_settings(values):
+        return discovery.branch_owners(command)
+
+
 def ownership():
     """The optional env adapter owns runtime discovery; cache across one-shot hosts."""
     root = Path(__file__).resolve().parents[3]
@@ -201,10 +236,11 @@ def ownership():
         adapter = values.get("ORCH_ENV") or "herdr"
         if not NAME.fullmatch(adapter):
             return {}
-        path = root / "env" / adapter / "pr_tabs.py"
+        path = root / "env" / adapter / "open_work.py"
         if not path.is_file():
             return {}
-        identity = json.dumps([str(root), str(path.stat().st_mtime_ns), values,
+        identity = json.dumps([str(root), str(path.stat().st_mtime_ns),
+                               str((root / "coordinator/watchers/discovery.py").stat().st_mtime_ns), values,
                                os.environ.get("HERDR_SOCKET_PATH"), os.environ.get("HERDR_BIN_PATH")], sort_keys=True)
         key = hashlib.sha256(identity.encode()).hexdigest()[:20]
         cache = Path(log_path()).parent / "owners.json"
@@ -216,10 +252,7 @@ def ownership():
         except (OSError, ValueError, KeyError, TypeError):
             pass
         try:
-            spec = importlib.util.spec_from_file_location("pr_tabs_adapter", path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            owners = module.branch_owners(values)
+            owners = discover_owners(root, values)
             if not is_owner_map(owners):
                 owners = None
         except Exception:  # Cache failed scans without replacing Chrome's last good map.
