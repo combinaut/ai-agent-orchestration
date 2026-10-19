@@ -164,6 +164,21 @@ class RulesTests(IsolatedTestCase):
         lines = [('a.js', 1, '', True), ('a.js', 2, 'ab', True), ('a.js', 3, '  ', True), ('a.js', 4, 'a' * 3000, True)]
         self.assertEqual([kind for kind, _, _ in parsed.scan(lines)], ['EMPTY', 'WORD', 'ANY', 'WORD'])
 
+    def test_matching_runs_in_chunks_with_the_same_result(self):
+        parsed = rules(rule(kind='"A"', pattern="'^a$'", paths='["**"]') + rule(kind='"B"', pattern="'b'", paths='["**"]'))
+        documents = [(f'f{n}.js', ['a', 'b', 'ab', '', 'a']) for n in range(4)]
+        whole = list(parsed.documents(documents))
+        started = []
+        real = legacy_rules.Matcher
+
+        def counted(pattern):
+            started.append(pattern)
+            return real(pattern)
+        with patch.object(legacy_rules, 'CHUNK_LINES', 7), patch.object(legacy_rules, 'Matcher', side_effect=counted):
+            self.assertEqual(list(parsed.documents(documents)), whole)
+        self.assertEqual(whole[0], ('f0.js', ['A', 'B', 'B', None, 'A']))
+        self.assertEqual(len(started), 4)
+
     def test_a_failing_rg_fails_the_scan(self):
         parsed = rules(rule(kind='"A"', pattern="'x'", paths='["**"]'))
         fake = self.base / 'rg'
@@ -253,14 +268,16 @@ class RulesTests(IsolatedTestCase):
         subprocess.run([*git, 'update-index', '--add', '--cacheinfo', f'160000,{"1" * 40},vendor/sub'], check=True)
         blob = subprocess.run([*git, 'hash-object', '-w', '--stdin'], input=b'$(x)\n', check=True, capture_output=True).stdout.strip()
         subprocess.run([*git, 'update-index', '--add', '--cacheinfo', b'100644,' + blob + b',docs/old-\xff.js'], check=True)
+        subprocess.run([*git, 'update-index', '--add', '--cacheinfo', b'100644,' + blob + b',docs/a\tb.js'], check=True)
         (root / orch_settings.REPO_FILE).write_text(rule(kind='"ALL"', paths='["**"]'))
         subprocess.run([*git, 'add', orch_settings.REPO_FILE], check=True)
         subprocess.run([*git, 'commit', '-qm', 'rules and a submodule'], check=True)
         env = {key: value for key, value in os.environ.items() if not key.startswith('ORCH_LEGACY_')}
         mapped = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'HEAD'],
                                 capture_output=True, text=True, env=env)
-        self.assertEqual((mapped.returncode, mapped.stdout, mapped.stderr), (0, 'ALL\t.orchestration.toml\nALL\ta.js\nALL\tdocs/old-\ufffd.js\n', ''))
-        subprocess.run([*git, 'rm', '-q', '--cached', 'vendor/sub', b'docs/old-\xff.js', orch_settings.REPO_FILE], check=True)
+        self.assertEqual((mapped.returncode, mapped.stdout), (0, 'ALL\t.orchestration.toml\nALL\ta.js\nALL\tdocs/old-\ufffd.js\n'))
+        self.assertEqual(mapped.stderr, "legacy-map.sh: skipped 'docs/a\\tb.js': a tab or newline in the name does not fit the TSV\n")
+        subprocess.run([*git, 'rm', '-q', '--cached', 'vendor/sub', b'docs/old-\xff.js', b'docs/a\tb.js', orch_settings.REPO_FILE], check=True)
         subprocess.run([*git, 'commit', '-qm', 'no rules'], check=True)
         env = {key: value for key, value in os.environ.items() if not key.startswith('ORCH_LEGACY_')}
         result = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'HEAD'],

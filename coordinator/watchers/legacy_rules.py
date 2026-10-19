@@ -15,6 +15,7 @@ import orch_settings
 
 LINE_SEARCH_LIMIT = 2000
 RULES_MAX = 64
+CHUNK_LINES = 10_000
 RG_FLAGS = ('--no-config', '--text', '--line-number', '--no-filename', '--max-columns', '1')
 RULE_KEYS = ('kind', 'pattern', 'paths', 'exclude')
 KIND = re.compile(r'[A-Za-z][A-Za-z0-9_-]*')
@@ -169,7 +170,19 @@ class Rules:
         return self.candidates[path]
 
     def documents(self, documents):
-        """(path, kinds) for each (path, lines), one kind or None per line; one rg process per rule pattern."""
+        """(path, kinds) for each (path, lines), one kind or None per line, in chunks of about CHUNK_LINES lines."""
+        chunk, size = [], 0
+        for path, lines in documents:
+            chunk.append((path, lines))
+            size += len(lines)
+            if size >= CHUNK_LINES:
+                yield from self.chunk(chunk)
+                chunk, size = [], 0
+        if chunk:
+            yield from self.chunk(chunk)
+
+    def chunk(self, documents):
+        """documents() for one chunk: one rg process per rule pattern."""
         matchers, fed = {}, []
         try:
             for index, (_, rule) in enumerate(self.rules):
@@ -276,7 +289,11 @@ def main(argv):
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f'legacy-map.sh: {error}', file=sys.stderr)
         return 1
-    sys.stdout.write(''.join(f'{kind}\t{path}\n' for kind, path in rows))
+    for kind, path in rows:
+        if '\t' in path or '\n' in path:
+            print(f'legacy-map.sh: skipped {path!r}: a tab or newline in the name does not fit the TSV', file=sys.stderr)
+        else:
+            sys.stdout.write(f'{kind}\t{path}\n')
     return 0
 
 
