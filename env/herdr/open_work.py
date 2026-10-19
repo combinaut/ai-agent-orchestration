@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 NOT_A_CHECKOUT = re.compile(r'not a git repository \(or any of the parent directories\)', re.I)
-GONE = re.compile(r'cannot change to .*: No such file or directory|not a git repository: |gitfile does not point to a valid repository|invalid gitfile format', re.I)
+GONE = re.compile(r'cannot change to .*: No such file or directory|not a git repository: |gitfile does not point to a valid repository', re.I)
 
 
 def herdr_bin():

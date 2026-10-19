@@ -100,6 +100,17 @@ class DiscoveryTest(IsolatedTestCase):
                 self.assertIsNone(discovery.github_repo(lambda *argv: url + '\n', '/r/web'))
         self.assertEqual(discovery.github_repo(lambda *argv: 'https://user:token@github.com/acme/web.git\n', '/r/web'), 'acme/web')
 
+    def test_malformed_git_metadata_keeps_the_saved_set(self):
+        found = discovery.repos(self.command)
+
+        def malformed(*argv):
+            if argv[0] == 'git' and argv[2] == '/wt/tools/x/sub':
+                raise subprocess.CalledProcessError(128, argv, stderr='fatal: invalid gitfile format: /wt/tools/x/.git')
+            return self.command(*argv)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(discovery.repos(malformed), found)
+        self.assertEqual(discovery.saved(), found)
+
     def test_a_permission_error_is_not_a_gone_folder(self):
         found = discovery.repos(self.command)
         for path in ('/r/web', '/wt/tools/x/sub'):
