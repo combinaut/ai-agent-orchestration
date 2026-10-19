@@ -48,7 +48,7 @@ filter bar            ← the initiative's workspace
 
 The architect confirms `tokens.owner` with `herdr workspace get <worker-id>` before it calls a dispatch done. The pulls watcher also uses the `owner` tag to route PR events.
 
-[Herdr Radar](https://github.com/combinaut/herdr-radar) reads these tags and draws the Coordinator → architect → worker tree in its Agents panel. Radar is optional; its checkout is `ORCH_RADAR_PATH`. See [`env/README.md`](../env/README.md).
+[Herdr Radar](https://github.com/combinaut/herdr-radar) reads these tags and groups workers under their architects in its Agents panel. Radar is optional; its checkout is `ORCH_RADAR_PATH`. See [`env/README.md`](../env/README.md).
 
 Workspace names stay true: `PR <n> · <job>` once a PR exists, `#<issue> · <job> (no PR yet)` before. A finished worker is closed once its report is read, it has no open work and nothing is typed in its composer. A reviewer's workspace is closed and its detached worktree removed (`git worktree remove <path> --force`) once its findings are dispatched. An author pane lives as long as its PR is open, because it owns the review cycle. Panes are closed with [`close-pane.sh`](../coordinator/watchers/close-pane.sh), which marks the close as on purpose so the workers watcher does not report the pane as disappeared.
 
