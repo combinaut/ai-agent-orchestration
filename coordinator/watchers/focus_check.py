@@ -30,12 +30,19 @@ def status_dir():
     return Path(os.environ.get('ORCH_USER_TODO_STATUS_DIR') or Path.home() / '.claude/coordinator/status')
 
 
+class StatusUnreadable(Exception):
+    """A status file exists but cannot be read."""
+
+
 def status_lines(title, name):
     for stem in (title, name):
+        path = status_dir() / f'{stem}.md'
         try:
-            return (status_dir() / f'{stem}.md').read_text().splitlines(), f'{stem}.md'
-        except (OSError, ValueError):
+            return path.read_text().splitlines(), f'{stem}.md'
+        except FileNotFoundError:
             continue
+        except (OSError, ValueError) as error:
+            raise StatusUnreadable(f'{path}: {error}') from error
     return [], None
 
 
@@ -173,10 +180,17 @@ def line():
             fwork[owner] = fwork.get(owner, 0) + 1
         if pane.get('status') == 'working':
             working[owner] = working.get(owner, 0) + 1
-    waits = {item['source'] for item in user_todo().status_items(status_dir())[0]}
+    items, unreadable = user_todo().status_items(status_dir())
+    unreadable = [path for path in unreadable if path != str(status_dir()) or status_dir().exists()]
+    if unreadable:
+        return f'FOCUS READFAIL status {", ".join(unreadable)}'
+    waits = {item['source'] for item in items}
     live, idle, prs = {}, [], OpenPrs()
     for ws, (title, name, state) in arch.items():
-        lines, source = status_lines(title, name)
+        try:
+            lines, source = status_lines(title, name)
+        except StatusUnreadable as error:
+            return f'FOCUS READFAIL status {error}'
         if paused(lines):
             continue
         live[ws] = name

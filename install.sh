@@ -794,8 +794,8 @@ register_services() {
 # legacy_map_default_repo: the clone of the open work whose repo settings turn legacy.scan on, else empty.
 legacy_map_default_repo() {
   local path scan clones bin socket
-  bin=$(config_value ORCH_HERDR_BIN)
-  socket=$(config_value ORCH_HERDR_SOCKET)
+  bin=$(placeholder_value ORCH_HERDR_BIN)
+  socket=$(placeholder_value ORCH_HERDR_SOCKET)
   # shellcheck disable=SC2030 # Set for the discovery call only.
   clones=$(
     [ -z "$bin" ] || export HERDR_BIN_PATH="$bin"

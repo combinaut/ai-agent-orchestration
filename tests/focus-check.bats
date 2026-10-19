@@ -194,6 +194,25 @@ SH
   [[ "$output" == *"idle_no_worker=none"* ]]
 }
 
+@test "an unreadable status file is a focus read failure" {
+  [ "$(id -u)" -ne 0 ] || skip "root can read mode-000 files"
+  chmod 000 "$STATUS"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FOCUS READFAIL status "*"Architect::Agent::Tooling.md"* ]]
+}
+
+@test "a missing status directory means no waits on the user" {
+  rm -rf "$HOME/.claude/coordinator/status"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=none"* ]]
+}
+
 @test "a missing status file means no waits on the user" {
   rm "$STATUS"
 

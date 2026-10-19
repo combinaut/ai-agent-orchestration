@@ -37,6 +37,6 @@ FOCUS workers=<working> focus_workers_live=<n> slots=<live> idle_no_worker=<name
 
 `idle_no_worker` lists an architect that is idle (it and its workers are not working, and it holds no live heavy slot) and has open work: a worker pane in a workspace it owns (`tokens.owner`), an open PR on the branch of such a workspace, or an item under `## Waits on the user` in its status file. An idle architect without open work is resting and never listed. A branch, origin or PR lookup that fails, or a PR list at its limit of 200, counts as open work; at most 20 repos are looked up per pass. `no_focus_worker` uses each repo's `focus.pattern`.
 
-A line `Paused: <reason>` in `~/.claude/coordinator/status/<architect>.md` leaves that architect out of both lists until the line is removed.
+A line `Paused: <reason>` in `~/.claude/coordinator/status/<architect>.md` leaves that architect out of both lists until the line is removed. A status file that exists but cannot be read makes the line `FOCUS READFAIL status <path>`; a missing file or folder means no waits.
 
 Alert kinds, deadlines, feed delivery and recovery rules are in the [watcher guide](../coordinator/watchers/README.md).

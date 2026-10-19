@@ -257,6 +257,22 @@ make_webapp() {
   esac
 }
 
+@test "the legacy map default expands \$HOME in the configured Herdr paths" {
+  fresh_install
+  ln -s "$BIN/herdr" "$HOME/herdr-link"
+  # shellcheck disable=SC2016 # The config holds the literal placeholder.
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN '$HOME/herdr-link' ORCH_HERDR_SOCKET '${HOME}/herdr.sock'
+  printf '%s\n' '[legacy]' 'scan = true' >"$BIG_REPO/.orchestration.local.toml"
+  export HERDR_WORKSPACES="[{\"workspace_id\":\"w1\",\"label\":\"x\",\"worktree\":{\"checkout_path\":\"$BIG_REPO\",\"repo_root\":\"$BIG_REPO\"}}]"
+  use_service_state
+  install_ok --env herdr
+  grep -qxF "socket=$HOME/herdr.sock" "$HERDR_CALLS"
+  case "$(uname -s)" in
+    Darwin) contains "$(cat "$HOME/.claude/coordinator/service/macos/com.combinaut.coord-legacy-map.plist")" "<string>$BIG_REPO</string>" ;;
+    Linux) contains "$(cat "$HOME/.claude/coordinator/service/linux/com.combinaut.coord-legacy-map.service")" "\"$BIG_REPO\"" ;;
+  esac
+}
+
 @test "an open-work clone without the legacy scan leaves the legacy map default off" {
   fresh_install
   config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket
