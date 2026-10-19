@@ -119,3 +119,26 @@ new_registered() {
     Linux) new_registered "${OLD}legacy-map.timer" ;;
   esac
 }
+
+@test "macOS cleanup waits for an old job that unloads late" {
+  [ "$(uname -s)" = Darwin ] || skip "launchd only"
+  agents="$TMP/LaunchAgents"
+  calls="$TMP/late-unload.calls"
+  prints_left=0
+  mkdir -p "$agents"
+  printf 'old\n' >"$agents/${OLD}watcher-hog.plist"
+  # shellcheck disable=SC1090
+  source "$ROOT/lib/platform/macos.sh"
+  platform_launch_agents_dir() { printf '%s' "$agents"; }
+  launchctl() {
+    printf '%s\n' "$*" >>"$calls"
+    case "$1" in
+      print) if [ "$prints_left" -gt 0 ]; then prints_left=$((prints_left - 1)); return 0; fi; return 1 ;;
+      bootout) prints_left=2 ;;
+    esac
+  }
+  LEGACY_LABEL_PREFIX=$OLD
+  run platform_remove_stale_services ""
+  [ "$status" -eq 0 ]
+  [ ! -e "$agents/${OLD}watcher-hog.plist" ]
+}

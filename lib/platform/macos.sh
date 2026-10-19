@@ -71,6 +71,17 @@ os.execvp(sys.argv[1], sys.argv[1:])' "$@" </dev/null
 
 platform_launch_agents_dir() { printf '%s' "$HOME/Library/LaunchAgents"; }
 
+# platform_wait_unloaded <uid> <label>: bootout returns before the job has exited; print keeps answering until it is gone.
+# Status 1: still loaded after the bounded wait.
+platform_wait_unloaded() {
+  local tries=${ORCH_LAUNCHD_WAIT_TRIES:-40}
+  while [ "$tries" -gt 0 ] && launchctl print "gui/$1/$2" >/dev/null 2>&1; do
+    sleep "${ORCH_LAUNCHD_WAIT_SLEEP:-0.5}"
+    tries=$((tries - 1))
+  done
+  ! launchctl print "gui/$1/$2" >/dev/null 2>&1
+}
+
 # platform_remove_stale_services <current file names>: boots out and deletes our LaunchAgents, old and new names, that no template renders.
 # A job still loaded after its bootout keeps its file and fails the call.
 platform_remove_stale_services() {
@@ -81,7 +92,7 @@ platform_remove_stale_services() {
     name=${file##*/}
     printf '%s\n' "$1" | grep -qxF "$name" && continue
     launchctl bootout "gui/$uid/${name%.plist}" >/dev/null 2>&1 || true
-    if launchctl print "gui/$uid/${name%.plist}" >/dev/null 2>&1; then
+    if ! platform_wait_unloaded "$uid" "${name%.plist}"; then
       say "not removed" "$file (still loaded; run: launchctl bootout gui/$uid/${name%.plist})"
       status=1
       continue
@@ -110,7 +121,7 @@ platform_copy_service() {
 # platform_register_service <rendered plist>: launchd loads ~/Library/LaunchAgents at login, so the plist is copied there
 # and bootstrapped when the copy changed or the job is not loaded. Status 2: already registered.
 platform_register_service() {
-  local file=$1 uid label dest missing_copy=0 tries
+  local file=$1 uid label dest missing_copy=0
   uid=$(id -u)
   label=$(basename "$file" .plist)
   dest="$(platform_launch_agents_dir)/$label.plist"
@@ -121,13 +132,7 @@ platform_register_service() {
     launchctl print "gui/$uid/$label" >/dev/null 2>&1 && return 2
   fi
   launchctl bootout "gui/$uid/$label" >/dev/null 2>&1 || true
-  # bootout returns before the job has exited; print keeps answering until it is gone.
-  tries=${ORCH_LAUNCHD_WAIT_TRIES:-40}
-  while [ "$tries" -gt 0 ] && launchctl print "gui/$uid/$label" >/dev/null 2>&1; do
-    sleep "${ORCH_LAUNCHD_WAIT_SLEEP:-0.5}"
-    tries=$((tries - 1))
-  done
-  if launchctl print "gui/$uid/$label" >/dev/null 2>&1; then
+  if ! platform_wait_unloaded "$uid" "$label"; then
     # An existing installed copy is replaced only after its old job unloads.
     return 1
   fi
