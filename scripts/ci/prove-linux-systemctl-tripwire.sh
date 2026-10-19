@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+cd "$(dirname "$0")/../.." || exit 1
+
 . tests/platform/linux.sh
 proof=$(mktemp)
 trap 'rm -f "$proof" "$proof.log"' EXIT

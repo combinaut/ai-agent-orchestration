@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+cd "$(dirname "$0")/../.." || exit 1
+
 units=$(mktemp -d)
 watcher_dir="$units/home with space/.claude/coordinator/watchers"
 mkdir -p "$watcher_dir"

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+cd "$(dirname "$0")/../.." || exit 1
+
 state_dir=$(mktemp -d)
 : >"$state_dir/no-config"
 # shellcheck disable=SC2016 # The generated stub expands these variables at runtime.
