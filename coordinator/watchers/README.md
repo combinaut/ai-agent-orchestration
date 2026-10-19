@@ -229,6 +229,10 @@ pane; agent list does not supply workspace labels. Blocked and error alert once
 per agent session and state; working, idle, done and waiting are silent.
 An active agent (working, waiting, blocked or error) that leaves the list raises
 dead/disappeared once, or `WORKER <pane> closed` when `<state-dir>/closed/<pane id>` exists.
+A working or waiting agent whose pane left `herdr pane list` while another pane of its tab is still
+listed is also `closed`: Herdr keeps a pane open when only its agent exits, and a helper that finishes
+inside one 60-second scan is closed before the watcher sees it idle. A blocked or error agent, a pane
+gone with its whole tab, or an unreadable pane list stays dead/disappeared.
 `close-pane.sh <pane id>` writes that marker, closes the pane, and removes the marker when the close fails; the watcher deletes a marker once neither its scan nor its saved state lists the pane. Its key is then dropped, so persisted worker state is
 bounded by live agents. A new session on an occupied pane silently replaces the
 old key without reporting the old session as disappeared. An old session still

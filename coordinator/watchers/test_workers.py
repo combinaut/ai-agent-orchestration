@@ -290,6 +290,53 @@ class WorkersTests(IsolatedTestCase):
         _, events = w.reduce("workers", state, {"result": {"agents": []}, "closed": ["pane-one"]})
         self.assertEqual(events, ["WORKER pane-one closed", "WORKER pane-two dead/disappeared"])
 
+    def scan_panes(self, rows, panes):
+        def herdr(*argv):
+            if argv[1:3] == ("pane", "list"):
+                return json.dumps({"result": {"panes": panes}})
+            return json.dumps({"result": {"agents": rows}})
+        with patch.dict(os.environ, {"HERDR_ENV": "1"}), patch.object(w, "command", side_effect=herdr):
+            line = w.cycle(self.base, "workers", lambda before: w.collect("workers", before, base=self.base))
+        return json.loads(line)["events"] if line else []
+
+    def test_finished_then_closed_is_silent(self):
+        row = dict(agent("working"), tab_id="tab-a")
+        self.assertEqual(self.scan_panes([row], []), [])
+        self.assertEqual(self.scan_panes([dict(row, agent_status="done")], []), [])
+        self.assertEqual(self.scan_panes([], [dict(pane_id="lead", tab_id="tab-a")]), [])
+
+    def test_working_pane_closed_while_its_tab_lives_is_closed(self):
+        row = dict(agent("working"), tab_id="tab-a")
+        self.assertEqual(self.scan_panes([row], []), [])
+        self.assertEqual(self.scan_panes([], [dict(pane_id="lead", tab_id="tab-a")]), ["WORKER pane-one closed"])
+
+    def test_working_agent_gone_from_a_live_pane_is_dead(self):
+        row = dict(agent("working"), tab_id="tab-a")
+        self.assertEqual(self.scan_panes([row], []), [])
+        self.assertEqual(self.scan_panes([], [dict(pane_id="pane-one", tab_id="tab-a", agent_status="unknown")]),
+                         ["WORKER pane-one dead/disappeared"])
+
+    def test_working_pane_gone_with_its_tab_is_dead(self):
+        row = dict(agent("working"), tab_id="tab-a")
+        self.assertEqual(self.scan_panes([row], []), [])
+        self.assertEqual(self.scan_panes([], [dict(pane_id="lead", tab_id="tab-b")]), ["WORKER pane-one dead/disappeared"])
+
+    def test_blocked_pane_closed_while_its_tab_lives_is_dead(self):
+        row = dict(agent("blocked"), tab_id="tab-a")
+        self.assertEqual(self.scan_panes([row], []), ["WORKER pane-one blocked"])
+        self.assertEqual(self.scan_panes([], [dict(pane_id="lead", tab_id="tab-a")]), ["WORKER pane-one dead/disappeared"])
+
+    def test_unreadable_pane_list_keeps_a_disappearance_dead(self):
+        row = dict(agent("working"), tab_id="tab-a")
+        self.assertEqual(self.scan_panes([row], []), [])
+        self.assertEqual(self.scan_panes([], None), ["WORKER pane-one dead/disappeared"])
+
+    def test_close_pane_mark_is_closed_without_a_pane_list(self):
+        (self.base / "closed").mkdir()
+        self.assertEqual(self.scan_panes([dict(agent("blocked"), tab_id="tab-a")], []), ["WORKER pane-one blocked"])
+        (self.base / "closed" / "pane-one").touch()
+        self.assertEqual(self.scan_panes([], None), ["WORKER pane-one closed"])
+
     def test_closed_markers_are_read_and_consumed_once_the_pane_is_gone(self):
         (self.base / "closed").mkdir()
         (self.base / "closed" / "pane-one").touch()

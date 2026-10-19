@@ -325,6 +325,14 @@ def worker_alerts(previous):
     return alerts
 
 
+def pane_closed(row, panes):
+    """A working or waiting agent's pane was closed while the rest of its tab lives on."""
+    if panes is None or row.get("agent_status") not in ("working", "waiting"):
+        return False
+    return row["pane_id"] not in {pane.get("pane_id") for pane in panes} \
+        and row.get("tab_id") in {pane.get("tab_id") for pane in panes}
+
+
 def reduce_workers(before, raw):
     previous = before or {}
     old_bad = worker_alerts(previous)
@@ -350,7 +358,8 @@ def reduce_workers(before, raw):
             bad[key] = dict(pane=row["pane_id"], state=status)
     for key, row in old_present.items():
         if key not in present and row.get("agent_status") in ACTIVE_WORKER_STATUSES:
-            bad[key] = dict(pane=row["pane_id"], state="closed" if row["pane_id"] in closed else "dead/disappeared")
+            bad[key] = dict(pane=row["pane_id"], state="closed" if row["pane_id"] in closed
+                            or pane_closed(row, raw.get("panes")) else "dead/disappeared")
     unreadable.sort()
     events = readfail_changes("WORKER", previous.get("unreadable", []), unreadable)
     for key in sorted(set(old_bad) | set(bad)):
@@ -795,6 +804,19 @@ def closed_panes(base, present, before):
     return names
 
 
+def live_panes(before, listed):
+    """Herdr's pane list when an active agent left the agent list, else None (also when unreadable)."""
+    gone = [row for row in ((before or {}).get("present") or {}).values()
+            if row.get("agent_status") in ACTIVE_WORKER_STATUSES and row.get("pane_id") not in listed]
+    if not gone:
+        return None
+    try:
+        panes = json.loads(command(herdr_bin(), "pane", "list"))["result"]["panes"]
+    except audit.READ_ERRORS:
+        return None
+    return panes if isinstance(panes, list) else None
+
+
 def collect(mode, before, scope="", base=None):
     if mode == "audit":
         return audit.collect(command, before=before)
@@ -809,8 +831,12 @@ def collect(mode, before, scope="", base=None):
         agents(raw)
         if mode == "workers":
             raw["observed_at"] = time.time()
+            listed = {row["pane_id"] for row in agents(raw)}
             if base is not None:
-                raw["closed"] = closed_panes(base, {row["pane_id"] for row in agents(raw)}, before)
+                raw["closed"] = closed_panes(base, listed, before)
+            panes = live_panes(before, listed)
+            if panes is not None:
+                raw["panes"] = panes
             return raw
         usage = {}
         for agent in agents(raw):
