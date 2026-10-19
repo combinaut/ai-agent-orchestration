@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# shellcheck disable=SC2154,SC2016 # bats provides status and output; fixture file bodies stay literal.
+# shellcheck disable=SC2154,SC2016,SC2030,SC2031 # bats provides status and output and runs each test in a subshell; fixture file bodies stay literal.
 load test_helper
 
 setup() {
