@@ -617,7 +617,7 @@ class LegacyTests(IsolatedTestCase):
     def test_invalid_rules_are_a_scan_failure_that_names_the_rule(self):
         bad = {'not toml': ('[legacy\n', 'invalid TOML'),
                'bad regex': (SCAN + '[[legacy.rules]]\nkind = "A"\npaths = ["**"]\npattern = "("\n',
-                             'legacy.rules[6] (A): pattern is not a valid regex'),
+                             'legacy.rules[6] (A): pattern is not a valid rg regex'),
                'removed key': ('[legacy]\nscan = true\nextra_pattern = "x"\n',
                                'legacy.extra_pattern: was removed; run install.sh to convert it to [[legacy.rules]]')}
         for name, (text, reason) in bad.items():

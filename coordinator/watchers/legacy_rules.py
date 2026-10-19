@@ -1,18 +1,21 @@
 """The legacy rules of a repo's [legacy] settings: classifies added lines and maps the files they count."""
 import hashlib
+import itertools
 import json
 import re
-import re._constants as sre
-import re._parser as sre_parse
+import shutil
 import subprocess
 import sys
-import warnings
+import tempfile
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'lib'))
 import orch_settings
 
 LINE_SEARCH_LIMIT = 2000
+RULES_MAX = 64
+RG_FLAGS = ('--no-config', '--text', '--line-number', '--no-filename', '--only-matching', '--replace', '')
 RULE_KEYS = ('kind', 'pattern', 'paths', 'exclude')
 KIND = re.compile(r'[A-Za-z][A-Za-z0-9_-]*')
 NO_RULES = 3
@@ -60,43 +63,70 @@ def globs(value, key, required=False):
         raise ValueError(f'{key}: {error}') from error
 
 
-def groups(arg):
-    """Every parsed group nested in an opcode argument."""
-    if isinstance(arg, sre_parse.SubPattern):
-        yield arg
-    elif isinstance(arg, (tuple, list)):
-        for item in arg:
-            yield from groups(item)
-
-
-def nested_repeat(items, repeated=False):
-    """True when a group repeated more than once holds a repeat, even an optional one, or a choice (catastrophic backtracking)."""
-    for op, arg in items:
-        if op in (sre.MAX_REPEAT, sre.MIN_REPEAT, sre.POSSESSIVE_REPEAT):
-            if repeated or nested_repeat(arg[2], arg[1] > 1):
-                return True
-        elif op is sre.BRANCH and repeated:
-            return True
-        elif any(nested_repeat(group, repeated) for group in groups(arg)):
-            return True
-    return False
+def rg():
+    path = shutil.which('rg')
+    if path is None:
+        raise ValueError('legacy rules need rg (ripgrep) on PATH')
+    return path
 
 
 def compile_pattern(pattern):
+    """The pattern when rg accepts it; rg matches in time linear in the input."""
     if pattern is None:
         return None
-    if not isinstance(pattern, str) or not pattern:
+    if not isinstance(pattern, str) or not pattern or '\0' in pattern:
         raise ValueError('pattern must be a non-empty string')
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter('error')
-            compiled = re.compile(pattern)
-            parsed = sre_parse.parse(pattern)
-    except (re.error, Warning, RecursionError, OverflowError) as error:
-        raise ValueError(f'pattern is not a valid regex: {error}') from error
-    if nested_repeat(parsed.data):
-        raise ValueError('pattern repeats a group that holds a repeat or an alternation (catastrophic backtracking)')
-    return compiled
+    result = subprocess.run([rg(), *RG_FLAGS, '--regexp', pattern, '-'], input=b'', capture_output=True, timeout=30)
+    if result.returncode not in (0, 1):
+        reason = ' '.join(result.stderr.decode(errors='replace').split())
+        raise ValueError(f'pattern is not a valid rg regex: {reason}')
+    return pattern
+
+
+class Matcher:
+    """One rg process for one pattern: numbers the lines fed to it and collects the numbers it matches."""
+
+    def __init__(self, pattern):
+        self.errors = tempfile.TemporaryFile()
+        self.process = subprocess.Popen([rg(), *RG_FLAGS, '--regexp', pattern, '-'],
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.errors)
+        self.fed, self.hits = 0, set()
+        self.reader = threading.Thread(target=self.read, daemon=True)
+        self.reader.start()
+
+    def read(self):
+        for raw in self.process.stdout:
+            number = raw.split(b':', 1)[0]
+            if number.isdigit():
+                self.hits.add(int(number))
+
+    def feed(self, lines):
+        """Line number of the first of `lines`."""
+        start = self.fed + 1
+        self.process.stdin.write(b''.join(line.encode(errors='replace') + b'\n' for line in lines))
+        self.fed += len(lines)
+        return start
+
+    def finish(self):
+        self.process.stdin.close()
+        self.reader.join()
+        self.process.stdout.close()
+        status = self.process.wait()
+        self.errors.seek(0)
+        reason = ' '.join(self.errors.read().decode(errors='replace').split())
+        self.errors.close()
+        if status not in (0, 1):
+            raise ValueError(f'rg failed with status {status}: {reason}')
+        return self.hits
+
+    def kill(self):
+        self.process.kill()
+        self.process.wait()
+        for stream in (self.process.stdin, self.process.stdout, self.errors):
+            try:
+                stream.close()
+            except OSError:
+                pass
 
 
 class Rule:
@@ -117,6 +147,8 @@ class Rules:
         if not isinstance(entries, list) or not entries or not all(isinstance(entry, dict) for entry in entries):
             raise ValueError('legacy.rules must be a non-empty array of tables ([[legacy.rules]])')
         self.exempt = globs(list(exempt), 'legacy.exempt')
+        if len(entries) > RULES_MAX:
+            raise ValueError(f'legacy.rules has {len(entries)} rules; at most {RULES_MAX}')
         self.rules = []
         for number, entry in enumerate(entries, 1):
             kind = entry.get('kind')
@@ -131,20 +163,43 @@ class Rules:
         self.candidates = {}
 
     def for_path(self, path):
+        """Indexes of the rules that cover path, in rule order."""
         if path not in self.candidates:
             exempt = any(glob.fullmatch(path) for glob in self.exempt)
-            self.candidates[path] = [] if exempt else [(kind, rule.pattern) for kind, rule in self.rules if rule.covers(path)]
+            self.candidates[path] = [] if exempt else [index for index, (_, rule) in enumerate(self.rules) if rule.covers(path)]
         return self.candidates[path]
 
+    def documents(self, documents):
+        """(path, kinds) for each (path, lines), one kind or None per line; one rg process per rule pattern."""
+        matchers, fed = {}, []
+        try:
+            for index, (_, rule) in enumerate(self.rules):
+                if rule.pattern is not None:
+                    matchers[index] = Matcher(rule.pattern)
+            for path, lines in documents:
+                lines = [line[:LINE_SEARCH_LIMIT] for line in lines]
+                fed.append((path, len(lines), {index: matchers[index].feed(lines)
+                                               for index in self.for_path(path) if index in matchers}))
+            hits = {index: matcher.finish() for index, matcher in matchers.items()}
+        except BaseException:
+            for matcher in matchers.values():
+                if matcher.process.returncode is None:
+                    matcher.kill()
+            raise
+        for path, count, starts in fed:
+            covering = self.for_path(path)
+            yield path, [next((self.rules[index][0] for index in covering
+                               if index not in starts or starts[index] + number in hits[index]), None)
+                         for number in range(count)]
+
     def classify(self, path, text):
-        text = text[:LINE_SEARCH_LIMIT]
-        for kind, pattern in self.for_path(path):
-            if pattern is None or pattern.search(text):
-                return kind
-        return None
+        return next(self.documents([(path, [text])]))[1][0]
 
     def scan(self, lines):
-        return [(kind, path, text) for path, _, text, added in lines if added and (kind := self.classify(path, text))]
+        added = [(path, text) for path, _, text, is_added in lines if is_added]
+        runs = [(path, [text for _, text in group]) for path, group in itertools.groupby(added, key=lambda item: item[0])]
+        return [(kind, path, text) for (path, texts), (_, kinds) in zip(runs, self.documents(runs))
+                for text, kind in zip(texts, kinds) if kind]
 
 
 def from_settings(settings):
@@ -177,32 +232,35 @@ def map_rows(repo, ref, rules):
     entries = [entry.split(b'\t', 1) for entry in git(repo, 'ls-tree', '-r', '-z', ref).split(b'\0') if entry]
     blobs = [(meta.split()[2].decode(), path.decode(errors='replace')) for meta, path in entries if meta.split()[1] == b'blob']
     blobs = [(oid, path) for oid, path in blobs if rules.for_path(path)]
-    rows = set()
     with subprocess.Popen(['git', '-C', repo, 'cat-file', '--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as batch:
-        for oid, path in blobs:
-            batch.stdin.write(f'{oid}\n'.encode())
-            batch.stdin.flush()
-            header = batch.stdout.readline().split()
-            if len(header) != 3 or header[0].decode() != oid or header[1] != b'blob' or not header[2].isdigit():
-                raise ValueError(f'cannot read {path} on {ref}')
-            blob = batch.stdout.read(int(header[2]) + 1)
-            if len(blob) != int(header[2]) + 1 or blob[-1:] != b'\n':
-                raise ValueError(f'cannot read {path} on {ref}: short read')
-            blob = blob[:-1]
-            try:
-                body = blob.decode()
-            except UnicodeDecodeError:
-                continue
-            if '\0' in body:
-                continue
-            lines = body.split('\n')
-            if len(lines) > 1 and lines[-1] == '':
-                lines.pop()
-            rows.update((kind, path) for text in lines if (kind := rules.classify(path, text)))
+        rows = {(kind, path) for path, kinds in rules.documents(blob_lines(batch, blobs, ref)) for kind in kinds if kind}
         batch.stdin.close()
         if batch.wait() != 0:
             raise ValueError(f'git cat-file failed with status {batch.returncode} on {ref}')
     return sorted(rows)
+
+
+def blob_lines(batch, blobs, ref):
+    """(path, lines) of each text blob; binary blobs are left out."""
+    for oid, path in blobs:
+        batch.stdin.write(f'{oid}\n'.encode())
+        batch.stdin.flush()
+        header = batch.stdout.readline().split()
+        if len(header) != 3 or header[0].decode() != oid or header[1] != b'blob' or not header[2].isdigit():
+            raise ValueError(f'cannot read {path} on {ref}')
+        blob = batch.stdout.read(int(header[2]) + 1)
+        if len(blob) != int(header[2]) + 1 or blob[-1:] != b'\n':
+            raise ValueError(f'cannot read {path} on {ref}: short read')
+        try:
+            body = blob[:-1].decode()
+        except UnicodeDecodeError:
+            continue
+        if '\0' in body:
+            continue
+        lines = body.split('\n')
+        if len(lines) > 1 and lines[-1] == '':
+            lines.pop()
+        yield path, lines
 
 
 def main(argv):

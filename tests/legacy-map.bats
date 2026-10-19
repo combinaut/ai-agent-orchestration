@@ -3,7 +3,10 @@
 load test_helper
 
 setup() {
+  local rg
+  rg=$(command -v rg)
   setup_fixture
+  ln -s "$rg" "$BIN/rg"
   MAP="$ROOT/coordinator/legacy-map.sh"
   OUT="$TMP/out/legacy-map.tsv"
   export ORCH_LEGACY_MAP_OUT="$OUT"
@@ -140,7 +143,7 @@ keep_previous_map() {
   keep_previous_map
   run "$MAP" "$BIG_REPO"
   [ "$status" -eq 1 ]
-  contains "$output" 'legacy-map.sh: legacy.rules[1] (A): pattern is not a valid regex'
+  contains "$output" 'legacy-map.sh: legacy.rules[1] (A): pattern is not a valid rg regex'
   [ "$(cat "$OUT")" = keep ]
 }
 

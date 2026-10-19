@@ -8,7 +8,7 @@ The clone and the Radar checkout are never updated over local work. With uncommi
 
 ## Requirements
 
-macOS or Linux, Bash 3.2 or newer; `git`, `jq`, `python3`, `curl`; `gh` for the PR watchers. Optional: Codex CLI (architects pick Claude or Codex per task).
+macOS or Linux, Bash 3.2 or newer; `git`, `jq`, `python3`, `curl`; `gh` for the PR watchers; `rg` (ripgrep) for the legacy scan and map. Optional: Codex CLI (architects pick Claude or Codex per task).
 
 ## What the installer does
 

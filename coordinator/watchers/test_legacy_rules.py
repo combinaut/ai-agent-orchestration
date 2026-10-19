@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -117,8 +118,7 @@ class RulesTests(IsolatedTestCase):
             'legacy.rules[1] (A): paths must be a non-empty list of non-empty strings ': rule(kind='"A"', paths='[]'),
             'legacy.rules[1] (A): exclude must be a list of non-empty strings': rule(kind='"A"', paths='["**"]', exclude='[1]'),
             'legacy.rules[1] (A): pattern must be a non-empty string': rule(kind='"A"', paths='["**"]', pattern='1'),
-            'legacy.rules[1] (A): pattern is not a valid regex': rule(kind='"A"', paths='["**"]', pattern="'('"),
-            'legacy.rules[1] (A): pattern repeats a group that holds a repeat or an alternation': rule(kind='"A"', paths='["**"]', pattern="'(a+)+$'"),
+            'legacy.rules[1] (A): pattern is not a valid rg regex': rule(kind='"A"', paths='["**"]', pattern="'('"),
             "legacy.rules[1] (A): paths: bad brace group in '{a'": rule(kind='"A"', paths='["{a"]'),
             "legacy.exempt: bad brace group in '{a'": '[legacy]\nexempt = ["{a"]\n' + rule(kind='"A"', paths='["**"]'),
         }
@@ -126,7 +126,7 @@ class RulesTests(IsolatedTestCase):
             with self.assertRaises(ValueError, msg=message) as caught:
                 rules(text)
             self.assertIn(message.strip(), str(caught.exception))
-        with self.assertRaisesRegex(ValueError, r'legacy\.rules\[2\] \(B\): pattern is not a valid regex'):
+        with self.assertRaisesRegex(ValueError, r'legacy\.rules\[2\] \(B\): pattern is not a valid rg regex'):
             rules(rule(kind='"A"', paths='["**"]') + rule(kind='"B"', paths='["**"]', pattern='"["'))
 
     def test_settings_reject_rules_that_are_not_tables(self):
@@ -139,13 +139,55 @@ class RulesTests(IsolatedTestCase):
         self.assertEqual(legacy_rules.from_settings(
             {'ORCH_LEGACY_RULES': '[{"kind":"A","paths":["**"]}]', 'ORCH_LEGACY_EXEMPT': 'x y'}).classify('y', ''), None)
 
-    def test_patterns_that_backtrack_without_bound_are_rejected(self):
-        for pattern in ('(a+)+$', '(a|aa)*', '(a*)*', '(?:x+y?)+', '((a)+)+', '(?=(a+)+)b', '(a|ab)+?', '^(a?){40}a{40}$',
-                        '^(a)?(?(1)(b+)+|c)$', '^(a)?(?(1)c|(b+)+)$', '(?:(a)?(?(1)b|c))+', '(?>(a+)+)'):
-            with self.assertRaisesRegex(ValueError, 'catastrophic backtracking', msg=pattern):
+    def test_patterns_are_rg_regexes(self):
+        for pattern in ('(?=a)b', '(a)\\1', '('):
+            with self.assertRaisesRegex(ValueError, 'pattern is not a valid rg regex', msg=pattern):
                 legacy_rules.compile_pattern(pattern)
-        for pattern in ('a+b+', '(ab)+', '(a|b)*', '(ab)?c*', 'ajax:(success|error)', 'remote: *true', '(?:ab){2}'):
-            self.assertIsNotNone(legacy_rules.compile_pattern(pattern), pattern)
+        for pattern in ('(a+)+$', 'a+b+', '(a|b)*', 'ajax:(success|error)', 'remote: *true', '\\$\\(', '(?i)jquery'):
+            self.assertEqual(legacy_rules.compile_pattern(pattern), pattern)
+
+    def test_a_backtracking_pattern_runs_in_bounded_time(self):
+        parsed = rules(rule(kind='"A"', pattern="'a*a*a*a*a*a*b'", paths='["**"]') + rule(kind='"B"', pattern="'(a+)+$'", paths='["**"]'))
+        start = time.monotonic()
+        self.assertIsNone(parsed.classify('x.txt', 'a' * 1500 + '!'))
+        self.assertEqual(parsed.classify('x.txt', 'a' * 5000 + '!'), 'B')
+        self.assertLess(time.monotonic() - start, 5)
+
+    def test_missing_rg_is_named(self):
+        with patch.object(legacy_rules.shutil, 'which', return_value=None):
+            with self.assertRaisesRegex(ValueError, r'legacy rules need rg \(ripgrep\) on PATH'):
+                rules(rule(kind='"A"', pattern="'x'", paths='["**"]'))
+
+    def test_a_failing_rg_fails_the_scan(self):
+        parsed = rules(rule(kind='"A"', pattern="'x'", paths='["**"]'))
+        fake = self.base / 'rg'
+        fake.write_text('#!/bin/sh\ncat >/dev/null\necho boom >&2\nexit 2\n')
+        fake.chmod(0o755)
+        with patch.object(legacy_rules, 'rg', return_value=str(fake)):
+            with self.assertRaisesRegex(ValueError, 'rg failed with status 2: boom'):
+                parsed.classify('a', 'x')
+
+    def test_too_many_rules_are_an_error(self):
+        text = rule(kind='"A"', paths='["**"]') * (legacy_rules.RULES_MAX + 1)
+        with self.assertRaisesRegex(ValueError, f'legacy.rules has {legacy_rules.RULES_MAX + 1} rules; at most {legacy_rules.RULES_MAX}'):
+            rules(text)
+
+    def test_the_map_ends_promptly_on_a_backtracking_pattern(self):
+        root = self.base / 'slow'
+        root.mkdir()
+        git = ['git', '-C', str(root), '-c', 'user.email=t@example.invalid', '-c', 'user.name=t']
+        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        (root / orch_settings.REPO_FILE).write_text(rule(kind='"OLD"', paths='["**/*.txt"]', pattern="'a*a*a*a*a*a*b'"))
+        (root / 'long.txt').write_text(('a' * 5000 + '\n') * 200)
+        (root / 'hit.txt').write_text('aaab\n')
+        subprocess.run([*git, 'add', '-A'], check=True)
+        subprocess.run([*git, 'commit', '-qm', 'seed'], check=True)
+        env = {key: value for key, value in os.environ.items() if not key.startswith('ORCH_LEGACY_')}
+        start = time.monotonic()
+        result = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'HEAD'],
+                                capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual((result.returncode, result.stdout), (0, 'OLD\thit.txt\n'), result.stderr)
+        self.assertLess(time.monotonic() - start, 10)
 
     def test_long_lines_are_searched_up_to_a_limit(self):
         parsed = rules(rule(kind='"A"', pattern="'needle'", paths='["**"]'))

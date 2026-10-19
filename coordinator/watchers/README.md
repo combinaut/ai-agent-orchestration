@@ -303,7 +303,7 @@ are skipped with a `legacy-scan skipped binary file <path>` line on stderr. A ru
 thin CLI over it that prints the matching lines.
 
 Invalid rules (an unknown key, a `kind` that is not one word, missing `paths`, a bad glob or regex) are a scan failure that names the rule
-(`READFAIL LEGACY <repo>#<n> <title>: legacy.rules[2] (JQUERY): pattern is not a valid regex: ...`).
+(`READFAIL LEGACY <repo>#<n> <title>: legacy.rules[2] (JQUERY): pattern is not a valid rg regex: ...`).
 
 Only the current search's OPEN PR lines are remembered; departed PRs are pruned
 without follow-up reads. Each source failing to read keeps its last known lines
