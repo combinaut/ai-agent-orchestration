@@ -176,6 +176,12 @@ keep_previous_map() {
   [ -z "$(find "$TMP/readonly" -type f)" ]
 }
 
+@test "sourced from zsh it refuses and the calling shell keeps running" {
+  run zsh -c 'source "$1" "$2"; echo "rc=$? alive"' zsh "$MAP" "$BIG_REPO"
+  contains "$output" 'run it, do not source it'
+  contains "$output" 'rc=1 alive'
+}
+
 @test "started with zsh or sh it runs under bash" {
   for shell in zsh sh; do
     rm -f "$OUT"

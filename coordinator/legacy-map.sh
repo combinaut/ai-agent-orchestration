@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Writes legacy-map.tsv: one <kind>\t<path> row per file on origin/main of the repo in $1 (or $ORCH_LEGACY_MAP_REPO) with a line its legacy rules count.
+case ${ZSH_EVAL_CONTEXT:-} in *:file*) echo "run it, do not source it" >&2; return 1 ;; esac
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
 

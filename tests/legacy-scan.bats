@@ -17,6 +17,12 @@ setup() {
   contains "$output" 'legacy-scan failed: HTTP 502'
 }
 
+@test "sourced from zsh it refuses and the calling shell keeps running" {
+  run zsh -c 'source "$1" "$2"; echo "rc=$? alive"' zsh "$SCAN" 7
+  contains "$output" 'run it, do not source it'
+  contains "$output" 'rc=1 alive'
+}
+
 @test "started with zsh or sh it runs under bash" {
   for shell in zsh sh; do
     run "$shell" "$SCAN" 7 owner/product
