@@ -5,3 +5,4 @@ Description=Combinaut legacy map
 Type=oneshot
 ExecStart="@ORCH_CLAUDE_DIR@/coordinator/legacy-map.sh" "@ORCH_LEGACY_MAP_REPO@"
 Environment="PATH=@ORCH_PATH@"
+Environment="ORCH_PYTHON3=@ORCH_SERVICE_PYTHON@"

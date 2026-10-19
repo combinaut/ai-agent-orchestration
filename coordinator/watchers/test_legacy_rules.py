@@ -138,7 +138,7 @@ class RulesTests(IsolatedTestCase):
             {'ORCH_LEGACY_RULES': '[{"kind":"A","paths":["**"]}]', 'ORCH_LEGACY_EXEMPT': 'x y'}).classify('y', ''), None)
 
     def test_patterns_that_backtrack_without_bound_are_rejected(self):
-        for pattern in ('(a+)+$', '(a|aa)*', '(a*)*', '(?:x+y?)+', '((a)+)+', '(?=(a+)+)b', '(a|ab)+?'):
+        for pattern in ('(a+)+$', '(a|aa)*', '(a*)*', '(?:x+y?)+', '((a)+)+', '(?=(a+)+)b', '(a|ab)+?', '^(a?){40}a{40}$'):
             with self.assertRaisesRegex(ValueError, 'catastrophic backtracking', msg=pattern):
                 legacy_rules.compile_pattern(pattern)
         for pattern in ('a+b+', '(ab)+', '(a|b)*', '(ab)?c*', 'ajax:(success|error)', 'remote: *true', '(?:ab){2}'):
@@ -185,6 +185,10 @@ class RulesTests(IsolatedTestCase):
                                 capture_output=True, text=True, env=env)
         self.assertEqual((result.returncode, result.stdout), (legacy_rules.NO_RULES, ''))
         self.assertIn('has no [[legacy.rules]]', result.stderr)
+        missing = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'origin/main'],
+                                 capture_output=True, text=True, env=env)
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn(f'legacy-map.sh: cannot read origin/main in {root}', missing.stderr)
 
 
 if __name__ == '__main__':

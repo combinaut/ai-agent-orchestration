@@ -61,12 +61,12 @@ def globs(value, key, required=False):
 
 
 def nested_repeat(items, repeated=False):
-    """True when a group repeated more than once holds a repeat or an alternation (catastrophic backtracking)."""
+    """True when a group repeated more than once holds a repeat, even an optional one, or an alternation (catastrophic backtracking)."""
     for op, arg in items:
         if op in (sre.MAX_REPEAT, sre.MIN_REPEAT, sre.POSSESSIVE_REPEAT):
             low, high, body = arg
             many = high > 1
-            if repeated and many or nested_repeat(body, repeated or many):
+            if repeated or nested_repeat(body, many):
                 return True
         elif op is sre.BRANCH:
             if repeated or any(nested_repeat(branch, repeated) for branch in arg[1]):
@@ -166,9 +166,10 @@ def git(repo, *args):
 def clone_rules(repo, ref):
     """Rules of the clone: its committed settings on `ref`, then its personal files."""
     try:
-        text = git(repo, 'show', f'{ref}:{orch_settings.REPO_FILE}').decode()
-    except subprocess.CalledProcessError:
-        text = ''
+        listed = git(repo, 'ls-tree', '--name-only', ref, '--', orch_settings.REPO_FILE)
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f'cannot read {ref} in {repo}: {error.stderr.decode(errors="replace").strip()}') from None
+    text = git(repo, 'show', f'{ref}:{orch_settings.REPO_FILE}').decode() if listed else ''
     return from_settings(orch_settings.load_remote(repo, ref, text, repo))
 
 

@@ -200,6 +200,7 @@ keep_previous_map() {
       contains "$(cat "$unit")" "<string>$HOME/.claude/coordinator/legacy-map.sh</string>"
       contains "$(cat "$unit")" "<string>$BIG_REPO</string>"
       contains "$(cat "$unit")" '<key>StartCalendarInterval</key>'
+      contains "$(cat "$unit")" '<key>ORCH_PYTHON3</key>'
       contains "$output" 'launchctl bootstrap'
       units=$(cat "$unit")
       ;;
@@ -207,6 +208,7 @@ keep_previous_map() {
       dir="$HOME/.claude/coordinator/service/linux"
       contains "$(cat "$dir/com.combinaut.coord-legacy-map.service")" "ExecStart=\"$HOME/.claude/coordinator/legacy-map.sh\" \"$BIG_REPO\""
       contains "$(cat "$dir/com.combinaut.coord-legacy-map.timer")" 'OnCalendar=*-*-* 06:00:00'
+      contains "$(cat "$dir/com.combinaut.coord-legacy-map.service")" 'Environment="ORCH_PYTHON3=/'
       contains "$output" 'systemctl --user link'
       units=$(cat "$dir"/com.combinaut.coord-legacy-map.service "$dir"/com.combinaut.coord-legacy-map.timer)
       contains "$output" 'systemctl --user enable --now'
