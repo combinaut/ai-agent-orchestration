@@ -184,6 +184,10 @@ def settings(request):
 OWNER_CACHE_SECONDS = 30
 
 
+def is_owner_map(value):
+    return isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
+
+
 def ownership():
     """The optional env adapter owns runtime discovery; cache across one-shot hosts."""
     root = Path(__file__).resolve().parents[3]
@@ -203,11 +207,11 @@ def ownership():
         identity = json.dumps([str(root), str(path.stat().st_mtime_ns), values,
                                os.environ.get("HERDR_SOCKET_PATH"), os.environ.get("HERDR_BIN_PATH")], sort_keys=True)
         key = hashlib.sha256(identity.encode()).hexdigest()[:20]
-        cache = Path(log_path()).parent / f"owners-{key}.json"
+        cache = Path(log_path()).parent / "owners.json"
         try:
             saved = json.loads(cache.read_text())
             age = time.time() - saved["time"]
-            if 0 <= age < OWNER_CACHE_SECONDS:
+            if saved["key"] == key and 0 <= age < OWNER_CACHE_SECONDS and (saved["owners"] is None or is_owner_map(saved["owners"])):
                 return saved["owners"]
         except (OSError, ValueError, KeyError, TypeError):
             pass
@@ -216,20 +220,32 @@ def ownership():
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             owners = module.branch_owners(values)
-            if not isinstance(owners, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in owners.items()):
-                owners = {}
-        except Exception:  # Cache failures too: optional discovery must not stall every search page.
-            owners = {}
+            if not is_owner_map(owners):
+                owners = None
+        except Exception:  # Cache failed scans without replacing Chrome's last good map.
+            owners = None
+        temporary = None
         try:
             cache.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(mode="w", dir=cache.parent, delete=False) as out:
-                json.dump({"time": time.time(), "owners": owners}, out)
+                temporary = Path(out.name)
+                json.dump({"key": key, "time": time.time(), "owners": owners}, out)
             os.replace(out.name, cache)
+            # Retire the old per-config cache files; the current format is bounded.
+            for old in cache.parent.glob("owners-*.json"):
+                if re.fullmatch(r"owners-[0-9a-f]{20}\.json", old.name):
+                    old.unlink(missing_ok=True)
         except OSError:
             pass
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
         return owners
     except Exception:  # Optional runtime discovery must never break GitHub checks.
-        return {}
+        return None
 
 
 HANDLERS = {"states": states, "search": search, "settings": settings}

@@ -1,9 +1,14 @@
 """Optional PR-tabs runtime adapter. Never writes to Herdr or a checkout."""
 import json
 import os
-import re
 import subprocess
 import time
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "lib"))
+from orch_settings import GITHUB_REMOTE  # noqa: E402
 
 
 def branch_owners(settings):
@@ -26,19 +31,22 @@ def branch_owners(settings):
     owners = {}
     ambiguous = set()
     for workspace in workspaces:
-        label = labels.get(workspace.get("tokens", {}).get("owner"))
+        label = labels.get((workspace.get("tokens") or {}).get("owner"))
         if not label:
             continue
         path = (workspace.get("worktree") or {}).get("checkout_path")
-        paths = [path] if path else [p.get("foreground_cwd") or p.get("cwd") for p in
-                json.loads(run([binary, "pane", "list", "--workspace", workspace["workspace_id"]]))["result"]["panes"]]
+        try:
+            paths = [path] if path else [p.get("foreground_cwd") or p.get("cwd") for p in
+                    json.loads(run([binary, "pane", "list", "--workspace", workspace["workspace_id"]]))["result"]["panes"]]
+        except (subprocess.CalledProcessError, ValueError, KeyError, TypeError):
+            continue  # One workspace may have closed since workspace list.
         for path in set(paths) - {None, ""}:
             try:
                 branch = run(["git", "-C", path, "symbolic-ref", "--quiet", "--short", "HEAD"])
                 remote = run(["git", "-C", path, "remote", "get-url", "origin"])
             except subprocess.CalledProcessError:
                 continue  # Missing checkout, detached HEAD, or no origin.
-            match = re.fullmatch(r"(?:https?://github\.com/|ssh://git@github\.com/|git@github\.com:)([^/]+/[^/]+?)(?:\.git)?/?", remote)
+            match = GITHUB_REMOTE.fullmatch(remote)
             if not match:
                 continue
             key = f"{match[1].lower()}:{branch}"

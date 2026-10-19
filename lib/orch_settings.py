@@ -312,6 +312,9 @@ def load_remote(repo, ref, committed_text, clone=None, environ=None):
     return merged(layers, environ)
 
 
+GITHUB_REMOTE = re.compile(r'^(?:[a-z][a-z0-9+.-]*://)?(?:[^@/\s]+@)?github\.com(?::\d+)?[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$', re.I)
+
+
 REMOTE_RE = r'(?:^|[/:]){}(?:\.git)?/?$'
 
 
@@ -410,7 +413,7 @@ def markdown_table(scope):
 
 OLD_NAMES = {'ORCH_V2_LAUNCHD': 'ORCH_WATCHERS_SERVICE', 'ORCH_V2_PR_SCOPE': 'ORCH_WATCHERS_PR_SCOPE',
              'ORCH_V2_WORKER_MODEL': 'ORCH_WATCHERS_WORKER_MODEL', 'ORCH_V2_PRIMARY_REPO': 'ORCH_WATCHERS_PRIMARY_REPO'}
-REMOVED = {'ORCH_BIG_REPO_REMOTES', 'ORCH_LEGACY_REPOS'}
+REMOVED = {'ORCH_BIG_REPO_REMOTES', 'ORCH_LEGACY_REPOS', 'ORCH_PR_TABS_TOPICS'}
 ASSIGN = re.compile(r'^\s*(?:export\s+)?(ORCH_[A-Z0-9_]*)=')
 
 
@@ -652,7 +655,8 @@ def drop_removed_keys(path):
     unchanged. This keeps formatting/comments without introducing a TOML writer.
     """
     path = Path(path)
-    text = path.read_text()
+    with path.open(encoding="utf-8", newline="") as source:
+        text = source.read()
     data = parse(text, str(path))
     if not isinstance(data.get('pr_tabs'), dict) or 'topics' not in data['pr_tabs']:
         return False
@@ -686,7 +690,10 @@ def drop_removed_keys(path):
             block = re.match(r"^\s*\[\[?\s*['\"]?pr_tabs['\"]?\s*\.\s*['\"]?topics['\"]?\s*\]", line)
             if plain or dotted or block:
                 for end in offsets[index + 1:]:
-                    yield offsets[index], end
+                    start = index
+                    if index and lines[index - 1].rstrip("\r\n") == '# Tab-group rules: tables with name, color and repo/title/any regex lists':
+                        start -= 1
+                    yield offsets[start], end
         # Inline members can be first, middle or last, with nested arrays/tables.
         # The parser/comparison below rejects matches inside strings or comments.
         for match in re.finditer(r"(?<![\w.-])['\"]?topics['\"]?\s*=", source):
@@ -716,7 +723,8 @@ def drop_removed_keys(path):
                 break
         else:
             raise ConfigError(f'{path}: cannot remove retired pr_tabs.topics in place')
-    path.write_text(text)
+    with path.open("w", encoding="utf-8", newline="") as destination:
+        destination.write(text)
     return True
 
 

@@ -337,3 +337,25 @@ class RemovedKeysTest(SettingsTest):
             self.assertTrue(s.drop_removed_keys(path))
             self.assertEqual(s.parse(path.read_text(), str(path)), expected)
             self.assertIn('# keep', path.read_text())
+
+
+    def test_only_the_immediately_preceding_retired_example_comment_is_removed(self):
+        retired = '# Tab-group rules: tables with name, color and repo/title/any regex lists\n'
+        text = retired + '# Personal note\n[pr_tabs]\norg = "acme"\n' + retired + 'topics = []\n'
+        path = self.write('removed.toml', text)
+        self.assertTrue(s.drop_removed_keys(path))
+        self.assertEqual(path.read_text(), retired + '# Personal note\n[pr_tabs]\norg = "acme"\n')
+
+    def test_retired_key_migration_preserves_crlf_bytes(self):
+        path = self.base / 'crlf.toml'
+        path.write_bytes(b'# personal\r\n[pr_tabs]\r\norg = "acme"\r\ntopics = []\r\n')
+        self.assertTrue(s.drop_removed_keys(path))
+        self.assertEqual(path.read_bytes(), b'# personal\r\n[pr_tabs]\r\norg = "acme"\r\n')
+
+    def test_legacy_topic_variable_is_retired_without_an_unknown_key_warning(self):
+        old = self.write('old.env', 'ORCH_PR_TABS_TOPICS=old\nORCH_PR_TABS_ORG=acme\n')
+        target = self.base / 'converted.toml'
+        with patch.object(s, 'env_file_values', return_value={'ORCH_PR_TABS_TOPICS': 'old', 'ORCH_PR_TABS_ORG': 'acme'}):
+            report = s.migrate(old, target, self.base / 'snippets')
+        self.assertNotIn('unknown keys', '\n'.join(report))
+        self.assertEqual(s.load_global(target), {'ORCH_PR_TABS_ORG': 'acme'})

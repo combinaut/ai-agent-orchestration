@@ -28,7 +28,7 @@ function ask(message, { reply = {}, status = 0, stderr = "", raw } = {}) {
   writeFileSync(calls, "");
   const done = spawnSync("python3", ["-I", HOST], {
     input: raw ?? frame(Buffer.from(JSON.stringify(message))),
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GH_CALLS: calls, GH_REPLY: join(dir, "reply.json"), GH_STATUS: String(status), GH_STDERR: stderr, ORCH_ENV: "none", PR_TABS_LOG: join(dir, "host.log") },
+    env: { ...process.env, HOME: dir, PATH: `${dir}:${process.env.PATH}`, GH_CALLS: calls, GH_REPLY: join(dir, "reply.json"), GH_STATUS: String(status), GH_STDERR: stderr, ORCH_ENV: "none", PR_TABS_LOG: join(dir, "host.log") },
     timeout: 20000,
   });
   assert.equal(done.status, 0, done.stderr.toString());

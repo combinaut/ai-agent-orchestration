@@ -100,6 +100,13 @@ export async function prEntries(rules) {
   return entries;
 }
 
+// null/absent ownership means discovery failed; an empty object is a good scan.
+async function recordOwners(next) {
+  if (!next || typeof next !== "object" || Array.isArray(next)) return;
+  owners = next;
+  await chrome.storage.local.set({ owners });
+}
+
 async function readMeta() {
   return (await chrome.storage.local.get({ meta: {} })).meta;
 }
@@ -227,8 +234,7 @@ async function checkOnce() {
     await chrome.alarms.create(ALARM, { delayInMinutes: nextDelaySeconds(failures) / 60 });
     return { error: `GitHub check failed: ${error.message}` };
   }
-  owners = reply.owners || {};
-  await chrome.storage.local.set({ owners });
+  await recordOwners(reply.owners);
   const keyById = new Map(entries.map(({ tab, pr }) => [tab.id, pr.key]));
   const closed = [];
   for (const id of tabsToClose(entries, reply.prs)) {
@@ -277,8 +283,7 @@ export async function openAll() {
   let after;
   for (let page = 0; page < MAX_SEARCH_PAGES; page++) {
     const reply = await askHost({ type: "search", query: rules.openAll, limit: SEARCH_LIMIT, ...(after && { after }) });
-    owners = reply.owners || {};
-    await chrome.storage.local.set({ owners });
+    await recordOwners(reply.owners);
     search.total = reply.total;
     search.prs.push(...reply.prs);
     if (!reply.hasNextPage || planOpenAll(search, openKeys, rules.org).open.length >= OPEN_ALL_CAP) break;

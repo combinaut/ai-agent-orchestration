@@ -390,3 +390,21 @@ test("a delayed persisted restore cannot overwrite fresh ownership from a check"
     chrome.storage.local.set = set;
   }
 });
+
+
+test("failed scans preserve the last good map for checks and Open all, including after restart", async () => {
+  const good = { "acme/webapp:feature": "Finder" };
+  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
+  store = { owners: good, meta: { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } } };
+  grouped = [];
+  nativeHandler = async message => message.type === "states"
+    ? { ok: true, owners: null, prs: { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } } }
+    : { ok: true, owners: null, total: 1, prs: [{ url: `${PR}/8`, headRefName: "feature" }], hasNextPage: false };
+  const worker = await import("../extension/background.js?failed-ownership-scan");
+  await worker.checkNow();
+  assert.equal(grouped.at(-1).title, "Finder");
+  assert.deepEqual(store.owners, good);
+  await worker.openAll();
+  assert.equal(grouped.at(-1).title, "Finder");
+  assert.deepEqual(store.owners, good);
+});
