@@ -191,6 +191,19 @@ class RulesTests(IsolatedTestCase):
             self.assertEqual(list(parsed.documents(big)), expected)
         self.assertLessEqual(max(fed), 3)
 
+    def test_queued_lines_are_cut_before_they_wait_for_matching(self):
+        parsed = rules(rule(kind='"A"', pattern="'x'", paths='["**"]'))
+        queued = []
+        real = legacy_rules.Rules.chunk
+
+        def chunk(self_, documents):
+            queued.extend(len(line) for _, lines in documents for line in lines)
+            return real(self_, documents)
+        long = 'x' * (legacy_rules.LINE_SEARCH_LIMIT * 3)
+        with patch.object(legacy_rules.Rules, 'chunk', chunk):
+            self.assertEqual(parsed.scan([('a.js', 1, long, True)]), [('A', 'a.js', long)])
+        self.assertEqual(queued, [legacy_rules.LINE_SEARCH_LIMIT])
+
     def test_a_failing_rg_fails_the_scan(self):
         parsed = rules(rule(kind='"A"', pattern="'x'", paths='["**"]'))
         fake = self.base / 'rg'

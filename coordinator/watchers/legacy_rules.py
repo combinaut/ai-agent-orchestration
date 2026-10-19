@@ -187,7 +187,7 @@ class Rules:
         batch, size = [], 0
         for number, (path, lines) in enumerate(documents):
             for start in range(0, max(len(lines), 1), CHUNK_LINES):
-                piece = lines[start:start + CHUNK_LINES]
+                piece = [line[:LINE_SEARCH_LIMIT] for line in lines[start:start + CHUNK_LINES]]
                 if batch and size + len(piece) > CHUNK_LINES:
                     yield from self.matched(batch)
                     batch, size = [], 0
@@ -208,7 +208,6 @@ class Rules:
                 if rule.pattern is not None:
                     matchers[index] = Matcher(rule.pattern)
             for path, lines in documents:
-                lines = [line[:LINE_SEARCH_LIMIT] for line in lines]
                 fed.append((path, len(lines), {index: matchers[index].feed(lines)
                                                for index in self.for_path(path) if index in matchers}))
             hits = {index: matcher.finish() for index, matcher in matchers.items()}
