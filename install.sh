@@ -796,6 +796,7 @@ legacy_map_default_repo() {
   local path scan clones bin socket
   bin=$(config_value ORCH_HERDR_BIN)
   socket=$(config_value ORCH_HERDR_SOCKET)
+  # shellcheck disable=SC2030 # Set for the discovery call only.
   clones=$(
     [ -z "$bin" ] || export HERDR_BIN_PATH="$bin"
     [ -z "$socket" ] || export HERDR_SOCKET_PATH="$socket"

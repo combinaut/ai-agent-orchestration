@@ -25,7 +25,7 @@ When the host is under pressure, the Coordinator follows the memory guard: on HO
 
 ## Repos from the open work
 
-The audit and pulls watchers take their repos from the open workspaces: each workspace's repo root is a clone to check for PACKS and WORKTREES, and its `origin` (`owner/name` on GitHub) a repo whose PRs to watch, deduplicated. The env adapter reports the workspaces (`env/<name>/open_work.py`). When it cannot, they use the last set saved in `~/.claude/coordinator/open-work.json` and log `open work unreadable (...)`; with no saved set the github and git sources are `READFAIL`.
+The audit and pulls watchers take their repos from the open workspaces: each workspace's repo root is a clone to check for PACKS and WORKTREES, and its `origin` (`owner/name` on GitHub) a repo whose PRs to watch, deduplicated. The env adapter reports the workspaces (`env/<name>/open_work.py`). When it cannot, or a clone's `origin` cannot be read, they use the last set saved in `~/.claude/coordinator/open-work.json` and log `open work unreadable (...)`; with no saved set the github and git sources are `READFAIL`. A clone without an `origin` remote is checked for pile-ups but has no PRs.
 
 ## Focus report
 
@@ -35,7 +35,7 @@ The audit and pulls watchers take their repos from the open workspaces: each wor
 FOCUS workers=<working> focus_workers_live=<n> slots=<live> idle_no_worker=<names> no_focus_worker=<names>
 ```
 
-`idle_no_worker` lists an architect that is idle (it and its workers are not working, and it holds no live heavy slot) and has open work: a worker pane in a workspace it owns (`tokens.owner`), an open PR on the branch of such a workspace, or an item under `## Waits on the user` in its status file. An idle architect without open work is resting and never listed. A PR lookup that fails counts as open work. `no_focus_worker` uses each repo's `focus.pattern`.
+`idle_no_worker` lists an architect that is idle (it and its workers are not working, and it holds no live heavy slot) and has open work: a worker pane in a workspace it owns (`tokens.owner`), an open PR on the branch of such a workspace, or an item under `## Waits on the user` in its status file. An idle architect without open work is resting and never listed. A PR lookup that fails, or returns its limit of 200 PRs, counts as open work; at most 20 repos are looked up per pass. `no_focus_worker` uses each repo's `focus.pattern`.
 
 A line `Paused: <reason>` in `~/.claude/coordinator/status/<architect>.md` leaves that architect out of both lists until the line is removed.
 
