@@ -33,9 +33,22 @@ class PrTabsTest(IsolatedTestCase):
             {'id': 'orphan', 'owner': 'gone', 'checkout': '/orphan'},
         ]}
         def command(*args):
-            return 'feature' if args[3] == 'symbolic-ref' else 'git@github.com:Acme/' + ('webapp.git' if args[2] == '/web' else 'docs.git')
+            return 'refs/heads/feature' if args[3] == 'symbolic-ref' else 'git@github.com:Acme/' + ('webapp.git' if args[2] == '/web' else 'docs.git')
         self.assertEqual(discovery.branch_owners(command, work),
                          {'acme/webapp:feature': 'Finder', 'acme/docs:feature': 'Agent::Tooling'})
+
+    def test_same_named_tag_does_not_change_branch_ownership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            def command(*args):
+                return subprocess.run(args, check=True, capture_output=True, text=True).stdout.strip()
+            command('git', 'init', '--initial-branch=feature', directory)
+            command('git', '-C', directory, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                    'commit', '--allow-empty', '-m', 'fixture')
+            command('git', '-C', directory, 'remote', 'add', 'origin', 'https://github.com/acme/webapp.git')
+            command('git', '-C', directory, 'tag', 'feature')
+            work = {'workspaces': [{'id': 'a', 'label': 'Finder'},
+                                   {'id': 'w', 'owner': 'a', 'checkout': directory}]}
+            self.assertEqual(discovery.branch_owners(command, work), {'acme/webapp:feature': 'Finder'})
 
     def test_conflicting_owners_and_detached_checkouts_are_omitted(self):
         work = {'workspaces': [{'id': 'a', 'label': 'A'}, {'id': 'b', 'label': 'B'}] + [
@@ -44,7 +57,7 @@ class PrTabsTest(IsolatedTestCase):
         def command(*args):
             if args[2] == '/detached':
                 raise subprocess.CalledProcessError(1, args)
-            return 'feature' if args[3] == 'symbolic-ref' else 'https://github.com/acme/webapp.git'
+            return 'refs/heads/feature' if args[3] == 'symbolic-ref' else 'https://github.com/acme/webapp.git'
         self.assertEqual(discovery.branch_owners(command, work), {})
 
     def test_host_cache_expires_and_missing_or_broken_adapter_falls_back(self):
@@ -87,7 +100,7 @@ class PrTabsTest(IsolatedTestCase):
         def command(*args):
             if args[2] == '/closed':
                 raise subprocess.CalledProcessError(128, args, stderr="fatal: cannot change to '/closed': No such file or directory")
-            return 'feature' if args[3] == 'symbolic-ref' else 'git@github.com:acme/webapp.git'
+            return 'refs/heads/feature' if args[3] == 'symbolic-ref' else 'git@github.com:acme/webapp.git'
         self.assertEqual(discovery.branch_owners(command, work), {'acme/webapp:feature': 'Finder'})
 
     def test_branch_read_failure_preserves_last_good_ownership_protocol(self):
@@ -106,7 +119,7 @@ class PrTabsTest(IsolatedTestCase):
                     if args[3] == 'symbolic-ref':
                         if failing:
                             raise subprocess.CalledProcessError(128, args, stderr=detail)
-                        return SimpleNamespace(stdout='feature')
+                        return SimpleNamespace(stdout='refs/heads/feature')
                     return SimpleNamespace(stdout='https://github.com/acme/webapp.git')
                 with patch.dict(os.environ, environ), patch.object(discovery, 'open_work', return_value=work), patch.object(host.subprocess, 'run', side_effect=run), patch.object(host.time, 'time', return_value=100):
                     self.assertEqual(host.ownership(), good)
@@ -153,7 +166,7 @@ class PrTabsTest(IsolatedTestCase):
         )
         for remote in accepted + rejected:
             def command(*args):
-                return 'feature' if args[3] == 'symbolic-ref' else remote
+                return 'refs/heads/feature' if args[3] == 'symbolic-ref' else remote
             with self.subTest(remote=remote):
                 expected = {'acme/webapp:feature': 'Finder'} if remote in accepted else {}
                 self.assertEqual(discovery.branch_owners(command, work), expected)
@@ -166,7 +179,7 @@ class PrTabsTest(IsolatedTestCase):
         def run(args, **kwargs):
             self.assertLessEqual(kwargs['timeout'], 5)
             self.assertEqual(kwargs['env']['HERDR_SOCKET_PATH'], '/fixture/socket')
-            return SimpleNamespace(stdout='feature' if args[3] == 'symbolic-ref' else 'ssh://git@GitHub.com:22/acme/webapp.git')
+            return SimpleNamespace(stdout='refs/heads/feature' if args[3] == 'symbolic-ref' else 'ssh://git@GitHub.com:22/acme/webapp.git')
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / 'config.toml'
             config.write_text('[install]\nenv="herdr"\n')
@@ -192,7 +205,7 @@ class PrTabsTest(IsolatedTestCase):
             elif args[3] == 'rev-parse':
                 value = '/docs/.git' if '--git-common-dir' in args else '/docs'
             elif args[3] == 'symbolic-ref':
-                value = 'feature'
+                value = 'refs/heads/feature'
             else:
                 value = 'https://GitHub.com:443/acme/docs.git'
             return SimpleNamespace(stdout=value)

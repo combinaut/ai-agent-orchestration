@@ -80,7 +80,7 @@ def branch_owners(command, work=None):
         if not label or not checkout:
             continue
         try:
-            branch = command('git', '-C', checkout, 'symbolic-ref', '--quiet', '--short', 'HEAD').strip()
+            branch = command('git', '-C', checkout, 'symbolic-ref', '--quiet', 'HEAD').strip().removeprefix('refs/heads/')
         except subprocess.CalledProcessError as error:
             if error.returncode == 1 or GONE.search(str(error.stderr or '')):
                 continue  # Detached or confirmed closed checkout; other workspaces still contribute.
