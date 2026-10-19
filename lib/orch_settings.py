@@ -670,10 +670,25 @@ def bracket_depth(text):
     return depth
 
 
+def tables(data, keep_dropped=True):
+    """{table: entries} of parsed TOML without empty tables, and without the DROPPED keys unless keep_dropped."""
+    found = {}
+    for table, entries in data.items():
+        if isinstance(entries, dict):
+            entries = {name: value for name, value in entries.items() if keep_dropped or f'{table}.{name}' not in DROPPED}
+            if entries:
+                found[table] = entries
+    return found
+
+
 def drop_keys(path):
     """Removes the DROPPED keys and the comment lines directly above them; returns the removed keys."""
     text = Path(path).read_text()
     before = parse(text, str(path))
+    present = [f'{table}.{name}' for table, entries in tables(before).items() for name in entries if f'{table}.{name}' in DROPPED]
+    if not present:
+        return []
+    problem = ConfigError(f'{path}: cannot drop {" ".join(present)} in place; edit it by hand')
     lines, kept, removed, table, skip = text.splitlines(), [], [], None, 0
     header = re.compile(r'^\s*\[\s*(["\']?)([A-Za-z0-9_-]+)\1\s*\]\s*(#.*)?$')
     key = re.compile(r'^\s*(?:(["\']?)([A-Za-z0-9_-]+)\1\s*\.\s*)?(["\']?)([A-Za-z0-9_-]+)\3\s*=(.*)$')
@@ -690,17 +705,12 @@ def drop_keys(path):
             skip = bracket_depth(match[5])
             continue
         kept.append(line)
-    if not removed:
-        return []
     text_out = '\n'.join(kept) + '\n'
-    problem = ConfigError(f'{path}: cannot drop {" ".join(removed)} in place; edit it by hand')
     try:
         after = parse(text_out, str(path))
     except ConfigError:
         raise problem from None
-    expected = {table: {name: value for name, value in entries.items() if f'{table}.{name}' not in DROPPED}
-                for table, entries in before.items() if isinstance(entries, dict)}
-    if {table: entries for table, entries in after.items() if isinstance(entries, dict)} != expected:
+    if tables(after) != tables(before, keep_dropped=False):
         raise problem
     Path(path).write_text(text_out)
     return removed

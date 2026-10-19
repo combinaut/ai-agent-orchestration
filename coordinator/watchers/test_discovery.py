@@ -74,6 +74,37 @@ class DiscoveryTest(IsolatedTestCase):
         self.assertIn('open work unreadable (', stderr.getvalue())
         self.assertIn(f'using the repos last discovered in {discovery.state_path()}', stderr.getvalue())
 
+    def test_an_unreadable_origin_keeps_the_saved_set(self):
+        found = discovery.repos(self.command)
+
+        def timeout(*argv):
+            if argv[0] == 'git' and argv[2] == '/r/web' and argv[3:] == ('remote', 'get-url', 'origin'):
+                raise subprocess.TimeoutExpired(argv, 45)
+            return self.command(*argv)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(discovery.repos(timeout), found)
+        self.assertIn('origin of /r/web unreadable', stderr.getvalue())
+        self.assertEqual(discovery.saved(), found)
+
+    def test_an_unreadable_origin_without_a_saved_set_is_unavailable(self):
+        def timeout(*argv):
+            if argv[0] == 'git' and argv[3:] == ('remote', 'get-url', 'origin'):
+                raise subprocess.TimeoutExpired(argv, 45)
+            return self.command(*argv)
+        with self.assertRaisesRegex(discovery.Unavailable, 'origin of /r/WEB2 unreadable'):
+            discovery.repos(timeout)
+        self.assertIsNone(discovery.saved())
+
+    def test_a_clone_without_an_origin_remote_is_a_clone_without_a_repo(self):
+        def no_origin(*argv):
+            if argv[0] == 'git' and argv[2] == '/r/web' and argv[3:] == ('remote', 'get-url', 'origin'):
+                raise subprocess.CalledProcessError(2, argv, stderr="error: No such remote 'origin'\n")
+            return self.command(*argv)
+        found = discovery.repos(no_origin)
+        self.assertEqual(found, dict(clones=['/r/WEB2', '/r/lab', '/r/tools', '/r/web'], repos=['acme/tools', 'ACME/Web']))
+        self.assertEqual(discovery.saved(), found)
+
     def test_an_unreadable_adapter_without_a_saved_set_is_unavailable(self):
         with self.assertRaisesRegex(discovery.Unavailable, 'no saved set'):
             discovery.repos(self.broken)

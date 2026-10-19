@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'lib'))
 import orch_settings
 
 PR_REPOS_MAX = 20
+PR_LIMIT = 200
 PAUSED = re.compile(r'^Paused:\s*\S')
 
 
@@ -55,14 +56,18 @@ def paused(lines):
 
 
 class OpenPrs:
-    """Open PR head branches per repo, read once per pass for at most PR_REPOS_MAX repos."""
+    """Open PR head branches per repo, read once per pass for at most PR_REPOS_MAX repos; a list at PR_LIMIT is unknown."""
 
     def __init__(self):
         self.branches, self.repos = {}, {}
 
     def repo(self, root):
+        """owner/name of the clone's GitHub origin, None without one, False when it cannot be read."""
         if root not in self.repos:
-            self.repos[root] = discovery.github_repo(command, root)
+            try:
+                self.repos[root] = discovery.github_repo(command, root)
+            except discovery.Unavailable:
+                self.repos[root] = False
         return self.repos[root]
 
     def has(self, repo, branch):
@@ -71,8 +76,9 @@ class OpenPrs:
             if len(self.branches) >= PR_REPOS_MAX:
                 return None
             try:
-                rows = json.loads(command('gh', 'pr', 'list', '-R', repo, '--state', 'open', '--json', 'headRefName', '--limit', '200'))
-                self.branches[repo] = {row['headRefName'] for row in rows}
+                rows = json.loads(command('gh', 'pr', 'list', '-R', repo, '--state', 'open', '--json', 'headRefName',
+                                          '--limit', str(PR_LIMIT)))
+                self.branches[repo] = None if len(rows) >= PR_LIMIT else {row['headRefName'] for row in rows}
             except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
                 self.branches[repo] = None
         found = self.branches[repo]
@@ -85,6 +91,8 @@ def open_pr(workspaces, owner, prs):
         if row.get('owner') != owner or not row.get('checkout') or not row.get('repo_root'):
             continue
         repo = prs.repo(row['repo_root'])
+        if repo is False:
+            return True
         if not repo:
             continue
         try:

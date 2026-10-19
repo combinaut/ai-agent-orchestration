@@ -228,6 +228,35 @@ make_webapp() {
   esac
 }
 
+@test "an open-work clone whose path has a space is read as one path" {
+  fresh_install
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket
+  spaced="$TMP/my clone"
+  mv "$BIG_REPO" "$spaced"
+  printf '%s\n' '[legacy]' 'scan = true' >"$spaced/.orchestration.local.toml"
+  saved_open_work "$spaced"
+  use_service_state
+  install_ok
+  case "$(uname -s)" in
+    Darwin) contains "$(cat "$HOME/.claude/coordinator/service/macos/com.combinaut.coord-legacy-map.plist")" "<string>$spaced</string>" ;;
+    Linux) contains "$(cat "$HOME/.claude/coordinator/service/linux/com.combinaut.coord-legacy-map.service")" "$spaced" ;;
+  esac
+}
+
+@test "the legacy map default asks the configured Herdr session of the env this install runs" {
+  fresh_install
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN "$BIN/herdr" ORCH_HERDR_SOCKET "$TMP/herdr.sock"
+  printf '%s\n' '[legacy]' 'scan = true' >"$BIG_REPO/.orchestration.local.toml"
+  export HERDR_WORKSPACES="[{\"workspace_id\":\"w1\",\"label\":\"x\",\"worktree\":{\"checkout_path\":\"$BIG_REPO\",\"repo_root\":\"$BIG_REPO\"}}]"
+  use_service_state
+  install_ok --env herdr
+  grep -qxF "socket=$TMP/herdr.sock" "$HERDR_CALLS"
+  case "$(uname -s)" in
+    Darwin) contains "$(cat "$HOME/.claude/coordinator/service/macos/com.combinaut.coord-legacy-map.plist")" "<string>$BIG_REPO</string>" ;;
+    Linux) contains "$(cat "$HOME/.claude/coordinator/service/linux/com.combinaut.coord-legacy-map.service")" "\"$BIG_REPO\"" ;;
+  esac
+}
+
 @test "an open-work clone without the legacy scan leaves the legacy map default off" {
   fresh_install
   config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket

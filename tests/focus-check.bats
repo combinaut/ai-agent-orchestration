@@ -277,6 +277,17 @@ SH
   [[ "$output" == *"idle_no_worker=none"* ]]
 }
 
+@test "a PR list at the lookup limit counts as open work" {
+  open_work_fixture
+  GH_PRS=$(python3 -c 'import json; print(json.dumps([{"headRefName": f"other-{n}"} for n in range(200)]))')
+  export GH_PRS
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+}
+
 @test "a PR lookup that fails counts as open work" {
   open_work_fixture
   export GH_FAIL=1

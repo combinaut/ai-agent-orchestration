@@ -12,6 +12,7 @@ from watcher_platform import MissingMetric
 
 ROOT = Path(__file__).resolve().parents[2]
 GITHUB_REMOTE = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
+NO_REMOTE = re.compile(r"No such remote", re.I)
 READ_ERRORS = (OSError, ValueError, KeyError, TypeError, AttributeError, MissingMetric, subprocess.SubprocessError)
 ADAPTERS = {}
 
@@ -48,12 +49,27 @@ def open_work(command):
 
 
 def github_repo(command, clone):
-    """owner/name of the clone's GitHub origin, else None."""
+    """owner/name of the clone's GitHub origin; None without one. Raises Unavailable when the origin cannot be read."""
     try:
-        match = GITHUB_REMOTE.search(command('git', '-C', clone, 'remote', 'get-url', 'origin').strip())
-    except READ_ERRORS:
-        return None
+        url = command('git', '-C', clone, 'remote', 'get-url', 'origin').strip()
+    except subprocess.CalledProcessError as error:
+        if NO_REMOTE.search(str(error.stderr or '')):
+            return None
+        raise Unavailable(f'origin of {clone} unreadable: {str(error.stderr or error).strip()[:200]}') from error
+    except READ_ERRORS as error:
+        raise Unavailable(f'origin of {clone} unreadable: {str(error)[:200]}') from error
+    match = GITHUB_REMOTE.search(url)
     return match[1] if match else None
+
+
+def discover(command, work):
+    clones = sorted({row['repo_root'] for row in work['workspaces'] if row.get('repo_root')})
+    names = {}
+    for clone in clones:
+        repo = github_repo(command, clone)
+        if repo:
+            names.setdefault(repo.lower(), repo)
+    return dict(clones=clones, repos=sorted(names.values(), key=str.lower))
 
 
 def save(found):
@@ -80,22 +96,15 @@ def saved():
 def repos(command, work=None):
     """{'clones': local clone paths, 'repos': GitHub owner/name} of the open workspaces, deduplicated.
 
-    Raises Unavailable when the adapter cannot answer and no earlier set is saved."""
+    Raises Unavailable when the adapter or an origin cannot be read and no earlier set is saved."""
     try:
-        work = open_work(command) if work is None else work
+        found = discover(command, open_work(command) if work is None else work)
     except Unavailable as error:
         found = saved()
         if found is None:
             raise Unavailable(f'open work unreadable ({error}) and no saved set at {state_path()}') from error
         print(f'open work unreadable ({error}); using the repos last discovered in {state_path()}', file=sys.stderr)
         return found
-    clones = sorted({row['repo_root'] for row in work['workspaces'] if row.get('repo_root')})
-    names = {}
-    for clone in clones:
-        repo = github_repo(command, clone)
-        if repo:
-            names.setdefault(repo.lower(), repo)
-    found = dict(clones=clones, repos=sorted(names.values(), key=str.lower))
     try:
         save(found)
     except OSError as error:

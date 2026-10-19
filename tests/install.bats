@@ -909,6 +909,15 @@ PY
   not_contains "$output" 'dropped '
 }
 
+@test "a key install cannot drop is named and install goes on" {
+  fresh_install
+  cfg="$HOME/.claude/orchestration.toml"
+  printf '%s\n' 'pr = { repos = ["acme/web"], author = "me" }' >"$cfg"
+  install_ok
+  contains "$output" "cannot drop pr.repos in place; edit it by hand"
+  [ "$(cat "$cfg")" = 'pr = { repos = ["acme/web"], author = "me" }' ]
+}
+
 @test "PR watchers are not registered until their settings are filled" {
   fresh_install
   config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET '/tmp/socket'

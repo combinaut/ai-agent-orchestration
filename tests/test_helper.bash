@@ -66,6 +66,11 @@ EOF
 #!/usr/bin/env bash
 printf 'herdr %s\n' "$*" >>"$HERDR_CALLS"
 case "$1 ${2:-}" in
+  'workspace list')
+    printf 'socket=%s\n' "${HERDR_SOCKET_PATH:-}" >>"$HERDR_CALLS"
+    printf '{"result":{"workspaces":%s}}\n' "${HERDR_WORKSPACES:-[]}"
+    ;;
+  'pane list') printf '{"result":{"panes":[]}}\n' ;;
   '--version ') case "$0" in */.local/bin/*) echo "herdr ${HERDR_INSTALLED_VERSION:-0.9.1}" ;; *) echo "herdr ${HERDR_VERSION:-0.9.1}" ;; esac ;;
   'plugin list') [ -f "$HERDR_PLUGIN" ] && printf -- '- hhdebb.herdr-radar (Radar) enabled [local:%s%s]\n' "$(cat "$HERDR_PLUGIN")" "${HERDR_PLUGIN_DIAGNOSTIC:-}" ;;
   'plugin uninstall') rm -f "$HERDR_PLUGIN" ;;

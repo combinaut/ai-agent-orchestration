@@ -143,6 +143,18 @@ class DropKeysTest(SettingsTest):
         self.assertEqual(s.drop_keys(path), ['pr.repos'])
         self.assertEqual(path.read_text(), "pr.author = 'me'\n")
 
+    def test_drop_of_the_only_dotted_key_of_a_table(self):
+        path = self.write('c.toml', 'pr.author = "me"\nfocus.skip_architects = ["A"]\n')
+        self.assertEqual(s.drop_keys(path), ['focus.skip_architects'])
+        self.assertEqual(path.read_text(), 'pr.author = "me"\n')
+
+    def test_drop_names_a_key_it_cannot_reach_instead_of_leaving_it(self):
+        text = 'pr = { repos = ["acme/web"], author = "me" }\n'
+        path = self.write('c.toml', text)
+        with self.assertRaisesRegex(s.ConfigError, 'cannot drop pr.repos in place; edit it by hand'):
+            s.drop_keys(path)
+        self.assertEqual(path.read_text(), text)
+
     def test_drop_leaves_a_file_without_dropped_keys_untouched(self):
         path = self.write('c.toml', '[pr]\nauthor = "me"')
         self.assertEqual(s.drop_keys(path), [])

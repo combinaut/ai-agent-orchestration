@@ -504,7 +504,10 @@ convert_old_config() {
 # drop_removed_keys: removes the settings the open work replaced from $CONFIG, with one printed line.
 drop_removed_keys() {
   local dropped
-  dropped=$(settings_cli drop "$CONFIG" 2>&1) || die "${dropped#ERROR: }"
+  if ! dropped=$(settings_cli drop "$CONFIG" 2>&1); then
+    say "warning" "${dropped#ERROR: }"
+    return 0
+  fi
   [ -z "$dropped" ] || say "dropped" "$CONFIG: $dropped (repos and architects come from the open work)"
 }
 
@@ -790,9 +793,16 @@ register_services() {
 
 # legacy_map_default_repo: the clone of the open work whose repo settings turn legacy.scan on, else empty.
 legacy_map_default_repo() {
-  local path scan clones
-  clones=$(ORCH_HERDR_BIN=$(config_value ORCH_HERDR_BIN) ORCH_ENV=$(config_value ORCH_ENV) "$INSTALL_PYTHON" "$ORCH_REPO/coordinator/watchers/discovery.py" clones 2>/dev/null) || clones=""
-  for path in $clones; do
+  local path scan clones bin socket
+  bin=$(config_value ORCH_HERDR_BIN)
+  socket=$(config_value ORCH_HERDR_SOCKET)
+  clones=$(
+    [ -z "$bin" ] || export HERDR_BIN_PATH="$bin"
+    [ -z "$socket" ] || export HERDR_SOCKET_PATH="$socket"
+    ORCH_ENV="${ENV_NAME:-$(config_value ORCH_ENV)}" "$INSTALL_PYTHON" "$ORCH_REPO/coordinator/watchers/discovery.py" clones 2>/dev/null
+  ) || clones=""
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
     scan=${ORCH_LEGACY_SCAN-}
     if [ -z "${ORCH_LEGACY_SCAN+x}" ]; then
       scan=$(settings_cli repo "$path") || return 2
@@ -802,7 +812,7 @@ legacy_map_default_repo() {
       printf '%s' "$path"
       return
     fi
-  done
+  done <<<"$clones"
 }
 
 # Renders the daily legacy map units of the current platform for registration; off until a repo to map is known.
