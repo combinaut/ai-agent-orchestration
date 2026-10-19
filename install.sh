@@ -520,12 +520,11 @@ upgrade_repo_files() {
   local clone file files=() clones=() line report
   while IFS= read -r clone; do
     [ -z "$clone" ] || clones+=("$clone")
-  done <<<"$(open_work_clones; settings_cli watched "$CONFIG" 2>/dev/null)"
+  done <<<"$(open_work_clones)"
   for file in "$SNIPPET_DIR"/*/*.toml; do
     [ ! -f "$file" ] || files+=("$file")
   done
-  [ ${#files[@]} -gt 0 ] || [ ${#clones[@]} -gt 0 ] || return 0
-  report=$(settings_cli upgrade ${files[@]+"${files[@]}"} --clones ${clones[@]+"${clones[@]}"}) || die "cannot convert the removed legacy settings (see above); edit the file by hand (docs/settings.md, \"Legacy rules\")"
+  report=$(settings_cli upgrade --watched "$CONFIG" ${files[@]+"${files[@]}"} --clones ${clones[@]+"${clones[@]}"}) || die "cannot convert the removed legacy settings (see above); edit the file by hand (docs/settings.md, \"Legacy rules\")"
   [ -n "$report" ] || return 0
   while IFS= read -r line; do
     say "migrated" "$line"

@@ -943,12 +943,13 @@ def main(argv):
             sys.stdout.write(shell_lines(load_repo(argv[2], {})))
         elif command == 'migrate' and len(argv) == 5:
             print('\n'.join(migrate(*argv[2:])))
-        elif command == 'watched' and len(argv) == 3:
-            for path in configured_clones(argv[2]):
-                print(path)
         elif command == 'upgrade' and len(argv) >= 3:
-            files, clones = (argv[2:argv.index('--clones')], argv[argv.index('--clones') + 1:]) if '--clones' in argv else (argv[2:], [])
-            for path in upgrade_targets(files, clones):
+            args, watched = argv[2:], []
+            if '--watched' in args:
+                watched = configured_clones(args[args.index('--watched') + 1])
+                args = args[:args.index('--watched')] + args[args.index('--watched') + 2:]
+            files, clones = (args[:args.index('--clones')], args[args.index('--clones') + 1:]) if '--clones' in args else (args, [])
+            for path in upgrade_targets(files, clones + watched):
                 for line in upgrade(path):
                     print(line)
         elif command == 'example' and len(argv) == 3 and argv[2] in ('global', 'repo'):
@@ -969,7 +970,7 @@ def main(argv):
             print(' '.join(env_names()))
         else:
             print('usage: orch_settings.py global <file> | repo <dir> | migrate <env> <toml> <snippet-dir> '
-                  '| watched <file> | upgrade <repo-file>... [--clones <dir>...] | set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
+                  '| upgrade [--watched <global-file>] <repo-file>... [--clones <dir>...] | set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
             return 2
     except ConfigError as error:
         print(f'ERROR: {error}', file=sys.stderr)

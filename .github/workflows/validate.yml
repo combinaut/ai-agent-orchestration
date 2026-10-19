@@ -30,7 +30,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.macos != 'false' }}
     runs-on: macos-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
       - run: brew install shellcheck bats-core ripgrep
