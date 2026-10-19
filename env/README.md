@@ -32,7 +32,7 @@ Available to both:
 
 | Key | Rows |
 |---|---|
-| `workspaces` | `id`, `label`, `owner` (the architect's workspace id), `status`, `checkout` (the checked-out directory), `repo_root` (the main clone), `gone` (true when the directory the checkout came from no longer exists) |
+| `workspaces` | `id`, `label`, `owner` (the architect's workspace id), `status`, `checkout` (the checked-out directory), `repo_root` (the main clone), `gone` (true when the directory the checkout came from no longer exists, or its worktree lost its main clone) |
 | `panes` | `workspace`, `pane`, `title`, `role`, `agent`, `status`, `cwd` |
 
 An env without the file, or `install.env = "none"`, has no open work: the watchers use the last saved set.

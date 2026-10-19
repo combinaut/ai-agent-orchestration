@@ -4,8 +4,8 @@ import os
 import re
 from pathlib import Path
 
-NOT_A_CHECKOUT = re.compile(r'not a git repository', re.I)
-GONE = re.compile(r'cannot change to .*: No such file or directory', re.I)
+NOT_A_CHECKOUT = re.compile(r'not a git repository \(or any of the parent directories\)', re.I)
+GONE = re.compile(r'cannot change to .*: No such file or directory|not a git repository: |gitfile does not point to a valid repository|invalid gitfile format', re.I)
 
 
 def herdr_bin():
@@ -28,7 +28,7 @@ def open_work(command):
     """{'workspaces': [{id, label, owner, status, checkout, repo_root, gone}], 'panes': [{workspace, pane, title, role, agent, status, cwd}]}.
 
     A workspace Herdr reports without a worktree takes the checkout of its first pane's directory; none when git says it is
-    no checkout, and none with gone=True when the directory is gone. Any other failure raises."""
+    no checkout, and none with gone=True when the directory is gone or its worktree lost its clone. Any other failure raises."""
     workspaces = result(command, 'workspace', 'list')['workspaces']
     panes = result(command, 'pane', 'list')['panes']
     if not isinstance(workspaces, list) or not isinstance(panes, list):

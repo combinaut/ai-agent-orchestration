@@ -17,16 +17,20 @@ WORKSPACES = [
     dict(workspace_id='w4', label='no worktree'),
     dict(workspace_id='w5', label='no checkout'),
     dict(workspace_id='w6', label='directory gone'),
+    dict(workspace_id='w8', label='worktree without its clone'),
     dict(workspace_id='w7', label='moved clone', worktree=dict(checkout_path='/r/moved', repo_root='/r/moved')),
 ]
 PANES = [dict(workspace_id='w4', pane_id='w4:p1', cwd='/wt/tools/x/sub', agent='claude', agent_status='idle'),
          dict(workspace_id='w5', pane_id='w5:p1', cwd='/tmp'),
-         dict(workspace_id='w6', pane_id='w6:p1', cwd='/gone')]
+         dict(workspace_id='w6', pane_id='w6:p1', cwd='/gone'),
+         dict(workspace_id='w8', pane_id='w8:p1', cwd='/wt/orphan')]
 REMOTES = {'/r/web': 'git@github.com:acme/web.git', '/r/WEB2': 'https://github.com/ACME/Web', '/r/lab': 'git@gitlab.com:acme/lab.git',
            '/r/tools': 'https://github.com/acme/tools.git'}
 
 
 def open_work_command(*argv):
+    if argv[0] == 'git' and argv[2] == '/wt/orphan':
+        raise subprocess.CalledProcessError(128, argv, stderr='fatal: not a git repository: /r/removed/.git/worktrees/orphan')
     if argv[0] == 'git' and argv[2] in ('/gone', '/r/moved'):
         raise subprocess.CalledProcessError(128, argv, stderr="fatal: cannot change to '/gone': No such file or directory")
     if argv[1:] == ('workspace', 'list'):
@@ -70,7 +74,7 @@ class DiscoveryTest(IsolatedTestCase):
         self.assertEqual((rows['w4']['checkout'], rows['w4']['repo_root']), ('/wt/tools/x', '/r/tools'))
         self.assertEqual((rows['w5']['checkout'], rows['w5']['repo_root']), (None, None))
         self.assertEqual((rows['w6']['checkout'], rows['w6']['repo_root']), (None, None))
-        self.assertEqual((rows['w5'].get('gone'), rows['w6'].get('gone')), (False, True))
+        self.assertEqual((rows['w5'].get('gone'), rows['w6'].get('gone'), rows['w8'].get('gone')), (False, True, True))
         self.assertEqual(rows['w1']['owner'], 'a')
 
     def test_an_unreadable_pane_checkout_keeps_the_saved_set(self):

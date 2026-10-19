@@ -352,6 +352,25 @@ SH
   [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
 }
 
+@test "an owned workspace whose worktree lost its main clone counts as open work" {
+  rm "$STATUS"
+  mkdir -p "$TMP/orphan"
+  printf 'gitdir: %s\n' "$TMP/removed-clone/.git/worktrees/orphan" >"$TMP/orphan/.git"
+  cat >"$TMP/bin/herdr" <<SH
+#!/bin/sh
+if [ "\$1" = pane ]; then
+  printf '%s\n' '{"result":{"panes":[{"workspace_id":"tooling","terminal_title_stripped":"Architect::Agent::Tooling","tokens":{"role":"architect"},"agent_status":"idle"},{"workspace_id":"w1","pane_id":"w1:p1","cwd":"$TMP/orphan"}]}}'
+else
+  printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"w1","label":"shell","tokens":{"owner":"tooling"}}]}}'
+fi
+SH
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+}
+
 @test "an owned shell workspace outside any checkout is not open work" {
   rm "$STATUS"
   mkdir -p "$TMP/plain"
