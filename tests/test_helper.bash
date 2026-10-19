@@ -16,6 +16,14 @@ setup_fixture() {
   export LAUNCHCTL_CALLS="$TMP/launchctl.calls" SYSTEMCTL_CALLS="$TMP/systemctl.calls"
   export ORCH_ENV=none
   export ORCH_LAUNCHD_WAIT_TRIES=2 ORCH_LAUNCHD_WAIT_SLEEP=0
+  # Each test runs on its own copy of the service stubs, which tests rename.
+  cp -R "$BATS_SERVICE_STUB_SOURCE" "$TMP/service-stubs"
+  PATH=":$PATH:"
+  PATH=${PATH//":$BATS_SERVICE_STUB_SOURCE:"/:}
+  PATH=${PATH#:}
+  PATH=${PATH%:}
+  BATS_SERVICE_STUB_BIN="$TMP/service-stubs" BATS_SERVICE_STUB_SOURCE="$TMP/service-stubs"
+  export BATS_SERVICE_STUB_BIN BATS_SERVICE_STUB_SOURCE
   export PATH="$BATS_SERVICE_STUB_BIN:$BIN:$PATH"
   # Apply only inside this fixture, including repositories product code creates later.
   export GIT_CONFIG_COUNT=3
