@@ -9,9 +9,11 @@ import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
-from legacy_rules import RULES_PATH, parse_rules, python_problem
+from legacy_rules import FRONTEND_EXTENSIONS, RULES_PATH, parse_rules
 import alert_policy
 from watcher_platform import MissingMetric, herdr_bin, read_slots
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'lib'))
+import orch_settings
 
 
 SELECTION = '''number title state isDraft mergeable baseRefName headRefName headRefOid headRepository{nameWithOwner}
@@ -25,6 +27,11 @@ nodes{... on CheckRun{name conclusion startedAt} ... on StatusContext{context st
 QUERY = '''query($q:String!,$np:Int!,$ni:Int!,$cursor:String){
 search(query:$q,type:ISSUE,first:$np,after:$cursor){pageInfo{hasNextPage endCursor}
 nodes{... on PullRequest{''' + SELECTION + '}}}}'
+LEGACY_PATTERN = re.compile(r'\$\(|jQuery|\$\.ajax|ajax:(success|complete|error|send)|jquery_ujs|jquery-ujs|rails-ujs|data-remote|remote: *true|\.trigger\(|select2')
+BUILTIN_EXEMPT = ('scripts/legacy-deletion-ratchet.mjs', 'scripts/legacy-deletion-ratchet-rules.json')
+LEGACY_KINDS = ('JSERB', 'JQUERY', 'LEGACY', 'TEST')
+TEST_PATH = re.compile(r'(^|/)(spec|test|tests)/|[._-](spec|test)\.[^/]*$')
+NOT_FRONTEND = ('.sh', '.bash', '.md')
 NOT_FOUND = re.compile(r'HTTP 404')
 HUNK = re.compile(r'@@ -\d+(?:,\d+)? \+(\d+)')
 TOO_LARGE = re.compile(r'too_large|too large|exceeded the maximum number of files', re.I)
@@ -41,6 +48,23 @@ def positive_setting(name, default, maximum=None):
     if value <= 0 or (maximum and value > maximum):
         raise ValueError(f'{name} must be between 1 and {maximum or "a positive integer"}')
     return value
+
+
+def legacy_patterns(settings=None):
+    extra = (os.environ if settings is None else settings).get('ORCH_LEGACY_EXTRA_PATTERN', '')
+    try:
+        return (LEGACY_PATTERN, re.compile(extra)) if extra else (LEGACY_PATTERN,)
+    except re.error as error:
+        raise ValueError(f'ORCH_LEGACY_EXTRA_PATTERN is not a valid regex: {error}') from error
+
+
+def exempt_paths(settings=None):
+    return BUILTIN_EXEMPT + tuple((os.environ if settings is None else settings).get('ORCH_LEGACY_EXEMPT_PATHS', '').split())
+
+
+def builtin_fingerprint(settings=None):
+    values = json.dumps([(os.environ if settings is None else settings).get('ORCH_LEGACY_EXTRA_PATTERN', ''), exempt_paths(settings)])
+    return 'builtin:' + hashlib.sha256(values.encode()).hexdigest()
 
 
 def fetch_prs(command, page_nodes=None):
@@ -67,6 +91,18 @@ def fetch_prs(command, page_nodes=None):
         if not next_cursor or next_cursor == cursor:
             raise ValueError('search cursor did not advance')
         cursor = next_cursor
+
+
+def classify(path, text, settings=None):
+    if path.endswith('.js.erb'):
+        return 'JSERB'
+    if path.endswith(NOT_FRONTEND):
+        return None
+    if path.endswith(FRONTEND_EXTENSIONS) and any(pattern.search(text) for pattern in legacy_patterns(settings)):
+        if TEST_PATH.search(path):
+            return 'TEST'
+        return 'LEGACY' if path.startswith('app/assets/javascripts/') else 'JQUERY'
+    return 'LEGACY' if path.startswith('app/assets/javascripts/') else None
 
 
 ESCAPES = {'a': 7, 'b': 8, 't': 9, 'n': 10, 'v': 11, 'f': 12, 'r': 13, '"': 34, '\\': 92}
@@ -246,13 +282,34 @@ def files_added(pages):
     return [(path, text) for path, _, text, added in files_lines(pages) if added]
 
 
-def base_rules(command, repo, base, cache):
-    """(rules, sha256) of the rules file on the PR's base ref, (None, '') without one; read once per base per pass."""
-    branch = base['baseRefName']
-    key = (repo, branch)
+def repo_settings(command, repo, ref, cache):
+    """Repo settings for a PR: the base ref's committed file, then the personal file of a watched clone."""
+    key = ('settings', repo, ref)
     if key not in cache:
         try:
-            ref = urllib.parse.quote(branch, safe='')
+            path = f'repos/{repo}/contents/{orch_settings.REPO_FILE}?ref={urllib.parse.quote(ref, safe="")}'
+            try:
+                text = command('gh', 'api', '-H', RAW, path)
+            except MissingMetric:
+                text = ''
+            except subprocess.CalledProcessError as error:
+                if not NOT_FOUND.search(error_detail(error)):
+                    raise
+                text = ''
+            cache[key] = orch_settings.load_remote(repo, ref, text, orch_settings.known_clone(repo))
+        except READ_ERRORS as error:
+            cache[key] = error
+    if isinstance(cache[key], Exception):
+        raise cache[key]
+    return cache[key]
+
+
+def base_rules(command, repo, base, cache):
+    default = base['repository']['defaultBranchRef']['name']
+    key = (repo, default)
+    if key not in cache:
+        try:
+            ref = urllib.parse.quote(default, safe='')
             try:
                 try:
                     text = command('gh', 'api', '-H', RAW,
@@ -264,7 +321,10 @@ def base_rules(command, repo, base, cache):
                     raise
                 cache[key] = (None, '')
             else:
-                cache[key] = (parse_rules(text, f'{repo}@{branch} {RULES_PATH}'), hashlib.sha256(text.encode()).hexdigest())
+                try:
+                    cache[key] = (parse_rules(text), hashlib.sha256(text.encode()).hexdigest())
+                except ValueError as error:
+                    raise ValueError(f'{repo}@{default} {RULES_PATH}: {error}') from error
         except READ_ERRORS as error:
             cache[key] = error
     if isinstance(cache[key], Exception):
@@ -272,18 +332,19 @@ def base_rules(command, repo, base, cache):
     return cache[key]
 
 
-def legacy_scan(command, repo, number, base=None, cache=None):
-    """(kind, path, text) for each added line the base ref's rules count; None when the base has no rules file."""
-    base = {} if base is None else base
-    if not base:
-        base.update(json.loads(command('gh', 'pr', 'view', str(number), '-R', repo, '--json',
-                                       'baseRefName,headRefOid,headRepository,headRepositoryOwner')))
+def legacy_scan(command, repo, number, base=None, cache=None, bridged=None):
+    if base is None:
+        base = json.loads(command('gh', 'pr', 'view', str(number), '-R', repo, '--json',
+                                  'baseRefName,headRefOid,headRepository,headRepositoryOwner'))
         owner, head = base.pop('headRepositoryOwner', None), base.pop('headRepository', None)
         if owner and head:
             base['headRepository'] = dict(nameWithOwner=f"{owner['login']}/{head['name']}")
-    rules = base_rules(command, repo, base, {} if cache is None else cache)[0]
-    if rules is None:
-        return None
+    if 'repository' not in base:
+        default = command('gh', 'api', f'repos/{repo}', '--jq', '.default_branch').strip()
+        base['repository'] = dict(defaultBranchRef=dict(name=default))
+    cache = {} if cache is None else cache
+    settings = repo_settings(command, repo, base['baseRefName'], cache)
+    rules = base_rules(command, repo, base, cache)[0]
     try:
         lines = list(diff_lines(command('gh', 'pr', 'diff', str(number), '-R', repo)))
     except subprocess.CalledProcessError as error:
@@ -291,17 +352,22 @@ def legacy_scan(command, repo, number, base=None, cache=None):
             raise
         pages = command('gh', 'api', '--paginate', f'repos/{repo}/pulls/{number}/files?per_page=100')
         lines = list(files_lines(pages, ContentReader(command, repo, base)))
-    return rules.scan(lines)
+    if rules:
+        return rules.scan(lines, bridged)
+    legacy_patterns(settings)
+    exempt = exempt_paths(settings)
+    return [(kind, path, text) for path, _, text, added in lines
+            if added and path not in exempt and (kind := classify(path, text, settings))]
 
 
-def legacy_line(label, hits, kinds):
+def legacy_line(label, hits):
     if not hits:
         return ''
-    counts = {kind: sum(hit[0] == kind for hit in hits) for kind in kinds}
+    counts = {kind: sum(hit[0] == kind for hit in hits) for kind in LEGACY_KINDS}
     return f'LEGACY {label} [{len(hits)} lines: ' + ', '.join(f'{kind} {count}' for kind, count in counts.items()) + ']'
 
 
-def pr_lines(pr, page_nodes=100):
+def pr_lines(pr, page_nodes=100, settings=None):
     if pr['state'] != 'OPEN':
         return []
     label = f"{pr['repository']['nameWithOwner']}#{pr['number']} {pr['title']}"
@@ -353,38 +419,37 @@ def pr_lines(pr, page_nodes=100):
             emit('APPROVED')
         else:
             detail = 'base ' + pr['baseRefName']
-            gates = set(filter(None, os.environ.get('ORCH_MERGE_GATE_CHECKS', '').split('|')))
+            try:
+                gates = set(filter(None, (settings() if settings else os.environ).get('ORCH_MERGE_GATE_CHECKS', '').split('|')))
+            except READ_ERRORS as error:
+                detail += f', full CI unknown: {error_detail(error)}'
+                gates = set()
             if gates:
                 detail += ', full CI ran' if gates.intersection(checks) else ', full CI not run'
             emit('APPROVED-STACKED', detail)
     return lines
 
 
-def legacy_entries(command, prs, cache):
-    repos = os.environ.get('ORCH_LEGACY_REPOS', '').split()
+def legacy_entries(command, prs, cache, rules=None):
     budget = positive_setting('ORCH_LEGACY_SCANS_MAX', 10)
-    entries, rules = {}, {}
-    prs = [pr for pr in prs if pr['state'] == 'OPEN' and pr['repository']['nameWithOwner'] in repos]
-    problem = python_problem()
-    if prs and problem:
-        return dict(python=dict(head='', base='', failed=True, line=f'READFAIL LEGACY python: {problem}'))
+    entries, rules = {}, {} if rules is None else rules
     for pr in prs:
         repo = pr['repository']['nameWithOwner']
+        if pr['state'] != 'OPEN':
+            continue
         key = f"{repo}#{pr['number']}"
         old = cache.get(key)
         try:
-            parsed, fingerprint = base_rules(command, repo, pr, rules)
-            if parsed is None:
-                branch = pr['baseRefName']
-                entries[f'{repo}@{branch}'] = dict(head='', base=branch, line=(
-                    f'NORULES LEGACY {repo}@{branch} [no {RULES_PATH} on {branch}; its PRs are not scanned]'))
-            elif old and old['head'] == pr['headRefOid'] and old.get('rules') == fingerprint and old.get('base') == pr['baseRefName']:
+            settings = repo_settings(command, repo, pr['baseRefName'], rules)
+            if settings['ORCH_LEGACY_SCAN'] != '1':
+                continue
+            fingerprint = base_rules(command, repo, pr, rules)[1] or builtin_fingerprint(settings)
+            if old and old['head'] == pr['headRefOid'] and old.get('rules') == fingerprint and old.get('base') == pr['baseRefName']:
                 entries[key] = old
             elif budget > 0:
                 budget -= 1
                 hits = legacy_scan(command, repo, pr['number'], pr, rules)
-                entries[key] = dict(head=pr['headRefOid'], base=pr['baseRefName'], rules=fingerprint,
-                                    line=legacy_line(f"{key} {pr['title']}", hits, parsed.kinds))
+                entries[key] = dict(head=pr['headRefOid'], base=pr['baseRefName'], rules=fingerprint, line=legacy_line(f"{key} {pr['title']}", hits))
             elif old:
                 entries[key] = old
         except READ_ERRORS as error:
@@ -396,10 +461,12 @@ def legacy_entries(command, prs, cache):
 def github_lines(command, cache=None, entries=None):
     page_nodes = positive_setting('ORCH_AUDIT_PAGE_NODES', 100, 100)
     prs = fetch_prs(command, page_nodes)
-    found = legacy_entries(command, prs, cache or {})
+    rules = {}
+    found = legacy_entries(command, prs, cache or {}, rules)
     if entries is not None:
         entries.update(found)
-    return [line for pr in prs for line in pr_lines(pr, page_nodes)]
+    return [line for pr in prs for line in pr_lines(
+        pr, page_nodes, lambda pr=pr: repo_settings(command, pr['repository']['nameWithOwner'], pr['baseRefName'], rules))]
 
 
 def workspace_lines(command):
@@ -525,26 +592,21 @@ def reduce(before, raw):
 
 def main(argv):
     from watchers import command
-    repos = os.environ.get("ORCH_LEGACY_REPOS", "").split()
-    if len(argv) not in (2, 3) or (len(argv) == 2 and len(repos) != 1):
+    repo = argv[2] if len(argv) == 3 else os.environ.get('ORCH_WATCHERS_PRIMARY_REPO', '')
+    if len(argv) not in (2, 3) or not repo:
         print(
-            "usage: audit.py <pr-number> [repo] (or set one ORCH_LEGACY_REPOS repo)", file=sys.stderr)
+            "usage: audit.py <pr-number> [repo] (or set watchers.primary_repo)", file=sys.stderr)
         return 2
-    repo = argv[2] if len(argv) == 3 else repos[0]
-    base = {}
+    bridged = []
     try:
-        problem = python_problem()
-        if problem:
-            raise ValueError(problem)
-        hits = legacy_scan(command, repo, int(argv[1]), base)
+        hits = legacy_scan(command, repo, int(argv[1]), bridged=bridged)
     except READ_ERRORS as error:
         print(f'legacy-scan failed: {error_detail(error)}', file=sys.stderr)
         return 1
-    if hits is None:
-        print(f"legacy-scan: {repo}@{base['baseRefName']} has no {RULES_PATH}; nothing to scan", file=sys.stderr)
-        return 0
     for kind, path, text in hits:
         print(f'{kind:<6} {path}: {text}')
+    for path, text in bridged:
+        print(f'{"BRIDGE":<6} {path}: {text}')
     return 0
 
 

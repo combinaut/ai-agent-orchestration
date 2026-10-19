@@ -284,12 +284,14 @@ class RuntimeTests(IsolatedTestCase):
 
     def test_swallowed_soft_timeout_still_reaches_cycle(self):
         with tempfile.TemporaryDirectory() as tmp:
-            result = self.child("import time; import watchers as w; from pathlib import Path\n"
+            # Deliver the soft alarm at a known point, leaving the normal hard
+            # budget for failure publication even on a busy host.
+            result = self.child("import signal; import watchers as w; from pathlib import Path\n"
                                 "def collector(before):\n"
-                                "    try: time.sleep(0.2)\n"
+                                "    try: signal.raise_signal(signal.SIGALRM)\n"
                                 "    except OSError: pass\n"
                                 "    return {'sources':{},'unreadable':{},'legacy':{}}\n"
-                                f"print(w.cycle(Path({tmp!r}),'audit',collector,failures=1,budget=0.05),flush=True)\n")
+                                f"print(w.cycle(Path({tmp!r}),'audit',collector,failures=1),flush=True)\n")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('audit read failed', result.stdout)
             import json
@@ -466,12 +468,13 @@ class RuntimeTests(IsolatedTestCase):
 
     def test_no_new_command_starts_after_swallowed_soft_timeout(self):
         with tempfile.TemporaryDirectory() as tmp:
-            result = self.child("import time,sys; import watchers as w; import watcher_runtime as r; from pathlib import Path\n"
+            # Catch the soft alarm before attempting the next command.
+            result = self.child("import signal,sys; import watchers as w; import watcher_runtime as r; from pathlib import Path\n"
                                 "def collector(before):\n"
-                                "    try: time.sleep(1)\n"
+                                "    try: signal.raise_signal(signal.SIGALRM)\n"
                                 "    except OSError: pass\n"
                                 "    print(r.run([sys.executable,'-c',\"print('should-not-start')\"]).stdout,flush=True)\n"
-                                f"print(w.cycle(Path({tmp!r}),'audit',collector,failures=1,budget=0.15),flush=True)\n")
+                                f"print(w.cycle(Path({tmp!r}),'audit',collector,failures=1),flush=True)\n")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('audit read failed', result.stdout)
         self.assertNotIn('should-not-start', result.stdout)

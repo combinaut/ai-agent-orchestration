@@ -115,7 +115,7 @@ templates, are registered as active jobs (see the top-level README, install step
 
 ## Feed delivery
 
-`notify-inbox.py --deliver file` passes every new alert through `alert_policy.py` and appends the lines it returns to `prod-context/coordinator-feed.log`; preview mode (no `--deliver`) prints the raw alert line. `notify-inbox.sh` loads `ORCH_CONFIG` (default `~/.claude/orchestration.env`) the way every watcher wrapper does, the environment winning, then runs `notify-inbox.py`; the services start the wrapper. The alert and state files keep every event.
+`notify-inbox.py --deliver file` passes every new alert through `alert_policy.py` and appends the lines it returns to `prod-context/coordinator-feed.log`; preview mode (no `--deliver`) prints the raw alert line. `notify-inbox.sh` loads `ORCH_CONFIG` (default `~/.claude/orchestration.toml`) the way every watcher wrapper does, the environment winning, then runs `notify-inbox.py`; the services start the wrapper. The alert and state files keep every event.
 
 The feed is mode 0600 and append-only; each batch is one `O_APPEND` write of whole lines, `<local ISO time> <mode>: <text> (<reason>)`. At 1 MiB it rotates to `coordinator-feed.log.1`, replacing the previous backup, so the feed takes at most 2 MiB. A single batch over 1 MiB keeps its newest lines that fit, after `watchers: <n> feed lines over the size cap dropped (digest)`.
 
@@ -139,7 +139,7 @@ The Monitor's follower writes `<inode> <attached> <consumed>` into its heartbeat
 
 ### PR events
 
-`com.combinaut.coord-watcher-pulls` runs `coord-pulls-watch.sh` every 150 seconds with the audit's settings (`ORCH_PR_AUTHOR`, `ORCH_PR_REPOS`, `ORCH_PR_SINCE`, `ORCH_BOT_REVIEWER_LOGIN`, `ORCH_MERGE_GATE_CHECKS`, `ORCH_AUDIT_PAGE_PRS`, `ORCH_AUDIT_PAGE_NODES`). Each poll makes one GraphQL search per page of `ORCH_AUDIT_PAGE_PRS` open PRs, at most 10 `gh api repos/<repo>/pulls/<n>` reads for PRs that left the open list, right after the search in their own 60-second window, fewest failed reads first (the rest wait for the next poll), then one `herdr workspace list`, one `git remote get-url origin` per repository root, and one `git worktree list` for each root whose remote is a watched repository; a root that fails is skipped and named by `PULLS READFAIL owners`, and only PRs of that root's repository (its `owner/name`, or every repository of that name when its remote could not be read) keep their last known owner. A failed read is `PULLS READFAIL pr:<repo>#<n>` and does not stop the others; a PR that left the search but is still open stops being tracked, its active lines cleared; each command times out after 45 seconds. Its first read emits only `PULLS BASELINE [<n> active lines]` and saves active lines and read failures silently; a read failure that persists to the next poll then emits once. Later polls emit `<kind> <repo>#<n> owner=<workspace or ?> <title> [<detail>]` when an `APPROVED`, `APPROVED-OLDHEAD`, `APPROVED-STACKED`, `RED`, `CHANGES`, `THREADS` or `COPILOT` line appears, `<kind> <repo>#<n> cleared` when it goes, and `MERGED` or `CLOSED` when the PR leaves the open list.
+`com.combinaut.coord-watcher-pulls` runs `coord-pulls-watch.sh` every 150 seconds with the audit's settings (`ORCH_PR_AUTHOR`, `ORCH_PR_REPOS`, `ORCH_PR_SINCE`, `ORCH_BOT_REVIEWER_LOGIN`, `ORCH_AUDIT_PAGE_PRS`, `ORCH_AUDIT_PAGE_NODES`, and each repo's `audit.merge_gate_checks`, read only for approved PRs on a non-default base). Each poll makes one GraphQL search per page of `ORCH_AUDIT_PAGE_PRS` open PRs, at most 10 `gh api repos/<repo>/pulls/<n>` reads for PRs that left the open list, right after the search in their own 60-second window, fewest failed reads first (the rest wait for the next poll), then one `herdr workspace list`, one `git remote get-url origin` per repository root, and one `git worktree list` for each root whose remote is a watched repository; a root that fails is skipped and named by `PULLS READFAIL owners`, and only PRs of that root's repository (its `owner/name`, or every repository of that name when its remote could not be read) keep their last known owner. A failed read is `PULLS READFAIL pr:<repo>#<n>` and does not stop the others; a PR that left the search but is still open stops being tracked, its active lines cleared; each command times out after 45 seconds. Its first read emits only `PULLS BASELINE [<n> active lines]` and saves active lines and read failures silently; a read failure that persists to the next poll then emits once. Later polls emit `<kind> <repo>#<n> owner=<workspace or ?> <title> [<detail>]` when an `APPROVED`, `APPROVED-OLDHEAD`, `APPROVED-STACKED`, `RED`, `CHANGES`, `THREADS` or `COPILOT` line appears, `<kind> <repo>#<n> cleared` when it goes, and `MERGED` or `CLOSED` when the PR leaves the open list.
 
 The owner is the `owner` tag of the Herdr workspace whose worktree has the PR's head branch checked out, matched by the repository's `owner/name` from its `origin` remote. The owner token always follows `<repo>#<n>`, so a PR title cannot claim one and truncation cannot drop it. The notifier sends each pulls `start` with an owner to `bindings/architect-<owner>.json` through the native channel as `pulls: <kind> <repo>#<n> (start); read the PR on GitHub` — native messages never carry PR titles or details — and writes the full line to the feed; without an owner or a binding the line stays in the feed. A failed owner lookup is `PULLS READFAIL owners`; known owners are kept and events still flow.
 
@@ -267,7 +267,7 @@ watchers.py. Audit heartbeat staleness starts at 4500 seconds, allowing a full 1
 soft pass budget plus its 1800-second interval and 15 minutes of slack. Other modes retain their 900-second threshold.
 
 The audit uses ORCH_PR_AUTHOR, ORCH_PR_REPOS, optional ORCH_PR_SINCE,
-ORCH_BOT_REVIEWER_LOGIN, ORCH_MERGE_GATE_CHECKS and existing page/limit settings.
+ORCH_BOT_REVIEWER_LOGIN and existing page/limit settings, and each repo's `audit.merge_gate_checks`.
 Each pass uses one GraphQL search, paged as needed, with all PR fields bundled.
 The PR list itself needs no per-PR calls; only the LEGACY scan below makes them. Nested checks/threads exceeding ORCH_AUDIT_PAGE_NODES
 emit the existing TRUNCATED line, so incomplete evidence remains visible.
@@ -286,10 +286,10 @@ use 20, with the configured thresholds deciding when to alert.
 `LEGACY <repo>#<n> <title> [<count> lines: JSERB a, JQUERY b, LEGACY c, TEST d]`
 lists lines an open PR adds that build on legacy front-end code: `.js.erb` files,
 jQuery/ujs/Select2 patterns, edits under `app/assets/javascripts/`, and those
-patterns in spec/test files. The scan runs for PRs in ORCH_LEGACY_REPOS (empty by default; no scans until configured) when a PR is first seen, when its head SHA changes, when its base branch changes, or when the rules file on its default branch changes, at most ORCH_LEGACY_SCANS_MAX PRs per
+patterns in spec/test files. The scan runs for PRs of repos whose repo settings turn `legacy.scan` on (off by default; read from the `.orchestration.toml` of the PR's base branch, then the `.orchestration.local.toml` of a watched clone) when a PR is first seen, when its head SHA changes, when its base branch changes, or when the rules file on its default branch changes, at most ORCH_LEGACY_SCANS_MAX PRs per
 pass (default 10; the rest wait for the next pass), and a head with a count above
 zero emits one line. Results are kept in `audit.json` → `before.legacy`, and the
-first read emits `AUDIT BASELINE legacy`. Each scan costs one `gh pr diff` call; every pass also makes one rules-file read per repository default branch of the scanned repos' open PRs. A PR over 300 files makes `gh pr diff`
+first read emits `AUDIT BASELINE legacy`. Each scan costs one `gh pr diff` call; every pass also makes one rules-file read per repository default branch of the scanned repos' open PRs, and one `.orchestration.toml` read per repository base branch of the open PRs. A PR over 300 files makes `gh pr diff`
 fail with `too_large`; the scan then reads the `pulls/<n>/files` patches, 100 files per page,
 and classifies them identically. GitHub leaves `patch` out of big file entries; the scan then reads
 the file at the PR head with the contents API (`added`), or the head and merge-base versions
@@ -298,7 +298,7 @@ files need no read. The added-line count must equal the entry's `additions`, or 
 `ORCH_LEGACY_READS_MAX` reads per PR (default 20; more fails the scan), each under the 45s
 command timeout, files over 1,000,000 bytes fail the scan, and binary files (NUL byte or not UTF-8)
 are skipped with a `legacy-scan skipped binary file <path>` line on stderr. A rules or scan failure becomes that PR’s `READFAIL LEGACY <repo>#<n> <title>: <reason>` entry, retried on later passes; other PR scans and own-PR review/check lines keep reporting. The classifier lives only in `audit.py` (built-in rules) and
-`legacy_rules.py` (the repository's rules file); `coordinator/legacy-scan.sh <pr> [repo]` uses the sole `ORCH_LEGACY_REPOS` entry when no repo is supplied; with zero or multiple entries, pass the repo explicitly. It is a
+`legacy_rules.py` (the repository's rules file); `coordinator/legacy-scan.sh <pr> [repo]` uses `watchers.primary_repo` when no repo is supplied. It is a
 thin CLI over it that prints the matching lines.
 
 If the repository has `scripts/legacy-deletion-ratchet-rules.json` on the repository's **default** branch

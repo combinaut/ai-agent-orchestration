@@ -7,8 +7,9 @@ setup() {
   export ORCH_HEAVY_SLOTS_DIR="$TMP/slots"
   export ORCH_HEAVY_SLOTS_MAX=4
   export TEST_ROOT="$TMP"
+  export HOME="$TMP/home"
   TEST_HOME=
-  mkdir -p "$ORCH_HEAVY_SLOTS_DIR"
+  mkdir -p "$ORCH_HEAVY_SLOTS_DIR" "$HOME"
 }
 
 teardown() {
@@ -65,21 +66,28 @@ raise SystemExit(result.returncode)
   [ "$output" = "heavy-slot: cannot load $config: not a regular file" ]
 }
 
-@test "a valid configuration may end with a non-zero command" {
-  config="$TMP/nonzero-tail.env"
-  printf '%s\n' 'ORCH_HEAVY_SLOTS_MAX=6' 'false' >"$config"
+@test "a valid configuration sets the slot limit" {
+  config="$TMP/valid.toml"
+  printf '[heavy_slots]\nmax = 6\n' >"$config"
   run env -u ORCH_HEAVY_SLOTS_MAX ORCH_CONFIG="$config" "$HELPER" count
   [ "$status" -eq 0 ]
   [ "$output" = 0 ]
 }
 
-@test "an unset expansion in configuration follows the load contract" {
-  config="$TMP/nounset.env"
-  # shellcheck disable=SC2016 # The sourced configuration expands this variable.
-  printf '%s\n' ': "$UNSET_HEAVY_SLOT_CONFIG_VALUE"' >"$config"
+@test "an unknown key in the configuration fails loudly" {
+  config="$TMP/unknown.toml"
+  printf '[heavy_slots]\nmaxx = 6\n' >"$config"
   run env -u ORCH_HEAVY_SLOTS_MAX ORCH_CONFIG="$config" "$HELPER" count
-  [ "$status" -eq 0 ]
-  [ "$output" = 0 ]
+  [ "$status" -eq 78 ]
+  [ "$output" = "heavy-slot: cannot load $config: heavy_slots.maxx: unknown key" ]
+}
+
+@test "a missing default configuration beside an old orchestration.env asks for install.sh" {
+  mkdir -p "$HOME/.claude"
+  printf 'ORCH_HEAVY_SLOTS_MAX="6"\n' >"$HOME/.claude/orchestration.env"
+  run env -u ORCH_HEAVY_SLOTS_MAX -u ORCH_CONFIG "$HELPER" count
+  [ "$status" -eq 78 ]
+  [ "$output" = "heavy-slot: cannot load $HOME/.claude/orchestration.toml: missing; run install.sh to convert $HOME/.claude/orchestration.env" ]
 }
 
 @test "a missing relative nested configuration path terminates" {
@@ -148,28 +156,31 @@ raise SystemExit(result.returncode)
 0" ]
 }
 
-@test "an explicit slot limit still sources the configuration" {
-  config="$TMP/override.env"
+@test "an explicit slot limit still reads the configuration and an exported slot directory wins" {
+  config="$TMP/override.toml"
   configured_dir="$TMP/configured-slots"
   mkdir -p "$configured_dir"
-  printf '%s\n' "ORCH_HEAVY_SLOTS_DIR=$configured_dir" >"$config"
+  printf '[heavy_slots]\ndir = "%s"\n' "$configured_dir" >"$config"
   printf '%s\n' "$$" >"$configured_dir/agent-config"
-  run env ORCH_HEAVY_SLOTS_MAX=8 ORCH_CONFIG="$config" "$HELPER" count
+  run env -u ORCH_HEAVY_SLOTS_DIR ORCH_HEAVY_SLOTS_MAX=8 ORCH_CONFIG="$config" "$HELPER" count
   [ "$status" -eq 0 ]
   [ "$output" = 1 ]
+  run env ORCH_HEAVY_SLOTS_MAX=8 ORCH_CONFIG="$config" "$HELPER" count
+  [ "$status" -eq 0 ]
+  [ "$output" = 0 ]
 }
 
 @test "an explicit slot limit uses defaults for a syntax-broken configuration" {
-  config="$TMP/syntax-broken.env"
+  config="$TMP/syntax-broken.toml"
   configured_dir="$TMP/partially-configured-slots"
   TEST_HOME=$(mktemp -d "${TMPDIR:-/tmp}/heavy-slot-home.XXXXXX")
   mkdir -p "$configured_dir"
-  printf '%s\n' "ORCH_HEAVY_SLOTS_DIR=$configured_dir" 'if then' >"$config"
+  printf '[heavy_slots]\ndir = "%s"\nif then\n' "$configured_dir" >"$config"
   printf '%s\n' "$$" >"$configured_dir/agent-config"
   run env -u ORCH_HEAVY_SLOTS_DIR HOME="$TEST_HOME" ORCH_HEAVY_SLOTS_MAX=8 ORCH_CONFIG="$config" "$HELPER" count
   [ "$status" -eq 0 ]
-  [ "$output" = "heavy-slot: cannot load $config: syntax error; using defaults
-0" ]
+  [[ "$output" == "heavy-slot: cannot load $config: invalid TOML: "*"; using defaults
+0" ]]
 }
 
 install_disappearing_mkdir() {

@@ -142,8 +142,37 @@ prepare_plugin() {
   fi
 }
 
+# radar_daemon <checkout>: pid of the daemon answering this Herdr session's control endpoint, empty when none does.
+radar_daemon() {
+  "$RADAR_NODE" -e 'require(process.argv[1] + "/lib/control").request({ cmd: "ping" }).then((r) => { if (r && r.ok && r.pid) console.log(r.pid); })' "$1" 2>/dev/null || true
+}
+
+# radar_daemon_wait <stop|start> <checkout> <pid before>: succeeds once this session's daemon is not the pid before (stop) or is a running pid other than it (start).
+radar_daemon_wait() {
+  local mode=$1 tries=${ORCH_RADAR_WAIT_TRIES:-40} now
+  while :; do
+    now=$(radar_daemon "$2")
+    if [ "$mode" = stop ]; then
+      [ "$now" != "$3" ] && return 0
+    else
+      [ -n "$now" ] && [ "$now" != "$3" ] && return 0
+    fi
+    tries=$((tries - 1))
+    [ "$tries" -gt 0 ] || return 1
+    sleep "${ORCH_RADAR_WAIT_SLEEP:-0.5}"
+  done
+}
+
+radar_start() {
+  local status=0
+  herdr_config_snapshot
+  platform_run_detached "$HERDR_EXE" plugin action invoke "$RADAR_ID.state-start" >/dev/null || status=$?
+  herdr_config_check
+  [ "$status" = 0 ] || die "Radar state-start failed (status $status); run install.sh again"
+}
+
 env_install() {
-  local pin path url head moved=0 source origin status
+  local pin path url head moved=0 source origin known=""
   pin=$(tr -d '[:space:]' <"$ENV_DIR/radar.pin")
   path=$(config_value ORCH_RADAR_PATH)
   if [ -z "$path" ]; then
@@ -195,13 +224,15 @@ env_install() {
     say "already linked" "Herdr plugin $RADAR_ID -> $RADAR_PLUGIN"
   fi
   if [ "$moved" = 1 ]; then
+    known=$(radar_daemon "$path")
     "$HERDR_EXE" plugin action invoke "$RADAR_ID.state-stop" >/dev/null
+    [ -z "$known" ] || radar_daemon_wait stop "$path" "$known" || say "note" "the Radar daemon did not exit after state-stop; starting anyway"
   fi
-  herdr_config_snapshot
-  status=0
-  platform_run_detached "$HERDR_EXE" plugin action invoke "$RADAR_ID.state-start" >/dev/null || status=$?
-  herdr_config_check
-  [ "$status" = 0 ] || die "Radar state-start failed (status $status); run install.sh again"
+  radar_start
+  if ! radar_daemon_wait start "$path" "$known"; then
+    radar_start
+    radar_daemon_wait start "$path" "$known" || die "Radar daemon is not running after state-start; run install.sh again, or see: $HERDR_EXE plugin log"
+  fi
   say "running" "Radar daemon (mise Node $RADAR_NODE)"
 }
 

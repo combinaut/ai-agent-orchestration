@@ -6,6 +6,8 @@
 	<dict>
 		<key>ORCH_CONFIG</key>
 		<string>@ORCH_CONFIG@</string>
+		<key>ORCH_PYTHON3</key>
+		<string>@ORCH_SERVICE_PYTHON@</string>
 		<key>HERDR_BIN_PATH</key>
 		<string>@ORCH_HERDR_BIN@</string>
 		<key>HERDR_ENV</key>

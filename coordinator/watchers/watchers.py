@@ -432,17 +432,24 @@ def collect_pulls(command, before, clock=time.monotonic):
     if roots:
         unreadable = ["owners"]
     unresolved = set(roots)
-    current = {}
+    current, settings, settings_failed = {}, {}, []
     for pr in prs:
         key = f"{pr['repository']['nameWithOwner']}#{pr['number']}"
-        lines = {line.split(" ", 1)[0]: line for line in audit.pr_lines(pr, page_nodes)
+
+        def repo_settings(pr=pr, key=key):
+            try:
+                return audit.repo_settings(command, pr["repository"]["nameWithOwner"], pr["baseRefName"], settings)
+            except audit.READ_ERRORS:
+                settings_failed.append(f"settings:{key}")
+                raise
+        lines = {line.split(" ", 1)[0]: line for line in audit.pr_lines(pr, page_nodes, repo_settings)
                  if line.split(" ", 1)[0] in alert_policy.PULL_KINDS}
         repo = pr["repository"]["nameWithOwner"].lower()
         kept = lookup_failed or repo in unresolved or "*/" + repo.split("/")[-1] in unresolved
         owner = owners.get(key) or (known.get(key, {}).get("owner") if kept else None)
         current[key] = dict(title=pr["title"], owner=owner, lines=lines)
     return dict(prs=current, departed=departed, failed=failed,
-                unreadable=unreadable + [f"pr:{key}" for key in sorted(failed + waiting)])
+                unreadable=unreadable + [f"pr:{key}" for key in sorted(failed + waiting)] + sorted(set(settings_failed)))
 
 
 def pull_line(line, key, owner):

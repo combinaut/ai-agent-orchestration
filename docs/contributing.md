@@ -10,4 +10,4 @@ It runs the Bats suites, the guard tests, the watcher tests and the Chrome exten
 
 ## Contributing
 
-Changes go through a pull request against `main`; CI runs ShellCheck and `tests/run.sh`. The Herdr Radar fork is pinned to one commit in `env/herdr/radar.pin`; move the pin in a PR.
+Changes go through a pull request against `main`; CI runs ShellCheck and `tests/run.sh`. The Herdr Radar fork is pinned to one commit in `env/herdr/radar.pin`; move the pin in a PR. Validate runs on Ubuntu for every PR and on macOS for pushes to `main` and PRs that change more than `.md`, `LICENSE` and `docs/` files (skipped counts as passed for branch protection); each job times out after 25 minutes.

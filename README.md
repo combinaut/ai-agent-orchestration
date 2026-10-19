@@ -22,28 +22,28 @@ Run a **Coordinator**, several **architects** and many **workers** (Claude Code 
 
 ## 1. Install
 
-You need macOS or Linux, [Claude Code](https://claude.com/claude-code) with the `ListAgents`, `SendMessage` and `Monitor` tools, `git`, `jq`, `python3` and `curl`. `gh` (logged in with `gh auth login`) is needed for the PR watchers. Codex CLI is optional.
+You need macOS or Linux, [Claude Code](https://claude.com/claude-code) with the `ListAgents`, `SendMessage` and `Monitor` tools, `git`, `jq`, Python 3.11 or newer and `curl`. `gh` (logged in with `gh auth login`) is needed for the PR watchers. Codex CLI is optional.
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh)
+s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) && bash -c "${s:?empty download}" _
 ```
 
-It clones this repo to `~/.claude/ai-agent-orchestration`, links the files into `~/.claude`, adds the hooks and status line to `~/.claude/settings.json`, and installs [Herdr](https://herdr.dev) 0.9 or newer with the Radar plugin. Pick another env with `--env <name>` after the command, or skip the env step with `ORCH_ENV="none"` in `~/.claude/orchestration.env`. If it prints `PATH setup`, add the line it shows to your shell startup file and open a new shell.
+It clones this repo to `~/.claude/ai-agent-orchestration`, links the files into `~/.claude`, adds the hooks and status line to `~/.claude/settings.json`, and installs [Herdr](https://herdr.dev) 0.9 or newer with the Radar plugin. Pick another env with `--env <name>` after the final `_`, or skip the env step with `env = "none"` under `[install]` in `~/.claude/orchestration.toml`. If it prints `PATH setup`, add the line it shows to your shell startup file and open a new shell.
 
 The installer never edits your `~/.claude/CLAUDE.md`. When its sections are missing it tells you to paste [`snippets/CLAUDE.md.snippet`](snippets/CLAUDE.md.snippet).
 
 ## 2. Set it up
 
-The first run copies [`config/orchestration.env.example`](config/orchestration.env.example) to `~/.claude/orchestration.env`. On a terminal it asks only for the six keys in the table below, when they are empty or still a `<…>` placeholder, and offers a default it found on the machine. Enter takes the default, `-` leaves the key empty. A key that has a value is never asked or changed, and no other key is asked. Without a terminal it asks nothing and lists the keys to fill. Set at least:
+The first run copies [`config/orchestration.toml.example`](config/orchestration.toml.example) to `~/.claude/orchestration.toml`, or converts an existing `~/.claude/orchestration.env`. On a terminal it asks for the keys below while they are empty or a `<…>` placeholder, offering a default it found; Enter takes it, `-` leaves the key empty. Without a terminal it lists the keys to fill. Set at least:
 
-| Key | Set it to |
+| Key (prompt) | Set it to |
 |---|---|
-| `ORCH_PR_REPOS` | the `owner/name` repos to watch, space separated (for example `acme/webapp`) |
-| `ORCH_PR_AUTHOR` | your GitHub login (`@me` works) |
-| `ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL` | a Codex model name each. Fill both even without Codex: `/coordinate` and `/architect` stop while either is still a placeholder |
-| `ORCH_HERDR_BIN`, `ORCH_HERDR_SOCKET` | Herdr's executable and socket; needed for the watcher services |
+| `[pr] repos` (`ORCH_PR_REPOS`) | the `owner/name` repos to watch, for example `["acme/webapp"]` |
+| `[pr] author` (`ORCH_PR_AUTHOR`) | your GitHub login (`"@me"` works) |
+| `[models] codex_worker`, `codex_smart` (`ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) | a Codex model name each. Fill both even without Codex: `/coordinate` and `/architect` stop while either is a placeholder |
+| `[herdr] bin`, `socket` (`ORCH_HERDR_BIN`, `ORCH_HERDR_SOCKET`) | Herdr's executable and socket; needed for the watcher services |
 
-Restart Claude Code afterwards so it loads the hooks and skills. Every key is listed in [`docs/settings.md`](docs/settings.md). For watcher services, see [`docs/watchers.md`](docs/watchers.md).
+Settings for one repo (big-repo guard, legacy scan, focus) go in that repo's `.orchestration.toml`, or `.orchestration.local.toml` for your own. Restart Claude Code afterwards so it loads the hooks and skills. Every key: [`docs/settings.md`](docs/settings.md). Watcher services: [`docs/watchers.md`](docs/watchers.md).
 
 To update, run the install command again. At session start a hook prints `ai-agent-orchestration setup out of date, run install.sh` when you are behind. Nothing updates on its own. The clone is never updated over local work: with uncommitted edits or commits that are not on origin the installer prints `REFUSED: … has local changes` and stops. It never stashes or resets. Put your changes in a PR, then run it again.
 
@@ -97,7 +97,7 @@ If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`
 
 - [`docs/architecture.md`](docs/architecture.md): how the Coordinator, architects, workers and watchers fit together.
 - [`docs/installer.md`](docs/installer.md): every installer step, the file table and a troubleshooting table.
-- [`docs/settings.md`](docs/settings.md): every `ORCH_*` setting in `~/.claude/orchestration.env`.
+- [`docs/settings.md`](docs/settings.md): every setting in `~/.claude/orchestration.toml` and in the repo files.
 - [`docs/watchers.md`](docs/watchers.md): the watchers, running them with or without services, and the host-pressure response.
 - [`docs/workers.md`](docs/workers.md): workers, recycles, handoffs and owner tags.
 - [`docs/heavy-slot.md`](docs/heavy-slot.md): the shared cap on heavy jobs and how slots work.

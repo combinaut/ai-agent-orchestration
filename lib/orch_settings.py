@@ -1,0 +1,693 @@
+"""Every orchestration setting, its TOML key and scope; the readers of the global and repo files."""
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+try:
+    import tomllib
+except ImportError:  # Python < 3.11
+    tomllib = None
+
+GLOBAL_FILE = '~/.claude/orchestration.toml'
+REPO_FILE = '.orchestration.toml'
+LOCAL_FILE = '.orchestration.local.toml'
+SNIPPET_DIR = '~/.claude/orchestration-repo-snippets'
+
+
+class Setting:
+    def __init__(self, key, env, kind, default, scope, doc, sep=' ', paths=False):
+        self.key, self.env, self.kind, self.default = key, env, kind, default
+        self.scope, self.doc, self.sep, self.paths = scope, doc, sep, paths
+
+    @property
+    def table(self):
+        return self.key.split('.')[0]
+
+    @property
+    def name(self):
+        return self.key.split('.', 1)[1]
+
+
+def _g(key, env, kind, default, doc, **kw):
+    return Setting(key, env, kind, default, 'global', doc, **kw)
+
+
+def _r(key, env, kind, default, doc, **kw):
+    return Setting(key, env, kind, default, 'repo', doc, **kw)
+
+
+DEFAULT_PATH = ['~/.local/bin', '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin']
+
+SETTINGS = [
+    _g('pr.repos', 'ORCH_PR_REPOS', 'list', [], 'GitHub repos (owner/name) whose PRs the audit watches; required by the audit watcher'),
+    _g('pr.author', 'ORCH_PR_AUTHOR', 'str', '', 'GitHub login whose open PRs the audit watches ("@me" works); required by the audit watcher'),
+    _g('pr.since', 'ORCH_PR_SINCE', 'str', '', 'Only PRs updated on or after this date (YYYY-MM-DD); empty means no date filter'),
+    _g('pr.bot_reviewer_login', 'ORCH_BOT_REVIEWER_LOGIN', 'str', 'copilot-pull-request-reviewer', 'Bot whose "Needs a closer look" review raises a COPILOT line'),
+    _g('audit.git_watch_repos', 'ORCH_GIT_WATCH_REPOS', 'list', [], 'Local clones checked for PACKS and WORKTREES pile-ups; their .orchestration.local.toml applies to PRs of the repo they clone', paths=True),
+    _g('audit.packs_max', 'ORCH_PACKS_MAX', 'int', 50, 'Pack files in a watched clone before a PACKS line'),
+    _g('audit.worktrees_max', 'ORCH_WORKTREES_MAX', 'int', 40, 'Worktrees in a watched clone before a WORKTREES line'),
+    _g('audit.page_prs', 'ORCH_AUDIT_PAGE_PRS', 'int', 80, 'PR search page size (1-100)'),
+    _g('audit.page_nodes', 'ORCH_AUDIT_PAGE_NODES', 'int', 100, 'Nested GitHub query page size (1-100); a cut-off result prints TRUNCATED'),
+    _g('legacy.scans_max', 'ORCH_LEGACY_SCANS_MAX', 'int', 10, 'PRs scanned for legacy code per audit pass; the rest wait for the next pass'),
+    _g('legacy.reads_max', 'ORCH_LEGACY_READS_MAX', 'int', 20, 'File reads per PR scan for files GitHub returns without a patch'),
+    _g('legacy.map_repo', 'ORCH_LEGACY_MAP_REPO', 'str', '', 'Clone the daily legacy-map job reads; empty picks the audit.git_watch_repos clone whose repo settings turn legacy.scan on', paths=True),
+    _g('heavy_slots.max', 'ORCH_HEAVY_SLOTS_MAX', 'int', 4, 'Most heavy jobs at once on the machine'),
+    _g('heavy_slots.dir', 'ORCH_HEAVY_SLOTS_DIR', 'str', '', 'Slot directory; empty means ~/.claude/heavy-slots', paths=True),
+    _g('heavy_slots.kill_grace', 'ORCH_HEAVY_SLOTS_KILL_GRACE', 'int', 10, 'Seconds a stopped job gets before it is killed'),
+    _g('focus.skip_architects', 'ORCH_FOCUS_SKIP_ARCHITECTS', 'list', [], 'Architect names left out of focus reports', sep=','),
+    _g('models.coordinator', 'ORCH_COORDINATOR_MODEL', 'str', 'claude-opus-5-5', 'Model of the Coordinator'),
+    _g('models.architect', 'ORCH_ARCHITECT_MODEL', 'str', 'claude-opus-5-5', 'Model of the architects'),
+    _g('models.codex_worker', 'ORCH_CODEX_WORKER_MODEL', 'str', '<codex-worker-model>', 'Codex model for routine work; replace the placeholder'),
+    _g('models.codex_smart', 'ORCH_CODEX_SMART_MODEL', 'str', '<codex-smart-model>', 'Codex model for hard work; replace the placeholder'),
+    _g('recycle.tokens', 'ORCH_RECYCLE_TOKENS', 'int', 300000, 'Tokens used at which RECYCLE fires'),
+    _g('recycle.pct', 'ORCH_RECYCLE_PCT', 'number', 55, 'Context percentage used when the token sensor is absent'),
+    _g('recycle.park_idle', 'ORCH_PARK_IDLE', 'bool', False, 'Park architects that have no open PR, worker or watcher'),
+    _g('install.repo_path', 'ORCH_REPO_PATH', 'str', '', 'The clone install.sh keeps up to date and links into ~/.claude; empty means ~/.claude/ai-agent-orchestration', paths=True),
+    _g('install.env', 'ORCH_ENV', 'str', '', 'Env adapter install.sh runs without --env (a directory under env/); empty means herdr, "none" skips the env step'),
+    _g('install.radar_path', 'ORCH_RADAR_PATH', 'str', '', 'Herdr Radar checkout; empty means ~/.claude/herdr-radar', paths=True),
+    _g('watchers.service', 'ORCH_WATCHERS_SERVICE', 'bool', False, 'Register the watchers as launchd or systemd user services; needs herdr.bin and herdr.socket'),
+    _g('watchers.python3', 'ORCH_PYTHON3', 'str', 'python3', 'Interpreter for the watcher scripts (3.11 or newer); services get it, or the installer\'s Python 3.11+ when it is older', paths=True),
+    _g('watchers.pr_scope', 'ORCH_WATCHERS_PR_SCOPE', 'str', '', 'GitHub search scope for the PR watchers, for example "org:acme"'),
+    _g('watchers.worker_model', 'ORCH_WATCHERS_WORKER_MODEL', 'str', '', 'Model label in dispatch records; empty leaves it out'),
+    _g('watchers.primary_repo', 'ORCH_WATCHERS_PRIMARY_REPO', 'str', '', 'Primary owner/name repo in dispatch records'),
+    _g('watchers.path', 'ORCH_PATH', 'list', DEFAULT_PATH, 'PATH entries given to services and to the Chrome host', sep=':', paths=True),
+    _g('watchers.closed_dir', 'ORCH_CLOSED_DIR', 'str', '', 'Where close-pane.sh marks a pane as closed on purpose; empty means ~/.claude/coordinator/watchers/prod-context/closed. The workers watcher reads <state-dir>/closed, so a custom folder needs that --state-dir', paths=True),
+    _g('herdr.bin', 'ORCH_HERDR_BIN', 'str', '', 'Absolute path of the Herdr executable', paths=True),
+    _g('herdr.socket', 'ORCH_HERDR_SOCKET', 'str', '', 'Absolute path of the Herdr socket', paths=True),
+    _g('user_todo.status_dir', 'ORCH_USER_TODO_STATUS_DIR', 'str', '', 'To-do status directory; empty means ~/.claude/coordinator/status', paths=True),
+    _g('user_todo.output', 'ORCH_USER_TODO_OUTPUT', 'str', '', 'To-do output file; empty means ~/.claude/coordinator/user-todo.md', paths=True),
+    _g('user_todo.state', 'ORCH_USER_TODO_STATE', 'str', '', 'To-do state file; empty means ~/.claude/coordinator/user-todo.state.json', paths=True),
+    _g('host.pressure_min_pct', 'ORCH_HOST_PRESSURE_MIN_PCT', 'number', 20, 'Host watcher: lowest free memory percentage'),
+    _g('host.swap_max_mb', 'ORCH_HOST_SWAP_MAX_MB', 'number', 1024, 'Host watcher: most swap used, in MB'),
+    _g('host.procs_max', 'ORCH_HOST_PROCS_MAX', 'number', 1300, 'Host watcher: most processes'),
+    _g('host.files_max', 'ORCH_HOST_FILES_MAX', 'number', 150000, 'Host watcher: most open files'),
+    _g('host.load_max', 'ORCH_HOST_LOAD_MAX', 'number', 40, 'Host watcher: highest load average'),
+    _g('alerts.escalate_ratio', 'ORCH_ALERT_ESCALATE_RATIO', 'number', 1.5, 'Feed: ratio between severity steps; greater than 1'),
+    _g('alerts.digest_s', 'ORCH_ALERT_DIGEST_S', 'int', 1800, 'Feed: seconds between digest lines'),
+    _g('alerts.quiet_s', 'ORCH_ALERT_QUIET_S', 'int', 1800, 'Feed: seconds a condition stays clear before its clear line'),
+    _g('hog.gb', 'ORCH_HOG_GB', 'number', 6, 'Hog watcher: process size in GB'),
+    _g('hog.git_gb', 'ORCH_HOG_GIT_GB', 'number', 2, 'Hog watcher: git process size in GB'),
+    _g('hog.git_age_s', 'ORCH_HOG_GIT_AGE_S', 'int', 180, 'Hog watcher: git process age in seconds'),
+    _g('pr_tabs.org', 'ORCH_PR_TABS_ORG', 'str', '', 'Organization the PR tabs extension manages; empty turns org actions off'),
+    _g('pr_tabs.default_repo', 'ORCH_PR_TABS_DEFAULT_REPO', 'str', '', 'Repo name for bare PR numbers; empty turns number jumps off'),
+    _g('pr_tabs.open_all', 'ORCH_PR_TABS_OPEN_ALL', 'str', '', 'GitHub search behind the Open all button; empty turns it off'),
+    _g('pr_tabs.topics', 'ORCH_PR_TABS_TOPICS', 'json', [], 'Tab-group rules: tables with name, color and repo/title/any regex lists'),
+    _r('guard.big_repo', 'ORCH_BIG_REPO', 'bool', False, 'Broad Git reads (git grep, cat-file over all objects) are blocked in this repo'),
+    _r('audit.merge_gate_checks', 'ORCH_MERGE_GATE_CHECKS', 'list', [], 'Check names that only run on a full CI run; an approved PR on a non-default base reports "full CI ran" or "full CI not run"', sep='|'),
+    _r('legacy.scan', 'ORCH_LEGACY_SCAN', 'bool', False, 'Open PRs of this repo are scanned for lines that build on legacy front-end code (LEGACY line)'),
+    _r('legacy.extra_pattern', 'ORCH_LEGACY_EXTRA_PATTERN', 'str', '', 'Regex searched in addition to the built-in jQuery/ujs patterns of the legacy scan'),
+    _r('legacy.exempt_paths', 'ORCH_LEGACY_EXEMPT_PATHS', 'list', [], 'Paths the built-in legacy scan skips, in addition to the two ratchet guard files under scripts/'),
+    _r('focus.pattern', 'ORCH_FOCUS_PATTERN', 'str', '', 'Case-insensitive regex matched against the labels of the workers of an architect working in this repo; empty turns the focus check off'),
+    _r('focus.architect', 'ORCH_FOCUS_ARCHITECT', 'str', '', 'Architect name never listed as lacking a focus worker'),
+]
+
+BY_KEY = {s.key: s for s in SETTINGS}
+BY_ENV = {s.env: s for s in SETTINGS}
+
+
+class ConfigError(ValueError):
+    pass
+
+
+def scoped(scope):
+    return [s for s in SETTINGS if s.scope == scope]
+
+
+def env_names():
+    return [s.env for s in SETTINGS]
+
+
+def expand(text, setting):
+    if setting.paths and (text == '~' or text.startswith('~/')):
+        return str(Path.home()) + text[1:]
+    return text
+
+
+def check_type(setting, value):
+    kind = setting.kind
+    if kind == 'str':
+        return isinstance(value, str)
+    if kind == 'int':
+        return isinstance(value, int) and not isinstance(value, bool)
+    if kind == 'number':
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if kind == 'bool':
+        return isinstance(value, bool)
+    if kind == 'list':
+        return isinstance(value, list) and all(isinstance(item, str) for item in value)
+    return isinstance(value, (list, dict))
+
+
+TYPE_NAMES = {'str': 'a string', 'int': 'an integer', 'number': 'a number', 'bool': 'true or false',
+              'list': 'a list of strings', 'json': 'an array or table'}
+
+
+def env_value(setting, value):
+    """The ORCH_* string a TOML value stands for."""
+    kind = setting.kind
+    if kind == 'bool':
+        return '1' if value else '0'
+    if kind in ('int', 'number'):
+        return repr(value) if isinstance(value, float) else str(value)
+    if kind == 'list':
+        return setting.sep.join(expand(item, setting) for item in value)
+    if kind == 'json':
+        return json.dumps(value, separators=(',', ':'), ensure_ascii=False)
+    return expand(value, setting)
+
+
+def parse(text, label):
+    if tomllib is None:
+        raise ConfigError(f'{label}: reading TOML needs Python 3.11 or newer (this is {sys.version.split()[0]})')
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise ConfigError(f'{label}: invalid TOML: {error}') from None
+
+
+def has_nul(value):
+    if isinstance(value, str):
+        return '\0' in value
+    if isinstance(value, dict):
+        return any(has_nul(k) or has_nul(v) for k, v in value.items())
+    return isinstance(value, list) and any(map(has_nul, value))
+
+
+def validate(data, label, scope):
+    """{setting: value} for a parsed file; every key must be a known setting of this scope."""
+    found = {}
+    for table, entries in data.items():
+        if not isinstance(entries, dict):
+            raise ConfigError(f'{label}: {table}: unknown key (settings live in tables such as [pr] or [watchers])')
+        for name, value in entries.items():
+            key = f'{table}.{name}'
+            setting = BY_KEY.get(key)
+            if setting is None:
+                raise ConfigError(f'{label}: {key}: unknown key')
+            if setting.scope != scope:
+                where = (f"a repo's {REPO_FILE} or {LOCAL_FILE}" if setting.scope == 'repo'
+                         else f'the global {GLOBAL_FILE}')
+                raise ConfigError(f'{label}: {key}: is a {setting.scope} setting; set it in {where}')
+            if not check_type(setting, value):
+                raise ConfigError(f'{label}: {key}: must be {TYPE_NAMES[setting.kind]}, got {type(value).__name__}')
+            if has_nul(value):
+                raise ConfigError(f'{label}: {key}: contains a NUL character')
+            if setting.kind == 'list':
+                for item in value:
+                    if (re.search(r'\s', item) if setting.sep == ' ' else setting.sep in item) or item == '':
+                        what = 'whitespace' if setting.sep == ' ' else f'"{setting.sep}"'
+                        raise ConfigError(f'{label}: {key}: entry {json.dumps(item)} is empty or contains {what}, '
+                                          'which separates entries')
+            found[setting] = value
+    return found
+
+
+def read_file(path, scope):
+    label = os.fspath(path)
+    try:
+        text = Path(path).read_text()
+    except (OSError, UnicodeDecodeError) as error:
+        raise ConfigError(f'{label}: cannot read: {error}') from None
+    return validate(parse(text, label), label, scope)
+
+
+def as_env(values):
+    return {setting.env: env_value(setting, value) for setting, value in values.items()}
+
+
+def load_global(path):
+    """ORCH_* values the global file sets; a missing file sets none."""
+    if not Path(path).exists():
+        return {}
+    return as_env(read_file(path, 'global'))
+
+
+def repo_root(start):
+    path = Path(start).resolve()
+    if path.is_file():
+        path = path.parent
+    for candidate in (path, *path.parents):
+        if (candidate / '.git').exists():
+            return candidate
+    return None
+
+
+def local_tracked(root):
+    try:
+        result = subprocess.run(['git', '-C', str(root), 'ls-files', '--error-unmatch', '--', LOCAL_FILE],
+                                capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def warn(message):
+    print(f'WARNING: {message}', file=sys.stderr)
+
+
+def local_values(root):
+    """Settings of a clone's personal file; warns when git tracks it."""
+    local = Path(root) / LOCAL_FILE
+    if not local.is_file():
+        return {}
+    if local_tracked(root):
+        warn(f'{local} is tracked by git; it is personal. Run: git -C {shlex.quote(str(root))} rm --cached {LOCAL_FILE} '
+             f'and add {LOCAL_FILE} to .gitignore')
+    return read_file(local, 'repo')
+
+
+def main_checkout(root):
+    """The main checkout of a linked worktree, else None."""
+    try:
+        common = subprocess.run(['git', '-C', str(root), 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+                                capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    main = Path(common).parent if common and Path(common).name == '.git' else None
+    return main if main is not None and main.resolve() != Path(root).resolve() else None
+
+
+def merged(layers, environ):
+    """Built-in default < each layer in order < an exported variable, as ORCH_* strings."""
+    result = {s.env: env_value(s, s.default) for s in scoped('repo')}
+    for layer in layers:
+        result.update(as_env(layer))
+    for name in result:
+        if name in environ:
+            result[name] = environ[name]
+    return result
+
+
+def load_repo(start, environ=None):
+    """Repo settings for the checkout containing start: committed file, the main checkout's personal file, its own."""
+    environ = os.environ if environ is None else environ
+    root = repo_root(start)
+    layers = []
+    if root is not None:
+        committed = root / REPO_FILE
+        if committed.is_file():
+            layers.append(read_file(committed, 'repo'))
+        main = main_checkout(root)
+        if main is not None:
+            layers.append(local_values(main))
+        layers.append(local_values(root))
+    return merged(layers, environ)
+
+
+def load_remote(repo, ref, committed_text, clone=None, environ=None):
+    """Repo settings for a PR: the committed file of its base ref, then the personal file of the user's clone."""
+    environ = os.environ if environ is None else environ
+    layers = []
+    if committed_text:
+        label = f'{repo}@{ref}:{REPO_FILE}'
+        layers.append(validate(parse(committed_text, label), label, 'repo'))
+    if clone:
+        main = main_checkout(clone)
+        if main is not None:
+            layers.append(local_values(main))
+        layers.append(local_values(clone))
+    return merged(layers, environ)
+
+
+REMOTE_RE = r'(?:^|[/:]){}(?:\.git)?/?$'
+
+
+def origin_matches(path, repo):
+    try:
+        url = subprocess.run(['git', '-C', str(path), 'remote', 'get-url', 'origin'],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool(url) and re.search(REMOTE_RE.format(re.escape(repo)), url, re.I) is not None
+
+
+def known_clone(repo, environ=None):
+    """The audit.git_watch_repos clone whose origin is repo, else None."""
+    environ = os.environ if environ is None else environ
+    for path in environ.get('ORCH_GIT_WATCH_REPOS', '').split():
+        if origin_matches(path, repo):
+            return path
+    return None
+
+
+# --- Writing TOML ---
+
+def toml_string(text):
+    return json.dumps(text, ensure_ascii=False)
+
+
+def toml_value(value, inline=False):
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, str):
+        return toml_string(value)
+    if isinstance(value, dict):
+        return '{ ' + ', '.join(f'{toml_key(k)} = {toml_value(v, True)}' for k, v in value.items()) + ' }'
+    items = [toml_value(item, inline) for item in value]
+    if not inline and (any(isinstance(item, dict) for item in value) or len(', '.join(items)) > 80):
+        return '[\n' + ''.join(f'  {item},\n' for item in items) + ']'
+    return '[' + ', '.join(items) + ']'
+
+
+def toml_key(name):
+    return name if re.fullmatch(r'[A-Za-z0-9_-]+', name) else toml_string(name)
+
+
+def render(values, comments=None, header=''):
+    """TOML text for {setting: value}, grouped by table in schema order."""
+    comments = comments or {}
+    out, table = [header] if header else [], None
+    for setting in SETTINGS:
+        if setting not in values:
+            continue
+        if setting.table != table:
+            if table is not None:
+                out.append('')
+            table = setting.table
+            out.append(f'[{table}]')
+        for line in comments.get(setting, []):
+            out.append(f'# {line}' if line else '#')
+        out.append(f'{setting.name} = {toml_value(values[setting])}')
+    return '\n'.join(out) + '\n'
+
+
+def example(scope):
+    lines = {s: [s.doc] for s in scoped(scope)}
+    values = {s: s.default for s in scoped(scope)}
+    if scope == 'global':
+        header = ('# Global settings for the Coordinator / architect setup. install.sh copies this file to\n'
+                  f'# {GLOBAL_FILE} on the first run only and never overwrites it.\n'
+                  '# An exported ORCH_* variable wins over this file; ORCH_CONFIG=/path selects another file.\n'
+                  f'# Repo settings ([guard], [legacy] scan, [focus] pattern, ...) live in each repo: {REPO_FILE}\n'
+                  f'# (committed) and {LOCAL_FILE} (personal, git-ignored). See docs/settings.md.\n')
+    else:
+        header = (f'# Repo settings. Commit this as {REPO_FILE} at the repo root; personal overrides go in\n'
+                  f'# {LOCAL_FILE} next to it (git-ignored). An exported ORCH_* variable wins over both.\n')
+    return render(values, lines, header)
+
+
+def markdown_default(setting):
+    value = setting.default
+    if value in ('', [], False) and setting.kind != 'bool':
+        return 'empty'
+    return f'`{toml_value(value, True)}`'
+
+
+def markdown_table(scope):
+    rows = ['| Key | Variable | Default | Meaning |', '|---|---|---|---|']
+    for setting in scoped(scope):
+        doc = setting.doc.replace('|', '\\|')
+        rows.append(f'| `{setting.key}` | `{setting.env}` | {markdown_default(setting).replace("|", chr(92) + "|")} | {doc} |')
+    return '\n'.join(rows)
+
+
+# --- Migration from orchestration.env ---
+
+OLD_NAMES = {'ORCH_V2_LAUNCHD': 'ORCH_WATCHERS_SERVICE', 'ORCH_V2_PR_SCOPE': 'ORCH_WATCHERS_PR_SCOPE',
+             'ORCH_V2_WORKER_MODEL': 'ORCH_WATCHERS_WORKER_MODEL', 'ORCH_V2_PRIMARY_REPO': 'ORCH_WATCHERS_PRIMARY_REPO'}
+REMOVED = {'ORCH_BIG_REPO_REMOTES', 'ORCH_LEGACY_REPOS'}
+ASSIGN = re.compile(r'^\s*(?:export\s+)?(ORCH_[A-Z0-9_]*)=')
+
+
+def env_file_values(path):
+    """ORCH_* values bash gets from sourcing the old file, in a clean environment."""
+    script = ('set +u; . "$1" >/dev/null 2>&1; shift; for n in "$@"; do [ -z "${!n+x}" ] || printf "%s\\0%s\\0" "$n" "${!n}"; done; '
+              'printf "%s\\0" "$0"')
+    names = sorted(set(env_names()) | REMOVED | set(OLD_NAMES) | set(assigned_names(path)))
+    env = {key: value for key, value in os.environ.items() if key not in names and key not in ('BASH_ENV', 'ENV')}
+    syntax = subprocess.run(['/bin/bash', '-n', str(path)], capture_output=True, env=env)
+    if syntax.returncode:
+        raise ConfigError(f'{path}: bash syntax error: {syntax.stderr.decode(errors="replace").strip()}')
+    done = 'ORCH_ENV_DONE'
+    out = subprocess.run(['/bin/bash', '-c', script, done, str(path), *names],
+                         capture_output=True, env=env).stdout.decode()
+    parts = out.split('\0')[:-1]
+    if not parts or parts[-1] != done:
+        raise ConfigError(f'{path}: stops before its end (exit or return in the file); nothing was converted')
+    parts = parts[:-1]
+    return dict(zip(parts[::2], parts[1::2]))
+
+
+def assigned_names(path):
+    return [m[1] for m in map(ASSIGN.match, Path(path).read_text(errors='replace').splitlines()) if m]
+
+
+def env_comments(path):
+    """Comment lines directly above each assignment, without --- section rules."""
+    comments, block = {}, []
+    for line in Path(path).read_text(errors='replace').splitlines():
+        stripped = line.strip()
+        if stripped.startswith('#'):
+            text = stripped[1:].strip()
+            if not text.startswith('---'):
+                block.append(text)
+            continue
+        match = ASSIGN.match(line)
+        if match:
+            comments.setdefault(match[1], block)
+        block = []
+    return comments
+
+
+def from_env(setting, text):
+    """TOML value for an old ORCH_* string; None when the old value is empty for a typed setting."""
+    kind = setting.kind
+    if kind == 'str':
+        return text
+    if text == '':
+        return [] if kind == 'list' else None
+    if kind == 'bool':
+        if text not in ('0', '1'):
+            raise ValueError(f'{setting.env}="{text}" is not 0 or 1')
+        return text == '1'
+    if kind == 'int':
+        return int(text)
+    if kind == 'number':
+        return float(text) if re.search(r'[.eE]', text) else int(text)
+    if kind == 'list':
+        return text.split() if setting.sep == ' ' else [item for item in text.split(setting.sep) if item]
+    return json.loads(text)
+
+
+def repo_layers(values, report):
+    """{owner/name: {setting: value}} the old global values meant for each repo."""
+    def repo_setting(key, env):
+        setting = BY_KEY[key]
+        if env not in values:
+            return None
+        try:
+            value = from_env(setting, values[env])
+        except ValueError as error:
+            report.append(f'not converted: {error}')
+            return None
+        return value if value not in (None, [], '') else None
+
+    repos = {}
+    big = values.get('ORCH_BIG_REPO_REMOTES', '').split()
+    legacy = values.get('ORCH_LEGACY_REPOS', '').split()
+    for repo in big:
+        repos.setdefault(repo, {})[BY_KEY['guard.big_repo']] = True
+    for repo in legacy:
+        layer = repos.setdefault(repo, {})
+        layer[BY_KEY['legacy.scan']] = True
+        for key, env in (('legacy.extra_pattern', 'ORCH_LEGACY_EXTRA_PATTERN'), ('legacy.exempt_paths', 'ORCH_LEGACY_EXEMPT_PATHS')):
+            value = repo_setting(key, env)
+            if value is not None:
+                layer[BY_KEY[key]] = value
+    gates = repo_setting('audit.merge_gate_checks', 'ORCH_MERGE_GATE_CHECKS')
+    if gates is not None:
+        for repo in values.get('ORCH_PR_REPOS', '').split():
+            repos.setdefault(repo, {})[BY_KEY['audit.merge_gate_checks']] = gates
+    focus = {key: repo_setting(key, env) for key, env in (('focus.pattern', 'ORCH_FOCUS_PATTERN'), ('focus.architect', 'ORCH_FOCUS_ARCHITECT'))}
+    focus = {key: value for key, value in focus.items() if value is not None}
+    if focus:
+        primary = values.get('ORCH_WATCHERS_PRIMARY_REPO', '')
+        targets = [primary] if primary else sorted(repos) or values.get('ORCH_PR_REPOS', '').split()[:1]
+        for repo in targets:
+            layer = repos.setdefault(repo, {})
+            layer.update({BY_KEY[key]: value for key, value in focus.items()})
+        if not targets:
+            report.append('not converted: focus.pattern and focus.architect (no repo to put them in)')
+    for env in ('ORCH_LEGACY_EXTRA_PATTERN', 'ORCH_LEGACY_EXEMPT_PATHS'):
+        if values.get(env) and not legacy:
+            report.append(f'not converted: {env} (no ORCH_LEGACY_REPOS repo to put it in)')
+    return repos
+
+
+def git(path, *args):
+    return subprocess.run(['git', '-C', str(path), *args], capture_output=True, text=True, timeout=10)
+
+
+def exclude_local(clone):
+    """Adds the personal file to the clone's info/exclude unless git already ignores it; True when added."""
+    if git(clone, 'check-ignore', '-q', LOCAL_FILE).returncode == 0:
+        return False
+    exclude = Path(clone) / git(clone, 'rev-parse', '--git-path', 'info/exclude').stdout.strip()
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    text = exclude.read_text() if exclude.exists() else ''
+    if text and not text.endswith('\n'):
+        text += '\n'
+    exclude.write_text(text + LOCAL_FILE + '\n')
+    return True
+
+
+def write_repo_layer(repo, layer, clone, snippet_dir, report):
+    body = render(layer, header=f'# Repo settings for {repo}, converted from orchestration.env.\n')
+    if clone:
+        local = os.path.join(clone, LOCAL_FILE)
+        if not os.path.exists(local):
+            Path(local).write_text(body)
+            report.append(f'created {local} ({repo})')
+            if exclude_local(clone):
+                report.append(f'added {LOCAL_FILE} to the info/exclude of {clone}')
+            return
+        try:
+            existing = read_file(local, 'repo')
+        except ConfigError as error:
+            existing, problem = None, str(error)
+        if existing is not None and all(existing.get(s) == v for s, v in layer.items()):
+            report.append(f'kept {local} (already has the converted {repo} settings)')
+            return
+        report.append(f'kept {local} (yours, not merged{": " + problem if existing is None else ""}); '
+                      'merge the snippet below by hand')
+    owner, name = repo.split('/', 1)
+    target = os.path.join(snippet_dir, owner, name + '.toml')
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    Path(target).write_text(body)
+    report.append(f'wrote {target}: commit it as {REPO_FILE} in {repo}, or save it as {LOCAL_FILE} in your clone')
+
+
+def migrate(env_path, toml_path, snippet_dir):
+    """Converts the old file: global values to toml_path, repo values to clones or snippets. Returns report lines."""
+    values = env_file_values(env_path)
+    comments = env_comments(env_path)
+    report, global_values = [], {}
+    for old, new in OLD_NAMES.items():
+        if old in values and new not in values:
+            values[new] = values[old]
+            report.append(f'renamed {old} to {new}')
+    for setting in scoped('global'):
+        if setting.env not in values:
+            continue
+        try:
+            value = from_env(setting, values[setting.env])
+        except ValueError as error:
+            report.append(f'not converted: {setting.env}: {error}')
+            continue
+        if value is None:
+            report.append(f'left out {setting.key} ({setting.env} was empty; the default applies)')
+            continue
+        global_values[setting] = value
+    unknown = sorted(n for n in assigned_names(env_path)
+                     if n not in BY_ENV and n not in REMOVED and n not in OLD_NAMES)
+    if unknown:
+        report.append('not converted (unknown keys): ' + ' '.join(unknown))
+    header = ('# Global orchestration settings, converted from orchestration.env. See docs/settings.md.\n'
+              '# An exported ORCH_* variable wins over this file.\n')
+    text = render(global_values, {s: comments.get(s.env, []) for s in global_values}, header)
+    validate(parse(text, str(toml_path)), str(toml_path), 'global')
+    environ = dict(os.environ, ORCH_GIT_WATCH_REPOS=values.get('ORCH_GIT_WATCH_REPOS', ''))
+    layers = sorted(repo_layers(values, report).items())
+    for repo, layer in layers:
+        label = f'{repo} repo settings'
+        validate(parse(render(layer), label), label, 'repo')
+    for repo, layer in layers:
+        write_repo_layer(repo, layer, known_clone(repo, environ), snippet_dir, report)
+    Path(toml_path).write_text(text)
+    return [f'converted {env_path} -> {toml_path}'] + report
+
+
+def set_key(path, env, text):
+    """Sets one global setting in the file from its ORCH_* string form, keeping every other line."""
+    setting = BY_ENV[env]
+    value = from_env(setting, text)
+    value = [] if value is None else value
+    rendered = toml_value(value)
+    lines = Path(path).read_text().splitlines()
+
+    def name(part):
+        return rf'(?:"{part}"|\'{part}\'|{part})'
+    header = re.compile(r'^\s*\[\s*("?)([A-Za-z0-9_-]+)\1\s*\]\s*(#.*)?$')
+    plain = re.compile(rf'^\s*{name(setting.name)}\s*=')
+    dotted = re.compile(rf'^\s*{name(setting.table)}\s*\.\s*{name(setting.name)}\s*=')
+    dotted_table = re.compile(rf'^\s*{name(setting.table)}\s*\.')
+    table, start, done, last_dotted = None, None, False, None
+    for index, current in enumerate(lines):
+        match = header.match(current)
+        if match:
+            table = match[2]
+            start = index if table == setting.table else start
+            continue
+        found = plain.match(current) if table == setting.table else dotted.match(current) if table is None else None
+        if found:
+            if current.rstrip().endswith(('[', '{')):
+                raise ConfigError(f'{path}: {setting.key}: spans several lines; edit it by hand')
+            key = setting.name if table == setting.table else f'{setting.table}.{setting.name}'
+            lines[index], done = f'{key} = {rendered}', True
+            break
+        if table is None and dotted_table.match(current):
+            last_dotted = index
+    if not done and start is not None:
+        lines.insert(start + 1, f'{setting.name} = {rendered}')
+    elif not done and last_dotted is not None:
+        lines.insert(last_dotted + 1, f'{setting.table}.{setting.name} = {rendered}')
+    elif not done:
+        lines += ['', f'[{setting.table}]', f'{setting.name} = {rendered}'] if lines else [f'[{setting.table}]', f'{setting.name} = {rendered}']
+    text_out = '\n'.join(lines) + '\n'
+    written = validate(parse(text_out, str(path)), str(path), 'global')
+    if written.get(setting) != value:
+        raise ConfigError(f'{path}: {setting.key}: cannot be set in place; edit it by hand')
+    Path(path).write_text(text_out)
+
+
+def file_keys(path, scope):
+    return [s.env for s in read_file(path, scope)]
+
+
+# --- Command line ---
+
+def shell_lines(values):
+    return ''.join(f'orch_set_default {name} {shlex.quote(value)}\n' for name, value in values.items())
+
+
+def main(argv):
+    try:
+        command = argv[1] if len(argv) > 1 else ''
+        if command == 'global' and len(argv) == 3:
+            sys.stdout.write(shell_lines(load_global(argv[2])))
+        elif command == 'repo' and len(argv) == 3:
+            sys.stdout.write(shell_lines(load_repo(argv[2], {})))
+        elif command == 'migrate' and len(argv) == 5:
+            print('\n'.join(migrate(*argv[2:])))
+        elif command == 'example' and len(argv) == 3 and argv[2] in ('global', 'repo'):
+            sys.stdout.write(example(argv[2]))
+        elif command == 'table' and len(argv) == 3 and argv[2] in ('global', 'repo'):
+            print(markdown_table(argv[2]))
+        elif command == 'set' and len(argv) >= 5 and len(argv) % 2 == 1:
+            for name, value in zip(argv[3::2], argv[4::2]):
+                set_key(argv[2], name, value)
+        elif command == 'keys' and len(argv) == 3:
+            print(' '.join(file_keys(argv[2], 'global')))
+        elif command == 'names' and len(argv) == 2:
+            print(' '.join(env_names()))
+        else:
+            print('usage: orch_settings.py global <file> | repo <dir> | migrate <env> <toml> <snippet-dir> '
+                  '| set <file> <ORCH_NAME> <value>... | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
+            return 2
+    except ConfigError as error:
+        print(f'ERROR: {error}', file=sys.stderr)
+        return 2
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        print(f'ERROR: {error}', file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))

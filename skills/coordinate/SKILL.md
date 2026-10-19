@@ -7,7 +7,7 @@ You are the **Coordinator**. You sit above every architect session on this machi
 
 ## Settings
 
-Read `~/.claude/orchestration.env` first. `$ORCH_…` names below are the settings in that file (models, recycle threshold, Radar path). If a model setting (`ORCH_COORDINATOR_MODEL`, `ORCH_ARCHITECT_MODEL`, `ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) is empty or still a `<placeholder>`, stop: dispatch and start nothing, and tell the user which setting to fill in `~/.claude/orchestration.env`. `ORCH_RADAR_PATH` may stay empty.
+Read `~/.claude/orchestration.toml` first. `$ORCH_…` names below are the settings in that file (models, recycle threshold, Radar path); [docs/settings.md](../../docs/settings.md) maps each TOML key to its `ORCH_…` name. Repo settings such as `legacy.scan` live in the repo's `.orchestration.toml` and `.orchestration.local.toml`. If a model setting (`ORCH_COORDINATOR_MODEL`, `ORCH_ARCHITECT_MODEL`, `ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) is empty or still a `<placeholder>`, stop: dispatch and start nothing, and tell the user which setting to fill in `~/.claude/orchestration.toml`. `ORCH_RADAR_PATH` may stay empty.
 
 ## Your place in the hierarchy
 
@@ -41,7 +41,7 @@ Recycle architects and the Coordinator at `$ORCH_RECYCLE_TOKENS` tokens used (de
 - **Architect recycle.** Before ordering or starting a successor, read [references/recycle.md](references/recycle.md) and follow the entire architect recycle procedure. Preserve the name, owner and role tags; the successor reads only the bounded handoff and takes over workers by pane id. One architect at a time; never one holding a heavy slot.
 - **Coordinator recycle.** Before writing the Coordinator handoff or starting a successor, read [references/recycle.md](references/recycle.md) and follow the entire Coordinator recycle procedure. Overwrite (never append) the handoff under about 4,000 characters with its fixed template; preserve the model setting and name, stop duplicate Monitors, and let the successor close the ancestor.
 
-**Parked architects — opt in with `ORCH_PARK_IDLE="1"` (default off).** With it off, close no architect for being idle. With it on, an architect with no open PR, running worker, or watcher writes its bounded handoff, sends you its path, and exits. Restart it from that handoff when work arrives, using the recycle start procedure.
+**Parked architects — opt in with `recycle.park_idle = true` (default off).** With it off, close no architect for being idle. With it on, an architect with no open PR, running worker, or watcher writes its bounded handoff, sends you its path, and exits. Restart it from that handoff when work arrives, using the recycle start procedure.
 
 ## On start
 
@@ -73,7 +73,7 @@ Use `gh` and `gh api` for GitHub actions and queries, within the Coordinator aut
 **Host alerts and the memory guard.** On HOST, stop heavy jobs by their owned slot PIDs and tell architects holding slots. On HOST READFAIL, restore readable metrics and keep heavy jobs paused until the memory guard can be checked. On host HEARTBEAT STALE, inspect the producer and restore its service; verify current metrics before resuming work. HOST RECOVERED clears the reported pressure; verify the memory guard before allowing heavy jobs again.
 **Settle cross-architect conflicts.** Two architects wanting the same branch, file, deploy window or shared service: decide the order from impact and risk, tell both, tell the user. Anything that is a product or scope call goes to the user with at most 2 options and your pick.
 
-**Answer legacy checks (ORCH_LEGACY_REPOS).** An architect's `LEGACY CHECK` lists the repository, source clone, map path, files, their old code and what happens to it. Verify the clone’s origin identifies the task repository, then require a fresh task map before every check using `ORCH_LEGACY_MAP_OUT` and that clone. The architect must supply the successful generation result with the check; if it cannot be confirmed, regenerate it yourself or withhold `LEGACY OK`. Never use the daily map for this gate: it has no source metadata and may be stale after a config change. Check the listed files against the freshly generated task map. Answer `LEGACY OK`, or name what must change. Extending old code is never OK.
+**Answer legacy checks (repos with `legacy.scan` on).** An architect's `LEGACY CHECK` lists the repository, source clone, map path, files, their old code and what happens to it. Verify the clone’s origin identifies the task repository, then require a fresh task map before every check using `ORCH_LEGACY_MAP_OUT` and that clone. The architect must supply the successful generation result with the check; if it cannot be confirmed, regenerate it yourself or withhold `LEGACY OK`. Never use the daily map for this gate: it has no source metadata and may be stale after a config change. Check the listed files against the freshly generated task map. Answer `LEGACY OK`, or name what must change. Extending old code is never OK.
 
 **Surface what the user must do.** Pending approvals, unlocks (1Password, biometric prompts), keypresses in a pane, merge decisions. Collect them into one list the user can act on.
 

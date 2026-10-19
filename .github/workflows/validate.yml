@@ -9,93 +9,41 @@ permissions:
   contents: read
 
 jobs:
-  Validate:
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-latest]
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      macos: ${{ steps.scope.outputs.macos }}
     steps:
       - uses: actions/checkout@v7
-      - name: Install validation tools
-        run: |
-          if [ "${{ runner.os }}" = macOS ]; then
-            brew install shellcheck bats-core
-          else
-            sudo apt-get update
-            sudo apt-get install -y shellcheck bats bubblewrap
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          fi
-      - name: ShellCheck
-        run: find . -type f \( -name '*.sh' -o -name '*.bash' \) -print0 | xargs -0 shellcheck && shellcheck -s bash tests/*.bats
-      - name: Prove Linux runner systemctl tripwire
-        if: runner.os == 'Linux'
-        run: |
-          . tests/platform/linux.sh
-          proof=$(mktemp)
-          trap 'rm -f "$proof" "$proof.log"' EXIT
-          printf '#!/bin/bash\n/usr/bin/systemctl --user stop fixture 2>/dev/null || true\n' >"$proof"
-          if run_isolated_tests "$PWD" "$proof" >"$proof.log" 2>&1; then
-            echo 'runner systemctl tripwire did not deny execution' >&2
-            exit 1
-          fi
-          cat "$proof.log"
-          grep -F '/usr/bin/systemctl --user stop fixture' "$proof.log"
-      - name: Run hog against real Linux processes
-        if: runner.os == 'Linux'
-        run: |
-          state_dir=$(mktemp -d)
-          : >"$state_dir/no-config"
-          ORCH_CONFIG="$state_dir/no-config" ORCH_HOG_GB=0.001 coordinator/watchers/coord-hog-watch.sh --state-dir "$state_dir"
-          test -s "$state_dir/hog.log"
-      - name: Run balance against real Linux processes
-        if: runner.os == 'Linux'
-        run: |
-          state_dir=$(mktemp -d)
-          : >"$state_dir/no-config"
-          ORCH_CONFIG="$state_dir/no-config" coordinator/watchers/coord-balance-watch.sh --state-dir "$state_dir"
-          test -s "$state_dir/balance.json"
-          python3 -c 'import json,sys; raw=json.load(open(sys.argv[1]))["before"]; assert "load5" not in raw["unreadable"] and "free" not in raw["unreadable"]; assert isinstance(raw["cpu_sample"]["ticks"], dict) and isinstance(raw["cpu_sample"]["uptime"], (int, float))' "$state_dir/balance.json"
-      - name: Run workers entrypoint with fake Herdr
-        run: |
-          state_dir=$(mktemp -d)
-          : >"$state_dir/no-config"
-          printf '#!/bin/sh\ncat "$HERDR_AGENTS"\n' >"$state_dir/herdr"
-          chmod +x "$state_dir/herdr"
-          HERDR_ENV=1 HERDR_BIN_PATH="$state_dir/herdr" HERDR_AGENTS="$PWD/coordinator/watchers/fixtures/workers.json" ORCH_CONFIG="$state_dir/no-config" coordinator/watchers/coord-worker-watch.sh --state-dir "$state_dir"
-          python3 -c 'import json,sys; state=json.load(open(sys.argv[1])); assert state["fails"] == 0 and state["before"]["present"]' "$state_dir/workers.json"
-      - name: Run audit entrypoint with fake GitHub and Herdr
-        run: |
-          state_dir=$(mktemp -d)
-          : >"$state_dir/no-config"
-          printf '#!/bin/sh\ncat "$AUDIT_GITHUB"\n' >"$state_dir/gh"
-          printf '#!/bin/sh\ncat "$AUDIT_HERDR"\n' >"$state_dir/herdr"
-          chmod +x "$state_dir/gh" "$state_dir/herdr"
-          python3 -c 'import json; pr=json.load(open("coordinator/watchers/fixtures/audit-pr.json")); print(json.dumps({"data":{"search":{"nodes":[pr],"pageInfo":{"hasNextPage":False}}}}))' >"$state_dir/github.json"
-          printf '{"result":{"workspaces":[]}}' >"$state_dir/herdr.json"
-          PATH="$state_dir:$PATH" AUDIT_GITHUB="$state_dir/github.json" AUDIT_HERDR="$state_dir/herdr.json" HERDR_BIN_PATH="$state_dir/herdr" ORCH_CONFIG="$state_dir/no-config" ORCH_PR_AUTHOR=author ORCH_PR_REPOS=owner/product coordinator/watchers/coord-audit-watch.sh --state-dir "$state_dir"
-          python3 -c 'import json,sys; state=json.load(open(sys.argv[1])); assert state["fails"] == 0 and not state["before"]["unreadable"]' "$state_dir/audit.json"
-      - name: Validate isolated test suites
-        run: tests/run.sh
-      - name: Verify Linux watcher units
-        if: runner.os == 'Linux'
-        run: |
-          units=$(mktemp -d)
-          watcher_dir="$units/home with space/.claude/coordinator/watchers"
-          mkdir -p "$watcher_dir"
-          touch "$watcher_dir/coord-audit-watch.sh" "$watcher_dir/coord-worker-watch.sh" "$watcher_dir/coord-balance-watch.sh" "$watcher_dir/coord-hog-watch.sh" "$watcher_dir/coord-host-watch.sh" "$watcher_dir/context-watch.sh" "$watcher_dir/notify-inbox.py" "$watcher_dir/notify-inbox.sh"
-          chmod +x "$watcher_dir/coord-audit-watch.sh" "$watcher_dir/coord-worker-watch.sh" "$watcher_dir/coord-balance-watch.sh" "$watcher_dir/coord-hog-watch.sh" "$watcher_dir/coord-host-watch.sh" "$watcher_dir/context-watch.sh" "$watcher_dir/notify-inbox.py" "$watcher_dir/notify-inbox.sh"
-          sed "s|@ORCH_CLAUDE_DIR@|$units/home with space/.claude|g; s|@ORCH_CONFIG@|$units/custom config.env|g; s|@ORCH_PYTHON3@|/usr/bin/python3|g; s|@ORCH_HERDR_BIN@|/usr/bin/herdr|g; s|@ORCH_HERDR_SOCKET@|$units/socket|g; s|@ORCH_PATH@|/usr/bin:/bin|g" coordinator/watchers/service/linux/com.combinaut.coord-watcher-context.service.template >"$units/context.service"
-          sed "s|@ORCH_CLAUDE_DIR@|$units/home with space/.claude|g; s|@ORCH_CONFIG@|$units/custom config.env|g; s|@ORCH_PYTHON3@|/usr/bin/python3|g; s|@ORCH_HERDR_BIN@|/usr/bin/herdr|g; s|@ORCH_HERDR_SOCKET@|$units/socket|g; s|@ORCH_PATH@|/usr/bin:/bin|g" coordinator/watchers/service/linux/com.combinaut.coord-watcher-inbox-context.service.template >"$units/inbox.service"
-          sed "s|@ORCH_CLAUDE_DIR@|$units/home with space/.claude|g; s|@ORCH_CONFIG@|$units/custom config.env|g; s|@ORCH_HERDR_BIN@|/usr/bin/herdr|g; s|@ORCH_HERDR_SOCKET@|$units/socket|g; s|@ORCH_PATH@|/usr/bin:/bin|g" coordinator/watchers/service/linux/com.combinaut.coord-watcher-host.service.template >"$units/host.service"
-          sed "s|@ORCH_CLAUDE_DIR@|$units/home with space/.claude|g; s|@ORCH_CONFIG@|$units/custom config.env|g; s|@ORCH_HERDR_BIN@|/usr/bin/herdr|g; s|@ORCH_HERDR_SOCKET@|$units/socket|g; s|@ORCH_PATH@|/usr/bin:/bin|g" coordinator/watchers/service/linux/com.combinaut.coord-watcher-hog.service.template >"$units/hog.service"
-          sed "s|@ORCH_CLAUDE_DIR@|$units/home with space/.claude|g; s|@ORCH_CONFIG@|$units/custom config.env|g; s|@ORCH_HERDR_BIN@|/usr/bin/herdr|g; s|@ORCH_HERDR_SOCKET@|$units/socket|g; s|@ORCH_PATH@|/usr/bin:/bin|g" coordinator/watchers/service/linux/com.combinaut.coord-watcher-balance.service.template >"$units/balance.service"
-          sed "s|@ORCH_CLAUDE_DIR@|$units/home with space/.claude|g; s|@ORCH_CONFIG@|$units/custom config.env|g; s|@ORCH_HERDR_BIN@|/usr/bin/herdr|g; s|@ORCH_HERDR_SOCKET@|$units/socket|g; s|@ORCH_PATH@|/usr/bin:/bin|g" coordinator/watchers/service/linux/com.combinaut.coord-watcher-workers.service.template >"$units/workers.service"
-          sed "s|@ORCH_CLAUDE_DIR@|$units/home with space/.claude|g; s|@ORCH_CONFIG@|$units/custom config.env|g; s|@ORCH_HERDR_BIN@|/usr/bin/herdr|g; s|@ORCH_HERDR_SOCKET@|$units/socket|g; s|@ORCH_PATH@|/usr/bin:/bin|g" coordinator/watchers/service/linux/com.combinaut.coord-watcher-audit.service.template >"$units/audit.service"
-          touch "$units/home with space/.claude/coordinator/legacy-map.sh"
-          chmod +x "$units/home with space/.claude/coordinator/legacy-map.sh"
-          for kind in service timer; do
-            sed "s|@ORCH_CLAUDE_DIR@|$units/home with space/.claude|g; s|@ORCH_LEGACY_MAP_REPO@|$units/webapp|g; s|@ORCH_PYTHON3@|/usr/bin/python3|g; s|@ORCH_PATH@|/usr/bin:/bin|g" coordinator/service/linux/com.combinaut.coord-legacy-map.$kind.template >"$units/legacy-map.$kind"
-          done
-          systemd-analyze verify "$units/context.service" "$units/legacy-map.service" "$units/legacy-map.timer" "$units/inbox.service" "$units/host.service" "$units/hog.service" "$units/balance.service" "$units/workers.service" "$units/audit.service"
+      - id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: .github/scripts/macos-scope.sh >>"$GITHUB_OUTPUT"
+
+  macos:
+    name: Validate (macos-latest)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.macos != 'false' }}
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - run: brew install shellcheck bats-core
+      - uses: ./.github/actions/validate
+
+  ubuntu:
+    name: Validate (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck bats bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: ./.github/actions/validate

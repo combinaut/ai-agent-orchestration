@@ -262,7 +262,7 @@ export async function openAll() {
   if (!rules.org || !rules.openAll)
     return {
       error:
-        "Set ORCH_PR_TABS_ORG and ORCH_PR_TABS_OPEN_ALL in orchestration.env",
+        "Set pr_tabs.org and pr_tabs.open_all in orchestration.toml",
     };
   const entries = await prEntries(rules);
   const openKeys = new Set(entries.map(({ pr }) => pr.key));
@@ -289,9 +289,9 @@ export const goTo = (input) => serial(() => findOrOpen(input));
 
 async function findOrOpen(input) {
   const rules = await loadRules();
-  if (!rules.org) return { error: "Set ORCH_PR_TABS_ORG in orchestration.env" };
+  if (!rules.org) return { error: "Set pr_tabs.org in orchestration.toml" };
   if (/^#?\d+$/.test((input || "").trim()) && !rules.defaultRepo)
-    return { error: "Set ORCH_PR_TABS_DEFAULT_REPO in orchestration.env" };
+    return { error: "Set pr_tabs.default_repo in orchestration.toml" };
   const pr = parseTarget(input, rules);
   if (!pr) return { error: `Not a ${rules.org} PR number or URL` };
   const focused = await chrome.windows.getLastFocused().catch(() => null);

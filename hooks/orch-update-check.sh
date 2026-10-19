@@ -45,11 +45,14 @@ if [ -n "$branch" ] && [ -n "$remote" ] && [ -n "$merge" ] && tmp=$(mktemp 2>/de
 fi
 
 pin_file="$repo/env/herdr/radar.pin"
-radar=${ORCH_RADAR_PATH-}
-if [ -z "${ORCH_RADAR_PATH+x}" ]; then
-  # shellcheck disable=SC1090
-  radar=$(set +u && . "${ORCH_CONFIG:-$HOME/.claude/orchestration.env}" >/dev/null 2>&1 && printf '%s' "${ORCH_RADAR_PATH:-}")
+err=$(mktemp 2>/dev/null) || exit 0
+# shellcheck source=coordinator/watchers/coord-lib.sh
+if ! radar=$(. "$repo/coordinator/watchers/coord-lib.sh" && orch_load_config 2>"$err" && printf '%s' "${ORCH_RADAR_PATH:-}"); then
+  sed 's/^ERROR: /orch-update-check: /' "$err" >&2
+  rm -f "$err"
+  exit 1
 fi
+rm -f "$err"
 case "$radar" in \~/*) radar="$HOME/${radar#\~/}" ;; esac
 [ -n "$radar" ] || radar="$HOME/.claude/herdr-radar"
 if [ -f "$pin_file" ] && git -C "$radar" rev-parse --git-dir >/dev/null 2>&1; then

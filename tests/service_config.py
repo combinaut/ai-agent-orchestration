@@ -25,12 +25,15 @@ for unit in units:
             elif line.startswith('ExecStart='):
                 argv = shlex.split(line.split('=', 1)[1])
     assert environment.get('ORCH_CONFIG') == expected, (unit.name, environment.get('ORCH_CONFIG'), expected)
+    python = environment.get('ORCH_PYTHON3', '')
+    assert python.startswith('/') and subprocess.run([python, '-c', 'import sys; print(sys.version_info >= (3, 11))'],
+                                                     capture_output=True, text=True).stdout.strip() == 'True', (unit.name, python)
     if 'coord-watcher-audit.' in unit.name:
         audit = (environment, argv)
 assert audit
 # Launch the actual rendered entrypoint once, with only the service's config selection.
 environment = dict(os.environ)
-for key in ('ORCH_CONFIG', 'ORCH_PR_AUTHOR', 'ORCH_PR_REPOS', 'ORCH_GIT_WATCH_REPOS'):
+for key in ('ORCH_CONFIG', 'ORCH_PR_AUTHOR', 'ORCH_PR_REPOS', 'ORCH_GIT_WATCH_REPOS', 'ORCH_PYTHON3', 'ORCH_LOADER_PYTHON'):
     environment.pop(key, None)
 environment.update(audit[0])
 argv = [arg for arg in audit[1] if arg != '--loop']

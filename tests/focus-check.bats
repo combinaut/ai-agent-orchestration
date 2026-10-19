@@ -138,8 +138,8 @@ SH
   chmod +x "$TMP/bin/configured-python" "$TMP/bin/configured-herdr"
   export CONFIG_PYTHON_USED="$TMP/configured-python-used"
   export CONFIG_HERDR_USED="$TMP/configured-herdr-used"
-  export ORCH_CONFIG="$TMP/orchestration.env"
-  printf 'ORCH_PYTHON3=%s\nORCH_HERDR_BIN=%s\n' "$TMP/bin/configured-python" "$TMP/bin/configured-herdr" >"$ORCH_CONFIG"
+  export ORCH_CONFIG="$TMP/orchestration.toml"
+  printf '[watchers]\npython3 = "%s"\n[herdr]\nbin = "%s"\n' "$TMP/bin/configured-python" "$TMP/bin/configured-herdr" >"$ORCH_CONFIG"
 
   run focus_line
 
@@ -149,8 +149,8 @@ SH
 }
 
 @test "empty configured executables fall back to PATH" {
-  export ORCH_CONFIG="$TMP/orchestration.env"
-  printf 'ORCH_PYTHON3=""\nORCH_HERDR_BIN=""\n' >"$ORCH_CONFIG"
+  export ORCH_CONFIG="$TMP/orchestration.toml"
+  printf '[watchers]\npython3 = ""\n[herdr]\nbin = ""\n' >"$ORCH_CONFIG"
 
   run focus_line
 
@@ -173,8 +173,8 @@ SH
 
 @test "an unavailable heavy-slot command reports an unknown slot count" {
   rm "$TMP/bin/heavy-slot"
-  export ORCH_CONFIG="$TMP/orchestration.env"
-  printf 'ORCH_PYTHON3=%s\n' "$(command -v python3)" >"$ORCH_CONFIG"
+  export ORCH_CONFIG="$TMP/orchestration.toml"
+  printf '[watchers]\npython3 = "%s"\n' "$(command -v python3)" >"$ORCH_CONFIG"
   export PATH="$TMP/bin:/usr/bin:/bin"
 
   run focus_line
@@ -184,8 +184,8 @@ SH
 }
 
 @test "focus reporting excludes only configured architects" {
-  export ORCH_CONFIG="$TMP/orchestration.env"
-  printf 'ORCH_FOCUS_SKIP_ARCHITECTS="Agent::Tooling"\n' >"$ORCH_CONFIG"
+  export ORCH_CONFIG="$TMP/orchestration.toml"
+  printf '[focus]\nskip_architects = ["Agent::Tooling"]\n' >"$ORCH_CONFIG"
 
   run focus_line
 
@@ -198,21 +198,24 @@ focus_fixture() {
   cat >"$TMP/bin/herdr" <<'SH'
 #!/bin/sh
 if [ "$1" = pane ]; then
-  printf '%s\n' '{"result":{"panes":[
-    {"workspace_id":"a","terminal_title_stripped":"Architect::Alpha","tokens":{"role":"architect"},"agent_status":"idle"},
-    {"workspace_id":"b","terminal_title_stripped":"Architect::Beta","tokens":{"role":"architect"},"agent_status":"idle"},
-    {"workspace_id":"w1","terminal_title_stripped":"worker","agent":"claude","tokens":{},"agent_status":"working"}]}}'
+  printf '{"result":{"panes":[
+    {"workspace_id":"a","terminal_title_stripped":"Architect::Alpha","tokens":{"role":"architect"},"agent_status":"idle","cwd":"%s"},
+    {"workspace_id":"b","terminal_title_stripped":"Architect::Beta","tokens":{"role":"architect"},"agent_status":"idle","cwd":"%s"},
+    {"workspace_id":"w1","terminal_title_stripped":"worker","agent":"claude","tokens":{},"agent_status":"working"}]}}\n' "$FOCUS_REPO" "${BETA_REPO:-$FOCUS_REPO}"
 else
   printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"w1","label":"Billing-fix","tokens":{"owner":"a"}}]}}'
 fi
 SH
-  export ORCH_CONFIG="$TMP/orchestration.env"
+  export ORCH_CONFIG="$TMP/orchestration.toml"
   : >"$ORCH_CONFIG"
+  export FOCUS_REPO="$TMP/repo"
+  mkdir -p "$FOCUS_REPO/sub"
+  git -C "$FOCUS_REPO" init -q
 }
 
 @test "a focus pattern counts matching workers case-insensitively and flags architects without one" {
   focus_fixture
-  printf 'ORCH_FOCUS_PATTERN="billing|invoice"\n' >"$ORCH_CONFIG"
+  printf '[focus]\npattern = "billing|invoice"\n' >"$FOCUS_REPO/.orchestration.toml"
 
   run focus_line
 
@@ -223,7 +226,7 @@ SH
 
 @test "the focus architect is left out of the no-worker list" {
   focus_fixture
-  printf 'ORCH_FOCUS_PATTERN="billing"\nORCH_FOCUS_ARCHITECT="Beta"\n' >"$ORCH_CONFIG"
+  printf '[focus]\npattern = "billing"\narchitect = "Beta"\n' >"$FOCUS_REPO/.orchestration.toml"
 
   run focus_line
 
@@ -233,7 +236,7 @@ SH
 
 @test "an empty focus pattern turns the focus check off" {
   focus_fixture
-  printf 'ORCH_FOCUS_PATTERN=""\n' >"$ORCH_CONFIG"
+  printf '[focus]\npattern = ""\n' >"$FOCUS_REPO/.orchestration.toml"
 
   run focus_line
 
@@ -252,9 +255,23 @@ SH
   [[ "$output" == *"no_focus_worker=none"* ]]
 }
 
+@test "an architect is judged by the focus pattern of the repo it works in" {
+  focus_fixture
+  export BETA_REPO="$TMP/elsewhere"
+  mkdir -p "$BETA_REPO"
+  printf '[focus]\npattern = "invoice"\n' >"$FOCUS_REPO/.orchestration.toml"
+  printf '[focus]\npattern = "billing"\n' >"$FOCUS_REPO/.orchestration.local.toml"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"focus_workers_live=1"* ]]
+  [[ "$output" == *"no_focus_worker=none"* ]]
+}
+
 @test "the environment overrides the configured focus pattern" {
   focus_fixture
-  printf 'ORCH_FOCUS_PATTERN="nomatch"\n' >"$ORCH_CONFIG"
+  printf '[focus]\npattern = "nomatch"\n' >"$FOCUS_REPO/.orchestration.toml"
   export ORCH_FOCUS_PATTERN="billing"
 
   run focus_line
@@ -265,10 +282,10 @@ SH
 
 @test "an invalid focus pattern reports a read failure naming the setting" {
   focus_fixture
-  printf 'ORCH_FOCUS_PATTERN="("\n' >"$ORCH_CONFIG"
+  printf '[focus]\npattern = "("\n' >"$FOCUS_REPO/.orchestration.toml"
 
   run focus_line
 
   [ "$status" -eq 0 ]
-  [[ "$output" == "FOCUS READFAIL ORCH_FOCUS_PATTERN" ]]
+  [[ "$output" == "FOCUS READFAIL ORCH_FOCUS_PATTERN "* ]]
 }

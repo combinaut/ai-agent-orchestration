@@ -322,8 +322,8 @@ class WorkersTests(IsolatedTestCase):
         fake = self.base / "fakeherdr"
         fake.write_text(f"#!/bin/sh\nexit {herdr_exit}\n")
         fake.chmod(0o755)
-        (self.base / "orchestration.env").write_text(f'ORCH_HERDR_BIN="{fake}"\n')
-        env = dict(os.environ, ORCH_CONFIG=str(self.base / "orchestration.env"), ORCH_CLOSED_DIR=str(self.base / "closed"))
+        (self.base / "orchestration.toml").write_text(f'[herdr]\nbin = "{fake}"\n')
+        env = dict(os.environ, ORCH_CONFIG=str(self.base / "orchestration.toml"), ORCH_CLOSED_DIR=str(self.base / "closed"))
         env.pop("HERDR_BIN_PATH", None)
         env.pop("ORCH_HERDR_BIN", None)
         return subprocess.run([str(w.ROOT / "close-pane.sh"), "wA:p9"], env=env, capture_output=True).returncode
@@ -335,9 +335,9 @@ class WorkersTests(IsolatedTestCase):
         victim = self.base / "victim"
         victim.write_text("keep")
         (self.base / "closed").mkdir()
-        (self.base / "none.env").touch()
+        (self.base / "none.toml").touch()
         env = dict(os.environ, HERDR_BIN_PATH=str(fake), ORCH_CLOSED_DIR=str(self.base / "closed"),
-                   ORCH_CONFIG=str(self.base / "none.env"))
+                   ORCH_CONFIG=str(self.base / "none.toml"))
         result = subprocess.run([str(w.ROOT / "close-pane.sh"), "../victim"], env=env, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(victim.read_text(), "keep")

@@ -30,6 +30,9 @@ class AuditTests(IsolatedTestCase):
                             ORCH_AUDIT_PAGE_PRS='80', ORCH_AUDIT_PAGE_NODES='100'))
         self.env.start()
         self.addCleanup(self.env.stop)
+        settings = patch.object(audit, 'repo_settings', lambda command, repo, ref, cache: audit.orch_settings.merged([], os.environ))
+        settings.start()
+        self.addCleanup(settings.stop)
 
     def lines(self):
         return audit.pr_lines(self.pr)

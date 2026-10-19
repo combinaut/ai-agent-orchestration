@@ -84,7 +84,7 @@ flowchart LR
 - The architect picks Claude or Codex per task for quality; Codex is the default for routine work. Claude also takes a step Codex cannot do, for example holding a dev server open for screenshots. `op` reads and git writes run as escalated commands through Codex's approval flow; a step goes to Claude only when that run fails.
 - A provider that refuses work for quota is replaced by the other family for new work, and the architect says so once.
 - A live session never changes model. A tier change happens through a recycle onto the new model.
-- All four model settings must be filled in `~/.claude/orchestration.env`; the skills stop while one is empty or a placeholder.
+- All four model settings must be filled in `~/.claude/orchestration.toml`; the skills stop while one is empty or a placeholder.
 
 ## Context recycle
 
@@ -110,13 +110,13 @@ sequenceDiagram
 - The successor keeps the session name, Herdr agent name, tab name, and `owner` and `role` tags, so `ListAgents`, Radar and the user see one continuous session.
 - One architect recycles at a time, and never one that holds a heavy slot.
 - The Coordinator recycles the same way with `handoff_coordinator.md`. Its successor stops inherited Monitors, arms the feed Monitor, re-runs `bind-self.py`, and closes the ancestor.
-- With `ORCH_PARK_IDLE=1` an architect with no open PR, running worker or watcher writes its handoff and exits; the Coordinator restarts it from that handoff when work arrives.
+- With `recycle.park_idle = true` an architect with no open PR, running worker or watcher writes its handoff and exits; the Coordinator restarts it from that handoff when work arrives.
 
 The procedures are in [`skills/coordinate/references/recycle.md`](../skills/coordinate/references/recycle.md).
 
 ## Watchers and the feed
 
-Producers run as launchd jobs (macOS) or systemd user units (Linux), registered by the installer with `ORCH_WATCHERS_SERVICE=1`. They write JSON alerts into `~/.claude/coordinator/watchers/prod-context/`. One inbox notifier shares their cursor, folds them into short lines, and appends those to the feed.
+Producers run as launchd jobs (macOS) or systemd user units (Linux), registered by the installer with `watchers.service = true`. They write JSON alerts into `~/.claude/coordinator/watchers/prod-context/`. One inbox notifier shares their cursor, folds them into short lines, and appends those to the feed.
 
 ```mermaid
 flowchart LR
@@ -170,7 +170,7 @@ The template every worker brief carries is [`worker-reports/machine-rules.md`](.
 
 ## LEGACY CHECK
 
-Projects that use the legacy-check workflow can use the audit’s `LEGACY` lines and the map and scan tools for repositories listed in `ORCH_LEGACY_REPOS`.
+Projects that use the legacy-check workflow can use the audit’s `LEGACY` lines and the map and scan tools for repositories whose repo settings turn `legacy.scan` on.
 
 ```mermaid
 sequenceDiagram
@@ -185,7 +185,7 @@ sequenceDiagram
 
 - The architect sends the Coordinator a 3-line `LEGACY CHECK`: the files the task touches, the old code in them (`grep -F <path> ~/.claude/coordinator/legacy-map.tsv`), and what happens to it (removed, untouched, or a named bridge with a ticket). Never extended.
 - No code starts until the answer is `LEGACY OK`.
-- [`legacy-map.sh`](../coordinator/legacy-map.sh) writes the map from `origin/main` of a repository; it runs daily only with `ORCH_WATCHERS_SERVICE=1` and a resolvable `ORCH_LEGACY_MAP_REPO`. [`legacy-scan.sh`](../coordinator/legacy-scan.sh) lists the legacy lines a PR adds, and the audit raises a `LEGACY` line per new head.
+- [`legacy-map.sh`](../coordinator/legacy-map.sh) writes the map from `origin/main` of a repository; it runs daily only with `watchers.service = true` and a resolvable `legacy.map_repo`. [`legacy-scan.sh`](../coordinator/legacy-scan.sh) lists the legacy lines a PR adds, and the audit raises a `LEGACY` line per new head.
 
 ## Remote Control
 

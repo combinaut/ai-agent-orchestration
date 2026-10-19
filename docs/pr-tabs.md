@@ -32,10 +32,13 @@ After an update, run the install command, then click the reload icon on the exte
 
 ## Rules
 
-Topics live as a JSON array in `ORCH_PR_TABS_TOPICS` in `orchestration.env`; empty means no custom topics. Each topic has a name, a [tab group colour](https://developer.chrome.com/docs/extensions/reference/api/tabGroups#type-Color), and case-insensitive regular expressions: `repo`, `branch` and `title` test that field; `any` tests all three. The first matching topic wins. `ORCH_PR_TABS_ORG` selects the organization, `ORCH_PR_TABS_DEFAULT_REPO` is the repo for bare numbers, and `ORCH_PR_TABS_OPEN_ALL` is the GitHub search behind the button. After changing settings, click the reload icon on the extension card. For example:
+Topics live as an array of tables in `pr_tabs.topics` in `orchestration.toml` (`ORCH_PR_TABS_TOPICS` holds them as JSON); empty means no custom topics. Each topic has a name, a [tab group colour](https://developer.chrome.com/docs/extensions/reference/api/tabGroups#type-Color), and case-insensitive regular expressions: `repo`, `branch` and `title` test that field; `any` tests all three. The first matching topic wins. `ORCH_PR_TABS_ORG` selects the organization, `ORCH_PR_TABS_DEFAULT_REPO` is the repo for bare numbers, and `ORCH_PR_TABS_OPEN_ALL` is the GitHub search behind the button. After changing settings, click the reload icon on the extension card. For example:
 
-```bash
-ORCH_PR_TABS_TOPICS='[ {"name":"Webapp", "color":"blue", "repo":["^webapp$"]} ]'
+```toml
+[pr_tabs]
+topics = [
+  { name = "Webapp", color = "blue", repo = ["^webapp$"] },
+]
 ```
 
 ## Troubleshooting
@@ -45,7 +48,7 @@ These are the common red errors in the popup. **Close merged PRs** puts `GitHub 
 | Popup message | Meaning and fix |
 |---|---|
 | `Specified native messaging host not found.` or `Access to the specified native messaging host is forbidden.` | The host is not registered, or its `allowed_origins` ID differs from the extension's. Run the install command, then reload the extension. The ID must be `dkchnpimpkalielhfanmgikajmfconfa`; load the extension from the path above so the pinned `key` applies. |
-| `gh not found on PATH` | The launcher's `PATH` is `ORCH_PATH`. Add the folder of `gh` to `ORCH_PATH` in `~/.claude/orchestration.env`, then run the install command. |
+| `gh not found on PATH` | The launcher's `PATH` is `ORCH_PATH`. Add the folder of `gh` to `watchers.path` in `~/.claude/orchestration.toml`, then run the install command. |
 | `gh timed out after 30s` | GitHub did not answer in time. Try again. |
 | Any other GitHub message, or `gh exited N` | The text is what `gh` or GitHub returned. Follow it. It can be a network failure, a rate limit or a query error; a logged-out `gh` (`gh auth login`) or an account without access to the org's repos is one cause. |
 | `native host timed out` or `empty reply from native host` | The host did not answer. Read the host log. |

@@ -4,9 +4,10 @@ root="$(cd "$(dirname "$0")" && pwd)"
 . "$root/coord-lib.sh"
 orch_load_config
 orch_export_config
+orch_watcher_python
 failed=0
 for mode in context workers hog balance host audit todo; do
-  if ! "${ORCH_PYTHON3:-python3}" "$root/watchers.py" "$mode" "$@"; then
+  if ! "$ORCH_WATCHER_PYTHON" "$root/watchers.py" "$mode" "$@"; then
     printf '%s check failed\n' "$mode" >&2
     failed=1
   fi

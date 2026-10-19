@@ -186,11 +186,11 @@ EOF2
   fresh_install
   [ -L "$HOME/.claude/coordinator/legacy-map.sh" ]
   [ -x "$HOME/.claude/coordinator/legacy-map.sh" ]
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE '1' ORCH_HERDR_BIN '/bin/echo' ORCH_HERDR_SOCKET '/tmp/socket'
   install_ok
   [ -z "$(find "$HOME/.claude/coordinator/service" -type f)" ]
   contains "$output" 'daily legacy map job (set ORCH_LEGACY_MAP_REPO'
-  printf '%s\n' "ORCH_LEGACY_MAP_REPO=\"$BIG_REPO\"" >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_LEGACY_MAP_REPO "$BIG_REPO"
   use_service_state
   mkdir -p "$HOME/.config/systemd/user"
   ln -s /elsewhere/com.combinaut.coord-legacy-map.service "$HOME/.config/systemd/user/com.combinaut.coord-legacy-map.service"
@@ -229,14 +229,14 @@ EOF2
       ;;
   esac
   mkdir -p "$TMP/other-webapp"
-  printf '%s\n' "ORCH_LEGACY_MAP_REPO=\"$TMP/other-webapp\"" >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_LEGACY_MAP_REPO "$TMP/other-webapp"
   : >"$SYSTEMCTL_CALLS"
   install_ok
   case "$(uname -s)" in
     Darwin) contains "$(cat "$HOME/Library/LaunchAgents/com.combinaut.coord-legacy-map.plist")" "<string>$TMP/other-webapp</string>" ;;
     Linux) contains "$(cat "$SYSTEMCTL_CALLS")" 'user daemon-reload' ;;
   esac
-  grep -v '^ORCH_LEGACY_MAP_REPO=' "$HOME/.claude/orchestration.env" >"$TMP/env" && mv "$TMP/env" "$HOME/.claude/orchestration.env"
+  config_set ORCH_LEGACY_MAP_REPO ""
   install_ok
   case "$(uname -s)" in
     Darwin)
@@ -247,10 +247,10 @@ EOF2
   esac
 }
 
-@test "the legacy map repo defaults to the watched clone of a legacy repo" {
+@test "the legacy map repo defaults to the watched clone whose repo settings turn the legacy scan on" {
   fresh_install
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' \
-    'ORCH_LEGACY_REPOS="acme/webapp"' "ORCH_GIT_WATCH_REPOS=\"/elsewhere/other $BIG_REPO\"" >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket ORCH_GIT_WATCH_REPOS "/elsewhere/other $BIG_REPO"
+  printf '%s\n' '[legacy]' 'scan = true' >"$BIG_REPO/.orchestration.local.toml"
   use_service_state
   install_ok
   case "$(uname -s)" in
@@ -259,11 +259,21 @@ EOF2
   esac
 }
 
-@test "an empty ORCH_LEGACY_REPOS turns the legacy map default off" {
+@test "a watched clone without the legacy scan leaves the legacy map default off" {
   fresh_install
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_HERDR_BIN="/bin/echo"' 'ORCH_HERDR_SOCKET="/tmp/socket"' \
-    "ORCH_GIT_WATCH_REPOS=\"$BIG_REPO\"" 'ORCH_LEGACY_REPOS=""' >>"$HOME/.claude/orchestration.env"
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket ORCH_GIT_WATCH_REPOS "$BIG_REPO"
   install_ok
   contains "$output" 'daily legacy map job (set ORCH_LEGACY_MAP_REPO'
   [ -z "$(find "$HOME/.claude/coordinator/service" -type f)" ]
+}
+
+@test "a broken repo file in a watched clone stops install before the legacy map job changes" {
+  fresh_install
+  config_set ORCH_WATCHERS_SERVICE 1 ORCH_HERDR_BIN /bin/echo ORCH_HERDR_SOCKET /tmp/socket ORCH_GIT_WATCH_REPOS "$BIG_REPO"
+  printf '%s\n' '[heavy_slots]' 'max = 2' >"$BIG_REPO/.orchestration.local.toml"
+  run /bin/bash "$CLONE/install.sh"
+  [ "$status" -ne 0 ]
+  contains "$output" "/webapp/.orchestration.local.toml: heavy_slots.max: is a global setting"
+  contains "$output" 'cannot read the repo settings of the audit.git_watch_repos clones'
+  not_contains "$output" 'daily legacy map job'
 }

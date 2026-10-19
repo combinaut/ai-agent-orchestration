@@ -156,7 +156,7 @@ def settings(request):
         org, repo, query, raw_topics = project_settings()
     except (OSError, subprocess.SubprocessError, UnicodeError) as error:
         config = os.environ.get(
-            "ORCH_CONFIG", str(Path.home() / ".claude/orchestration.env")
+            "ORCH_CONFIG", str(Path.home() / ".claude/orchestration.toml")
         )
         raise RequestError(
             f"Cannot load PR-tabs settings from {config}: {type(error).__name__}"
@@ -165,7 +165,7 @@ def settings(request):
         topics = json.loads(raw_topics) if raw_topics else []
     except ValueError:
         raise RequestError(
-            "ORCH_PR_TABS_TOPICS must be a JSON array of topic objects"
+            "pr_tabs.topics (ORCH_PR_TABS_TOPICS) must be an array of topic tables"
         ) from None
     if not isinstance(topics, list) or any(
         not isinstance(topic, dict)

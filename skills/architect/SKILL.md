@@ -9,7 +9,7 @@ You own architecture, decomposition, task sequencing, delegation, escalation and
 
 ## Settings
 
-Read `~/.claude/orchestration.env` first. `$ORCH_…` names below are the settings in that file (models, recycle threshold, Radar path). If a model setting (`ORCH_COORDINATOR_MODEL`, `ORCH_ARCHITECT_MODEL`, `ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) is empty or still a `<placeholder>`, stop: dispatch and start nothing, and tell the user which setting to fill in `~/.claude/orchestration.env`. `ORCH_RADAR_PATH` may stay empty.
+Read `~/.claude/orchestration.toml` first. `$ORCH_…` names below are the settings in that file (models, recycle threshold, Radar path); [docs/settings.md](../../docs/settings.md) maps each TOML key to its `ORCH_…` name. Repo settings such as `legacy.scan` live in the repo's `.orchestration.toml` and `.orchestration.local.toml`. If a model setting (`ORCH_COORDINATOR_MODEL`, `ORCH_ARCHITECT_MODEL`, `ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) is empty or still a `<placeholder>`, stop: dispatch and start nothing, and tell the user which setting to fill in `~/.claude/orchestration.toml`. `ORCH_RADAR_PATH` may stay empty.
 
 ## Agent families
 
@@ -33,7 +33,7 @@ Reply with its path and stop. The Coordinator starts your successor in a fresh p
 
 **PR events come to you.** On start and after every recycle, run `python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/architect-$HERDR_WORKSPACE_ID.json` from your own Bash environment. The pulls watcher then sends APPROVED, RED, CHANGES, THREADS, COPILOT and MERGED for PRs whose branch is checked out in a workspace tagged `owner=$HERDR_WORKSPACE_ID` straight to you, within about 3 minutes. Do not poll for approvals.
 
-**Park when idle — opt in with `ORCH_PARK_IDLE="1"` (default off).** With this setting off, stay open. With it on and no open PR, running worker, or watcher, overwrite the same bounded handoff, tell the Coordinator its path in one line, and exit. The Coordinator restarts you from that handoff when work arrives, using the recycle start procedure.
+**Park when idle — opt in with `recycle.park_idle = true` (default off).** With this setting off, stay open. With it on and no open PR, running worker, or watcher, overwrite the same bounded handoff, tell the Coordinator its path in one line, and exit. The Coordinator restarts you from that handoff when work arrives, using the recycle start procedure.
 
 Default to worker models. Pick the tier per task: Sonnet/terra for routine work, Opus/sol-medium for hard work, Fable for the hardest only. Use a smart model only when architecture or requirements are ambiguous, substantial reasoning across subsystems is required, a worker is blocked after a reasonable attempt, or the consequences of a subtle mistake are high.
 
@@ -163,9 +163,9 @@ Never, without an explicit request: **merge**, assign or reassign people beyond 
 
 A worker's failure does not go straight to the user.
 
-## Legacy check before code (ORCH_LEGACY_REPOS)
+## Legacy check before code (`legacy.scan`)
 
-For projects listed in `ORCH_LEGACY_REPOS`, before a worker writes code, send the Coordinator a 3-line `LEGACY CHECK`:
+For repos whose repo settings turn `legacy.scan` on, before a worker writes code, send the Coordinator a 3-line `LEGACY CHECK`:
 
 1. The repository, source clone, map path, and files/areas the task touches. Verify the clone's origin belongs to the task repository, then generate a fresh task map before every check with `ORCH_LEGACY_MAP_OUT="<task-map-path>" ~/.claude/coordinator/legacy-map.sh "<task-clone>"`. Include the successful generation result. Do not reuse the daily map: its TSV has no source metadata, so it may belong to the previous configured clone.
 2. The old code in them: `grep -F <path> <verified-map-path>` (JSERB, ASSETJS and JQUERY files on main).
@@ -179,7 +179,7 @@ No code starts until the Coordinator answers `LEGACY OK`. Other projects skip th
 - Run the linter **and** the formatter. Passing lint is not passing CI.
 - A pure refactor edits **no spec**, and the test count matches before and after.
 - **"Done" means the checks were actually run** — not that the file looks right. For anything deployable, the acceptance test is a real request against a real dependency.
-- For projects listed in `ORCH_LEGACY_REPOS`, run `legacy-scan.sh` on your own diff before review.
+- For repos whose repo settings turn `legacy.scan` on, run `legacy-scan.sh` on your own diff before review.
 - Respect the repo's own rules on attribution, commit signing and language choice.
 - **Never change shared config to get past a block** — the repo's `.git/config`, global gitconfig, `CLAUDE.md`, settings, credentials. A blocked worker stops and reports `BLOCKED: …`.
 

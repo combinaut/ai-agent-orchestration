@@ -13,7 +13,7 @@ The watchers write alerts to files, and one notifier turns them into a feed at `
 | workers | Blocked, errored or vanished agents |
 | user-todo | What waits on you (see [The to-do pane](../README.md#the-to-do-pane)) |
 
-**With services**: set `ORCH_WATCHERS_SERVICE="1"` (with `ORCH_HERDR_BIN` and `ORCH_HERDR_SOCKET`) and run the installer again. It registers the watchers (audit and pulls only when `ORCH_PR_REPOS` and `ORCH_PR_AUTHOR` are set in the config file, not just exported) with launchd (macOS) or `systemd --user` (Linux) to run now and at login. Back to `0` removes them. Off by default.
+**With services**: set `[watchers] service = true` (with `[herdr] bin` and `socket`) and run the installer again. It registers the watchers (audit and pulls only when `pr.repos` and `pr.author` are set in the config file, not just exported) with launchd (macOS) or `systemd --user` (Linux) to run now and at login. Back to `false` removes them. Off by default.
 
 **Without services**: run the loops yourself in the background, and the notifier too, because it fills the Coordinator's feed. The commands are in [Run the watchers without services](../coordinator/watchers/README.md#run-the-watchers-without-services). Each producer takes `--state-dir`, and `--loop --interval <seconds>` keeps it running. A watcher without `--loop` scans once and exits, which is the quick way to test one:
 

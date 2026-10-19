@@ -5,8 +5,10 @@ setup() {
   ROOT=$(cd "$BATS_TEST_DIRNAME/.." && pwd -P)
   TMP=$(mktemp -d "${TMPDIR:-/tmp}/legacy-settings-bats.XXXXXX")
   export HOME="$TMP/home"
-  export ORCH_CONFIG="$TMP/orchestration.env"
-  mkdir -p "$HOME"
+  export ORCH_CONFIG="$TMP/orchestration.toml"
+  mkdir -p "$HOME" "$TMP/repo/app"
+  : >"$ORCH_CONFIG"
+  git -C "$TMP/repo" init -q
 }
 
 teardown() {
@@ -17,14 +19,15 @@ classify_after_config() {
   (
     . "$ROOT/coordinator/watchers/coord-lib.sh"
     orch_load_config
+    orch_load_repo_config "$TMP/repo/app"
     orch_export_config
     # shellcheck disable=SC2016 # Python source, not shell.
     cd "$ROOT/coordinator/watchers" && python3 -c 'import audit; print(audit.classify("app/a.rb", "file-name"), audit.classify("app/a.rb", "env-name"), audit.classify("scripts/x.js", "$(x)"))'
   )
 }
 
-@test "a legacy pattern set only in the config file reaches the scan" {
-  printf 'ORCH_LEGACY_EXTRA_PATTERN="file-name"\n' >"$ORCH_CONFIG"
+@test "a legacy pattern set only in the repo file reaches the scan" {
+  printf '[legacy]\nextra_pattern = "file-name"\n' >"$TMP/repo/.orchestration.toml"
 
   run classify_after_config
 
@@ -32,8 +35,8 @@ classify_after_config() {
   [ "$output" = "JQUERY None JQUERY" ]
 }
 
-@test "an exported legacy pattern overrides the config file" {
-  printf 'ORCH_LEGACY_EXTRA_PATTERN="file-name"\n' >"$ORCH_CONFIG"
+@test "an exported legacy pattern overrides the repo file" {
+  printf '[legacy]\nextra_pattern = "file-name"\n' >"$TMP/repo/.orchestration.toml"
   export ORCH_LEGACY_EXTRA_PATTERN="env-name"
 
   run classify_after_config
@@ -42,8 +45,8 @@ classify_after_config() {
   [ "$output" = "None JQUERY JQUERY" ]
 }
 
-@test "an exported empty legacy pattern overrides the config file" {
-  printf 'ORCH_LEGACY_EXTRA_PATTERN="file-name"\n' >"$ORCH_CONFIG"
+@test "an exported empty legacy pattern overrides the repo file" {
+  printf '[legacy]\nextra_pattern = "file-name"\n' >"$TMP/repo/.orchestration.toml"
   export ORCH_LEGACY_EXTRA_PATTERN=""
 
   run classify_after_config

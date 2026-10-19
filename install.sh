@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Installs, updates and repairs the ai-agent-orchestration setup: one clone, symlinked into ~/.claude.
-# Safe to run any number of times. Run it without a clone (arguments go after the closing parenthesis):
-#   bash <(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh)
+# Safe to run any number of times. Run it without a clone (arguments go after the final _):
+#   s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) && bash -c "${s:?empty download}" _
 set -eu
 
 REPO_SLUG="combinaut/ai-agent-orchestration"
 CLAUDE_DIR="${HOME:?HOME is not set}/.claude"
-CONFIG="${ORCH_CONFIG:-$CLAUDE_DIR/orchestration.env}"
+CONFIG="${ORCH_CONFIG:-$CLAUDE_DIR/orchestration.toml}"
+OLD_CONFIG="$CLAUDE_DIR/orchestration.env"
+SNIPPET_DIR="$CLAUDE_DIR/orchestration-repo-snippets"
 STAMP=$(date +%Y%m%d%H%M%S)
 BACKUP_DIR="$CLAUDE_DIR/backups/$STAMP"
 # State directories the watchers write to; created under ~/.claude, never linked.
@@ -121,24 +123,50 @@ config_value() {
   local key=$1 value=""
   if [ -n "${!key+x}" ]; then
     value=${!key}
-  elif [ -f "$CONFIG" ]; then
-    # shellcheck disable=SC1090
-    value=$(set +u && . "$CONFIG" >/dev/null 2>&1 && printf '%s' "${!key:-}") || value=""
+  else
+    value=$(config_file_value "$key")
   fi
   case "$value" in \~/*) value="$HOME/${value#\~/}" ;; esac
   printf '%s' "$value"
 }
 
 # config_file_value <ORCH_KEY>: the value the config file gives, ignoring the installer's environment (what services load).
+# Before the clone exists only install.repo_path is read; before the conversion the old file is sourced.
 config_file_value() {
-  [ -f "$CONFIG" ] || return 0
-  # shellcheck disable=SC1090
-  (unset "$1" && set +u && . "$CONFIG" >/dev/null 2>&1 && printf '%s' "${!1:-}") || true
+  local lib="${SRC:+$SRC/coordinator/watchers/coord-lib.sh}"
+  if [ ! -f "$CONFIG" ]; then
+    if [ -z "${ORCH_CONFIG:-}" ] && [ -f "$OLD_CONFIG" ]; then
+      # shellcheck disable=SC1090
+      (unset "$1" && set +u && . "$OLD_CONFIG" >/dev/null 2>&1 && printf '%s' "${!1:-}") || true
+    fi
+    return 0
+  fi
+  if [ "$CONFIG_CACHE" = "$(config_stamp)" ]; then
+    local cached="__orch_file_$1"
+    printf '%s' "${!cached:-}"
+  elif [ -n "$lib" ] && [ -f "$lib" ]; then
+    # shellcheck source=coordinator/watchers/coord-lib.sh
+    (unset "$1" && . "$lib" && orch_load_config >/dev/null 2>&1 && printf '%s' "${!1:-}") || true
+  elif [ "$1" = ORCH_REPO_PATH ] && [ -n "$INSTALL_PYTHON" ]; then
+    "$INSTALL_PYTHON" -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb")).get("install", {}).get("repo_path", ""), end="")' "$CONFIG" 2>/dev/null || true
+  fi
 }
 
-# config_has <ORCH_KEY>: the key is set in the environment or assigned in the config file, even to an empty value.
-config_has() {
-  [ -n "${!1+x}" ] || { [ -f "$CONFIG" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?$1=" "$CONFIG"; }
+config_stamp() { cksum <"$CONFIG" 2>/dev/null; }
+
+# load_config_cache: reads every value of the config file once; config_file_value uses it while the file is unchanged.
+CONFIG_CACHE=""
+load_config_cache() {
+  local out name
+  CONFIG_CACHE=""
+  [ -f "$CONFIG" ] && [ -n "$INSTALL_PYTHON" ] && [ -f "${SRC:-}/lib/orch_settings.py" ] || return 0
+  out=$("$INSTALL_PYTHON" -I "$SRC/lib/orch_settings.py" global "$CONFIG" 2>/dev/null) || return 0
+  for name in ${!__orch_file_@}; do unset "$name"; done
+  # shellcheck disable=SC2317,SC2329 # Called by the eval below.
+  orch_set_default() { printf -v "__orch_file_$1" '%s' "$2"; }
+  eval "$out"
+  unset -f orch_set_default
+  CONFIG_CACHE=$(config_stamp)
 }
 
 # refuse_local_changes <dir> <label>: exits when <dir> has uncommitted edits or commits not on origin.
@@ -162,8 +190,14 @@ refuse_local_changes() {
   exit 1
 }
 
+# find_python: a Python 3.11 or newer (reading TOML needs tomllib), else exits.
+find_python() {
+  [ -n "$INSTALL_PYTHON" ] || die "Python 3.11 or newer not found (the TOML config needs it). Fix: $(platform_dependency_fix python3), or export ORCH_PYTHON3=/path/to/python3.11+"
+}
+
 preflight() {
   command -v git >/dev/null 2>&1 || die "git not found. Fix: $(platform_dependency_fix git)"
+  find_python
   if ! command -v gh >/dev/null 2>&1; then
     say "no gh" "PR watchers need it: $(platform_dependency_fix gh) && gh auth login"
   elif ! gh auth status >/dev/null 2>&1; then
@@ -199,6 +233,14 @@ sync_clone() {
   fi
 }
 
+INSTALL_PYTHON=""
+for candidate in ${ORCH_PYTHON3:+"$ORCH_PYTHON3"} python3 ${ORCH_PYTHON_FALLBACKS-/opt/homebrew/bin/python3 /usr/local/bin/python3} python3.14 python3.13 python3.12 python3.11; do
+  command -v "$candidate" >/dev/null 2>&1 || continue
+  if [ "$("$candidate" -c 'import sys; print(sys.version_info >= (3, 11))' 2>/dev/null)" = True ]; then
+    INSTALL_PYTHON=$(command -v "$candidate")
+    break
+  fi
+done
 ORCH_REPO=$(config_value ORCH_REPO_PATH)
 [ -n "$ORCH_REPO" ] || ORCH_REPO="$CLAUDE_DIR/ai-agent-orchestration"
 
@@ -404,21 +446,14 @@ detect_default() {
   printf '%s' "$value"
 }
 
-# write_config_key <ORCH_KEY> <value>: sets an empty or placeholder key in $CONFIG, or appends it.
+# write_config_key <ORCH_KEY> <value>: sets the key in $CONFIG, keeping every other line.
 write_config_key() {
-  local quoted tmp
-  quoted=$(printf '%s' "$2" | sed 's/[\\"$`]/\\&/g')
-  tmp=$(mktemp)
-  if grep -Eq "^[[:space:]]*(export[[:space:]]+)?$1=" "$CONFIG"; then
-    KEY="$1" LINE="$1=\"$quoted\"" awk '$0 ~ "^[[:space:]]*(export[[:space:]]+)?" ENVIRON["KEY"] "=" { if (!done) print ENVIRON["LINE"]; done = 1; next } { print }' "$CONFIG" >"$tmp"
-  else
-    cat "$CONFIG" >"$tmp"
-    printf '%s="%s"\n' "$1" "$quoted" >>"$tmp"
-  fi
-  cat "$tmp" >"$CONFIG"
-  rm -f "$tmp"
+  settings_cli set "$CONFIG" "$1" "$2" || die "cannot set $1 in $CONFIG"
   say "set" "$CONFIG: $1"
 }
+
+# settings_cli <args>: runs the settings module with the installer's Python 3.11 or newer.
+settings_cli() { "$INSTALL_PYTHON" -I "$ORCH_REPO/lib/orch_settings.py" "$@"; }
 
 # First run on a terminal: asks for each empty or placeholder key; "-" leaves it empty.
 ask_config_keys() {
@@ -444,8 +479,31 @@ ask_config_keys() {
   done
 }
 
+# convert_old_config: with no orchestration.toml, orchestration.env is converted and renamed to orchestration.env.bak.
+convert_old_config() {
+  local backup="$OLD_CONFIG.bak" line report n=0
+  [ -z "${ORCH_CONFIG:-}" ] && [ -f "$OLD_CONFIG" ] || return 0
+  if [ -L "$CONFIG" ] || [ -e "$CONFIG" ]; then
+    say "warning" "$OLD_CONFIG is not read any more; $CONFIG wins. Remove $OLD_CONFIG when nothing in it is missing from $CONFIG"
+    return 0
+  fi
+  if ! report=$(settings_cli migrate "$OLD_CONFIG" "$CONFIG" "$SNIPPET_DIR") || [ ! -f "$CONFIG" ]; then
+    die "cannot convert $OLD_CONFIG; it is unchanged. Fix it, or write $CONFIG from $ORCH_REPO/config/orchestration.toml.example"
+  fi
+  while IFS= read -r line; do
+    say "migrated" "$line"
+  done <<<"$report"
+  while [ -e "$backup" ] || [ -L "$backup" ]; do
+    n=$((n + 1))
+    backup="$OLD_CONFIG.bak.$n"
+  done
+  mv "$OLD_CONFIG" "$backup"
+  say "moved" "$OLD_CONFIG -> $backup"
+}
+
 personal_config() {
-  local example="$ORCH_REPO/config/orchestration.env.example" k v fill="" new="" old_key new_key consequence
+  local example="$ORCH_REPO/config/orchestration.toml.example" k v fill="" new="" have error
+  convert_old_config
   if [ -L "$CONFIG" ] || [ -e "$CONFIG" ]; then
     say "kept" "$CONFIG (yours, never overwritten)"
   else
@@ -453,31 +511,24 @@ personal_config() {
     cp "$example" "$CONFIG"
     say "created" "$CONFIG"
   fi
+  have=$(settings_cli keys "$CONFIG" 2>&1) || die "${have#ERROR: }"
+  have=" $have "
+  load_config_cache
   local missing_project_keys=""
-  for k in ORCH_BIG_REPO_REMOTES ORCH_LEGACY_REPOS ORCH_PR_TABS_ORG ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS ORCH_FOCUS_SKIP_ARCHITECTS; do
-    grep -Eq "^[[:space:]]*(export[[:space:]]+)?$k=" "$CONFIG" 2>/dev/null || missing_project_keys="$missing_project_keys $k"
+  for k in ORCH_PR_TABS_ORG ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS ORCH_FOCUS_SKIP_ARCHITECTS; do
+    case "$have" in *" $k "*) ;; *) missing_project_keys="$missing_project_keys $k" ;; esac
   done
   [ -z "$missing_project_keys" ] || say "configure" "Project features are off until you configure missing keys in $CONFIG:$missing_project_keys"
   for k in ORCH_PR_REPOS ORCH_PR_AUTHOR ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL ORCH_HERDR_BIN ORCH_HERDR_SOCKET; do
     v=$(config_value "$k")
     case "$v" in "" | "<"*">") fill="$fill $k" ;; esac
   done
-  while IFS= read -r k; do
-    grep -q "^$k=" "$CONFIG" 2>/dev/null || new="$new $k"
-  done < <(sed -n 's/^\(ORCH_[A-Z0-9_]*\)=.*/\1/p' "$example")
+  for k in $(settings_cli keys "$example"); do
+    case "$have" in *" $k "*) ;; *) new="$new $k" ;; esac
+  done
   [ -z "$fill" ] || say "fill in" "$CONFIG:$fill"
   [ -z "$new" ] || say "new keys" "in $example, not in your config (defaults apply):$new"
-  for old_key in ORCH_V2_LAUNCHD ORCH_V2_PR_SCOPE ORCH_V2_WORKER_MODEL ORCH_V2_PRIMARY_REPO; do
-    grep -q "^$old_key=" "$CONFIG" 2>/dev/null || continue
-    case "$old_key" in
-      ORCH_V2_LAUNCHD) new_key=ORCH_WATCHERS_SERVICE; consequence="services are not rendered" ;;
-      ORCH_V2_PR_SCOPE) new_key=ORCH_WATCHERS_PR_SCOPE; consequence="PR watching cannot start" ;;
-      ORCH_V2_WORKER_MODEL) new_key=ORCH_WATCHERS_WORKER_MODEL; consequence="dispatch records omit the worker model" ;;
-      ORCH_V2_PRIMARY_REPO) new_key=ORCH_WATCHERS_PRIMARY_REPO; consequence="dispatch records omit the primary repository" ;;
-      *) new_key=${old_key/ORCH_V2_/ORCH_WATCHERS_} ;;
-    esac
-    say "migrate" "$CONFIG: rename $old_key to $new_key; $consequence until renamed"
-  done
+  say "repo settings" "per repo in .orchestration.toml (committed) and .orchestration.local.toml (git-ignored); see $ORCH_REPO/docs/settings.md"
 }
 
 # Adds our hooks, and the status line when none is set. Touches nothing else.
@@ -560,13 +611,20 @@ placeholder_value() {
     printf '%s' "$v"
     return
   fi
+  if [ "$1" = ORCH_SERVICE_PYTHON ]; then
+    [ -z "$SERVICE_PYTHON" ] || { printf '%s' "$SERVICE_PYTHON" && return; }
+    v=$(placeholder_value ORCH_PYTHON3)
+    [ -n "$v" ] && [ "$("$v" -c 'import sys; print(sys.version_info >= (3, 11))' 2>/dev/null)" = True ] || v=$INSTALL_PYTHON
+    printf '%s' "$v"
+    return
+  fi
   v=$(config_value "$1")
   if [ -z "$v" ]; then
     case "$1" in
       ORCH_CLAUDE_DIR) v=$CLAUDE_DIR ;;
       ORCH_PATH) v="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" ;;
       ORCH_PYTHON3) v=python3 ;;
-      ORCH_LEGACY_MAP_REPO) v=$(legacy_map_default_repo) ;;
+      ORCH_LEGACY_MAP_REPO) v=$(legacy_map_default_repo) || return 2 ;;
     esac
   fi
   # shellcheck disable=SC2016
@@ -586,7 +644,7 @@ render_service() {
   dest=${dest%.template}
   script="" missing=""
   for key in $(grep -o '@ORCH_[A-Z0-9_]*@' "$t" | tr -d @ | sort -u); do
-    value=$(placeholder_value "$key")
+    value=$(placeholder_value "$key") || die "cannot resolve $key for $t"
     if [ -z "$value" ]; then
       missing="$missing $key"
       continue
@@ -722,22 +780,28 @@ register_services() {
   fi
 }
 
-# legacy_map_default_repo: the ORCH_GIT_WATCH_REPOS clone named like an ORCH_LEGACY_REPOS repo, else empty.
+# legacy_map_default_repo: the ORCH_GIT_WATCH_REPOS clone whose repo settings turn legacy.scan on, else empty.
 legacy_map_default_repo() {
-  local path repo repos
-  repos=$(config_value ORCH_LEGACY_REPOS)
+  local path scan
   for path in $(config_value ORCH_GIT_WATCH_REPOS); do
-    for repo in $repos; do
-      [ "${path##*/}" != "${repo##*/}" ] || { printf '%s' "$path" && return; }
-    done
+    scan=${ORCH_LEGACY_SCAN-}
+    if [ -z "${ORCH_LEGACY_SCAN+x}" ]; then
+      scan=$(settings_cli repo "$path") || return 2
+      case "$scan" in *"orch_set_default ORCH_LEGACY_SCAN 1"*) scan=1 ;; *) scan=0 ;; esac
+    fi
+    if [ "$scan" = 1 ]; then
+      printf '%s' "$path"
+      return
+    fi
   done
 }
 
 # Renders the daily legacy map units of the current platform for registration; off until a repo to map is known.
 render_legacy_map_service() {
-  local t start dest
+  local t start dest repo
   [ "$(config_value ORCH_WATCHERS_SERVICE)" = 1 ] || return 0
-  if [ -z "$(placeholder_value ORCH_LEGACY_MAP_REPO)" ]; then
+  repo=$(placeholder_value ORCH_LEGACY_MAP_REPO) || die "cannot read the repo settings of the audit.git_watch_repos clones (see above); fix them or set legacy.map_repo in $CONFIG"
+  if [ -z "$repo" ]; then
     skip "daily legacy map job (set ORCH_LEGACY_MAP_REPO in $CONFIG to the local clone to map)"
     return 0
   fi
@@ -786,15 +850,15 @@ register_chrome_host() {
     skip "Chrome PR tabs host (no Chrome profile at $chrome_dir)"
     return 0
   fi
-  python=$(placeholder_value ORCH_PYTHON3)
+  python=$(placeholder_value ORCH_SERVICE_PYTHON)
   if [ -z "$python" ]; then
-    skip "Chrome PR tabs host (python3 not found; set ORCH_PYTHON3)"
+    skip "Chrome PR tabs host (no Python 3.11 or newer found; set watchers.python3)"
     return 0
   fi
   id=$(tr -d '[:space:]' <"$ORCH_REPO/chrome/pr-tabs/extension.id")
   launcher="$CLAUDE_DIR/chrome-pr-tabs/pr-tabs-host"
   write_rendered "$launcher" 755 < <(
-    printf '#!/bin/bash\nexport PATH=%q\nexport ORCH_CONFIG=%q\nexec %q %q\n' "$(placeholder_value ORCH_PATH)" "$(placeholder_value ORCH_CONFIG)" "$python" "$ORCH_REPO/chrome/pr-tabs/host/pr_tabs_host.py"
+    printf '#!/bin/bash\nexport PATH=%q\nexport ORCH_CONFIG=%q\nexport ORCH_PYTHON3=%q\nexec %q %q\n' "$(placeholder_value ORCH_PATH)" "$(placeholder_value ORCH_CONFIG)" "$python" "$python" "$ORCH_REPO/chrome/pr-tabs/host/pr_tabs_host.py"
   )
   write_rendered "$chrome_dir/NativeMessagingHosts/$CHROME_HOST.json" 644 < <(
     jq -n --arg name "$CHROME_HOST" --arg path "$launcher" --arg origin "chrome-extension://$id/" \
@@ -863,6 +927,9 @@ merge_settings
 verify_guard
 run_env
 ask_config_keys
+load_config_cache
+SERVICE_PYTHON=""
+SERVICE_PYTHON=$(placeholder_value ORCH_SERVICE_PYTHON)
 render_services
 render_legacy_map_service
 register_chrome_host

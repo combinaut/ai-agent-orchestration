@@ -84,9 +84,24 @@ case "$1 ${2:-}" in
           printf '[keys]\nprefix = "ctrl-b"\n' >"$config"
         fi
         [ -z "${HERDR_FAIL_START:-}" ] || exit 1
-        if [ -n "${HERDR_DAEMON_PID:-}" ]; then
-          sleep 300 </dev/null >/dev/null 2>&1 &
-          echo $! >"$HERDR_DAEMON_PID"
+        # Like Radar: a live daemon is left alone, otherwise one starts.
+        if [ -z "${HERDR_NO_DAEMON:-}" ] && ! { [ -f "$TMP/daemon.pid" ] && kill -0 "$(cat "$TMP/daemon.pid")" 2>/dev/null; }; then
+          (sleep 300 </dev/null >/dev/null 2>&1 &
+            echo $! >"$TMP/daemon.pid")
+        fi
+        ;;
+      *state-stop*)
+        # Herdr returns from invoke before the action finishes: the daemon leaves after a delay.
+        if [ -f "$TMP/daemon.pid" ]; then
+          (
+            sleep "${HERDR_STOP_DELAY:-0.5}"
+            kill "$(cat "$TMP/daemon.pid")" 2>/dev/null
+            # A watchdog event can start the replacement before the installer starts one.
+            if [ -n "${HERDR_STOP_REPLACES:-}" ]; then
+              sleep 300 &
+              echo $! >"$TMP/daemon.pid"
+            fi
+          ) </dev/null >/dev/null 2>&1 &
         fi
         ;;
     esac
@@ -96,6 +111,11 @@ esac
 EOF
   cat >"$BIN/node" <<'EOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = -e ]; then
+  # Stands in for Radar's control endpoint: the pid of this session's daemon.
+  { [ -f "$TMP/daemon.pid" ] && kill -0 "$(cat "$TMP/daemon.pid")" 2>/dev/null && cat "$TMP/daemon.pid"; } || true
+  exit 0
+fi
 echo "v${NODE_VERSION:-22.20.0}"
 EOF
   mkdir -p "$TMP/managed-node"
@@ -172,13 +192,16 @@ exec "$REAL_UNAME" "$@"
 EOF
   chmod +x "$BIN/uname"
   ln -s "$(command -v dirname)" "$BIN/dirname"
+  python_bin=$(command -v python3) || return 1
+  "$python_bin" -c 'import sys; sys.exit(sys.version_info < (3, 11))' || { echo "tests need python3 3.11 or newer on PATH" >&2; return 1; }
+  ln -s "$python_bin" "$BIN/python3"
   export PATH="$BATS_SERVICE_STUB_BIN:$BIN:/usr/bin:/bin:/usr/sbin:/sbin"
   export TMP BIN ORIGIN RADAR_ORIGIN
   export MISE_CWDS="$TMP/mise.cwds" MISE_CALLS="$TMP/mise.calls" CURL_CALLS="$TMP/curl.calls"
   export INSTALL_SOURCE="$SRC" ORCH_REPO_URL="file://$ORIGIN"
   export HERDR_CALLS="$TMP/herdr.calls" HERDR_PLUGIN="$TMP/herdr.plugin"
   # shellcheck disable=SC2016 # Expansions belong to the downloaded script.
-  export ONE_LINER='exec /bin/bash <(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) "$@"'
+  export ONE_LINER='s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) && bash -c "${s:?empty download}" _ "$@"'
 }
 
 teardown_fixture() {
@@ -237,14 +260,29 @@ not_contains() {
 }
 
 prepare_custom_service_config() {
-  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_PR_AUTHOR="custom-author"' 'ORCH_PR_REPOS="owner/custom"' 'ORCH_GIT_WATCH_REPOS=""' >"$1"
-  printf 'ORCH_HERDR_BIN="%s"\nORCH_HERDR_SOCKET="/tmp/socket"\nORCH_PATH="%s:/usr/bin:/bin"\n' "$BIN/herdr" "$BIN" >>"$1"
+  : >"$1"
+  CONFIG_FILE="$1" config_set ORCH_WATCHERS_SERVICE 1 ORCH_PR_AUTHOR custom-author ORCH_PR_REPOS owner/custom ORCH_GIT_WATCH_REPOS "" \
+    ORCH_HERDR_BIN "$BIN/herdr" ORCH_HERDR_SOCKET /tmp/socket ORCH_PATH "$BIN:/usr/bin:/bin"
+}
+
+# config_set <ORCH_NAME> <value> ...: sets settings in $CONFIG_FILE (default the installed global config).
+config_set() {
+  local file=${CONFIG_FILE:-$HOME/.claude/orchestration.toml}
+  [ -e "$file" ] || : >"$file"
+  python3 "$ROOT/lib/orch_settings.py" set "$file" "$@"
+}
+
+# config_get <ORCH_NAME>: the value the loader gives for a setting of the installed global config.
+config_get() {
+  # shellcheck disable=SC2016 # The child shell expands these.
+  env -u "$1" ORCH_CONFIG="${CONFIG_FILE:-$HOME/.claude/orchestration.toml}" bash -c '. "$1/coordinator/watchers/coord-lib.sh" && orch_load_config && printf "%s" "${!2-}"' _ "$ROOT" "$1"
 }
 
 prepare_audit_commands() {
   python3 -c 'import json,sys; pr=json.load(open(sys.argv[1])); print(json.dumps({"data":{"search":{"nodes":[pr],"pageInfo":{"hasNextPage":False}}}}))' "$ROOT/coordinator/watchers/fixtures/audit-pr.json" >"$TMP/audit-gh.json"
   cat >"$BIN/gh" <<'EOF'
 #!/bin/bash
+case "$*" in *"/contents/"*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; esac
 printf '%s\n' "$*" >"$AUDIT_ARGS"
 cat "$AUDIT_FIXTURE"
 EOF

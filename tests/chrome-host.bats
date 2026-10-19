@@ -50,11 +50,14 @@ ask_host() {
   jq -e --arg origin "chrome-extension://$id/" '.name == "com.combinaut.pr_tabs" and .type == "stdio" and .allowed_origins == [$origin]' "$HOST_MANIFEST" >/dev/null
   launcher=$(jq -r .path "$HOST_MANIFEST")
   [ -x "$launcher" ]
+  python=$(sed -n 's/^export ORCH_PYTHON3=//p' "$launcher")
+  [ "$("$python" -c 'import sys; print(sys.version_info >= (3, 11))')" = True ]
+  grep -qx "exec $python .*" "$launcher"
   run ask_host "$launcher" '{"type":"ping"}'
   [ "$status" -eq 0 ]
   printf '%s' "$output" | jq -e '.ok == false and (.error | test("unknown request type"))' >/dev/null
-  printf '%s\n' 'ORCH_PR_TABS_ORG="acme"' 'ORCH_PR_TABS_DEFAULT_REPO="webapp"' >"$TMP/relative config.env"
-  run /bin/bash -c 'cd "$1"; ORCH_CONFIG="relative config.env" /bin/bash "$2"' _ "$TMP" "$CLONE/install.sh"
+  printf '%s\n' '[pr_tabs]' 'org = "acme"' 'default_repo = "webapp"' >"$TMP/relative config.toml"
+  run /bin/bash -c 'cd "$1"; ORCH_CONFIG="relative config.toml" /bin/bash "$2"' _ "$TMP" "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   run ask_host "$launcher" '{"type":"settings"}'
   [ "$status" -eq 0 ]

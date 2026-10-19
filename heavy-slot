@@ -3,10 +3,13 @@
 
 set -u
 
-CONFIG=${ORCH_CONFIG:-"$HOME/.claude/orchestration.env"}
+SELF=$0
+[ ! -L "$SELF" ] || SELF=$(readlink "$SELF")
+# shellcheck source=coordinator/watchers/coord-lib.sh
+. "$(cd "$(dirname "$SELF")" && pwd -P)/coordinator/watchers/coord-lib.sh"
+CONFIG=$(orch_config_path)
 CONFIG_PARENT=$(dirname "$CONFIG")
 ORCH_HEAVY_SLOTS_MAX_WAS_SET=${ORCH_HEAVY_SLOTS_MAX+x}
-ORCH_HEAVY_SLOTS_MAX_SAVED=${ORCH_HEAVY_SLOTS_MAX:-}
 config_error() {
   printf 'heavy-slot: cannot load %s: %s\n' "$CONFIG" "$1" >&2
   exit 78
@@ -31,15 +34,16 @@ if [ -e "$CONFIG" ] || [ -L "$CONFIG" ]; then
     config_unavailable 'not a regular file'
   elif [ ! -r "$CONFIG" ]; then
     config_unavailable 'not readable'
-  elif ! bash -n "$CONFIG" 2>/dev/null; then
-    config_unavailable 'syntax error'
+  elif ! LOADED=$({ orch_python >/dev/null && "$ORCH_LOADER_PYTHON" -I "$(orch_settings_module)" global "$CONFIG"; } 2>&1); then
+    LOADED=${LOADED#ERROR: }
+    config_unavailable "${LOADED#"$CONFIG": }"
   else
-    set +u
-    # shellcheck disable=SC1090 # User-selected Bash settings file.
-    . "$CONFIG"
-    set -u
+    eval "$LOADED"
   fi
 else
+  if [ -z "${ORCH_CONFIG:-}" ] && [ -f "$HOME/.claude/orchestration.env" ]; then
+    config_unavailable "missing; run install.sh to convert $HOME/.claude/orchestration.env"
+  fi
   CONFIG_ANCESTOR=$CONFIG_PARENT
   while { [ ! -e "$CONFIG_ANCESTOR" ] && [ ! -L "$CONFIG_ANCESTOR" ]; } && [ "$CONFIG_ANCESTOR" != / ]; do
     CONFIG_NEXT=$(dirname "$CONFIG_ANCESTOR")
@@ -50,7 +54,6 @@ else
     config_unavailable 'parent directory not searchable'
   fi
 fi
-[ -z "$ORCH_HEAVY_SLOTS_MAX_WAS_SET" ] || ORCH_HEAVY_SLOTS_MAX=$ORCH_HEAVY_SLOTS_MAX_SAVED
 SLOT_DIR=${ORCH_HEAVY_SLOTS_DIR:-"$HOME/.claude/heavy-slots"}
 SLOT_MAX=${ORCH_HEAVY_SLOTS_MAX:-4}
 LOCK_DIR="$SLOT_DIR/.lock"

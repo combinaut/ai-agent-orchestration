@@ -19,7 +19,7 @@ class InboxTest(IsolatedTestCase):
     def setUp(self):
         config_dir = tempfile.TemporaryDirectory()
         self.addCleanup(config_dir.cleanup)
-        config = Path(config_dir.name) / "no-config.env"
+        config = Path(config_dir.name) / "no-config.toml"
         config.touch()
         env = patch.dict(os.environ, {"ORCH_CONFIG": str(config)})
         env.start()

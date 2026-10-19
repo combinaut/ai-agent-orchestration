@@ -35,8 +35,8 @@ def hook(command, cwd):
 def check_installer(repo, root, push_cwd):
     home = root/'install-home'; bindir = root/'install-bin'
     home.mkdir(); bindir.mkdir()
-    custom_config = root/'selected-orchestration.env'
-    custom_config.write_text('ORCH_BIG_REPO_REMOTES="acme/webapp"\n')
+    custom_config = root/'selected-orchestration.toml'
+    custom_config.write_text('[pr]\nauthor = "me"\n')
     gh = bindir/'gh'
     gh.write_text('#!/bin/sh\n[ "$1 $2" = "auth status" ]\n')
     gh.chmod(0o755)
@@ -189,9 +189,7 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
     root = Path(directory)
     test_home = root/'home'; (test_home/'.claude/hooks').mkdir(parents=True)
     os.environ['HOME'] = str(test_home)
-    config = test_home / "orchestration.env"
-    config.write_text('ORCH_BIG_REPO_REMOTES="acme/webapp"\n')
-    os.environ["ORCH_CONFIG"] = str(config)
+    os.environ.pop("ORCH_CONFIG", None)
     repo = root/'repo'; repo.mkdir()
     git(repo, 'init', '-b', 'main')
     git(repo, '-c', 'user.name=Guard Test', '-c', 'user.email=guard@example.invalid', 'commit', '--allow-empty', '-m', 'initial')
@@ -212,53 +210,42 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
     git(webapp, 'remote', 'add', 'origin', 'git@github.com:acme/webapp.git')
     other = root/'other'; other.mkdir(); git(other, 'init', '-b', 'main')
     git(other, 'remote', 'add', 'origin', 'https://github.com/combinaut/not-webapp.git')
-    configured_remote = os.environ.get("GENERIC_PROOF_REMOTE", "acme/webapp")
-    git(
-        webapp,
-        "remote",
-        "set-url",
-        "origin",
-        "git@github.com:" + configured_remote + ".git",
-    )
-    config.write_text('ORCH_BIG_REPO_REMOTES="' + configured_remote + '"\n')
-    for value in ("", "acme/unrelated"):
-        os.environ["ORCH_BIG_REPO_REMOTES"] = value
-        assert hook("git grep needle", webapp).returncode == 0
-    del os.environ["ORCH_BIG_REPO_REMOTES"]
-    good_config = config.read_text()
-    config_failures = []
-    missing_config = root/'missing-orchestration.env'
-    for label, selected in [('missing file', missing_config), ('early exit', config)]:
-        if label == 'early exit':
-            config.write_text('ORCH_BIG_REPO_REMOTES="acme/webapp"\nexit 0\n')
-        os.environ['ORCH_CONFIG'] = str(selected)
-        result = hook('git grep needle', webapp)
-        if result.returncode != 2 or 'Cannot load ORCH configuration' not in result.stderr:
-            config_failures.append((label, result.returncode, result.stderr))
-        assert hook('git status', webapp).returncode == 0
-    os.environ['ORCH_CONFIG'] = str(config)
-    config.write_text('ORCH_BIG_REPO_REMOTES=""\n')
-    assert hook('git grep needle', webapp).returncode == 0
-    config.write_text(good_config)
-    assert not config_failures, config_failures
-    config.write_text('ORCH_BIG_REPO_REMOTES="unterminated\n')
+    separate = root/'separate'; subprocess.run(['git', 'init', '-q', f'--separate-git-dir={root/"separate.git"}', str(separate)], check=True)
+    (separate/'.orchestration.toml').write_text('[guard]\nbig_repo = true\n')
+    sub_source = root/'sub-source'; sub_source.mkdir(); git(sub_source, 'init', '-b', 'main'); git(sub_source, '-c', 'user.name=Guard Test', '-c', 'user.email=guard@example.invalid', 'commit', '--allow-empty', '-m', 'initial')
+    superproject = root/'superproject'; superproject.mkdir(); git(superproject, 'init', '-b', 'main')
+    git(superproject, '-c', 'protocol.file.allow=always', 'submodule', '-q', 'add', str(sub_source), 'module')
+    (superproject/'module/.orchestration.toml').write_text('[guard]\nbig_repo = true\n')
+    repo_file = webapp/'.orchestration.toml'
+    local_file = webapp/'.orchestration.local.toml'
+    (webapp/'app').mkdir()
+    assert hook("git grep needle", webapp).returncode == 0
+    repo_file.write_text('[guard]\nbig_repo = true\n')
+    assert hook("git grep needle", webapp).returncode == 2
+    assert hook("git grep needle", webapp/'app').returncode == 2
+    assert hook("git grep needle", other).returncode == 0
+    os.environ["ORCH_BIG_REPO"] = "0"
+    assert hook("git grep needle", webapp).returncode == 0
+    del os.environ["ORCH_BIG_REPO"]
+    local_file.write_text('[guard]\nbig_repo = false\n')
+    assert hook("git grep needle", webapp).returncode == 0
+    local_file.unlink()
+    no_tomllib = subprocess.run([sys.executable, '-c', 'import runpy, sys; sys.modules["tomllib"] = None; sys.argv = [sys.argv[1]]; runpy.run_path(sys.argv[0], run_name="__main__")', str(HOOK)],
+                                input=json.dumps({'tool_name': 'Bash', 'cwd': str(webapp), 'tool_input': {'command': 'git grep needle'}}), capture_output=True, text=True, timeout=20)
+    assert no_tomllib.returncode == 2 and 'No git grep in a configured big repo' in no_tomllib.stderr, no_tomllib.stderr
+    good_config = repo_file.read_text()
     try:
-        assert hook("git grep needle", webapp).returncode == 2
-        assert hook("git cat-file --batch-all-objects --batch", webapp).returncode == 2
-        assert (
-            hook("git ls-tree -r HEAD | git cat-file --batch", webapp).returncode == 2
-        )
-        assert hook("git cat-file -p HEAD", webapp).returncode == 0
-        assert hook("git status", webapp).returncode == 0
-        config.write_bytes(
-            ('ORCH_BIG_REPO_REMOTES="' + configured_remote + '"\n').encode()
-            + b'ORCH_PR_TABS_TOPICS="\xff"\n'
-        )
-        assert hook("git grep needle", webapp).returncode == 2
-        config.write_bytes(b'ORCH_BIG_REPO_REMOTES="\xff"\n')
-        assert hook("git grep needle", webapp).returncode == 2
+        for broken in ('[guard\n', '[guard]\nbig_repo = "yes"\n', '[heavy_slots]\nmax = 2\n', b'[guard]\nbig_repo = true\n# \xff\n'):
+            repo_file.write_bytes(broken if isinstance(broken, bytes) else broken.encode())
+            result = hook("git grep needle", webapp)
+            assert result.returncode == 2 and 'Cannot load the repo settings' in result.stderr, (broken, result.stderr)
+            assert 'heavy_slots' not in str(broken) or 'heavy_slots.max: is a global setting' in result.stderr, result.stderr
+            assert hook("git cat-file --batch-all-objects --batch", webapp).returncode == 2
+            assert hook("git ls-tree -r HEAD | git cat-file --batch", webapp).returncode == 2
+            assert hook("git cat-file -p HEAD", webapp).returncode == 0
+            assert hook("git status", webapp).returncode == 0
     finally:
-        config.write_text(good_config)
+        repo_file.write_text(good_config)
     msg = root/'message.txt'; msg.write_text('Co-Authored-By: Claude <bot@anthropic.com>')
     oversized_msg = root/'oversized-message.txt'; oversized_msg.write_text('x'*(1024*1024) + 'Co-Authored-By: Claude')
     oversized_plain = root/'oversized-plain.txt'; oversized_plain.write_text('x'*(1024*1024 + 1))
@@ -433,6 +420,14 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
     case('webapp nonrecursive formatted root tree', "git ls-tree --full-tree --format='%(objectname)' HEAD | git cat-file --batch-check", cwd=webapp)
     case('webapp config-spoofed grep', 'git -c remote.origin.url=https://github.com/combinaut/other.git grep needle', True, webapp)
     case('webapp git -C cat-file tree', f'git -C {webapp} ls-tree -r HEAD | git -C {webapp} cat-file --batch', True, root)
+    case('webapp git dir batch all objects', f'git -C {webapp}/.git cat-file --batch-all-objects --batch', True, root)
+    case('webapp git dir grep', f'cd {webapp}/.git && git grep needle', True, root)
+    case('webapp git dir with an outside work tree', f'git --git-dir={webapp}/.git --work-tree={other} cat-file --batch-all-objects --batch', True, root)
+    case('other git dir with the webapp work tree', f'git --git-dir={other}/.git --work-tree={webapp} grep needle', cwd=root)
+    case('separate git dir checkout grep', 'git grep needle', True, separate)
+    case('separate git dir with an outside work tree', f'git --git-dir={root}/separate.git --work-tree={other} cat-file --batch-all-objects --batch', True, root)
+    case('submodule grep', 'git grep needle', True, superproject/'module')
+    case('submodule git dir with an outside work tree', f'git --git-dir={superproject}/.git/modules/module --work-tree={other} grep needle', True, root)
     case('non-webapp grep', 'git grep needle', cwd=other)
     case('leave webapp before grep', f'cd {other} && git grep needle', cwd=webapp)
     case('successful and cd leaves webapp', f'true && cd {other}; git grep needle', cwd=webapp)

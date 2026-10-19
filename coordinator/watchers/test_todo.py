@@ -576,11 +576,11 @@ class TodoTest(IsolatedTestCase):
             self.assertEqual(args[1], root / ".claude/coordinator/user-todo.md")
             self.assertEqual(args[2], root / ".claude/coordinator/user-todo.state.json")
 
-    def test_cli_loads_shared_orch_config_with_shell_expansion(self):
+    def test_cli_loads_shared_orch_config_with_home_expansion(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config = root / "orchestration.env"
-            config.write_text('ORCH_USER_TODO_OUTPUT="$HOME/custom-todo.md"\nORCH_HERDR_BIN="/tmp/herdr"\n')
+            config = root / "orchestration.toml"
+            config.write_text('[user_todo]\noutput = "~/custom-todo.md"\n[herdr]\nbin = "/tmp/herdr"\n')
             calls = []
             def run(argv, **kwargs):
                 calls.append(argv)
@@ -594,7 +594,7 @@ class TodoTest(IsolatedTestCase):
 
     def test_cli_rejects_missing_selected_config(self):
         with tempfile.TemporaryDirectory() as tmp:
-            env = dict(os.environ, HOME=tmp, ORCH_CONFIG=str(Path(tmp) / "missing.env"))
+            env = dict(os.environ, HOME=tmp, ORCH_CONFIG=str(Path(tmp) / "missing.toml"))
             result = subprocess.run([sys.executable, str(w.ROOT.parent / "user-todo.py"), "--help"],
                                     env=env, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
