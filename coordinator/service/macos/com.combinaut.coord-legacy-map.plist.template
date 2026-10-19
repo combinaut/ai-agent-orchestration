@@ -4,6 +4,8 @@
 <dict>
 	<key>EnvironmentVariables</key>
 	<dict>
+		<key>ORCH_PYTHON3</key>
+		<string>@ORCH_PYTHON3@</string>
 		<key>PATH</key>
 		<string>@ORCH_PATH@</string>
 	</dict>

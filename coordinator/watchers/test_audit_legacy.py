@@ -14,10 +14,11 @@ from unittest.mock import patch
 
 from test_support import IsolatedTestCase
 import audit
+import legacy_rules
 import watchers as w
 
 
-RULES_TEXT = (w.ROOT / 'fixtures/legacy-rules.json').read_text()
+RULES_TEXT = (w.ROOT / 'fixtures/legacy-rules.toml').read_text()
 PR = json.loads((w.ROOT / 'fixtures/audit-pr.json').read_text())
 LABEL = 'owner/product#7 Fix menu'
 DIFF = '''diff --git a/app/views/menus/update.js.erb b/app/views/menus/update.js.erb
@@ -67,8 +68,7 @@ HITS = [('JSERB', 'app/views/menus/update.js.erb', 'plain line in erb'),
 SUMMARY = f'LEGACY {LABEL} [6 lines: JSERB 2, JQUERY 1, LEGACY 2, TEST 1]'
 
 
-VIEW = ('case "$*" in *".default_branch"*) echo main; exit 0;; esac\n'
-        'case "$2" in view) echo \'{"baseRefName":"main","headRefOid":"headsha"}\'; exit 0;; esac\n'
+VIEW = ('case "$2" in view) echo \'{"baseRefName":"main","headRefOid":"headsha"}\'; exit 0;; esac\n'
         'case "$*" in *"/contents/"*) if [ -s "$STUB_DIR/rules" ]; then cat "$STUB_DIR/rules"; exit 0; fi; '
         'echo "gh: Not Found (HTTP 404)" >&2; exit 1;; esac\n')
 
@@ -78,9 +78,9 @@ def new_file(path, *lines):
             + ''.join(f'+{line}\n' for line in lines))
 
 
-SELF = (new_file('scripts/legacy-deletion-ratchet-rules.json', '"pattern": "\\\\$\\\\("', '"id": "jquery"')
-        + new_file('scripts/legacy-deletion-ratchet.mjs', "const jquery = /\\$\\(/;", "const ujs = 'rails-ujs';")
-        + new_file('scripts/legacy-deletion-ratchet.test.mjs', "assert($('.x'))", "text = 'select2'"))
+SELF = (new_file('.orchestration/legacy-rules.toml', "pattern = '\\$\\('", 'kind = "JQUERY"')
+        + new_file('scripts/legacy-guard.mjs', "const jquery = /\\$\\(/;", "const ujs = 'rails-ujs';")
+        + new_file('scripts/legacy-guard.test.mjs', "assert($('.x'))", "text = 'select2'"))
 
 
 def files_pages(diff, per_page=2):
@@ -106,7 +106,7 @@ class LegacyTests(IsolatedTestCase):
         self.diff = DIFF
         self.calls = []
         self.big = False
-        self.rules = {}
+        self.rules = {'main': RULES_TEXT}
         self.pages = None
         self.view = {}
         self.versions = {}
@@ -122,7 +122,7 @@ class LegacyTests(IsolatedTestCase):
         self.calls.append(args)
         if args[:2] == ('gh', 'api') and '/compare/' in args[2]:
             return 'mergebase\n'
-        if args[:2] == ('gh', 'api') and '/contents/' in args[-1] and audit.RULES_PATH not in args[-1]:
+        if args[:2] == ('gh', 'api') and '/contents/' in args[-1] and legacy_rules.RULES_PATH not in args[-1]:
             return self.version(args[-1])
         if args[:2] == ('gh', 'api') and '/contents/' in args[-1]:
             return self.contents(args[-1])
@@ -154,7 +154,7 @@ class LegacyTests(IsolatedTestCase):
         return audit.legacy_scan(self.fake, 'owner/product', 7)
 
     def reads(self):
-        return [c[-1].split('/contents/', 1)[1] for c in self.calls if '/contents/' in c[-1] and audit.RULES_PATH not in c[-1]]
+        return [c[-1].split('/contents/', 1)[1] for c in self.calls if '/contents/' in c[-1] and legacy_rules.RULES_PATH not in c[-1]]
 
     def contents(self, url):
         ref = url.rsplit('?ref=', 1)[1]
@@ -177,24 +177,6 @@ class LegacyTests(IsolatedTestCase):
     def test_each_kind_is_classified(self):
         self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), HITS)
 
-    def test_classify_pattern_boundaries(self):
-        for text in ('$(', 'jQuery', '$.ajax', 'ajax:success', 'jquery_ujs', 'jquery-ujs', 'rails-ujs',
-                     'data-remote', 'remote:true', 'remote:  true', '.trigger(', 'select2'):
-            self.assertEqual(audit.classify('app/a.rb', text), 'JQUERY', text)
-        self.assertIsNone(audit.classify('app/a.rb', 'plain'))
-        self.assertIsNone(audit.classify('app/a.rb', 'acme-widget'))
-        self.assertEqual(audit.classify('app/assets/javascripts/a.js', 'plain'), 'LEGACY')
-        self.assertEqual(audit.classify('app/a.js.erb', 'plain'), 'JSERB')
-        self.assertEqual(audit.classify('spec/a.rb', 'jQuery'), 'TEST')
-        for path in ('test/a.rb', 'app/spec/a.rb', 'a/b_spec.rb', 'a/b.test.js', 'a/b-spec.js'):
-            self.assertEqual(audit.classify(path, 'jQuery'), 'TEST', path)
-        for path in ('app/models/contest.rb', 'app/assets/javascripts/testimonials.js', 'app/latest/a.rb'):
-            self.assertNotEqual(audit.classify(path, 'jQuery'), 'TEST', path)
-        self.assertIsNone(audit.classify('app/assets/javascripts/README.md', 'plain'))
-        for path in ('bin/build.sh', 'bin/x.bash', 'docs/a.md'):
-            self.assertIsNone(audit.classify(path, 'value=$(command)'), path)
-        self.assertIsNone(audit.classify('spec/a.rb', 'plain'))
-
     def test_quoted_diff_paths_are_decoded(self):
         diff = ('diff --git "a/app/views/t\\303\\251.js.erb" "b/app/views/t\\303\\251.js.erb"\n'
                 '--- "a/app/views/t\\303\\251.js.erb"\n+++ "b/app/views/t\\303\\251.js.erb"\n@@ -1 +1 @@\n+x\n'
@@ -205,8 +187,9 @@ class LegacyTests(IsolatedTestCase):
         self.assertEqual(audit.unquote('"q\\"x\\\\y"'), 'q"x\\y')
 
     def test_summary_line_and_zero_count(self):
-        self.assertEqual(audit.legacy_line(LABEL, audit.legacy_scan(self.fake, 'owner/product', 7)), SUMMARY)
-        self.assertEqual(audit.legacy_line(LABEL, []), '')
+        kinds = ('JSERB', 'JQUERY', 'LEGACY', 'TEST')
+        self.assertEqual(audit.legacy_line(LABEL, audit.legacy_scan(self.fake, 'owner/product', 7), kinds), SUMMARY)
+        self.assertEqual(audit.legacy_line(LABEL, [], kinds), '')
 
     def test_large_pr_fallback_matches_diff_path(self):
         direct = audit.legacy_scan(self.fake, 'owner/product', 7)
@@ -350,13 +333,6 @@ class LegacyTests(IsolatedTestCase):
         self.versions[('app/m.rb', 'mergebase')] = 't\ni\nd\ne\n'
         self.assertEqual(self.patchless(dict(filename='app/m.rb', status='modified', additions=2)), [])
 
-    def test_empty_rules_file_is_a_qualified_scan_failure(self):
-        def empty(*args):
-            if '/contents/' in args[-1] and audit.RULES_PATH in args[-1]:
-                raise w.MissingMetric('gh empty response')
-            return self.fake(*args)
-        self.assertRegex(self.fail_reason(empty), r'^READFAIL LEGACY owner/product#7 Fix menu: owner/product@main scripts/legacy-deletion-ratchet-rules.json: rules file is not JSON')
-
     def test_patchless_content_keeps_bare_carriage_returns(self):
         self.versions[('app/a.rb', 'headsha')] = 'a\rb\nc\n'
         self.assertEqual(self.patchless(dict(filename='app/a.rb', status='added', additions=2)), [])
@@ -367,7 +343,7 @@ class LegacyTests(IsolatedTestCase):
 
     def test_only_http_404_means_no_rules_file(self):
         def odd(*args):
-            if '/contents/' in args[-1] and audit.RULES_PATH in args[-1]:
+            if '/contents/' in args[-1] and legacy_rules.RULES_PATH in args[-1]:
                 raise subprocess.CalledProcessError(1, args, stderr='error: Not Found proxy response')
             return self.fake(*args)
         self.assertIn('Not Found proxy', self.fail_reason(odd))
@@ -385,7 +361,7 @@ class LegacyTests(IsolatedTestCase):
         self.view = dict(headRepository=dict(name='product'), headRepositoryOwner=dict(login='fork'))
         self.patchless(dict(filename='app/a.rb', status='added', additions=1),
                        dict(filename='app/m.rb', status='modified', additions=1))
-        urls = [c[-1] if c[2] != '-H' else c[-1] for c in self.calls if '/contents/' in c[-1] and audit.RULES_PATH not in c[-1]]
+        urls = [c[-1] if c[2] != '-H' else c[-1] for c in self.calls if '/contents/' in c[-1] and legacy_rules.RULES_PATH not in c[-1]]
         compare = [c[2] for c in self.calls if '/compare/' in c[2]]
         self.assertEqual(urls, ['repos/fork/product/contents/app/a.rb?ref=headsha', 'repos/fork/product/contents/app/m.rb?ref=headsha',
                                 'repos/owner/product/contents/app/m.rb?ref=mergebase'])
@@ -518,21 +494,6 @@ class LegacyTests(IsolatedTestCase):
     def fail_reason(self, command=None):
         return audit.collect(command or self.fake, self.base / 'slots')['legacy']['owner/product#7']['line']
 
-    def test_stacked_parent_cannot_weaken_default_rules(self):
-        self.diff = new_file('app/x.js', '$(".a").hide()')
-        parent = copy.deepcopy(PR)
-        parent.update(number=8, baseRefName='feat/parent')
-        for change in (dict(selfExempt=['app/**']), dict(bridgeMarker=dict(pattern='', fileLevelLines=5)), dict(patterns={})):
-            self.rules = {'main': RULES_TEXT, 'feat%2Fparent': json.dumps(dict(json.loads(RULES_TEXT), **change))}
-            def command(*args):
-                if args[:3] == ('gh', 'api', 'graphql'):
-                    return json.dumps(dict(data=dict(search=dict(nodes=[self.pr, parent], pageInfo=dict(hasNextPage=False)))))
-                return self.fake(*args)
-            raw = audit.collect(command, self.base / 'slots')
-            self.assertNotIn('github', raw['unreadable'])
-            for key in ('owner/product#7', 'owner/product#8'):
-                self.assertIn('JQUERY 1', raw['legacy'][key]['line'], change)
-
     def test_bad_rules_and_scan_errors_are_per_pr_and_retry(self):
         self.pr['reviewDecision'] = 'CHANGES_REQUESTED'
         other = copy.deepcopy(PR)
@@ -596,119 +557,11 @@ class LegacyTests(IsolatedTestCase):
         self.big, self.pages = True, '[]'
         self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), [])
 
-    def test_rules_file_is_read_from_the_default_branch_only(self):
-        self.diff = SELF
-        self.rules = {'feature': RULES_TEXT}
-        base = dict(baseRefName='main', headRefName='feature', repository=self.pr['repository'])
-        self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7, base), [
-            ('TEST', 'scripts/legacy-deletion-ratchet.test.mjs', "assert($('.x'))"),
-            ('TEST', 'scripts/legacy-deletion-ratchet.test.mjs', "text = 'select2'")])
-        self.assertEqual([c[-1] for c in self.calls if '/contents/' in c[-1]],
-                         ['repos/owner/product/contents/scripts/legacy-deletion-ratchet-rules.json?ref=main'])
-        self.assertIn('Accept: application/vnd.github.raw+json', self.calls[0])
-
-    def test_built_in_fallback_skips_the_guard_files(self):
-        self.diff = (SELF + new_file('app/frontend/tests/other.spec.js', "expect($('.x'))"))
-        self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), [
-            ('TEST', 'scripts/legacy-deletion-ratchet.test.mjs', "assert($('.x'))"),
-            ('TEST', 'scripts/legacy-deletion-ratchet.test.mjs', "text = 'select2'"),
-            ('TEST', 'app/frontend/tests/other.spec.js', "expect($('.x'))")])
-        self.rules = {'main': json.dumps(dict(json.loads(RULES_TEXT), selfExempt=[]))}
-        self.assertEqual(len(audit.legacy_scan(self.fake, 'owner/product', 7)), 5)
-
-    def test_extra_legacy_pattern_setting_adds_project_names(self):
-        with patch.dict(os.environ, {'ORCH_LEGACY_EXTRA_PATTERN': 'acme-widget|old-grid'}):
-            for text in ('acme-widget', 'old-grid', 'select2'):
-                self.assertEqual(audit.classify('app/a.rb', text), 'JQUERY', text)
-            self.assertIsNone(audit.classify('app/a.rb', 'plain'))
-            self.assertEqual(audit.classify('spec/a.rb', 'acme-widget'), 'TEST')
-
-    def test_extra_legacy_pattern_keeps_its_own_flags_and_groups(self):
-        with patch.dict(os.environ, {'ORCH_LEGACY_EXTRA_PATTERN': '(?i)old-widget'}):
-            self.assertEqual(audit.classify('app/a.rb', 'OLD-WIDGET'), 'JQUERY')
-            self.assertEqual(audit.classify('app/a.rb', 'jQuery'), 'JQUERY')
-            self.assertIsNone(audit.classify('app/a.rb', 'JQUERY'))
-        with patch.dict(os.environ, {'ORCH_LEGACY_EXTRA_PATTERN': r'(ab)\1'}):
-            self.assertEqual(audit.classify('app/a.rb', 'abab'), 'JQUERY')
-            self.assertIsNone(audit.classify('app/a.rb', 'abxx'))
-
-    def test_empty_extra_legacy_pattern_adds_nothing(self):
-        with patch.dict(os.environ, {'ORCH_LEGACY_EXTRA_PATTERN': ''}):
-            self.assertIsNone(audit.classify('app/a.rb', 'acme-widget'))
-            self.assertEqual(audit.classify('app/a.rb', 'select2'), 'JQUERY')
-
-    def test_invalid_extra_legacy_pattern_names_the_setting(self):
-        with patch.dict(os.environ, {'ORCH_LEGACY_EXTRA_PATTERN': '('}):
-            with self.assertRaisesRegex(ValueError, 'ORCH_LEGACY_EXTRA_PATTERN'):
-                audit.classify('app/a.rb', 'plain')
-
-    def test_exempt_paths_setting_extends_the_built_in_exemptions(self):
-        self.diff = (SELF + new_file('app/frontend/tests/guard-cli.spec.js', "expect($('.x'))")
-                     + new_file('app/frontend/tests/other.spec.js', "expect($('.x'))"))
-        both = [('TEST', 'scripts/legacy-deletion-ratchet.test.mjs', "assert($('.x'))"),
-                ('TEST', 'scripts/legacy-deletion-ratchet.test.mjs', "text = 'select2'")]
-        self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), both + [
-            ('TEST', 'app/frontend/tests/guard-cli.spec.js', "expect($('.x'))"),
-            ('TEST', 'app/frontend/tests/other.spec.js', "expect($('.x'))")])
-        with patch.dict(os.environ, {'ORCH_LEGACY_EXEMPT_PATHS': 'app/frontend/tests/guard-cli.spec.js  other/x.js'}):
-            self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), both + [
-                ('TEST', 'app/frontend/tests/other.spec.js', "expect($('.x'))")])
-        with patch.dict(os.environ, {'ORCH_LEGACY_EXEMPT_PATHS': ''}):
-            self.assertEqual(len(audit.legacy_scan(self.fake, 'owner/product', 7)), 4)
-
-    def test_invalid_extra_legacy_pattern_fails_scans_without_frontend_additions(self):
-        self.diff = new_file('docs/a.md', 'plain')
-        with patch.dict(os.environ, {'ORCH_LEGACY_EXTRA_PATTERN': '('}):
-            with self.assertRaisesRegex(ValueError, 'ORCH_LEGACY_EXTRA_PATTERN'):
-                audit.legacy_scan(self.fake, 'owner/product', 7)
-
-    def test_changing_a_legacy_setting_rescans_cached_built_in_results(self):
-        self.scan()
-        self.scan()
-        self.assertEqual(len(self.scans()), 1)
-        for name, value in (('ORCH_LEGACY_EXTRA_PATTERN', 'acme-widget'), ('ORCH_LEGACY_EXEMPT_PATHS', 'app/x.rb')):
-            with patch.dict(os.environ, {name: value}):
-                before = len(self.scans())
-                self.scan()
-                self.assertEqual(len(self.scans()), before + 1, name)
-
-    def test_pattern_kinds_only_apply_to_frontend_sources(self):
-        data = ''.join(new_file(path, '"command": "$(git rev-parse --show-toplevel)"', 'select2 jQuery rails-ujs')
-                       for path in ('.codex/hooks.json', 'app/a.sh', 'app/b.yml', 'app/c.yaml', 'app/d.md', 'lib/e.bash'))
-        code = ''.join(new_file(path, '$(x)') for path in
-                       ('app/a.js', 'app/a.mjs', 'app/a.cjs', 'app/a.ts', 'app/a.vue', 'app/a.erb', 'app/a.haml',
-                        'app/a.hbs', 'app/a.ejs', 'app/a.coffee', 'app/a.rb'))
-        for rules in ({}, {'main': RULES_TEXT}):
-            self.rules = rules
-            self.diff = data
-            self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), [])
-            self.diff = code
-            self.assertEqual(len(audit.legacy_scan(self.fake, 'owner/product', 7)), 11)
-        broad = json.dumps(dict(json.loads(RULES_TEXT), scannedPaths=['**']))
-        self.rules, self.diff = {'main': broad}, data
-        self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), [])
-
     def test_base_rules_exempt_their_own_guard_files(self):
         self.diff = SELF
-        self.rules = {'main': RULES_TEXT}
         self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), [])
         self.scan()
         self.assertEqual(self.saved()['before']['legacy']['owner/product#7']['line'], '')
-
-    def test_missing_rules_file_keeps_the_built_in_rules(self):
-        self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), HITS)
-        self.rules = {'main': RULES_TEXT}
-        self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), HITS)
-
-    def test_unreadable_rules_file_is_a_scan_failure(self):
-        bad = {'not json': '{nope', 'wrong version': json.dumps(dict(json.loads(RULES_TEXT), version=2)),
-               'no patterns': json.dumps(dict(version=1)), 'array': '[]',
-               'pattern jquery-call': json.dumps(dict(json.loads(RULES_TEXT), patterns=dict(jquery=[
-                   dict(id='jquery-call', pattern='(?<=a|bc)x', flags='')])))}
-        for name, text in bad.items():
-            self.rules = {'main': text}
-            self.assertRegex(self.fail_reason(), r'^READFAIL LEGACY owner/product#7 Fix menu: owner/product@main scripts/legacy', name)
-        self.assertIn('pattern jquery-call:', self.fail_reason())
 
     def test_rules_fetch_errors_other_than_missing_are_scan_failures(self):
         def denied(*args):
@@ -717,40 +570,8 @@ class LegacyTests(IsolatedTestCase):
             return self.fake(*args)
         self.assertEqual(self.fail_reason(denied), 'READFAIL LEGACY owner/product#7 Fix menu: HTTP 502')
 
-    def test_rules_are_fetched_once_per_default_branch_per_pass(self):
-        others = []
-        for number, base in ((8, 'main'), (9, 'release')):
-            pr = copy.deepcopy(PR)
-            pr.update(number=number, baseRefName=base)
-            others.append(pr)
-        prs = [self.pr] + others
-        def command(*args):
-            if args[:3] == ('gh', 'api', 'graphql'):
-                return json.dumps(dict(data=dict(search=dict(nodes=prs, pageInfo=dict(hasNextPage=False)))))
-            return self.fake(*args)
-        self.scan(command)
-        urls = [c[-1] for c in self.calls if '/contents/' in c[-1]]
-        self.assertEqual(sorted(urls), [f'repos/owner/product/contents/scripts/legacy-deletion-ratchet-rules.json?ref={ref}'
-                                        for ref in ('main',)])
-
-    def test_changed_rules_on_the_base_rescan_an_unchanged_head(self):
-        self.diff = SELF
-        self.rules = {'main': RULES_TEXT}
-        self.scan()
-        self.assertEqual(len(self.scans()), 1)
-        self.assertIsNone(self.scan())
-        self.assertEqual(len(self.scans()), 1)
-        self.rules = {}
-        events = self.events(self.scan())
-        self.assertEqual(len(self.scans()), 2)
-        self.assertEqual(len(events), 1)
-        self.assertRegex(events[0], r'^LEGACY owner/product#7 Fix menu \[\d+ lines: ')
-        self.assertIsNone(self.scan())
-        self.rules = {'main': RULES_TEXT}
-        self.assertTrue(self.events(self.scan())[0].startswith('CLEARED LEGACY'))
-        self.assertEqual(self.saved()['before']['legacy']['owner/product#7']['line'], '')
-
     def test_retargeted_pr_is_scanned_again(self):
+        self.rules['release'] = RULES_TEXT
         self.scan()
         self.assertEqual(len(self.scans()), 1)
         self.pr['baseRefName'] = 'release'
@@ -760,60 +581,146 @@ class LegacyTests(IsolatedTestCase):
         self.scan()
         self.assertEqual(len(self.scans()), 2)
 
-    def test_rules_kinds_map_to_the_output_buckets(self):
-        self.rules = {'main': RULES_TEXT}
-        self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), HITS)
-        self.diff = ''.join([
-            new_file('app/a.rb', 'rails-ujs', 'ajax:success', '$.ajax(x)', 'select2', 'legacy-select', 'JQUERY ref', 'plain'),
-            new_file('app/assets/javascripts/b.js', 'plain', '$(x)'),
-            new_file('app/c.coffee', 'plain'),
-            new_file('docs/d.rb', '$(x)'),
-            new_file('app/e.sh', '$(x)'),
-            new_file('spec/f_spec.rb', 'ajax:error', 'plain')])
-        self.assertEqual([(kind, path, text) for kind, path, text in audit.legacy_scan(self.fake, 'owner/product', 7)], [
-            ('JQUERY', 'app/a.rb', 'rails-ujs'), ('JQUERY', 'app/a.rb', 'ajax:success'),
-            ('JQUERY', 'app/a.rb', '$.ajax(x)'), ('JQUERY', 'app/a.rb', 'select2'), ('JQUERY', 'app/a.rb', 'legacy-select'),
-            ('JQUERY', 'app/a.rb', 'JQUERY ref'),
-            ('LEGACY', 'app/assets/javascripts/b.js', 'plain'), ('LEGACY', 'app/assets/javascripts/b.js', '$(x)'),
-            ('LEGACY', 'app/c.coffee', 'plain'), ('TEST', 'spec/f_spec.rb', 'ajax:error')])
+    def prs_command(self, prs):
+        def command(*args):
+            if args[:3] == ('gh', 'api', 'graphql'):
+                return json.dumps(dict(data=dict(search=dict(nodes=prs, pageInfo=dict(hasNextPage=False)))))
+            return self.fake(*args)
+        return command
 
-    def test_bridge_marker_lines_and_files_are_not_counted(self):
-        self.rules = {'main': RULES_TEXT}
-        self.diff = ''.join([
-            new_file('app/line.rb', 'a', 'b', 'c', 'd', 'e', "$('.a') # legacy-bridge: moves to Vue", '$(b)'),
-            new_file('app/file.rb', 'x', '# legacy-bridge: whole file', '$(c)', '$(d)', 'y', '$(e)'),
-            new_file('app/late.rb', 'a', 'b', 'c', 'd', 'e', '# legacy-bridge', '$(f)'),
-            'diff --git a/app/old.rb b/app/old.rb\n--- a/app/old.rb\n+++ b/app/old.rb\n@@ -1,3 +1,4 @@\n'
-            ' # legacy-bridge: kept\n keep\n+$(g)\n keep\n'
-            'diff --git a/app/mid.rb b/app/mid.rb\n--- a/app/mid.rb\n+++ b/app/mid.rb\n@@ -4,3 +4,4 @@\n'
-            ' keep\n keep\n # legacy-bridge: past the window\n+$(h)\n'])
-        bridged = []
-        hits = audit.legacy_scan(self.fake, 'owner/product', 7, bridged=bridged)
-        self.assertEqual(hits, [('JQUERY', 'app/line.rb', '$(b)'), ('JQUERY', 'app/late.rb', '$(f)'), ('JQUERY', 'app/mid.rb', '$(h)')])
-        self.assertEqual(sorted(bridged), sorted([
-            ('app/line.rb', "$('.a') # legacy-bridge: moves to Vue"),
-            ('app/file.rb', 'x'), ('app/file.rb', '# legacy-bridge: whole file'), ('app/file.rb', '$(c)'),
-            ('app/file.rb', '$(d)'), ('app/file.rb', 'y'), ('app/file.rb', '$(e)'),
-            ('app/late.rb', '# legacy-bridge'), ('app/old.rb', '$(g)')]))
-        self.big = True
-        again = []
-        self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7, bridged=again), hits)
-        self.assertEqual(sorted(again), sorted(bridged))
+    def rules_urls(self):
+        return [c[-1] for c in self.calls if '/contents/' in c[-1] and legacy_rules.RULES_PATH in c[-1]]
 
-    def test_cli_lists_bridged_lines_and_reports_unreadable_rules(self):
-        self.diff = new_file('app/a.rb', '# legacy-bridge', '$(x)', 'plain')
-        result = self.cli('7', 'owner/product', rules=RULES_TEXT)
-        self.assertEqual((result.returncode, result.stdout), (0, 'BRIDGE app/a.rb: # legacy-bridge\nBRIDGE app/a.rb: $(x)\nBRIDGE app/a.rb: plain\n'))
+    def test_no_rules_file_means_no_scan_and_one_line(self):
+        self.rules = {}
+        other = copy.deepcopy(PR)
+        other['number'] = 8
+        command = self.prs_command([self.pr, other])
+        self.assertIsNone(audit.legacy_scan(self.fake, 'owner/product', 7))
+        self.assertFalse([c for c in self.calls if c[:3] == ('gh', 'pr', 'diff')])
+        self.calls.clear()
+        norules = 'NORULES LEGACY owner/product@main [no .orchestration/legacy-rules.toml on main; its PRs are not scanned]'
+        self.scan(command)
+        self.assertEqual(self.saved()['before']['legacy'], {'owner/product@main': dict(head='', base='main', line=norules)})
+        self.assertEqual(self.scans(), [])
+        self.pr['headRefOid'] = 'next'
+        self.assertIsNone(self.scan(command))
+        self.rules = {'main': RULES_TEXT}
+        events = self.events(self.scan(command))
+        self.assertEqual(events, [SUMMARY, SUMMARY.replace('#7', '#8'), 'CLEARED ' + norules])
+
+    def test_rules_file_is_read_from_the_pr_base_ref(self):
+        self.diff = new_file('app/x.js', '$(".a").hide()')
+        self.rules = {'feat%2Fparent': RULES_TEXT, 'feature': RULES_TEXT.replace('kind = "JQUERY"', 'kind = "OTHER"')}
+        base = dict(baseRefName='feat/parent', headRefName='feature', headRefOid='headsha')
+        self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7, base), [('JQUERY', 'app/x.js', '$(".a").hide()')])
+        self.assertEqual(self.rules_urls(), ['repos/owner/product/contents/.orchestration/legacy-rules.toml?ref=feat%2Fparent'])
+        self.assertIn('Accept: application/vnd.github.raw+json', next(c for c in self.calls if '/contents/' in c[-1]))
+        self.rules = {'feature': RULES_TEXT}
+        self.assertIsNone(audit.legacy_scan(self.fake, 'owner/product', 7, dict(base)))
+
+    def test_rules_are_fetched_once_per_base_ref_per_pass(self):
+        others = []
+        for number, base in ((8, 'main'), (9, 'release')):
+            pr = copy.deepcopy(PR)
+            pr.update(number=number, baseRefName=base)
+            others.append(pr)
+        self.rules['release'] = RULES_TEXT
+        self.scan(self.prs_command([self.pr] + others))
+        self.assertEqual(sorted(self.rules_urls()), [f'repos/owner/product/contents/.orchestration/legacy-rules.toml?ref={ref}'
+                                                     for ref in ('main', 'release')])
+
+    def test_changed_rules_on_the_base_rescan_an_unchanged_head(self):
+        self.diff = SELF
+        self.scan()
+        self.assertEqual(len(self.scans()), 1)
+        self.assertIsNone(self.scan())
+        self.assertEqual(len(self.scans()), 1)
+        self.rules = {'main': RULES_TEXT.replace('exempt = [".orchestration/**", "scripts/legacy-guard*.mjs"]', 'exempt = []')}
+        events = self.events(self.scan())
+        self.assertEqual(len(self.scans()), 2)
+        self.assertEqual(events, [f'LEGACY {LABEL} [3 lines: JSERB 0, JQUERY 1, LEGACY 0, TEST 2]'])
+        self.assertIsNone(self.scan())
+        self.rules = {'main': RULES_TEXT}
+        self.assertTrue(self.events(self.scan())[0].startswith('CLEARED LEGACY'))
+        self.assertEqual(self.saved()['before']['legacy']['owner/product#7']['line'], '')
+
+    def test_exempt_paths_come_from_the_rules_file(self):
+        self.diff = SELF + new_file('app/frontend/tests/other.spec.js', "expect($('.x'))")
+        self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), [
+            ('TEST', 'app/frontend/tests/other.spec.js', "expect($('.x'))")])
+        self.rules = {'main': RULES_TEXT.replace('"scripts/legacy-guard*.mjs"', '"scripts/legacy-guard*.mjs", "app/frontend/tests/**"')}
+        self.assertEqual(audit.legacy_scan(self.fake, 'owner/product', 7), [])
+
+    def test_kinds_in_the_legacy_line_come_from_the_file_in_order(self):
+        self.rules = {'main': 'version = 1\n[[rules]]\nkind = "OLD"\npaths = ["src/old/**"]\n'
+                              '[[rules]]\nkind = "JQUERY"\npattern = \'\\$\\(\'\npaths = ["**/*.js"]\nexclude = ["vendor/**"]\n'
+                              '[[rules]]\nkind = "UNUSED"\npaths = ["nothing/**"]\n'}
+        self.diff = (new_file('src/old/a.txt', 'one', '$(x)') + new_file('src/new/b.js', '$(y)', 'plain')
+                     + new_file('vendor/c.js', '$(z)'))
+        hits = audit.legacy_scan(self.fake, 'owner/product', 7)
+        self.assertEqual(hits, [('OLD', 'src/old/a.txt', 'one'), ('OLD', 'src/old/a.txt', '$(x)'), ('JQUERY', 'src/new/b.js', '$(y)')])
+        self.assertEqual(audit.legacy_line(LABEL, hits, ('OLD', 'JQUERY', 'UNUSED')),
+                         f'LEGACY {LABEL} [3 lines: OLD 2, JQUERY 1, UNUSED 0]')
+        self.scan()
+        self.assertEqual(self.saved()['before']['legacy']['owner/product#7']['line'], f'LEGACY {LABEL} [3 lines: OLD 2, JQUERY 1, UNUSED 0]')
+
+    def test_empty_rules_file_is_a_qualified_scan_failure(self):
+        def empty(*args):
+            if '/contents/' in args[-1] and legacy_rules.RULES_PATH in args[-1]:
+                raise w.MissingMetric('gh empty response')
+            return self.fake(*args)
+        self.assertRegex(self.fail_reason(empty), r'^READFAIL LEGACY owner/product#7 Fix menu: owner/product@main \.orchestration/legacy-rules\.toml: unsupported version')
+
+    def test_invalid_rules_file_is_a_scan_failure(self):
+        prefix = 'READFAIL LEGACY owner/product#7 Fix menu: owner/product@main .orchestration/legacy-rules.toml: '
+        bad = {'not valid TOML': '{nope', 'unsupported version 2': RULES_TEXT.replace('version = 1', 'version = 2'),
+               "unknown key 'patterns'": RULES_TEXT + 'patterns = 1\n',
+               'rules[2] (JQUERY): pattern is not a valid regex': RULES_TEXT.replace("pattern = '\\$\\(|", "pattern = '(|", 1)}
+        for message, text in bad.items():
+            self.rules = {'main': text}
+            line = self.fail_reason()
+            self.assertTrue(line.startswith(prefix), line)
+            self.assertIn(message, line)
+
+    def test_old_python_is_reported_once_and_nothing_is_read(self):
+        other = copy.deepcopy(PR)
+        other['number'] = 8
+        with patch.object(legacy_rules, 'tomllib', None):
+            raw = audit.collect(self.prs_command([self.pr, other]), self.base / 'slots')
+        self.assertEqual(list(raw['legacy']), ['python'])
+        self.assertRegex(raw['legacy']['python']['line'], r'^READFAIL LEGACY python: legacy scan needs Python 3\.11\+ for tomllib; ')
+        self.assertEqual(self.scans() + self.rules_urls(), [])
+
+    def test_cli_reports_a_missing_rules_file(self):
+        result = self.cli('7', 'owner/product', rules='')
+        self.assertEqual((result.returncode, result.stdout), (0, ''))
+        self.assertIn('legacy-scan: owner/product@main has no .orchestration/legacy-rules.toml; nothing to scan', result.stderr)
+
+    def test_cli_reports_an_invalid_rules_file(self):
         result = self.cli('7', 'owner/product', rules='{nope')
         self.assertEqual((result.returncode, result.stdout), (1, ''))
-        self.assertIn('legacy-scan failed: owner/product@main', result.stderr)
+        self.assertIn('legacy-scan failed: owner/product@main .orchestration/legacy-rules.toml: not valid TOML', result.stderr)
 
-    def cli(self, *args, mode='diff', config=None, rules=None):
+    def test_cli_on_old_python_says_so(self):
+        python = self.base / 'old-python'
+        python.write_text('#!/bin/sh\nexec "$REAL_PYTHON" -c \'import runpy, sys; sys.modules["tomllib"] = None; '
+                          'sys.argv = sys.argv[1:]; sys.path.insert(0, sys.argv[0].rsplit("/", 1)[0]); '
+                          'runpy.run_path(sys.argv[0], run_name="__main__")\' "$@"\n')
+        python.chmod(0o755)
+        config = self.base / 'old.env'
+        config.write_text(f'ORCH_PYTHON3="{python}"\n')
+        with patch.dict(os.environ, REAL_PYTHON=sys.executable):
+            result = self.cli('7', 'owner/product', config=config)
+        self.assertEqual((result.returncode, result.stdout), (1, ''))
+        self.assertIn('legacy-scan failed: legacy scan needs Python 3.11+ for tomllib', result.stderr)
+
+    def cli(self, *args, mode='diff', config=None, rules=RULES_TEXT):
         stubs = self.base / 'bin'
         stubs.mkdir(exist_ok=True)
         (self.base / 'diff').write_text(self.diff)
         (self.base / 'files').write_text(files_pages(self.diff))
-        (self.base / 'rules').write_text(rules or '')
+        (self.base / 'rules').write_text(rules)
         (stubs / 'gh').write_text('#!/bin/sh\n' + VIEW + {
             'diff': 'cat "$STUB_DIR/diff"\n',
             'big': 'if [ "$2" = diff ]; then echo "diff too_large" >&2; exit 1; fi\ncat "$STUB_DIR/files"\n',

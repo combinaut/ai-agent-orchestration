@@ -3,39 +3,45 @@
 load test_helper
 
 setup() {
+  local python
+  python=$(command -v python3)
   setup_fixture
+  # The fixture PATH starts at /usr/bin, whose macOS python3 has no tomllib.
+  ln -s "$python" "$BIN/python3"
   MAP="$ROOT/coordinator/legacy-map.sh"
   OUT="$TMP/out/legacy-map.tsv"
   export ORCH_LEGACY_MAP_OUT="$OUT"
   make_webapp
-  cat >"$BIN/rg" <<'EOF2'
-#!/usr/bin/env python3
-import os, re, sys
-a = sys.argv[1:]
-globs, pats, paths, i = [], [], [], 0
-while i < len(a):
-    if a[i] == '--glob': globs.append(a[i + 1]); i += 2
-    elif a[i] == '-e': pats.append(a[i + 1]); i += 2
-    elif a[i] == '-l': i += 1
-    else: paths.append(a[i]); i += 1
-def rx(g):
-    out = re.escape(g[1:]).replace(r'\*\*/', '(?:.*/)?').replace(r'\*\*', '.*').replace(r'\*', '[^/]*')
-    return re.compile('^' + out + '$')
-skip = [rx(g) for g in globs if g.startswith('!')]
-pat = re.compile('|'.join(pats))
-open(os.environ['RG_CALLS'], 'a').write(os.getcwd() + ' ' + ' '.join(paths) + '\n')
-hits = []
-for p in paths:
-    for d, _, fs in os.walk(p):
-        for f in fs:
-            path = os.path.join(d, f)
-            if any(s.match(path) for s in skip): continue
-            if pat.search(open(path, errors='replace').read()): hits.append(path)
-print('\n'.join(sorted(hits)))
-sys.exit(0 if hits else 1)
+}
+
+# write_rules <dir>: the rules file the map follows.
+write_rules() {
+  mkdir -p "$1/.orchestration"
+  cat >"$1/.orchestration/legacy-rules.toml" <<'EOF2'
+version = 1
+exempt = [".orchestration/**", "app/js/exempt.js"]
+
+[[rules]]
+kind = "JSERB"
+paths = ["**/*.js.erb"]
+
+[[rules]]
+kind = "ASSETJS"
+paths = ["**/app/assets/javascripts/**/*.{js,coffee}"]
+
+[[rules]]
+kind = "JQUERY"
+pattern = '\bjQuery\b|\$\(|\$\.ajax|ajax:(success|complete)|data-remote|remote: *true'
+paths = ["{app,lib,clients}/**"]
+exclude = ["**/tests/**", "**/*.spec.*"]
 EOF2
-  chmod +x "$BIN/rg"
-  export RG_CALLS="$TMP/rg.calls"
+}
+
+# push_seed <message>: commits the seed and pushes it to origin/main.
+push_seed() {
+  git -C "$TMP/webapp-seed" add -A
+  git -C "$TMP/webapp-seed" -c user.email=t@example.invalid -c user.name=t commit -qm "$1"
+  git -C "$TMP/webapp-seed" push -q origin main
 }
 
 # make_webapp: BIG_REPO is a clone of a fixture origin; the working copy later diverges from origin/main.
@@ -44,6 +50,7 @@ make_webapp() {
   BIG_REPO="$TMP/webapp"
   mkdir -p "$seed/app/views/a" "$seed/app/assets/javascripts" "$seed/app/js" "$seed/lib" "$seed/clients/acme/app/assets/javascripts" "$seed/clients/acme/app/js" "$seed/app/tests" "$seed/docs"
   echo 'x' >"$seed/app/views/a/show.js.erb"
+  : >"$seed/app/views/a/empty.js.erb"
   echo 'x' >"$seed/app/assets/javascripts/old.js"
   echo 'x' >"$seed/clients/acme/app/assets/javascripts/legacy.coffee"
   echo '$(".a").hide()' >"$seed/app/js/uses_dollar.js"
@@ -51,8 +58,11 @@ make_webapp() {
   echo 'data-remote' >"$seed/clients/acme/app/js/remote.js"
   echo '$(".a")' >"$seed/app/tests/skipped.js"
   echo '$(".a")' >"$seed/app/js/skipped.spec.js"
+  echo '$(".a")' >"$seed/app/js/exempt.js"
+  printf '$(".a")\0binary' >"$seed/app/js/binary.js"
   echo '$(".a")' >"$seed/app/assets/javascripts/inside.js"
   echo '$(".a")' >"$seed/docs/outside_scan.js"
+  write_rules "$seed"
   git -C "$seed" init -q
   git -C "$seed" add -A
   git -C "$seed" -c user.email=t@example.invalid -c user.name=t commit -qm seed
@@ -64,11 +74,19 @@ make_webapp() {
   git clone -q "$TMP/webapp-origin.git" "$BIG_REPO"
 }
 
-@test "writes JSERB, ASSETJS and JQUERY rows from origin/main" {
+keep_previous_map() {
+  mkdir -p "$(dirname "$OUT")"
+  printf 'keep\n' >"$OUT"
+}
+
+@test "writes a row per file and kind the rules file on origin/main counts" {
   run "$MAP" "$BIG_REPO"
   [ "$status" -eq 0 ]
-  [ "$(cat "$OUT")" = "$(printf 'ASSETJS\tapp/assets/javascripts/inside.js\nASSETJS\tapp/assets/javascripts/old.js\nASSETJS\tclients/acme/app/assets/javascripts/legacy.coffee\nJQUERY\tapp/js/uses_dollar.js\nJQUERY\tclients/acme/app/js/remote.js\nJQUERY\tlib/uses_jquery.rb\nJSERB\tapp/views/a/show.js.erb')" ]
+  [ "$(cat "$OUT")" = "$(printf 'ASSETJS\tapp/assets/javascripts/inside.js\nASSETJS\tapp/assets/javascripts/old.js\nASSETJS\tclients/acme/app/assets/javascripts/legacy.coffee\nJQUERY\tapp/js/uses_dollar.js\nJQUERY\tclients/acme/app/js/remote.js\nJQUERY\tlib/uses_jquery.rb\nJSERB\tapp/views/a/empty.js.erb\nJSERB\tapp/views/a/show.js.erb')" ]
   contains "$output" '3 ASSETJS'
+  not_contains "$(cat "$OUT")" 'outside_scan'
+  not_contains "$(cat "$OUT")" 'exempt.js'
+  not_contains "$(cat "$OUT")" 'binary.js'
 }
 
 @test "a change only in the working copy does not appear" {
@@ -79,6 +97,18 @@ make_webapp() {
   [ "$status" -eq 0 ]
   not_contains "$(cat "$OUT")" 'working_copy_only'
   not_contains "$(cat "$OUT")" 'extra.js.erb'
+}
+
+@test "the rules come from origin/main, not the working copy" {
+  printf 'version = 1\n[[rules]]\nkind = "ALL"\npaths = ["**"]\n' >"$BIG_REPO/.orchestration/legacy-rules.toml"
+  run "$MAP" "$BIG_REPO"
+  [ "$status" -eq 0 ]
+  not_contains "$(cat "$OUT")" 'ALL'
+  printf 'version = 1\n[[rules]]\nkind = "DOCS"\npaths = ["docs/**"]\n' >"$TMP/webapp-seed/.orchestration/legacy-rules.toml"
+  push_seed 'docs rule'
+  run "$MAP" "$BIG_REPO"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT")" = "$(printf 'DOCS\tdocs/outside_scan.js')" ]
 }
 
 @test "a commit that reaches origin/main after the clone is fetched" {
@@ -92,46 +122,46 @@ make_webapp() {
   contains "$(cat "$OUT")" 'app/views/a/new.js.erb'
 }
 
-@test "rg scans an extracted copy of only app, lib and clients, and the copy is removed" {
-  run env TMPDIR="$TMP" "$MAP" "$BIG_REPO"
-  [ "$status" -eq 0 ]
-  scanned=$(cut -d' ' -f1 "$RG_CALLS")
-  [ "$scanned" != "$(cd "$BIG_REPO" && pwd -P)" ]
-  case "$scanned" in "$(cd "$TMP" && pwd -P)"/legacy-map.*) ;; *) false ;; esac
-  [ ! -e "$scanned" ]
-  [ -z "$(find "$TMP" -maxdepth 1 -name 'legacy-map.*')" ]
-  [ "$(cut -d' ' -f2- "$RG_CALLS")" = 'app lib clients' ]
-  not_contains "$(cat "$OUT")" 'outside_scan'
+@test "no rules file on origin/main stops and keeps the previous map" {
+  git -C "$TMP/webapp-seed" rm -q .orchestration/legacy-rules.toml
+  push_seed 'no rules'
+  keep_previous_map
+  run "$MAP" "$BIG_REPO"
+  [ "$status" -ne 0 ]
+  contains "$output" "has no .orchestration/legacy-rules.toml on origin/main"
+  [ "$(cat "$OUT")" = keep ]
 }
 
-@test "the temp dir is removed when the script fails after extracting" {
+@test "an invalid rules file stops with the reason and keeps the previous map" {
+  printf 'version = 1\n[[rules]]\nkind = "A"\npaths = ["**"]\npattern = "("\n' >"$TMP/webapp-seed/.orchestration/legacy-rules.toml"
+  push_seed 'bad rules'
+  keep_previous_map
+  run "$MAP" "$BIG_REPO"
+  [ "$status" -ne 0 ]
+  contains "$output" 'origin/main:.orchestration/legacy-rules.toml: rules[1] (A): pattern is not a valid regex'
+  [ "$(cat "$OUT")" = keep ]
+}
+
+@test "a Python without tomllib says so and keeps the previous map" {
+  cat >"$TMP/old-python" <<EOF2
+#!/bin/sh
+exec "$(command -v python3)" -c 'import runpy, sys; sys.modules["tomllib"] = None; sys.argv = sys.argv[1:]; sys.path.insert(0, sys.argv[0].rsplit("/", 1)[0]); runpy.run_path(sys.argv[0], run_name="__main__")' "\$@"
+EOF2
+  chmod +x "$TMP/old-python"
+  keep_previous_map
+  run env ORCH_PYTHON3="$TMP/old-python" "$MAP" "$BIG_REPO"
+  [ "$status" -ne 0 ]
+  contains "$output" 'legacy scan needs Python 3.11+ for tomllib'
+  [ "$(cat "$OUT")" = keep ]
+}
+
+@test "a failed write leaves no temp file and a nonzero status" {
   mkdir -p "$TMP/readonly"
   chmod 555 "$TMP/readonly"
-  run env TMPDIR="$TMP" ORCH_LEGACY_MAP_OUT="$TMP/readonly/map.tsv" "$MAP" "$BIG_REPO"
+  run env ORCH_LEGACY_MAP_OUT="$TMP/readonly/map.tsv" "$MAP" "$BIG_REPO"
   chmod 755 "$TMP/readonly"
   [ "$status" -ne 0 ]
-  [ -s "$RG_CALLS" ]
-  [ -z "$(find "$TMP" -maxdepth 1 -name 'legacy-map.*')" ]
-}
-
-@test "a missing rg stops before the map is touched" {
-  rm "$BIN/rg"
-  mkdir -p "$(dirname "$OUT")"
-  printf 'keep\n' >"$OUT"
-  run "$MAP" "$BIG_REPO"
-  [ "$status" -ne 0 ]
-  contains "$output" 'rg not found'
-  [ "$(cat "$OUT")" = keep ]
-}
-
-@test "an rg failure stops the job and keeps the previous map" {
-  printf '#!/bin/sh\nexit 2\n' >"$BIN/rg"
-  mkdir -p "$(dirname "$OUT")"
-  printf 'keep\n' >"$OUT"
-  run "$MAP" "$BIG_REPO"
-  [ "$status" -ne 0 ]
-  contains "$output" 'rg failed with status 2'
-  [ "$(cat "$OUT")" = keep ]
+  [ -z "$(find "$TMP/readonly" -type f)" ]
 }
 
 @test "no repository stops with usage" {
@@ -172,6 +202,7 @@ make_webapp() {
       contains "$(cat "$unit")" "<string>$HOME/.claude/coordinator/legacy-map.sh</string>"
       contains "$(cat "$unit")" "<string>$BIG_REPO</string>"
       contains "$(cat "$unit")" '<key>StartCalendarInterval</key>'
+      contains "$(cat "$unit")" '<key>ORCH_PYTHON3</key>'
       contains "$output" 'launchctl bootstrap'
       units=$(cat "$unit")
       ;;
@@ -179,6 +210,7 @@ make_webapp() {
       dir="$HOME/.claude/coordinator/service/linux"
       contains "$(cat "$dir/com.combinaut.coord-legacy-map.service")" "ExecStart=\"$HOME/.claude/coordinator/legacy-map.sh\" \"$BIG_REPO\""
       contains "$(cat "$dir/com.combinaut.coord-legacy-map.timer")" 'OnCalendar=*-*-* 06:00:00'
+      contains "$(cat "$dir/com.combinaut.coord-legacy-map.service")" 'Environment="ORCH_PYTHON3='
       contains "$output" 'systemctl --user link'
       units=$(cat "$dir"/com.combinaut.coord-legacy-map.service "$dir"/com.combinaut.coord-legacy-map.timer)
       contains "$output" 'systemctl --user enable --now'
