@@ -237,6 +237,20 @@ class PullsTest(IsolatedTestCase):
             owners = w.pull_owners(self.command([]), [pr(7)])
         self.assertEqual(owners, {"owner/product#7": "wArch"})
 
+    def test_an_unowned_worktree_of_a_second_clone_keeps_the_owner(self):
+        second = {"workspace_id": "wS", "tokens": {}, "worktree": {"checkout_path": "/wt/second/feature", "repo_root": "/repo/second"}}
+        run = self.command([])
+
+        def command(*argv):
+            if argv[0] == "git" and argv[2] == "/repo/second" and argv[3:5] == ("remote", "get-url"):
+                return REMOTES["/repo/product"]
+            if argv[0] == "git" and argv[2] == "/repo/second" and argv[3] == "worktree":
+                return "worktree /repo/second\nbranch refs/heads/main\n\nworktree /wt/second/feature\nbranch refs/heads/feature\n"
+            return run(*argv)
+        with patch.dict(WORKSPACES["result"], {"workspaces": WORKSPACES["result"]["workspaces"] + [second]}):
+            owners = w.pull_owners(command, [pr(7)])
+        self.assertEqual(owners, {"owner/product#7": "wArch"})
+
     def test_owner_lookup_lists_worktrees_only_for_watched_repos(self):
         unrelated = {"workspace_id": "wU", "tokens": {"owner": "wX"},
                      "worktree": {"checkout_path": "/repo/other", "repo_root": "/repo/other"}}

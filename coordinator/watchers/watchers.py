@@ -397,7 +397,7 @@ def pull_owners(command, prs, failed=None, work=None):
         for line in listing.splitlines():
             if line.startswith("worktree "):
                 path = line[9:]
-            elif line.startswith("branch refs/heads/") and path:
+            elif line.startswith("branch refs/heads/") and path in by_path:
                 branches[(remote.group(1).lower(), line[18:])] = path
     owners = {}
     for pr in prs:
