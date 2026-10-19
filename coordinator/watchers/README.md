@@ -300,7 +300,7 @@ files need no read. The added-line count must equal the entry's `additions`, or 
 command timeout, files over 1,000,000 bytes fail the scan, and binary files (NUL byte or not UTF-8)
 are skipped with a `legacy-scan skipped binary file <path>` line on stderr. A rules or scan failure becomes that PR’s `READFAIL LEGACY <repo>#<n> <title>: <reason>` entry, retried on later passes; other PR scans and own-PR review/check lines keep reporting. The classifier lives only in
 `legacy_rules.py`; `coordinator/legacy-scan.sh <pr> [repo]` uses `watchers.primary_repo` when no repo is supplied. It is a
-thin CLI over it that prints the matching lines.
+thin CLI over it that prints the matching lines. It and `legacy-map.sh` re-run themselves under bash when started with zsh or sh.
 
 Invalid rules (an unknown key, a `kind` that is not one word, missing `paths`, a bad glob or regex) are a scan failure that names the rule
 (`READFAIL LEGACY <repo>#<n> <title>: legacy.rules[2] (JQUERY): pattern is not a valid rg regex: ...`).

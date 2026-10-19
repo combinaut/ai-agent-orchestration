@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Writes legacy-map.tsv: one <kind>\t<path> row per file on origin/main of the repo in $1 (or $ORCH_LEGACY_MAP_REPO) with a line its legacy rules count.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")" && pwd)"

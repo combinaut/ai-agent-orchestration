@@ -176,6 +176,15 @@ keep_previous_map() {
   [ -z "$(find "$TMP/readonly" -type f)" ]
 }
 
+@test "started with zsh or sh it runs under bash" {
+  for shell in zsh sh; do
+    rm -f "$OUT"
+    run "$shell" "$MAP" "$BIG_REPO"
+    [ "$status" -eq 0 ]
+    contains "$(cat "$OUT")" 'JSERB'
+  done
+}
+
 @test "no repository stops with usage" {
   run env -u ORCH_LEGACY_MAP_REPO "$MAP"
   [ "$status" -ne 0 ]
