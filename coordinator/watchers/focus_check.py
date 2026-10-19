@@ -86,7 +86,7 @@ class OpenPrs:
 
 
 def open_pr(workspaces, owner, prs):
-    """True when a workspace the architect owns has a branch with an open PR; an unreadable lookup counts as one."""
+    """True when a workspace the architect owns has a branch with an open PR; an unreadable origin, branch or lookup counts as one."""
     for row in workspaces:
         if row.get('owner') != owner or not row.get('checkout') or not row.get('repo_root'):
             continue
@@ -98,7 +98,7 @@ def open_pr(workspaces, owner, prs):
         try:
             branch = command('git', '-C', row['checkout'], 'branch', '--show-current').strip()
         except (OSError, subprocess.SubprocessError):
-            continue
+            return True
         if branch and prs.has(repo, branch) is not False:
             return True
     return False

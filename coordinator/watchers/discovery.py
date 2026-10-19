@@ -11,7 +11,7 @@ from pathlib import Path
 from watcher_platform import MissingMetric
 
 ROOT = Path(__file__).resolve().parents[2]
-GITHUB_REMOTE = re.compile(r"github\.com(?::\d+)?[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
+GITHUB_REMOTE = re.compile(r"github\.com(?::\d+)?[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$", re.I)
 NO_REMOTE = re.compile(r"No such remote", re.I)
 GONE = re.compile(r"cannot change to .*: No such file or directory", re.I)
 READ_ERRORS = (OSError, ValueError, KeyError, TypeError, AttributeError, MissingMetric, subprocess.SubprocessError)
@@ -103,8 +103,12 @@ def saved():
 def repos(command, work=None):
     """{'clones': local clone paths, 'repos': GitHub owner/name} of the open workspaces, deduplicated.
 
+    work is the open work already read, or the Unavailable that reading it raised.
+
     Raises Unavailable when the adapter or an origin cannot be read and no earlier set is saved."""
     try:
+        if isinstance(work, Unavailable):
+            raise work
         found = discover(command, open_work(command) if work is None else work)
     except Unavailable as error:
         found = saved()

@@ -85,7 +85,8 @@ class DiscoveryTest(IsolatedTestCase):
 
     def test_github_origins_in_every_url_form_name_the_repo(self):
         for url in ('git@github.com:acme/web.git', 'https://github.com/acme/web', 'https://github.com/acme/web.git/',
-                    'ssh://git@github.com/acme/web.git', 'ssh://git@github.com:22/acme/web.git', 'git://github.com/acme/web'):
+                    'ssh://git@github.com/acme/web.git', 'ssh://git@github.com:22/acme/web.git', 'git://github.com/acme/web',
+                    'https://GitHub.com/acme/web.git'):
             with self.subTest(url=url):
                 self.assertEqual(discovery.github_repo(lambda *argv: url + '\n', '/r/web'), 'acme/web')
         self.assertIsNone(discovery.github_repo(lambda *argv: 'git@gitlab.com:acme/web.git\n', '/r/web'))

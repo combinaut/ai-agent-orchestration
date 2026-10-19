@@ -295,7 +295,7 @@ class PullsSettingsTest(SettingsTest):
                 return '[audit]\nmerge_gate_checks = ["Full gate"]\n'
             if args[:3] == ('gh', 'api', 'graphql'):
                 return json.dumps(dict(data=dict(search=dict(nodes=[pr], pageInfo=dict(hasNextPage=False)))))
-            return json.dumps(dict(result=dict(workspaces=[])))
+            return json.dumps(dict(result=dict(workspaces=[], panes=[])))
         with patch.dict(os.environ, {'ORCH_PR_AUTHOR': 'author'}), open_work('owner/product'):
             os.environ.pop('ORCH_MERGE_GATE_CHECKS', None)
             pulls = w.collect_pulls(command, None)
@@ -314,7 +314,7 @@ class PullsSettingsTest(SettingsTest):
                 return repo_file[0]
             if args[:3] == ('gh', 'api', 'graphql'):
                 return json.dumps(dict(data=dict(search=dict(nodes=[pr], pageInfo=dict(hasNextPage=False)))))
-            return json.dumps(dict(result=dict(workspaces=[])))
+            return json.dumps(dict(result=dict(workspaces=[], panes=[])))
         with patch.dict(os.environ, {'ORCH_PR_AUTHOR': 'author'}), open_work('owner/product'):
             os.environ.pop('ORCH_MERGE_GATE_CHECKS', None)
             before, _ = w.reduce_pulls(None, w.collect_pulls(command, None))

@@ -22,6 +22,7 @@ WORKSPACES = {"result": {"workspaces": [
     {"workspace_id": "wW", "tokens": {"owner": "wArch"},
      "worktree": {"checkout_path": "/wt/product/feature", "repo_root": "/repo/product"}},
     {"workspace_id": "wArch", "tokens": {}, "worktree": {"checkout_path": "/repo/product", "repo_root": "/repo/product"}}]}}
+PANES = []
 REMOTES = {"/repo/product": "git@github.com:owner/product.git\n", "/repo/other": "git@github.com:owner/other.git\n"}
 WORKTREES = "worktree /repo/product\nbranch refs/heads/main\n\nworktree /wt/product/feature\nbranch refs/heads/feature\n"
 
@@ -43,6 +44,12 @@ class PullsTest(IsolatedTestCase):
                 return json.dumps({"data": {"search": {"nodes": prs, "pageInfo": {"hasNextPage": False}}}})
             if argv[1:3] == ("workspace", "list"):
                 return json.dumps(WORKSPACES)
+            if argv[1:3] == ("pane", "list"):
+                return json.dumps({"result": {"panes": PANES}})
+            if argv[0] == "git" and argv[3:] == ("rev-parse", "--show-toplevel"):
+                return "/wt/product/pane\n"
+            if argv[0] == "git" and argv[-1] == "--git-common-dir":
+                return "/repo/product/.git\n"
             if argv[0] == "git" and argv[3:5] == ("remote", "get-url"):
                 return REMOTES[argv[2]]
             if argv[0] == "git":
@@ -214,6 +221,15 @@ class PullsTest(IsolatedTestCase):
         for _ in range(3):
             state, events = w.reduce_pulls(before, w.collect_pulls(slow, before, clock=lambda: elapsed[0]))
             self.assertEqual(events[-1], f"MERGED {repo}#7 owner=wArch Fix")
+
+    def test_a_workspace_found_through_its_pane_directory_has_its_owner(self):
+        pane_workspace = {"workspace_id": "wP", "tokens": {"owner": "wArch2"}}
+        pane = {"workspace_id": "wP", "pane_id": "wP:p1", "cwd": "/wt/product/pane/sub"}
+        listing = WORKTREES + "\nworktree /wt/product/pane\nbranch refs/heads/pane-branch\n"
+        with patch.dict(WORKSPACES["result"], {"workspaces": WORKSPACES["result"]["workspaces"] + [pane_workspace]}), \
+                patch(__name__ + ".PANES", [pane]), patch(__name__ + ".WORKTREES", listing):
+            owners = w.pull_owners(self.command([]), [pr(7), pr(9, branch="pane-branch")])
+        self.assertEqual(owners, {"owner/product#7": "wArch", "owner/product#9": "wArch2"})
 
     def test_owner_lookup_lists_worktrees_only_for_watched_repos(self):
         unrelated = {"workspace_id": "wU", "tokens": {"owner": "wX"},
