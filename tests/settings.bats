@@ -30,7 +30,7 @@ every_value() {
 import sys
 sys.path.insert(0, sys.argv[1])
 import orch_settings as s
-values = {'str': 'from-file', 'int': 7, 'number': 7.5, 'bool': True, 'list': ['a', 'b'], 'json': [{'name': 'file'}]}
+values = {'str': 'from-file', 'int': 7, 'number': 7.5, 'bool': True, 'list': ['a', 'b'], 'json': [{'name': 'file'}], 'tables': [{'name': 'file'}]}
 print(s.render({setting: values[setting.kind] for setting in s.scoped(sys.argv[2])}), end='')
 PY
 }
@@ -231,15 +231,16 @@ ENV
   [[ "$output" == *"created $CLONE/.orchestration.local.toml (acme/webapp)"* ]]
   [[ "$output" == *"added .orchestration.local.toml to the info/exclude of $CLONE"* ]]
   [[ "$output" == *"wrote $TMP/snippets/acme/tools.toml"* ]]
-  [ "$(grep -cE '^\[guard\]|^(big_repo|scan|extra_pattern|exempt_paths|merge_gate_checks|pattern|architect) =' "$ORCH_CONFIG")" = 0 ]
+  [[ "$output" == *'acme/webapp: legacy.scan has no built-in rules; add the [[legacy.rules]] this repo needs'* ]]
+  [ "$(grep -cE '^\[guard\]|^(big_repo|scan|rules|exempt|merge_gate_checks|pattern|architect) =' "$ORCH_CONFIG")" = 0 ]
   grep -qx 'pr_scope = "org:acme"' "$ORCH_CONFIG"
   run load_settings "$CLONE"
   [ "$status" -eq 0 ]
   [ "$output" = "ORCH_BIG_REPO=1
 ORCH_MERGE_GATE_CHECKS=Gate A|Gate B
 ORCH_LEGACY_SCAN=1
-ORCH_LEGACY_EXTRA_PATTERN=old-widget
-ORCH_LEGACY_EXEMPT_PATHS=a.js b.js
+ORCH_LEGACY_RULES=[{\"kind\":\"LEGACY\",\"pattern\":\"old-widget\",\"paths\":[\"**\"]}]
+ORCH_LEGACY_EXEMPT=a.js b.js
 ORCH_FOCUS_PATTERN=billing
 ORCH_FOCUS_ARCHITECT=Billing" ]
   [ "$(cat "$TMP/snippets/acme/tools.toml")" = '# Repo settings for acme/tools, converted from orchestration.env.

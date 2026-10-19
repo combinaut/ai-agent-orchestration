@@ -48,7 +48,7 @@ filter bar            ← the initiative's workspace
 
 The architect confirms `tokens.owner` with `herdr workspace get <worker-id>` before it calls a dispatch done. The pulls watcher also uses the `owner` tag to route PR events.
 
-[Herdr Radar](https://github.com/combinaut/herdr-radar) reads these tags and draws the Coordinator → architect → worker tree in its Agents panel. Radar is optional; its checkout is `ORCH_RADAR_PATH`. See [`env/README.md`](../env/README.md).
+[Herdr Radar](https://github.com/combinaut/herdr-radar) reads these tags and groups workers under their architects in its Agents panel. Radar is optional; its checkout is `ORCH_RADAR_PATH`. See [`env/README.md`](../env/README.md).
 
 Workspace names stay true: `PR <n> · <job>` once a PR exists, `#<issue> · <job> (no PR yet)` before. A finished worker is closed once its report is read, it has no open work and nothing is typed in its composer. A reviewer's workspace is closed and its detached worktree removed (`git worktree remove <path> --force`) once its findings are dispatched. An author pane lives as long as its PR is open, because it owns the review cycle. Panes are closed with [`close-pane.sh`](../coordinator/watchers/close-pane.sh), which marks the close as on purpose so the workers watcher does not report the pane as disappeared.
 
@@ -170,22 +170,24 @@ The template every worker brief carries is [`worker-reports/machine-rules.md`](.
 
 ## LEGACY CHECK
 
-Projects that use the legacy-check workflow can use the audit’s `LEGACY` lines and the map and scan tools for repositories whose repo settings turn `legacy.scan` on.
+Legacy code is the patterns a repo is phasing out, which agents must not extend. Projects that use the legacy-check workflow can use the audit’s `LEGACY` lines and the map and scan tools for repositories whose repo settings turn `legacy.scan` on; both follow the repo's own `[[legacy.rules]]` ([settings](settings.md#legacy-rules)).
 
 ```mermaid
 sequenceDiagram
     participant A as Architect
     participant C as Coordinator
     participant W as Worker
-    A->>C: LEGACY CHECK (files, old code, what happens to it)
-    C->>C: check against ~/.claude/coordinator/legacy-map.tsv
+    A->>A: verify the clone's origin, generate a fresh task map
+    A->>C: LEGACY CHECK (repo, clone, map path, generation result, files, old code, what happens to it)
+    C->>C: check the files against the task map
     C-->>A: LEGACY OK, or what must change
     A->>W: go ahead, code starts
 ```
 
-- The architect sends the Coordinator a 3-line `LEGACY CHECK`: the files the task touches, the old code in them (`grep -F <path> ~/.claude/coordinator/legacy-map.tsv`), and what happens to it (removed, untouched, or a named bridge with a ticket). Never extended.
+- Before every check the architect verifies the source clone's origin identifies the task repository, then generates a fresh task map: `ORCH_LEGACY_MAP_OUT="<task-map-path>" ~/.claude/coordinator/legacy-map.sh "<task-clone>"`. The daily map is never used for this gate: it has no source metadata and may belong to a previous clone.
+- The architect sends the Coordinator a `LEGACY CHECK`: the repo, source clone, map path, the successful generation result, the files the task touches, the old code in them, and what happens to it (removed, untouched, or a named bridge with a ticket). Never extended. The Coordinator checks the files against that task map; if it cannot confirm the generation, it regenerates the map or withholds `LEGACY OK`.
 - No code starts until the answer is `LEGACY OK`.
-- [`legacy-map.sh`](../coordinator/legacy-map.sh) writes the map from `origin/main` of a repository; it runs daily only with `watchers.service = true` and a resolvable `legacy.map_repo`. [`legacy-scan.sh`](../coordinator/legacy-scan.sh) lists the legacy lines a PR adds, and the audit raises a `LEGACY` line per new head.
+- [`legacy-map.sh`](../coordinator/legacy-map.sh) writes a map from `origin/main` of a repository. [`legacy-scan.sh`](../coordinator/legacy-scan.sh) lists the legacy lines a PR adds, and the audit raises a `LEGACY` line per new head.
 
 ## Remote Control
 

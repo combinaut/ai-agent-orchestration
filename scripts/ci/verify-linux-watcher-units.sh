@@ -18,6 +18,6 @@ sed "s|@ORCH_CLAUDE_DIR@|$units/home with space/.claude|g; s|@ORCH_CONFIG@|$unit
 touch "$units/home with space/.claude/coordinator/legacy-map.sh"
 chmod +x "$units/home with space/.claude/coordinator/legacy-map.sh"
 for kind in service timer; do
-  sed "s|@ORCH_CLAUDE_DIR@|$units/home with space/.claude|g; s|@ORCH_LEGACY_MAP_REPO@|$units/webapp|g; s|@ORCH_PATH@|/usr/bin:/bin|g" coordinator/service/linux/orch.coord-legacy-map.$kind.template >"$units/legacy-map.$kind"
+  sed "s|@ORCH_CLAUDE_DIR@|$units/home with space/.claude|g; s|@ORCH_LEGACY_MAP_REPO@|$units/webapp|g; s|@ORCH_SERVICE_PYTHON@|/usr/bin/python3|g; s|@ORCH_PATH@|/usr/bin:/bin|g" coordinator/service/linux/orch.coord-legacy-map.$kind.template >"$units/legacy-map.$kind"
 done
 systemd-analyze verify "$units/context.service" "$units/legacy-map.service" "$units/legacy-map.timer" "$units/inbox.service" "$units/host.service" "$units/hog.service" "$units/balance.service" "$units/workers.service" "$units/audit.service"

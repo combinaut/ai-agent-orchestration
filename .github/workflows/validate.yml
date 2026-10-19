@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
-      - run: brew install shellcheck bats-core
+      - run: brew install shellcheck bats-core ripgrep parallel
       - uses: ./.github/actions/validate
 
   ubuntu:

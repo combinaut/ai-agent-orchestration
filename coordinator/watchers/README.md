@@ -283,13 +283,14 @@ original audit text: RED, THREADS, COPILOT, CONFLICT, CHANGES, NOREVIEWER,
 APPROVED, APPROVED-OLDHEAD, APPROVED-STACKED, LEGACY, BLOCKED worker, STALESLOT,
 SLOTDIR, PACKS and WORKTREES. A condition that leaves a readable source, or a legacy line whose PR closed or whose new head has no hits, emits `CLEARED <its last line>`; a changed detail, such as a thread count, is the same condition. Pack steps use ORCH_PACKS_MAX; worktree steps
 use 20, with the configured thresholds deciding when to alert.
-`LEGACY <repo>#<n> <title> [<count> lines: JSERB a, JQUERY b, LEGACY c, TEST d]`
-lists lines an open PR adds that build on legacy front-end code: `.js.erb` files,
-jQuery/ujs/Select2 patterns, edits under `app/assets/javascripts/`, and those
-patterns in spec/test files. The scan runs for PRs of repos whose repo settings turn `legacy.scan` on (off by default; read from the `.orchestration.toml` of the PR's base branch, then the `.orchestration.local.toml` of a watched clone) when a PR is first seen, when its head SHA changes, when its base branch changes, or when the rules file on its default branch changes, at most ORCH_LEGACY_SCANS_MAX PRs per
+`LEGACY <repo>#<n> <title> [<count> lines: <kind> a, <kind> b, ...]`
+lists lines an open PR adds that the repo's legacy rules count (patterns the repo is phasing out, which
+agents must not extend), one count per rule kind in rule order. The rules are `[[legacy.rules]]` in the repo
+settings ([docs/settings.md](../../docs/settings.md#legacy-rules)); the tool ships none. A repo with `legacy.scan` on and no rules gets one
+`NORULES LEGACY <repo>@<base> [...]` line per base branch and no scan. The scan runs for PRs of repos whose repo settings turn `legacy.scan` on (off by default; read from the `.orchestration.toml` of the PR's base branch, then the `.orchestration.local.toml` of a watched clone) when a PR is first seen, when its head SHA changes, when its base branch changes, or when its rules or `legacy.exempt` change, at most ORCH_LEGACY_SCANS_MAX PRs per
 pass (default 10; the rest wait for the next pass), and a head with a count above
 zero emits one line. Results are kept in `audit.json` → `before.legacy`, and the
-first read emits `AUDIT BASELINE legacy`. Each scan costs one `gh pr diff` call; every pass also makes one rules-file read per repository default branch of the scanned repos' open PRs, and one `.orchestration.toml` read per repository base branch of the open PRs. A PR over 300 files makes `gh pr diff`
+first read emits `AUDIT BASELINE legacy`. Each scan costs one `gh pr diff` call; every pass also makes one `.orchestration.toml` read per repository base branch of the open PRs. A PR over 300 files makes `gh pr diff`
 fail with `too_large`; the scan then reads the `pulls/<n>/files` patches, 100 files per page,
 and classifies them identically. GitHub leaves `patch` out of big file entries; the scan then reads
 the file at the PR head with the contents API (`added`), or the head and merge-base versions
@@ -297,33 +298,12 @@ the file at the PR head with the contents API (`added`), or the head and merge-b
 files need no read. The added-line count must equal the entry's `additions`, or the scan fails. At most
 `ORCH_LEGACY_READS_MAX` reads per PR (default 20; more fails the scan), each under the 45s
 command timeout, files over 1,000,000 bytes fail the scan, and binary files (NUL byte or not UTF-8)
-are skipped with a `legacy-scan skipped binary file <path>` line on stderr. A rules or scan failure becomes that PR’s `READFAIL LEGACY <repo>#<n> <title>: <reason>` entry, retried on later passes; other PR scans and own-PR review/check lines keep reporting. The classifier lives only in `audit.py` (built-in rules) and
-`legacy_rules.py` (the repository's rules file); `coordinator/legacy-scan.sh <pr> [repo]` uses `watchers.primary_repo` when no repo is supplied. It is a
+are skipped with a `legacy-scan skipped binary file <path>` line on stderr. A rules or scan failure becomes that PR’s `READFAIL LEGACY <repo>#<n> <title>: <reason>` entry, retried on later passes; other PR scans and own-PR review/check lines keep reporting. The classifier lives only in
+`legacy_rules.py`; `coordinator/legacy-scan.sh <pr> [repo]` uses `watchers.primary_repo` when no repo is supplied. It is a
 thin CLI over it that prints the matching lines.
 
-If the repository has `scripts/legacy-deletion-ratchet-rules.json` on the repository's **default** branch
-(read with one `gh api` call per repository per audit pass, never from the PR head, so a PR cannot
-exempt itself), the scan uses it instead of the built-in rules. The saved result remembers a hash of
-the rules file it used, so a PR is scanned again when the file on its default branch changes, even with the same head:
-
-- `selfExempt` paths are skipped.
-- A `jquery`, `ujs`, `ajax` or `selectWidgets` pattern match counts as JQUERY (TEST in a spec/test
-  path); only files in `scannedPaths` are matched (empty means all), and only frontend sources: `.js .mjs .cjs .jsx .ts .tsx .vue .erb .haml .hbs .ejs .coffee .rb` (`FRONTEND_EXTENSIONS` in `legacy_rules.py`, also used by the built-in rules). `.json`, `.sh`, `.yml`, `.md` and the like never match a pattern.
-- Lines under `legacyPaths` count as LEGACY; `.js.erb` files as JSERB and other `legacyExtensions` as LEGACY.
-- A line matching `bridgeMarker.pattern`, or every line of a file whose first `fileLevelLines` lines
-  (as shown in the diff, context lines included) carry it, is a named bridge: it is not counted, and
-  the CLI lists it as `BRIDGE <path>: <line>`.
-- The patterns are JavaScript regexes run in Python through a strict translator. Without the `u`
-  flag the text is matched as UTF-16 code units, as JavaScript does. Only the flags `i`, `m`, `s`, `u`
-  are accepted, and `i` with `u` is not; `g`, `y`, `d`, `v`, variable-width lookbehind, `\p{..}`, `\k<..>`,
-  numbered backreferences, `(?i)`-style and other Python-only syntax, possessive quantifiers, a repeated group (`*`, `+`, `{n,}`) that contains a quantifier or `|` (backtracking blow-up), empty
-  classes, `\c..`, `\u{..}` and non-ASCII text with the `i` flag are rejected.
-- Only the first 2,000 characters of a line are matched. Globs: `**` crosses `/`, `*` and `?` do not, `{a,b}` alternates, a trailing `/` means the whole
-  directory; a glob matches the whole path.
-
-No file (HTTP 404) falls back to the built-in rules, which match patterns only in the frontend source extensions above and skip the guard's own two `scripts/` files (`BUILTIN_EXEMPT` in `audit.py`) plus any `ORCH_LEGACY_EXEMPT_PATHS`; `ORCH_LEGACY_EXTRA_PATTERN` adds project names to the patterns; once the file is on the default branch its `selfExempt` list replaces that. A file that is not JSON, has `version` other
-than 1, has an unknown pattern kind, or holds a pattern the translator rejects is a scan failure
-(`READFAIL LEGACY <repo>#<n> <title>: <repo>@<default> scripts/legacy-deletion-ratchet-rules.json: pattern <id>: ...`).
+Invalid rules (an unknown key, a `kind` that is not one word, missing `paths`, a bad glob or regex) are a scan failure that names the rule
+(`READFAIL LEGACY <repo>#<n> <title>: legacy.rules[2] (JQUERY): pattern is not a valid rg regex: ...`).
 
 Only the current search's OPEN PR lines are remembered; departed PRs are pruned
 without follow-up reads. Each source failing to read keeps its last known lines

@@ -8,7 +8,7 @@ The clone and the Radar checkout are never updated over local work. With uncommi
 
 ## Requirements
 
-macOS or Linux, Bash 3.2 or newer; `git`, `jq`, `python3`, `curl`; `gh` for the PR watchers. Optional: Codex CLI (architects pick Claude or Codex per task); `rg` for the legacy map.
+macOS or Linux, Bash 3.2 or newer; `git`, `jq`, `python3`, `curl`; `gh` for the PR watchers; `rg` (ripgrep) for the legacy scan and map. Optional: Codex CLI (architects pick Claude or Codex per task).
 
 ## What the installer does
 
@@ -39,7 +39,7 @@ It never edits `CLAUDE.md`; it tells you to paste `snippets/CLAUDE.md.snippet` w
 | `worker-reports/machine-rules.md` | `~/.claude/worker-reports/` | Template of machine rules to paste into every worker brief |
 | `hooks/orch-update-check.sh` | `~/.claude/hooks/` | SessionStart hook: says when this setup is out of date |
 | `hooks/guard-bash.py` | `~/.claude/hooks/` | PreToolUse Bash guard: blocks unsafe Git commands, including every `git grep` (even path-scoped) in configured big repos |
-| `coordinator/legacy-map.sh` | `~/.claude/coordinator/` | Writes `legacy-map.tsv` (old-style front-end files on the configured project’s `origin/main`) for the architect's legacy check |
+| `coordinator/legacy-map.sh` | `~/.claude/coordinator/` | Writes `legacy-map.tsv` (files on the configured project’s `origin/main` its legacy rules count); architects run it per task for the legacy check |
 | `coordinator/service/<platform>/*.template` | linked like the rest of `coordinator/`; with `watchers.service = true` and a repo to map also rendered beside the link | daily legacy map job (launchd plist, or systemd service and timer), registered for login by the installer; the repo is `legacy.map_repo`, else the first clone of an open workspace, at install time, whose repo settings set `legacy.scan = true` |
 | `coordinator/watchers/` | `~/.claude/coordinator/watchers/` (file by file; `bindings/` and `prod-context/` created empty) | Coordinator watchers, see [`coordinator/watchers/README.md`](../coordinator/watchers/README.md) |
 | `coordinator/watchers/service/<platform>/*.template` | linked like the rest of `coordinator/`; with `watchers.service = true` also rendered to a `.plist` or `.service` beside the link | platform watcher services, registered by the installer to run now and at login |

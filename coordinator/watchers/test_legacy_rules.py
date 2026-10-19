@@ -1,107 +1,245 @@
-import json
+import io
+import os
 import subprocess
+import sys
+import tempfile
+import time
+import tracemalloc
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from test_support import IsolatedTestCase
 import legacy_rules
+import orch_settings
 import watchers as w
 
-RULES = json.loads((w.ROOT / 'fixtures/legacy-rules.json').read_text())
-EXTRA = [('translated-dot', '^a.b$', ''), ('translated-dot-s', 'a.b', 's'), ('multiline', '^x|y$', 'm'),
-         ('lookbehind', '(?<=@)name', ''), ('lookahead', 'name(?!:)', ''), ('space-class', '[\\s,]x', ''),
-         ('not-space', 'a\\Sb', ''), ('lazy', 'a.*?b', ''), ('counted', 'a{2,3}b', ''), ('literal-brace', 'a{,2}', ''),
-         ('u-surrogate-pair', '\\uD83D\\uDE00', 'u'), ('nonu-surrogate-pair', '\\uD83D\\uDE00', ''), ('u-surrogate-class', '^[\\uD83D\\uDE00]$', 'u'),
-         ('ascii-escapes-i', '\\x41\\u0042', 'i'), ('escaped-backslash-i', '\\\\u00B5', 'i'),
-         ('bounded-optional', '(a+){0,1}b', ''), ('bounded-one', '(a|b){1,1}x', ''), ('group-repeat', '(ab)+c', ''), ('optional-group', '(a+)?b', ''), ('alt-group', '(?:jquery|rails)-ujs?', ''), ('bounded-group', '(?:a|b){1}x', ''),
-         ('u-slash', 'a\\/b', 'u'), ('u-class-dash', '[a\\-z]', 'u'), ('u-syntax', '\\(\\)\\{\\}', 'u'),
-         ('astral-dot', '^.$', ''), ('astral-dot-u', '^.$', 'u'), ('astral-class', '^[\U0001F600]$', ''),
-         ('astral-class-u', '^[\U0001F600]$', 'u'), ('astral-literal', '\U0001F600+', ''), ('astral-literal-u', '\U0001F600+', 'u'),
-         ('class-edge', '[\\]\\[a-]x', ''), ('ascii-word', '\\w+', ''), ('word-boundary', '\\bfoo\\b', 'i')]
-LINES = ['$(".menu").hide()', 'JQuery', 'x = jquery_ujs', 'link remote: true', 'remote:true', 'data-remote="1"',
-         '$.ajax({})', 'ajax:error', 'select2', 'plain', '', 'a\nb', 'a\rb', 'a b', 'a b', 'a٣b',
-         'aab', 'aaaab', 'a{,2}', '@name', 'name:', 'name', 'x]x', '-x', 'ab', 'a b', 'foo', 'FOO', 'fooé', 'éfoo',
-         'xy', 'y', 'x', ' x', 'a,x', 'ſ', 'K', 'k', '\U0001F600', '\U0001F600\U0001F600', 'a\U0001F600']
+RULES = (w.ROOT / 'fixtures/legacy-rules.toml').read_text()
 
 
-def fixture_patterns():
-    for kind, entries in RULES['patterns'].items():
-        for entry in entries:
-            yield entry['id'], entry['pattern'], entry['flags']
-    yield 'bridge', RULES['bridgeMarker']['pattern'], ''
-    yield from EXTRA
+def rules(text):
+    """Rules of a repo settings file, read the way the scan and the map read them."""
+    return legacy_rules.from_settings(orch_settings.load_remote('owner/product', 'main', text, environ={}))
 
 
-NODE = ('const cases = JSON.parse(process.argv[1]);'
-        'console.log(JSON.stringify(cases.map(([, p, f, lines]) => lines.map(l => new RegExp(p, f).test(l)))))')
+def rule(**fields):
+    body = ''.join(f'{key} = {value}\n' for key, value in fields.items())
+    return f'[[legacy.rules]]\n{body}'
 
 
-class TranslatorTests(IsolatedTestCase):
-    def test_node_and_python_agree_on_every_pattern(self):
-        cases = [(name, pattern, flags, LINES) for name, pattern, flags in fixture_patterns()]
-        result = subprocess.run(['node', '-e', NODE, json.dumps(cases)], capture_output=True, text=True, check=True)
-        expected = json.loads(result.stdout)
-        self.assertEqual(len(expected), len(cases))
-        for (name, pattern, flags, lines), js in zip(cases, expected):
-            compiled = legacy_rules.compile_js(pattern, flags)
-            self.assertEqual([bool(compiled.search(line)) for line in lines], js, name)
-        self.assertTrue(any(any(row) for row in expected))
+class RulesTests(IsolatedTestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
 
-    def test_unsupported_syntax_is_rejected(self):
-        for pattern, flags in [('(?<=a|bc)x', ''), ('(?<name>a)\\k<name>', ''), ('\\p{L}', 'u'), ('a', 'g'), ('a', 'y'),
-                               ('a', 'd'), ('a', 'ii'), ('(a)\\1', ''), ('(?i)a', ''), ('(?P<n>a)', ''), ('a++', ''),
-                               ('a*+', ''), ('\\u{1F600}', 'u'), ('[]', ''), ('[^]', ''), ('\\cJ', ''), ('\\A', ''),
-                               ('é', 'i'), ('[', ''), ('a\\', ''), ('(?#c)', ''), ('(?>a)', ''), ('[\\S]', ''),
-                               ('(?<n>a)(?<n>b)', ''), ('[+--]', ''), ('k', 'iu'), ('(a+)+$', ''), ('(a|a)*', ''), ('(a*)*b', ''), ('((a)+)+', ''), ('(\\w+\\s?)+x', ''), ('(?:a|b){2,}', ''), ('(a+){2,5}', ''), ('^(a?){1000}a{1000}$', ''), ('(a{1,3})+', ''), ('((ab)?c)*', ''), ('(a+){1,}$', ''), ('(a|aa){1,}$', ''), ('(a+){0,}b', ''), ('\\u00B5', 'i'), ('\\xB5', 'i'), ('\\u212A', 'i'), ('\\-', 'u'), ('a{,2}', 'u'), ('a{', 'u'), ('a}', 'u'), ('a]', 'u'), ('\\_', 'u')]:
-            with self.assertRaises(ValueError, msg=f'{pattern!r} {flags!r}'):
-                legacy_rules.compile_js(pattern, flags)
+    def test_no_rules_is_none(self):
+        self.assertIsNone(rules(''))
+        self.assertIsNone(rules('[legacy]\nscan = true\nexempt = ["a"]\n'))
+        self.assertIsNone(legacy_rules.from_settings({}))
 
-    def test_accepted_flags_and_groups(self):
-        self.assertTrue(legacy_rules.compile_js('(?<n>a)b', 'ims').search('AB'))
-        self.assertFalse(legacy_rules.compile_js('^a$', '').search('a\n'))
+    def test_kinds_follow_rule_order(self):
+        self.assertEqual(rules(RULES).kinds, ('JSERB', 'JQUERY', 'LEGACY', 'TEST'))
+        text = rule(kind='"B"', paths='["**"]') + rule(kind='"A"', paths='["**"]') + rule(kind='"B"', paths='["x"]')
+        self.assertEqual(rules(text).kinds, ('B', 'A'))
 
-    def test_rules_file_validation(self):
-        bad = [None, [], dict(RULES, version=2), dict(RULES, version=True), dict(RULES, version=1.0), dict(RULES, version='1'), {k: v for k, v in RULES.items() if k != 'version'},
-               dict(RULES, patterns=[]), dict(RULES, patterns=dict(other=[])),
-               dict(RULES, patterns=dict(jquery=[dict(id='', pattern='a')])),
-               dict(RULES, patterns=dict(jquery=[dict(id='x', pattern='a', flags='g')])),
-               dict(RULES, bridgeMarker=dict(pattern='a', fileLevelLines=0)), dict(RULES, legacyPaths='x'),
-               dict(RULES, scannedPaths=['{a']), dict(RULES, selfExempt=['']), dict(RULES, legacyExtensions=['']),
-               dict(RULES, legacyExtensions=[1]), dict(RULES, legacyExtensions='.coffee')]
-        for raw in bad:
-            with self.assertRaises(ValueError, msg=repr(raw)):
-                legacy_rules.Rules(raw)
-        with self.assertRaises(ValueError):
-            legacy_rules.parse_rules('{not json')
-        for constant in ('NaN', 'Infinity', '-Infinity'):
-            with self.assertRaisesRegex(ValueError, 'is not JSON'):
-                legacy_rules.parse_rules(json.dumps(RULES).replace('"jQuery call"', constant))
-        with self.assertRaisesRegex(ValueError, 'pattern x:'):
-            legacy_rules.Rules(dict(RULES, patterns=dict(jquery=[dict(id='x', pattern='(?<=a|bc)')])))
+    def test_fixture_rules_classify_like_the_jquery_conventions(self):
+        parsed = rules(RULES)
+        for text in ('$(', 'jQuery', '$.ajax', 'ajax:success', 'jquery_ujs', 'jquery-ujs', 'rails-ujs',
+                     'data-remote', 'remote:true', 'remote:  true', '.trigger(', 'select2', 'legacy-select'):
+            self.assertEqual(parsed.classify('app/a.rb', text), 'JQUERY', text)
+        self.assertIsNone(parsed.classify('app/a.rb', 'plain'))
+        self.assertEqual(parsed.classify('app/assets/javascripts/a.js', 'plain'), 'LEGACY')
+        self.assertEqual(parsed.classify('app/assets/javascripts/a.js', '$(x)'), 'LEGACY')
+        self.assertEqual(parsed.classify('app/assets/javascripts/spec/a.js', '$(x)'), 'TEST')
+        self.assertEqual(parsed.classify('app/assets/javascripts/spec/a.js', 'plain'), 'LEGACY')
+        self.assertEqual(parsed.classify('app/a.js.erb', 'plain'), 'JSERB')
+        self.assertEqual(parsed.classify('spec/a.rb', 'jQuery'), 'TEST')
+        for path in ('test/a.rb', 'app/spec/a.rb', 'a/b_spec.rb', 'a/b.test.js', 'a/b-spec.js', 'a/b.spec.foo.js'):
+            self.assertEqual(parsed.classify(path, 'jQuery'), 'TEST', path)
+        for path in ('app/models/contest.rb', 'app/assets/javascripts/testimonials.js', 'app/latest/a.rb'):
+            self.assertNotEqual(parsed.classify(path, 'jQuery'), 'TEST', path)
+        self.assertIsNone(parsed.classify('app/assets/javascripts/README.md', 'plain'))
+        for path in ('bin/build.sh', 'bin/x.bash', 'docs/a.md', '.codex/hooks.json', 'app/b.yml'):
+            self.assertIsNone(parsed.classify(path, 'value=$(command)'), path)
+        self.assertIsNone(parsed.classify('spec/a.rb', 'plain'))
+        self.assertIsNone(parsed.classify('.orchestration.toml', '$('))
+        self.assertIsNone(parsed.classify('scripts/legacy-guard.test.mjs', '$('))
 
-    def test_empty_matching_bridges_are_rejected(self):
-        for pattern in ('', 'x*', '(?:)'):
-            with self.assertRaisesRegex(ValueError, 'empty string'):
-                legacy_rules.Rules(dict(RULES, bridgeMarker=dict(pattern=pattern, fileLevelLines=5)))
+    def test_rule_without_pattern_counts_every_line(self):
+        parsed = rules(rule(kind='"OLD"', paths='["src/old/**"]'))
+        self.assertEqual(parsed.classify('src/old/a.js', ''), 'OLD')
+        self.assertEqual(parsed.classify('src/old/deep/b.txt', 'anything'), 'OLD')
+        self.assertIsNone(parsed.classify('src/new/a.js', 'anything'))
 
-    def test_empty_pattern_sets_are_rejected(self):
-        for patterns in ({}, dict(jquery=[])):
-            with self.assertRaisesRegex(ValueError, 'at least one'):
-                legacy_rules.Rules(dict(RULES, patterns=patterns))
+    def test_exclude_skips_paths_for_that_rule_only(self):
+        parsed = rules(rule(kind='"A"', pattern="'x'", paths='["**/*.js"]', exclude='["vendor/**"]')
+                       + rule(kind='"B"', paths='["vendor/**"]'))
+        self.assertEqual(parsed.classify('app/a.js', 'x'), 'A')
+        self.assertEqual(parsed.classify('vendor/a.js', 'x'), 'B')
 
-    def test_extension_order_does_not_change_the_bucket(self):
-        for extensions in ([".erb", ".js.erb"], [".js.erb", ".erb"]):
-            rules = legacy_rules.Rules(dict(RULES, legacyExtensions=extensions))
-            self.assertEqual(rules.classify('app/a.js.erb', 'x'), 'JSERB')
-            self.assertEqual(rules.classify('app/a.erb', 'x'), 'LEGACY')
+    def test_exempt_paths_are_never_counted(self):
+        parsed = rules('[legacy]\nexempt = ["tools/guard.mjs", "gen/**"]\n' + rule(kind='"A"', paths='["**"]'))
+        self.assertIsNone(parsed.classify('tools/guard.mjs', 'x'))
+        self.assertIsNone(parsed.classify('gen/a/b.js', 'x'))
+        self.assertEqual(parsed.classify('tools/other.mjs', 'x'), 'A')
+
+    def test_first_matching_rule_wins_per_line(self):
+        parsed = rules(rule(kind='"FIRST"', pattern="'jQuery'", paths='["**"]')
+                       + rule(kind='"SECOND"', pattern="'jQuery|\\$\\('", paths='["**"]'))
+        self.assertEqual(parsed.classify('a.js', 'jQuery $('), 'FIRST')
+        self.assertEqual(parsed.classify('a.js', '$('), 'SECOND')
+        lines = [('a.js', 1, 'jQuery', True), ('a.js', 2, '$(x)', True), ('a.js', 3, '$(y)', False), ('a.js', 4, 'plain', True)]
+        self.assertEqual(parsed.scan(lines), [('FIRST', 'a.js', 'jQuery'), ('SECOND', 'a.js', '$(x)')])
+
+    def test_inline_flags_work_in_patterns(self):
+        self.assertEqual(rules(rule(kind='"A"', pattern="'(?i)jquery'", paths='["**"]')).classify('a', 'JQuery'), 'A')
+        self.assertIsNone(rules(rule(kind='"A"', pattern="'jquery'", paths='["**"]')).classify('a', 'JQuery'))
+
+    def test_personal_rules_replace_the_committed_ones(self):
+        root = self.base / 'clone'
+        root.mkdir()
+        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        (root / orch_settings.LOCAL_FILE).write_text(rule(kind='"MINE"', paths='["**"]'))
+        settings = orch_settings.load_remote('owner/product', 'main', rule(kind='"SHARED"', paths='["**"]'), str(root), environ={})
+        self.assertEqual(legacy_rules.from_settings(settings).kinds, ('MINE',))
+
+    def test_fingerprint_follows_rules_and_exempt(self):
+        base = rule(kind='"A"', paths='["**"]')
+        prints = {rules(text).fingerprint for text in (base, base, rule(kind='"B"', paths='["**"]'), '[legacy]\nexempt = ["x"]\n' + base)}
+        self.assertEqual(len(prints), 3)
+
+    def test_each_validation_error_names_the_rule_and_problem(self):
+        cases = {
+            "legacy.rules[1] (A): unknown key 'path'": rule(kind='"A"', path='["**"]'),
+            "legacy.rules[1] (A): unknown key 'flags'": rule(kind='"A"', paths='["**"]', flags='"i"'),
+            'legacy.rules[1]: kind must be a word': rule(kind='"two words"', paths='["**"]'),
+            'legacy.rules[1]: kind must be a word ': rule(kind='1', paths='["**"]'),
+            'legacy.rules[1] (A): paths must be a non-empty list of non-empty strings': rule(kind='"A"'),
+            'legacy.rules[1] (A): paths must be a non-empty list of non-empty strings ': rule(kind='"A"', paths='[]'),
+            'legacy.rules[1] (A): exclude must be a list of non-empty strings': rule(kind='"A"', paths='["**"]', exclude='[1]'),
+            'legacy.rules[1] (A): pattern must be a non-empty string': rule(kind='"A"', paths='["**"]', pattern='1'),
+            'legacy.rules[1] (A): pattern is not a valid rg regex': rule(kind='"A"', paths='["**"]', pattern="'('"),
+            "legacy.rules[1] (A): paths: bad brace group in '{a'": rule(kind='"A"', paths='["{a"]'),
+            "legacy.exempt: bad brace group in '{a'": '[legacy]\nexempt = ["{a"]\n' + rule(kind='"A"', paths='["**"]'),
+        }
+        for message, text in cases.items():
+            with self.assertRaises(ValueError, msg=message) as caught:
+                rules(text)
+            self.assertIn(message.strip(), str(caught.exception))
+        with self.assertRaisesRegex(ValueError, r'legacy\.rules\[2\] \(B\): pattern is not a valid rg regex'):
+            rules(rule(kind='"A"', paths='["**"]') + rule(kind='"B"', paths='["**"]', pattern='"["'))
+
+    def test_settings_reject_rules_that_are_not_tables(self):
+        with self.assertRaisesRegex(orch_settings.ConfigError, 'legacy.rules: must be an array of tables'):
+            rules('[legacy]\nrules = ["x"]\n')
+
+    def test_exported_rules_must_be_json(self):
+        with self.assertRaisesRegex(ValueError, 'ORCH_LEGACY_RULES is not JSON'):
+            legacy_rules.from_settings({'ORCH_LEGACY_RULES': '[{'})
+        self.assertEqual(legacy_rules.from_settings(
+            {'ORCH_LEGACY_RULES': '[{"kind":"A","paths":["**"]}]', 'ORCH_LEGACY_EXEMPT': 'x y'}).classify('y', ''), None)
+
+    def test_patterns_are_rg_regexes(self):
+        for pattern in ('(?=a)b', '(a)\\1', '('):
+            with self.assertRaisesRegex(ValueError, 'pattern is not a valid rg regex', msg=pattern):
+                legacy_rules.compile_pattern(pattern)
+        for pattern in ('(a+)+$', 'a+b+', '(a|b)*', 'ajax:(success|error)', 'remote: *true', '\\$\\(', '(?i)jquery'):
+            self.assertEqual(legacy_rules.compile_pattern(pattern), pattern)
+
+    def test_a_backtracking_pattern_runs_in_bounded_time(self):
+        parsed = rules(rule(kind='"A"', pattern="'a*a*a*a*a*a*b'", paths='["**"]') + rule(kind='"B"', pattern="'(a+)+$'", paths='["**"]'))
+        start = time.monotonic()
+        self.assertIsNone(parsed.classify('x.txt', 'a' * 1500 + '!'))
+        self.assertEqual(parsed.classify('x.txt', 'a' * 5000 + '!'), 'B')
+        self.assertLess(time.monotonic() - start, 5)
+
+    def test_missing_rg_is_named(self):
+        with patch.object(legacy_rules.shutil, 'which', return_value=None):
+            with self.assertRaisesRegex(ValueError, r'legacy rules need rg \(ripgrep\) on PATH'):
+                rules(rule(kind='"A"', pattern="'x'", paths='["**"]'))
+
+    def test_zero_width_matches_count_and_keep_rule_order(self):
+        parsed = rules(rule(kind='"EMPTY"', pattern="'^$'", paths='["**"]') + rule(kind='"WORD"', pattern="'\\b'", paths='["**"]')
+                       + rule(kind='"ANY"', paths='["**"]'))
+        lines = [('a.js', 1, '', True), ('a.js', 2, 'ab', True), ('a.js', 3, '  ', True), ('a.js', 4, 'a' * 3000, True)]
+        self.assertEqual([kind for kind, _, _ in parsed.scan(lines)], ['EMPTY', 'WORD', 'ANY', 'WORD'])
+
+    def test_matching_runs_in_chunks_with_the_same_result(self):
+        parsed = rules(rule(kind='"A"', pattern="'^a$'", paths='["**"]') + rule(kind='"B"', pattern="'b'", paths='["**"]'))
+        documents = [(f'f{n}.js', ['a', 'b', 'ab', '', 'a']) for n in range(4)]
+        whole = list(parsed.documents(documents))
+        started = []
+        real = legacy_rules.Matcher
+
+        def counted(pattern):
+            started.append(pattern)
+            return real(pattern)
+        with patch.object(legacy_rules, 'CHUNK_LINES', 7), patch.object(legacy_rules, 'Matcher', side_effect=counted):
+            self.assertEqual(list(parsed.documents(documents)), whole)
+        self.assertEqual(whole[0], ('f0.js', ['A', 'B', 'B', None, 'A']))
+        self.assertEqual(len(started), 8)
+        big = [('big.js', ['a', 'b'] * 5), ('empty.js', []), ('small.js', ['b'])]
+        expected = list(parsed.documents(big))
+        self.assertEqual(expected, [('big.js', ['A', 'B'] * 5), ('empty.js', []), ('small.js', ['B'])])
+        fed = []
+        real_feed = legacy_rules.Matcher.feed
+
+        def feed(matcher, lines):
+            fed.append(len(lines))
+            return real_feed(matcher, lines)
+        with patch.object(legacy_rules, 'CHUNK_LINES', 3), patch.object(legacy_rules.Matcher, 'feed', feed):
+            self.assertEqual(list(parsed.documents(big)), expected)
+        self.assertLessEqual(max(fed), 3)
+
+    def test_queued_lines_are_cut_before_they_wait_for_matching(self):
+        parsed = rules(rule(kind='"A"', pattern="'x'", paths='["**"]'))
+        queued = []
+        real = legacy_rules.Rules.chunk
+
+        def chunk(self_, documents):
+            queued.extend(len(line) for _, lines in documents for line in lines)
+            return real(self_, documents)
+        long = 'x' * (legacy_rules.LINE_SEARCH_LIMIT * 3)
+        with patch.object(legacy_rules.Rules, 'chunk', chunk):
+            self.assertEqual(parsed.scan([('a.js', 1, long, True)]), [('A', 'a.js', long)])
+        self.assertEqual(queued, [legacy_rules.LINE_SEARCH_LIMIT])
+
+    def test_a_failing_rg_fails_the_scan(self):
+        parsed = rules(rule(kind='"A"', pattern="'x'", paths='["**"]'))
+        fake = self.base / 'rg'
+        fake.write_text('#!/bin/sh\ncat >/dev/null\necho boom >&2\nexit 2\n')
+        fake.chmod(0o755)
+        with patch.object(legacy_rules, 'rg', return_value=str(fake)):
+            with self.assertRaisesRegex(ValueError, 'rg failed with status 2: boom'):
+                parsed.classify('a', 'x')
+
+    def test_too_many_rules_are_an_error(self):
+        text = rule(kind='"A"', paths='["**"]') * (legacy_rules.RULES_MAX + 1)
+        with self.assertRaisesRegex(ValueError, f'legacy.rules has {legacy_rules.RULES_MAX + 1} rules; at most {legacy_rules.RULES_MAX}'):
+            rules(text)
+
+    def test_the_map_ends_promptly_on_a_backtracking_pattern(self):
+        root = self.base / 'slow'
+        root.mkdir()
+        git = ['git', '-C', str(root), '-c', 'user.email=t@example.invalid', '-c', 'user.name=t']
+        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        (root / orch_settings.REPO_FILE).write_text(rule(kind='"OLD"', paths='["**/*.txt"]', pattern="'a*a*a*a*a*a*b'"))
+        (root / 'long.txt').write_text(('a' * 5000 + '\n') * 200)
+        (root / 'hit.txt').write_text('aaab\n')
+        subprocess.run([*git, 'add', '-A'], check=True)
+        subprocess.run([*git, 'commit', '-qm', 'seed'], check=True)
+        env = {key: value for key, value in os.environ.items() if not key.startswith('ORCH_LEGACY_')}
+        start = time.monotonic()
+        result = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'HEAD'],
+                                capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual((result.returncode, result.stdout), (0, 'OLD\thit.txt\n'), result.stderr)
+        self.assertLess(time.monotonic() - start, 10)
 
     def test_long_lines_are_searched_up_to_a_limit(self):
-        regex = legacy_rules.compile_js('needle', '')
-        self.assertTrue(regex.search('x' * (legacy_rules.LINE_SEARCH_LIMIT - 6) + 'needle'))
-        self.assertFalse(regex.search('x' * legacy_rules.LINE_SEARCH_LIMIT + 'needle'))
-
-    def test_deeply_nested_rules_are_a_value_error(self):
-        with self.assertRaisesRegex(ValueError, 'nested too deeply'):
-            legacy_rules.parse_rules('[' * 200000)
+        parsed = rules(rule(kind='"A"', pattern="'needle'", paths='["**"]'))
+        self.assertEqual(parsed.classify('a', 'x' * (legacy_rules.LINE_SEARCH_LIMIT - 6) + 'needle'), 'A')
+        self.assertIsNone(parsed.classify('a', 'x' * legacy_rules.LINE_SEARCH_LIMIT + 'needle'))
 
     def test_globs(self):
         match = lambda glob, path: bool(legacy_rules.compile_glob(glob).fullmatch(path))
@@ -114,6 +252,156 @@ class TranslatorTests(IsolatedTestCase):
         self.assertTrue(match('a/{b,c}/x?.rb', 'a/c/x1.rb'))
         self.assertFalse(match('a/{b,c}/x?.rb', 'a/d/x1.rb'))
         self.assertFalse(match('app/x.rb', 'app/xarb'))
+        self.assertTrue(match('**/*.js', 'a.js'))
+
+    def test_map_rejects_a_short_or_failed_cat_file(self):
+        rules_ = rules(rule(kind='"A"', paths='["**"]'))
+        oid = 'a' * 40
+
+        class Batch:
+            def __init__(self, reply, status):
+                self.stdin, self.stdout, self.returncode, self.status = io.BytesIO(), io.BytesIO(reply), None, status
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def wait(self):
+                self.returncode = self.status
+                return self.status
+        tree = f'100644 blob {oid}\ta.js\0'.encode()
+        for reply, status, message in ((f'{oid} blob 100\n'.encode() + b'safe\n', 7, 'short read'),
+                                       (f'{oid} blob 5\n'.encode() + b'safe\n\n', 7, 'git cat-file failed with status 7'),
+                                       (f'{"b" * 40} blob 5\n'.encode() + b'safe\n\n', 0, 'cannot read a.js')):
+            with patch.object(legacy_rules, 'git', return_value=tree), \
+                    patch.object(legacy_rules.subprocess, 'Popen', return_value=Batch(reply, status)):
+                with self.assertRaisesRegex(ValueError, message):
+                    legacy_rules.map_rows('repo', 'HEAD', rules_)
+        with patch.object(legacy_rules, 'git', return_value=tree), \
+                patch.object(legacy_rules.subprocess, 'Popen', return_value=Batch(f'{oid} blob 5\n'.encode() + b'safe\n\n', 0)):
+            self.assertEqual(legacy_rules.map_rows('repo', 'HEAD', rules_), [('A', 'a.js')])
+
+    def test_map_reads_blobs_in_bounded_pieces(self):
+        rules_ = rules(rule(kind='"A"', pattern="'needle'", paths='["**"]') + rule(kind='"B"', paths='["**"]'))
+        huge, text, small, long = 'a' * 40, 'b' * 40, 'c' * 40, 'd' * 40
+        span = 16 * legacy_rules.READ_BYTES
+        big = 64 << 20
+        reads, lines_fed = [], []
+
+        class Stream:
+            """cat-file output: a huge binary blob served lazily, a multi-piece text blob, an empty blob."""
+
+            def __init__(self):
+                body = ('é' * 3 + 'x' * (legacy_rules.READ_BYTES - 7) + '\nneedle\n' + 'y' * 50000 + '\n').encode()
+                self.parts = [f'{huge} blob {big}\n'.encode(), b'needle\nneedle\n' + b'z' * (legacy_rules.READ_BYTES - 14), ('lazy', big - legacy_rules.READ_BYTES), b'\n',
+                              f'{text} blob {len(body)}\n'.encode() + body + b'\n', f'{small} blob 0\n\n'.encode(),
+                              f'{long} blob {span + 1}\n'.encode(), ('lazy', span, b'w'), b'\n\n']
+                self.buffer = b''
+
+            def fill(self):
+                while not self.buffer and self.parts:
+                    part = self.parts.pop(0)
+                    if isinstance(part, tuple):
+                        self.lazy, self.byte = part[1], part[2] if len(part) > 2 else b'\0'
+                        return
+                    self.buffer = part
+
+            def read(self, size):
+                reads.append(size)
+                out = []
+                while size:
+                    if getattr(self, 'lazy', 0):
+                        step = min(size, self.lazy)
+                        self.lazy -= step
+                        out.append(self.byte * step)
+                    else:
+                        self.fill()
+                        if getattr(self, 'lazy', 0):
+                            continue
+                        if not self.buffer:
+                            break
+                        step = min(size, len(self.buffer))
+                        out.append(self.buffer[:step])
+                        self.buffer = self.buffer[step:]
+                    size -= step
+                return b''.join(out)
+
+            def readline(self):
+                self.fill()
+                line, sep, rest = self.buffer.partition(b'\n')
+                self.buffer = rest
+                return line + sep
+
+        class Batch:
+            def __init__(self):
+                self.stdin, self.stdout, self.returncode = io.BytesIO(), Stream(), None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def wait(self):
+                self.returncode = 0
+                return 0
+        tree = b''.join(f'100644 blob {oid}\t{name}\0'.encode()
+                        for oid, name in ((huge, 'huge.bin'), (text, 'text.txt'), (small, 'empty.txt'), (long, 'long.txt')))
+        real = legacy_rules.blob_lines
+
+        def blob_lines(*args):
+            for path, lines in real(*args):
+                lines_fed.append(len(lines))
+                yield path, lines
+        popen = subprocess.Popen
+        batch = Batch()
+
+        def fake_popen(args, *rest, **kw):
+            return batch if 'cat-file' in args else popen(args, *rest, **kw)
+        with patch.object(legacy_rules, 'git', return_value=tree), patch.object(legacy_rules.subprocess, 'Popen', side_effect=fake_popen), \
+                patch.object(legacy_rules, 'blob_lines', blob_lines), patch.object(legacy_rules, 'CHUNK_LINES', 2):
+            tracemalloc.start()
+            rows = legacy_rules.map_rows('repo', 'HEAD', rules_)
+            peak = tracemalloc.get_traced_memory()[1]
+            tracemalloc.stop()
+        self.assertEqual(rows, [('A', 'text.txt'), ('B', 'empty.txt'), ('B', 'long.txt'), ('B', 'text.txt')])
+        self.assertLess(peak, 8 * legacy_rules.READ_BYTES)
+        self.assertLessEqual(max(reads), legacy_rules.READ_BYTES)
+        self.assertLessEqual(max(lines_fed), 2)
+
+    def test_map_skips_submodules_and_without_rules_exits_with_its_own_status(self):
+        root = self.base / 'repo'
+        root.mkdir()
+        git = ['git', '-C', str(root), '-c', 'user.email=t@example.invalid', '-c', 'user.name=t']
+        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        (root / 'a.js').write_text('$(x)\n')
+        subprocess.run([*git, 'add', '-A'], check=True)
+        subprocess.run([*git, 'commit', '-qm', 'seed'], check=True)
+        subprocess.run([*git, 'update-index', '--add', '--cacheinfo', f'160000,{"1" * 40},vendor/sub'], check=True)
+        blob = subprocess.run([*git, 'hash-object', '-w', '--stdin'], input=b'$(x)\n', check=True, capture_output=True).stdout.strip()
+        subprocess.run([*git, 'update-index', '--add', '--cacheinfo', b'100644,' + blob + b',docs/old-\xff.js'], check=True)
+        subprocess.run([*git, 'update-index', '--add', '--cacheinfo', b'100644,' + blob + b',docs/a\tb.js'], check=True)
+        (root / orch_settings.REPO_FILE).write_text(rule(kind='"ALL"', paths='["**"]'))
+        subprocess.run([*git, 'add', orch_settings.REPO_FILE], check=True)
+        subprocess.run([*git, 'commit', '-qm', 'rules and a submodule'], check=True)
+        env = {key: value for key, value in os.environ.items() if not key.startswith('ORCH_LEGACY_')}
+        mapped = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'HEAD'],
+                                capture_output=True, text=True, env=env)
+        self.assertEqual((mapped.returncode, mapped.stdout), (0, 'ALL\t.orchestration.toml\nALL\ta.js\nALL\tdocs/old-\ufffd.js\n'))
+        self.assertEqual(mapped.stderr, "legacy-map.sh: skipped 'docs/a\\tb.js': a tab or newline in the name does not fit the TSV\n")
+        subprocess.run([*git, 'rm', '-q', '--cached', 'vendor/sub', b'docs/old-\xff.js', b'docs/a\tb.js', orch_settings.REPO_FILE], check=True)
+        subprocess.run([*git, 'commit', '-qm', 'no rules'], check=True)
+        env = {key: value for key, value in os.environ.items() if not key.startswith('ORCH_LEGACY_')}
+        result = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'HEAD'],
+                                capture_output=True, text=True, env=env)
+        self.assertEqual((result.returncode, result.stdout), (legacy_rules.NO_RULES, ''))
+        self.assertIn('has no [[legacy.rules]]', result.stderr)
+        missing = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'origin/main'],
+                                 capture_output=True, text=True, env=env)
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn(f'legacy-map.sh: cannot read origin/main in {root}', missing.stderr)
 
 
 if __name__ == '__main__':

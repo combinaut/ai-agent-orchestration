@@ -103,8 +103,8 @@ class GlobalFileTest(SettingsTest):
             self.assertIn(f'WARNING: {path}: {key}: not read', stderr.getvalue())
 
     def test_a_repo_list_entry_with_its_separator_is_an_error(self):
-        message = self.error('[legacy]\nexempt_paths = ["a b.js"]\n', 'repo')
-        self.assertIn('legacy.exempt_paths: entry "a b.js" is empty or contains whitespace', message)
+        message = self.error('[legacy]\nexempt = ["a b.js"]\n', 'repo')
+        self.assertIn('legacy.exempt: entry "a b.js" is empty or contains whitespace', message)
         message = self.error('[audit]\nmerge_gate_checks = ["A|B"]\n', 'repo')
         self.assertIn('audit.merge_gate_checks: entry "A|B" is empty or contains "|"', message)
 
@@ -179,17 +179,17 @@ class RepoFileTest(SettingsTest):
 
     def test_the_repo_file_is_found_from_a_subdirectory(self):
         root = self.repo()
-        (root / s.REPO_FILE).write_text('[guard]\nbig_repo = true\n[legacy]\nexempt_paths = ["a", "b"]\n')
+        (root / s.REPO_FILE).write_text('[guard]\nbig_repo = true\n[legacy]\nexempt = ["a", "b"]\n')
         (root / 'app/models').mkdir(parents=True)
         values = s.load_repo(root / 'app/models', {})
-        self.assertEqual((values['ORCH_BIG_REPO'], values['ORCH_LEGACY_EXEMPT_PATHS']), ('1', 'a b'))
+        self.assertEqual((values['ORCH_BIG_REPO'], values['ORCH_LEGACY_EXEMPT']), ('1', 'a b'))
 
     def test_the_local_file_overrides_the_committed_one_and_the_environment_wins(self):
         root = self.repo()
-        (root / s.REPO_FILE).write_text('[focus]\npattern = "shared"\narchitect = "A"\n[legacy]\nexempt_paths = ["a", "b"]\n')
-        (root / s.LOCAL_FILE).write_text('[focus]\npattern = "mine"\n[legacy]\nexempt_paths = ["c"]\n')
+        (root / s.REPO_FILE).write_text('[focus]\npattern = "shared"\narchitect = "A"\n[legacy]\nexempt = ["a", "b"]\n')
+        (root / s.LOCAL_FILE).write_text('[focus]\npattern = "mine"\n[legacy]\nexempt = ["c"]\n')
         values = s.load_repo(root, {})
-        self.assertEqual((values['ORCH_FOCUS_PATTERN'], values['ORCH_FOCUS_ARCHITECT'], values['ORCH_LEGACY_EXEMPT_PATHS']),
+        self.assertEqual((values['ORCH_FOCUS_PATTERN'], values['ORCH_FOCUS_ARCHITECT'], values['ORCH_LEGACY_EXEMPT']),
                          ('mine', 'A', 'c'))
         self.assertEqual(s.load_repo(root, {'ORCH_FOCUS_PATTERN': 'env'})['ORCH_FOCUS_PATTERN'], 'env')
 
@@ -233,10 +233,10 @@ class RemoteReadTest(SettingsTest):
         return run, calls
 
     def test_the_committed_file_comes_from_the_base_ref(self):
-        run, calls = self.command('[legacy]\nscan = true\nextra_pattern = "shared"\n')
+        run, calls = self.command('[legacy]\nscan = true\nexempt = ["shared"]\n')
         with open_work():
             values = audit.repo_settings(run, 'acme/webapp', 'feature/base', {})
-        self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXTRA_PATTERN']), ('1', 'shared'))
+        self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXEMPT']), ('1', 'shared'))
         self.assertEqual(calls[0][-1], 'repos/acme/webapp/contents/.orchestration.toml?ref=feature%2Fbase')
 
     def test_a_clone_of_the_same_name_on_another_host_is_not_the_github_clone(self):
@@ -268,24 +268,24 @@ class RemoteReadTest(SettingsTest):
 
     def test_the_local_file_of_a_known_clone_overrides_the_base_ref(self):
         clone = self.repo('clone')
-        (clone / s.LOCAL_FILE).write_text('[legacy]\nextra_pattern = "mine"\n')
+        (clone / s.LOCAL_FILE).write_text('[legacy]\nexempt = ["mine"]\n')
         other = self.repo('other', 'https://github.com/acme/other.git')
-        (other / s.LOCAL_FILE).write_text('[legacy]\nextra_pattern = "wrong clone"\n')
-        run, _ = self.command('[legacy]\nscan = true\nextra_pattern = "shared"\n')
+        (other / s.LOCAL_FILE).write_text('[legacy]\nexempt = ["wrong-clone"]\n')
+        run, _ = self.command('[legacy]\nscan = true\nexempt = ["shared"]\n')
         with open_work('', f'{other} {clone}'):
             values = audit.repo_settings(run, 'acme/webapp', 'main', {})
-        self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXTRA_PATTERN']), ('1', 'mine'))
+        self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXEMPT']), ('1', 'mine'))
 
     def test_a_watched_linked_worktree_also_applies_its_main_checkout_file(self):
         main = self.repo('main')
         git(main, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init')
         git(main, 'worktree', 'add', '-q', '-b', 'side', str(self.base / 'side'))
-        (main / s.LOCAL_FILE).write_text('[legacy]\nscan = true\nextra_pattern = "main"\n')
-        (self.base / 'side' / s.LOCAL_FILE).write_text('[legacy]\nextra_pattern = "side"\n')
+        (main / s.LOCAL_FILE).write_text('[legacy]\nscan = true\nexempt = ["main"]\n')
+        (self.base / 'side' / s.LOCAL_FILE).write_text('[legacy]\nexempt = ["side"]\n')
         run, _ = self.command(None)
         with open_work('', str(self.base / 'side')):
             values = audit.repo_settings(run, 'acme/webapp', 'main', {})
-        self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXTRA_PATTERN']), ('1', 'side'))
+        self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXEMPT']), ('1', 'side'))
 
     def test_without_a_known_clone_only_the_committed_file_applies(self):
         run, _ = self.command(None)
@@ -354,7 +354,101 @@ class PullsSettingsTest(SettingsTest):
 
 
 def example_value(setting):
-    return {'str': 'x', 'int': 7, 'number': 7, 'bool': True, 'list': ['x', 'y'], 'json': [{'name': 'x'}]}[setting.kind]
+    return {'str': 'x', 'int': 7, 'number': 7, 'bool': True, 'list': ['x', 'y'], 'json': [{'name': 'x'}], 'tables': [{'name': 'x'}]}[setting.kind]
+
+
+class LegacyUpgradeTest(SettingsTest):
+    def test_rules_are_an_array_of_tables_passed_on_as_json(self):
+        path = self.write('r.toml', '[legacy]\nscan = true\n[[legacy.rules]]\nkind = "A"\npaths = ["**"]\npattern = \'\\$\\(\'\n')
+        self.assertEqual(s.as_env(s.read_file(path, 'repo'))['ORCH_LEGACY_RULES'], '[{"kind":"A","paths":["**"],"pattern":"\\\\$\\\\("}]')
+        self.assertIn('legacy.rules: must be an array of tables', self.error('[legacy]\nrules = [1]\n', 'repo'))
+
+    def test_removed_keys_name_the_conversion(self):
+        self.assertIn('legacy.extra_pattern: was removed; run install.sh to convert it to [[legacy.rules]]',
+                      self.error('[legacy]\nextra_pattern = "x"\n', 'repo'))
+        self.assertIn('legacy.exempt_paths: was removed; run install.sh to convert it to legacy.exempt',
+                      self.error('[legacy]\nexempt_paths = []\n', 'repo'))
+
+    def test_upgrade_converts_the_removed_keys_and_keeps_every_other_line(self):
+        text = ('# mine\n[guard]\nbig_repo = true\n\n[legacy]\nscan = true  # on\nextra_pattern = "uber-select"\n'
+                'exempt_paths = [\n  "a.js",\n  "b.js",\n]\n\n[focus]\npattern = "x"\n')
+        path = self.write('local.toml', text)
+        report = s.upgrade(path)
+        self.assertEqual(path.read_text(), '# mine\n[guard]\nbig_repo = true\n\n[legacy]\nscan = true  # on\n'
+                         'exempt = [\n  "a.js",\n  "b.js",\n]\n\n[focus]\npattern = "x"\n\n'
+                         '[[legacy.rules]]\nkind = "LEGACY"\npattern = "uber-select"\npaths = ["**"]\n')
+        self.assertEqual(report, [f'converted {path}: legacy.extra_pattern -> [[legacy.rules]] (kind LEGACY, every path), '
+                                  'legacy.exempt_paths -> legacy.exempt', f'{path}: {s.NO_BUILTIN_RULES}'])
+        self.assertEqual(s.upgrade(path), [])
+
+    def test_upgrade_of_dotted_keys_and_an_empty_pattern(self):
+        path = self.write('local.toml', 'legacy.extra_pattern = ""\nlegacy.exempt_paths = ["a"]\n')
+        self.assertEqual(s.upgrade(path), [f'converted {path}: legacy.extra_pattern -> [[legacy.rules]] (kind LEGACY, every path), '
+                                           'legacy.exempt_paths -> legacy.exempt'])
+        self.assertEqual(path.read_text(), 'legacy.exempt = ["a"]\n')
+        path = self.write('only.toml', 'legacy.extra_pattern = ""\n[guard]\nbig_repo = true\n')
+        self.assertEqual(s.upgrade(path), [f'converted {path}: legacy.extra_pattern -> [[legacy.rules]] (kind LEGACY, every path)'])
+        self.assertEqual(path.read_text(), '[guard]\nbig_repo = true\n')
+        for text in ('legacy.extra_pattern = ""\n', '[legacy]\nextra_pattern = ""\n', '[legacy]\nextra_pattern = ""\n[guard]\nbig_repo = true\n'):
+            path = self.write('alone.toml', text)
+            self.assertEqual(len(s.upgrade(path)), 1, text)
+            self.assertNotIn('extra_pattern', path.read_text(), text)
+            self.assertEqual(s.read_file(path, 'repo').get(s.BY_KEY['legacy.rules']), None, text)
+
+    def test_configured_clones_read_the_dropped_key_as_written(self):
+        path = self.write('g.toml', '[audit]\ngit_watch_repos = ["~/a", "/b", ""]\npacks_max = 9\n')
+        self.assertEqual(s.configured_clones(path), [f'{Path.home()}/a', '/b'])
+        for text in ('', '[audit]\npacks_max = 9\n', '[audit]\ngit_watch_repos = "x"\n', 'not toml ['):
+            self.assertEqual(s.configured_clones(self.write('g.toml', text)), [], text)
+        self.assertEqual(s.configured_clones(self.base / 'missing.toml'), [])
+
+    def test_upgrade_targets_cover_clones_their_main_checkouts_and_files_once(self):
+        main = self.repo('main')
+        git(main, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init')
+        git(main, 'worktree', 'add', '-q', '-b', 'side', str(self.base / 'side'))
+        side = self.base / 'side'
+        (main / s.LOCAL_FILE).write_text('')
+        (side / s.LOCAL_FILE).write_text('')
+        snippet = self.write('snip.toml', '')
+        stray = self.write('stray', 'not toml [')
+        targets = s.upgrade_targets([str(snippet), str(snippet)], [str(side), str(main), str(self.base / 'gone'), str(stray)])
+        self.assertEqual([p.resolve() for p in targets],
+                         [snippet.resolve(), (side / s.LOCAL_FILE).resolve(), (main / s.LOCAL_FILE).resolve()])
+
+    def test_upgrade_reads_quoted_table_headers(self):
+        for header in ('["legacy"]', "['legacy']", '[ "legacy" ]'):
+            path = self.write('local.toml', f'{header}\nscan = true\nexempt_paths = ["a"]\n')
+            s.upgrade(path)
+            self.assertEqual(path.read_text(), f'{header}\nscan = true\nexempt = ["a"]\n', header)
+
+    def test_upgrade_keeps_rules_already_there(self):
+        path = self.write('local.toml', '[legacy]\nextra_pattern = "b"\n\n[[legacy.rules]]\nkind = "A"\npaths = ["**"]\n')
+        s.upgrade(path)
+        self.assertEqual([rule['kind'] for rule in s.read_file(path, 'repo')[s.BY_KEY['legacy.rules']]], ['A', 'LEGACY'])
+
+    def test_upgrade_refuses_what_it_cannot_convert_in_place(self):
+        for text in ('[legacy]\nextra_pattern = """x"""\n', '[legacy]\nexempt_paths = ["a"]\nexempt = ["b"]\n',
+                     '[legacy]\nextra_pattern = 1\n',
+                     '[focus]\npattern = """\n[legacy]\nexempt_paths = "old-widget"\n"""\n[legacy]\nexempt_paths = ["a"]\n',
+                     '[legacy]\nextra_pattern = \'(ab)\\1\'\n'):
+            path = self.write('local.toml', text)
+            with self.assertRaises(s.ConfigError, msg=text):
+                s.upgrade(path)
+            self.assertEqual(path.read_text(), text)
+
+    def test_migration_from_the_env_file_writes_rules(self):
+        values = {'ORCH_LEGACY_REPOS': 'acme/webapp', 'ORCH_LEGACY_EXTRA_PATTERN': 'old-widget', 'ORCH_LEGACY_EXEMPT_PATHS': 'a.js b.js'}
+        report = []
+        layer = s.repo_layers(values, report)['acme/webapp']
+        self.assertEqual(layer, {s.BY_KEY['legacy.scan']: True,
+                                 s.BY_KEY['legacy.rules']: [{'kind': 'LEGACY', 'pattern': 'old-widget', 'paths': ['**']}],
+                                 s.BY_KEY['legacy.exempt']: ['a.js', 'b.js']})
+        self.assertEqual(report, [f'acme/webapp: {s.NO_BUILTIN_RULES}'])
+        report = []
+        layer = s.repo_layers(dict(values, ORCH_LEGACY_EXTRA_PATTERN='(ab)\\1'), report)['acme/webapp']
+        self.assertNotIn(s.BY_KEY['legacy.rules'], layer)
+        self.assertTrue(report[0].startswith('not converted: ORCH_LEGACY_EXTRA_PATTERN for acme/webapp is not an rg regex ('), report)
+        self.assertEqual(s.validate(s.parse(s.render(layer), 'x'), 'x', 'repo'), layer)
 
 
 class DriftTest(SettingsTest):
@@ -365,7 +459,10 @@ class DriftTest(SettingsTest):
 
     def test_the_examples_are_the_schema(self):
         self.assertEqual((REPO / 'config/orchestration.toml.example').read_text(), s.example('global'))
-        self.assertEqual((REPO / 'config/repo.orchestration.toml.example').read_text(), s.example('repo'))
+        repo = (REPO / 'config/repo.orchestration.toml.example').read_text()
+        self.assertTrue(repo.startswith(s.example('repo') + '\n#'))
+        self.assertTrue(all(line.startswith('#') or not line for line in repo[len(s.example('repo')):].splitlines()))
+        self.assertEqual(s.read_file(REPO / 'config/repo.orchestration.toml.example', 'repo')[s.BY_KEY['legacy.scan']], False)
 
     def test_the_settings_doc_lists_the_schema(self):
         doc = (REPO / 'docs/settings.md').read_text()

@@ -502,6 +502,38 @@ convert_old_config() {
   say "moved" "$OLD_CONFIG -> $backup"
 }
 
+# open_work_clones: the clones of the open work, one per line; none when the env adapter cannot answer.
+open_work_clones() {
+  local bin socket
+  bin=$(placeholder_value ORCH_HERDR_BIN)
+  socket=$(placeholder_value ORCH_HERDR_SOCKET)
+  # shellcheck disable=SC2030 # Set for the discovery call only.
+  (
+    [ -z "$bin" ] || export HERDR_BIN_PATH="$bin"
+    [ -z "$socket" ] || export HERDR_SOCKET_PATH="$socket"
+    ORCH_ENV="${ENV_NAME:-$(config_value ORCH_ENV)}" "$INSTALL_PYTHON" "$ORCH_REPO/coordinator/watchers/discovery.py" clones 2>/dev/null
+  ) || true
+}
+
+# upgrade_repo_files: rewrites legacy.extra_pattern and legacy.exempt_paths as rules in the personal files of the
+# open-work clones, of legacy.map_repo, of the clones $CONFIG still lists in audit.git_watch_repos, of their main checkouts, and in the snippets.
+upgrade_repo_files() {
+  local clone file files=() clones=() line report map
+  map=$(config_value ORCH_LEGACY_MAP_REPO)
+  [ -z "$map" ] || map=$(placeholder_value ORCH_LEGACY_MAP_REPO)
+  while IFS= read -r clone; do
+    [ -z "$clone" ] || clones+=("$clone")
+  done <<<"$(open_work_clones; printf '%s\n' "$map")"
+  for file in "$SNIPPET_DIR"/*/*.toml; do
+    [ ! -f "$file" ] || files+=("$file")
+  done
+  report=$(settings_cli upgrade --watched "$CONFIG" ${files[@]+"${files[@]}"} --clones ${clones[@]+"${clones[@]}"}) || die "cannot convert the removed legacy settings (see above); edit the file by hand (docs/settings.md, \"Legacy rules\")"
+  [ -n "$report" ] || return 0
+  while IFS= read -r line; do
+    say "migrated" "$line"
+  done <<<"$report"
+}
+
 # drop_removed_keys: removes the settings the open work replaced from $CONFIG, with one printed line.
 drop_removed_keys() {
   local dropped
@@ -522,10 +554,11 @@ personal_config() {
     cp "$example" "$CONFIG"
     say "created" "$CONFIG"
   fi
-  drop_removed_keys
   local removed
   removed=$(settings_cli drop-removed "$CONFIG" 2>&1) || die "${removed#ERROR: }"
   [ -z "$removed" ] || say "migrated" "$removed"
+  upgrade_repo_files
+  drop_removed_keys
   have=$(settings_cli keys "$CONFIG" 2>&1) || die "${have#ERROR: }"
   have=" $have "
   load_config_cache
@@ -797,15 +830,8 @@ register_services() {
 
 # legacy_map_default_repo: the clone of the open work whose repo settings turn legacy.scan on, else empty.
 legacy_map_default_repo() {
-  local path scan clones bin socket
-  bin=$(placeholder_value ORCH_HERDR_BIN)
-  socket=$(placeholder_value ORCH_HERDR_SOCKET)
-  # shellcheck disable=SC2030 # Set for the discovery call only.
-  clones=$(
-    [ -z "$bin" ] || export HERDR_BIN_PATH="$bin"
-    [ -z "$socket" ] || export HERDR_SOCKET_PATH="$socket"
-    ORCH_ENV="${ENV_NAME:-$(config_value ORCH_ENV)}" "$INSTALL_PYTHON" "$ORCH_REPO/coordinator/watchers/discovery.py" clones 2>/dev/null
-  ) || clones=""
+  local path scan clones
+  clones=$(open_work_clones)
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     scan=${ORCH_LEGACY_SCAN-}

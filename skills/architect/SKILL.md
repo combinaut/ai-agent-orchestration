@@ -168,7 +168,7 @@ A worker's failure does not go straight to the user.
 For repos whose repo settings turn `legacy.scan` on, before a worker writes code, send the Coordinator a 3-line `LEGACY CHECK`:
 
 1. The repository, source clone, map path, and files/areas the task touches. Verify the clone's origin belongs to the task repository, then generate a fresh task map before every check with `ORCH_LEGACY_MAP_OUT="<task-map-path>" ~/.claude/coordinator/legacy-map.sh "<task-clone>"`. Include the successful generation result. Do not reuse the daily map: its TSV has no source metadata, so it may belong to the previous configured clone.
-2. The old code in them: `grep -F <path> <verified-map-path>` (JSERB, ASSETJS and JQUERY files on main).
+2. The old code in them: `grep -F <path> <verified-map-path>` (each file on main with the kind of legacy rule that counts it).
 3. What happens to it: removed, left untouched, or kept as a named bridge with a ticket. Never extended.
 
 No code starts until the Coordinator answers `LEGACY OK`. Other projects skip this check.

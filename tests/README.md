@@ -12,7 +12,7 @@ and `herdr` before test discovery. A discovery check requires every test case to
 inherit `IsolatedTestCase`; existing command mocks still provide scenario-specific
 responses.
 
-Run the full suite with `tests/run.sh`. Individual test targets are not supported.
+Run the full suite with `tests/run.sh`. Bats runs one test at a time, or `ORCH_TEST_JOBS` tests at once (needs GNU parallel); with `CI=true` it runs one test per CPU. Individual test targets are not supported.
 Bats suite setup and the Python fixture require the runner's sandbox marker.
 The Python runner installs fakes before discovery imports any test modules.
 
