@@ -70,6 +70,7 @@ class DiscoveryTest(IsolatedTestCase):
         self.assertEqual((rows['w4']['checkout'], rows['w4']['repo_root']), ('/wt/tools/x', '/r/tools'))
         self.assertEqual((rows['w5']['checkout'], rows['w5']['repo_root']), (None, None))
         self.assertEqual((rows['w6']['checkout'], rows['w6']['repo_root']), (None, None))
+        self.assertEqual((rows['w5'].get('gone'), rows['w6'].get('gone')), (False, True))
         self.assertEqual(rows['w1']['owner'], 'a')
 
     def test_an_unreadable_pane_checkout_keeps_the_saved_set(self):

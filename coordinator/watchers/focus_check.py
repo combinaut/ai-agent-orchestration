@@ -90,7 +90,11 @@ class OpenPrs:
 def open_pr(workspaces, owner, prs):
     """True when a workspace the architect owns has a branch with an open PR; a gone clone or an unreadable origin, branch or lookup counts as one."""
     for row in workspaces:
-        if row.get('owner') != owner or not row.get('checkout') or not row.get('repo_root'):
+        if row.get('owner') != owner:
+            continue
+        if row.get('gone'):
+            return True
+        if not row.get('checkout') or not row.get('repo_root'):
             continue
         repo = prs.repo(row['repo_root'])
         if repo is False:

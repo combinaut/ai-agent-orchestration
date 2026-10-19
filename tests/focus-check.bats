@@ -335,6 +335,41 @@ SH
   [ ! -e "$TMP/gh-calls" ]
 }
 
+@test "an owned workspace whose pane directory is gone counts as open work" {
+  rm "$STATUS"
+  cat >"$TMP/bin/herdr" <<SH
+#!/bin/sh
+if [ "\$1" = pane ]; then
+  printf '%s\n' '{"result":{"panes":[{"workspace_id":"tooling","terminal_title_stripped":"Architect::Agent::Tooling","tokens":{"role":"architect"},"agent_status":"idle"},{"workspace_id":"w1","pane_id":"w1:p1","cwd":"$TMP/gone/repo"}]}}'
+else
+  printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"w1","label":"shell","tokens":{"owner":"tooling"}}]}}'
+fi
+SH
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+}
+
+@test "an owned shell workspace outside any checkout is not open work" {
+  rm "$STATUS"
+  mkdir -p "$TMP/plain"
+  cat >"$TMP/bin/herdr" <<SH
+#!/bin/sh
+if [ "\$1" = pane ]; then
+  printf '%s\n' '{"result":{"panes":[{"workspace_id":"tooling","terminal_title_stripped":"Architect::Agent::Tooling","tokens":{"role":"architect"},"agent_status":"idle"},{"workspace_id":"w1","pane_id":"w1:p1","cwd":"$TMP/plain"}]}}'
+else
+  printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"w1","label":"shell","tokens":{"owner":"tooling"}}]}}'
+fi
+SH
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=none"* ]]
+}
+
 @test "a PR lookup that fails counts as open work" {
   open_work_fixture
   export GH_FAIL=1

@@ -4,7 +4,8 @@ import os
 import re
 from pathlib import Path
 
-NOT_A_CHECKOUT = re.compile(r'not a git repository|cannot change to .*: No such file or directory', re.I)
+NOT_A_CHECKOUT = re.compile(r'not a git repository', re.I)
+GONE = re.compile(r'cannot change to .*: No such file or directory', re.I)
 
 
 def herdr_bin():
@@ -24,10 +25,10 @@ def checkout_of(command, path):
 
 
 def open_work(command):
-    """{'workspaces': [{id, label, owner, status, checkout, repo_root}], 'panes': [{workspace, pane, title, role, agent, status, cwd}]}.
+    """{'workspaces': [{id, label, owner, status, checkout, repo_root, gone}], 'panes': [{workspace, pane, title, role, agent, status, cwd}]}.
 
     A workspace Herdr reports without a worktree takes the checkout of its first pane's directory; none when git says it is
-    no checkout or the directory is gone. Any other failure raises."""
+    no checkout, and none with gone=True when the directory is gone. Any other failure raises."""
     workspaces = result(command, 'workspace', 'list')['workspaces']
     panes = result(command, 'pane', 'list')['panes']
     if not isinstance(workspaces, list) or not isinstance(panes, list):
@@ -38,17 +39,19 @@ def open_work(command):
     rows = []
     for row in workspaces:
         tree = row.get('worktree') or {}
-        checkout, root = tree.get('checkout_path'), tree.get('repo_root')
+        checkout, root, gone = tree.get('checkout_path'), tree.get('repo_root'), False
         cwd = first_cwd.get(row['workspace_id'])
         if not root and cwd:
             try:
                 checkout, root = checkout_of(command, cwd)
             except Exception as error:
-                if not NOT_A_CHECKOUT.search(str(getattr(error, 'stderr', None) or '')):
+                detail = str(getattr(error, 'stderr', None) or '')
+                gone = bool(GONE.search(detail))
+                if not gone and not NOT_A_CHECKOUT.search(detail):
                     raise
                 checkout, root = None, None
         rows.append(dict(id=row['workspace_id'], label=row.get('label', ''), owner=(row.get('tokens') or {}).get('owner'),
-                         status=row.get('agent_status'), checkout=checkout, repo_root=root))
+                         status=row.get('agent_status'), checkout=checkout, repo_root=root, gone=gone))
     return dict(workspaces=rows, panes=[
         dict(workspace=pane.get('workspace_id'), pane=pane.get('pane_id'), title=pane.get('terminal_title_stripped', ''),
              role=(pane.get('tokens') or {}).get('role'), agent=pane.get('agent'), status=pane.get('agent_status'),
