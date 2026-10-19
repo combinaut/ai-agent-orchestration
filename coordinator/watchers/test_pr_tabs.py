@@ -86,9 +86,35 @@ class PrTabsTest(IsolatedTestCase):
                               {'id': 'good', 'owner': 'a', 'checkout': '/web'}]}
         def command(*args):
             if args[2] == '/closed':
-                raise subprocess.CalledProcessError(128, args)
+                raise subprocess.CalledProcessError(128, args, stderr="fatal: cannot change to '/closed': No such file or directory")
             return 'feature' if args[3] == 'symbolic-ref' else 'git@github.com:acme/webapp.git'
         self.assertEqual(discovery.branch_owners(command, work), {'acme/webapp:feature': 'Finder'})
+
+    def test_branch_read_failure_preserves_last_good_ownership_protocol(self):
+        work = {'workspaces': [{'id': 'a', 'label': 'Finder'},
+                               {'id': 'w', 'owner': 'a', 'checkout': '/web'}]}
+        good = {'acme/webapp:feature': 'Finder'}
+        for detail in ('fatal: detected dubious ownership in repository at /web',
+                       "fatal: cannot change to '/web': Permission denied"):
+            with self.subTest(detail=detail), tempfile.TemporaryDirectory() as directory:
+                config = Path(directory) / 'config.toml'
+                config.write_text('[install]\nenv="herdr"\n')
+                environ = {'ORCH_CONFIG': str(config), 'ORCH_ENV': 'herdr',
+                           'PR_TABS_LOG': str(Path(directory) / 'host.log')}
+                failing = False
+                def run(args, **kwargs):
+                    if args[3] == 'symbolic-ref':
+                        if failing:
+                            raise subprocess.CalledProcessError(128, args, stderr=detail)
+                        return SimpleNamespace(stdout='feature')
+                    return SimpleNamespace(stdout='https://github.com/acme/webapp.git')
+                with patch.dict(os.environ, environ), patch.object(discovery, 'open_work', return_value=work), patch.object(host.subprocess, 'run', side_effect=run), patch.object(host.time, 'time', return_value=100):
+                    self.assertEqual(host.ownership(), good)
+                    failing = True
+                    with patch.object(host.time, 'time', return_value=131):
+                        self.assertIsNone(host.ownership(), 'failed scan must retain Chrome last-good ownership')
+                        self.assertIsNone(host.ownership(), 'failure is cached for the normal TTL')
+                    self.assertIsNone(json.loads((Path(directory) / 'owners.json').read_text())['owners'])
 
     def test_cache_reuses_one_file_across_config_edits_and_removes_legacy_files(self):
         with tempfile.TemporaryDirectory() as directory:

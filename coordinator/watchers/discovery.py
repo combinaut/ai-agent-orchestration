@@ -81,8 +81,10 @@ def branch_owners(command, work=None):
             continue
         try:
             branch = command('git', '-C', checkout, 'symbolic-ref', '--quiet', '--short', 'HEAD').strip()
-        except subprocess.CalledProcessError:
-            continue  # Detached or closed checkout; other workspaces still contribute.
+        except subprocess.CalledProcessError as error:
+            if error.returncode == 1 or GONE.search(str(error.stderr or '')):
+                continue  # Detached or confirmed closed checkout; other workspaces still contribute.
+            raise Unavailable(f'branch of {checkout} unreadable: {str(error.stderr or error).strip()[:200]}') from error
         repo = github_repo(command, checkout)
         if not repo or not branch:
             continue
