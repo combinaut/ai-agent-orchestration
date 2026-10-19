@@ -389,7 +389,9 @@ def pull_owners(command, prs, failed=None, work=None):
                 continue
             identity = remote.group(1).lower()
             listing = command("git", "-C", root, "worktree", "list", "--porcelain")
-        except audit.READ_ERRORS:
+        except audit.READ_ERRORS as error:
+            if isinstance(error, subprocess.CalledProcessError) and audit.orch_settings.NO_ORIGIN.search(str(error.stderr or "")):
+                continue
             if failed is not None:
                 failed.append(identity)
             continue

@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -250,6 +251,22 @@ class PullsTest(IsolatedTestCase):
         with patch.dict(WORKSPACES["result"], {"workspaces": WORKSPACES["result"]["workspaces"] + [second]}):
             owners = w.pull_owners(command, [pr(7)])
         self.assertEqual(owners, {"owner/product#7": "wArch"})
+
+    def test_a_root_without_origin_or_folder_is_no_owner_failure(self):
+        extra = [{"workspace_id": "wL", "tokens": {"owner": "wX"}, "worktree": {"checkout_path": "/repo/local", "repo_root": "/repo/local"}},
+                 {"workspace_id": "wG", "tokens": {"owner": "wX"}, "worktree": {"checkout_path": "/repo/gone", "repo_root": "/repo/gone"}}]
+        run = self.command([])
+
+        def command(*argv):
+            if argv[0] == "git" and argv[2] == "/repo/local":
+                raise subprocess.CalledProcessError(2, argv, stderr="error: No such remote 'origin'")
+            if argv[0] == "git" and argv[2] == "/repo/gone":
+                raise subprocess.CalledProcessError(128, argv, stderr="fatal: cannot change to '/repo/gone': No such file or directory")
+            return run(*argv)
+        failed = []
+        with patch.dict(WORKSPACES["result"], {"workspaces": WORKSPACES["result"]["workspaces"] + extra}):
+            owners = w.pull_owners(command, [pr(7)], failed)
+        self.assertEqual((owners, failed), ({"owner/product#7": "wArch"}, []))
 
     def test_owner_lookup_lists_worktrees_only_for_watched_repos(self):
         unrelated = {"workspace_id": "wU", "tokens": {"owner": "wX"},
