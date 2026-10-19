@@ -71,14 +71,16 @@ class OpenPrs:
         return self.repos[root]
 
     def has(self, repo, branch):
-        """True, False, or None when the repo's PRs cannot be read."""
+        """True, False, or None when the repo's PRs cannot be read. PRs from forks do not count."""
+        repo = repo.lower()
         if repo not in self.branches:
             if len(self.branches) >= PR_REPOS_MAX:
                 return None
             try:
-                rows = json.loads(command('gh', 'pr', 'list', '-R', repo, '--state', 'open', '--json', 'headRefName',
+                rows = json.loads(command('gh', 'pr', 'list', '-R', repo, '--state', 'open', '--json', 'headRefName,isCrossRepository',
                                           '--limit', str(PR_LIMIT)))
-                self.branches[repo] = None if len(rows) >= PR_LIMIT else {row['headRefName'] for row in rows}
+                self.branches[repo] = (None if len(rows) >= PR_LIMIT else
+                                       {row['headRefName'] for row in rows if not row.get('isCrossRepository')})
             except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
                 self.branches[repo] = None
         found = self.branches[repo]

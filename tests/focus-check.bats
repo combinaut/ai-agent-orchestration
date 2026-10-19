@@ -243,7 +243,7 @@ open_work_fixture() {
 if [ "$1" = pane ]; then
   printf '{"result":{"panes":[{"workspace_id":"tooling","terminal_title_stripped":"Architect::Agent::Tooling","tokens":{"role":"architect"},"agent_status":"idle"}%s]}}\n' "${WORKER_PANE:-}"
 else
-  printf '{"result":{"workspaces":[{"workspace_id":"w1","label":"feature","tokens":{"owner":"tooling"},"worktree":{"checkout_path":"%s","repo_root":"%s"}}]}}\n' "${WORK_CHECKOUT:-$TMP/web-feature}" "$WORK_REPO"
+  printf '{"result":{"workspaces":[{"workspace_id":"w1","label":"feature","tokens":{"owner":"tooling"},"worktree":{"checkout_path":"%s","repo_root":"%s"}}%s]}}\n' "${WORK_CHECKOUT:-$TMP/web-feature}" "$WORK_REPO" "${EXTRA_WORKSPACE:-}"
 fi
 SH
   cat >"$TMP/bin/gh" <<'SH'
@@ -264,7 +264,32 @@ SH
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
-  [ "$(cat "$TMP/gh-calls")" = "pr list -R acme/web --state open --json headRefName --limit 200" ]
+  [ "$(cat "$TMP/gh-calls")" = "pr list -R acme/web --state open --json headRefName,isCrossRepository --limit 200" ]
+}
+
+@test "a fork PR with the same branch name is not open work" {
+  open_work_fixture
+  export GH_PRS='[{"headRefName":"feature","isCrossRepository":true}]'
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=none"* ]]
+}
+
+@test "clones of one repo in different case share one PR lookup" {
+  open_work_fixture
+  git init -q -b main "$TMP/web2"
+  git -C "$TMP/web2" remote add origin git@github.com:ACME/Web.git
+  git -C "$TMP/web2" -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m init
+  export EXTRA_WORKSPACE=",{\"workspace_id\":\"w2\",\"label\":\"x\",\"tokens\":{\"owner\":\"tooling\"},\"worktree\":{\"checkout_path\":\"$TMP/web2\",\"repo_root\":\"$TMP/web2\"}}"
+  export GH_PRS='[{"headRefName":"other","isCrossRepository":false}]'
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=none"* ]]
+  [ "$(wc -l <"$TMP/gh-calls")" -eq 1 ]
 }
 
 @test "an owned workspace without an open PR is not open work" {
