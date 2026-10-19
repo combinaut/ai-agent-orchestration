@@ -243,7 +243,7 @@ open_work_fixture() {
 if [ "$1" = pane ]; then
   printf '{"result":{"panes":[{"workspace_id":"tooling","terminal_title_stripped":"Architect::Agent::Tooling","tokens":{"role":"architect"},"agent_status":"idle"}%s]}}\n' "${WORKER_PANE:-}"
 else
-  printf '{"result":{"workspaces":[{"workspace_id":"w1","label":"feature","tokens":{"owner":"tooling"},"worktree":{"checkout_path":"%s","repo_root":"%s"}}%s]}}\n' "${WORK_CHECKOUT:-$TMP/web-feature}" "$WORK_REPO" "${EXTRA_WORKSPACE:-}"
+  printf '{"result":{"workspaces":[{"workspace_id":"w1","label":"feature","tokens":{"owner":"tooling"},"worktree":{"checkout_path":"%s","repo_root":"%s"}}%s]}}\n' "${WORK_CHECKOUT:-$TMP/web-feature}" "${WORK_ROOT:-$WORK_REPO}" "${EXTRA_WORKSPACE:-}"
 fi
 SH
   cat >"$TMP/bin/gh" <<'SH'
@@ -316,6 +316,17 @@ SH
 @test "a branch that cannot be read counts as open work" {
   open_work_fixture
   export WORK_CHECKOUT="$TMP/no-such-checkout"
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+  [ ! -e "$TMP/gh-calls" ]
+}
+
+@test "an owned workspace whose clone folder is gone counts as open work" {
+  open_work_fixture
+  export WORK_ROOT="$TMP/moved-away"
 
   run focus_line
 

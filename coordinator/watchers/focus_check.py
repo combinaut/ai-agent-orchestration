@@ -62,10 +62,10 @@ class OpenPrs:
         self.branches, self.repos = {}, {}
 
     def repo(self, root):
-        """owner/name of the clone's GitHub origin, None without one, False when it cannot be read."""
+        """owner/name of the clone's GitHub origin, None without one, False when it is gone or cannot be read."""
         if root not in self.repos:
             try:
-                self.repos[root] = discovery.github_repo(command, root) or None
+                self.repos[root] = discovery.github_repo(command, root)
             except discovery.Unavailable:
                 self.repos[root] = False
         return self.repos[root]
@@ -88,7 +88,7 @@ class OpenPrs:
 
 
 def open_pr(workspaces, owner, prs):
-    """True when a workspace the architect owns has a branch with an open PR; an unreadable origin, branch or lookup counts as one."""
+    """True when a workspace the architect owns has a branch with an open PR; a gone clone or an unreadable origin, branch or lookup counts as one."""
     for row in workspaces:
         if row.get('owner') != owner or not row.get('checkout') or not row.get('repo_root'):
             continue
