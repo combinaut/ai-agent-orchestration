@@ -178,15 +178,15 @@ def worker_facts(line):
 
 def audit_facts(line):
     if line.startswith("AUDIT BASELINE "):
-        return [fact("audit:baseline:" + line.split(" ")[2], line)]
+        return [fact("audit:baseline:" + re.sub(r" \[[^\]]*\]$", "", line[len("AUDIT BASELINE "):]), line)]
     if line.startswith("READFAIL "):
         return [fact("audit:readfail:" + line.split(" ", 1)[1].split(": ", 1)[0], line, clearable=True)]
-    cleared = re.fullmatch(r"(\S+) READFAIL cleared", line)
+    cleared = re.fullmatch(r"(github|herdr|slots|(?:slot|git):.+) READFAIL cleared", line)
     if cleared:
         return [clear("audit:readfail:" + cleared.group(1), exact=True)]
     if line.startswith("CLEARED "):
         return [clear(audit_facts(line[len("CLEARED "):])[0]["key"], exact=True)]
-    match = re.match(r"(PACKS|WORKTREES) (\S+) has over (\d+)", line)
+    match = re.match(r"(PACKS|WORKTREES) (.+?) has over (\d+)", line)
     if match:
         kind, repo, count = match.groups()
         return [fact(f"audit:{kind} {repo}", line, float(count), clearable=True)]

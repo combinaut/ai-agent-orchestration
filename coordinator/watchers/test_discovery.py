@@ -89,7 +89,11 @@ class DiscoveryTest(IsolatedTestCase):
                     'https://GitHub.com/acme/web.git'):
             with self.subTest(url=url):
                 self.assertEqual(discovery.github_repo(lambda *argv: url + '\n', '/r/web'), 'acme/web')
-        self.assertIsNone(discovery.github_repo(lambda *argv: 'git@gitlab.com:acme/web.git\n', '/r/web'))
+        for url in ('git@gitlab.com:acme/web.git', 'git@notgithub.com:acme/web.git', '/srv/mirrors/github.com/acme/web.git',
+                    'https://github.com.evil.example/acme/web', 'file:///srv/github.com/acme/web.git'):
+            with self.subTest(url=url):
+                self.assertIsNone(discovery.github_repo(lambda *argv: url + '\n', '/r/web'))
+        self.assertEqual(discovery.github_repo(lambda *argv: 'https://user:token@github.com/acme/web.git\n', '/r/web'), 'acme/web')
 
     def test_a_permission_error_is_not_a_gone_folder(self):
         found = discovery.repos(self.command)

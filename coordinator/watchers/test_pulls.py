@@ -231,6 +231,12 @@ class PullsTest(IsolatedTestCase):
             owners = w.pull_owners(self.command([]), [pr(7), pr(9, branch="pane-branch")])
         self.assertEqual(owners, {"owner/product#7": "wArch", "owner/product#9": "wArch2"})
 
+    def test_an_ownerless_workspace_on_the_same_checkout_keeps_the_owner(self):
+        reviewer = {"workspace_id": "wR", "tokens": {}, "worktree": {"checkout_path": "/wt/product/feature", "repo_root": "/repo/product"}}
+        with patch.dict(WORKSPACES["result"], {"workspaces": WORKSPACES["result"]["workspaces"] + [reviewer]}):
+            owners = w.pull_owners(self.command([]), [pr(7)])
+        self.assertEqual(owners, {"owner/product#7": "wArch"})
+
     def test_owner_lookup_lists_worktrees_only_for_watched_repos(self):
         unrelated = {"workspace_id": "wU", "tokens": {"owner": "wX"},
                      "worktree": {"checkout_path": "/repo/other", "repo_root": "/repo/other"}}

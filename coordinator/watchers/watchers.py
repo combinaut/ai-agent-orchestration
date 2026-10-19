@@ -378,7 +378,7 @@ def pull_owners(command, prs, failed=None, work=None):
     if isinstance(work, discovery.Unavailable):
         raise work
     rows = work["workspaces"]
-    by_path = {row["checkout"]: row for row in rows if row.get("checkout")}
+    by_path = {row["checkout"]: row for row in rows if row.get("checkout") and row.get("owner")}
     watched = {pr["repository"]["nameWithOwner"].lower() for pr in prs}
     branches = {}
     for root in sorted({row["repo_root"] for row in rows if row.get("repo_root")}):
