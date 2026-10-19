@@ -1,4 +1,6 @@
 """The legacy rules of a repo's [legacy] settings: classifies added lines and maps the files they count."""
+import codecs
+import collections
 import hashlib
 import itertools
 import json
@@ -16,6 +18,7 @@ import orch_settings
 LINE_SEARCH_LIMIT = 2000
 RULES_MAX = 64
 CHUNK_LINES = 10_000
+READ_BYTES = 1 << 20
 RG_FLAGS = ('--no-config', '--text', '--line-number', '--no-filename', '--max-columns', '1')
 RULE_KEYS = ('kind', 'pattern', 'paths', 'exclude')
 KIND = re.compile(r'[A-Za-z][A-Za-z0-9_-]*')
@@ -262,35 +265,64 @@ def map_rows(repo, ref, rules):
     entries = [entry.split(b'\t', 1) for entry in git(repo, 'ls-tree', '-r', '-z', ref).split(b'\0') if entry]
     blobs = [(meta.split()[2].decode(), path.decode(errors='replace')) for meta, path in entries if meta.split()[1] == b'blob']
     blobs = [(oid, path) for oid, path in blobs if rules.for_path(path)]
+    found, skipped, order = {}, set(), collections.deque()
     with subprocess.Popen(['git', '-C', repo, 'cat-file', '--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as batch:
-        rows = {(kind, path) for path, kinds in rules.documents(blob_lines(batch, blobs, ref)) for kind in kinds if kind}
+        for _, kinds in rules.documents(blob_lines(batch, blobs, ref, skipped, order)):
+            found.setdefault(order.popleft(), set()).update(kind for kind in kinds if kind)
         batch.stdin.close()
         if batch.wait() != 0:
             raise ValueError(f'git cat-file failed with status {batch.returncode} on {ref}')
-    return sorted(rows)
+    return sorted((kind, blobs[number][1]) for number, kinds in found.items() if number not in skipped for kind in kinds)
 
 
-def blob_lines(batch, blobs, ref):
-    """(path, lines) of each text blob; binary blobs are left out."""
-    for oid, path in blobs:
+def blob_lines(batch, blobs, ref, skipped, order):
+    """(path, lines) pieces of at most CHUNK_LINES lines cut to LINE_SEARCH_LIMIT, read READ_BYTES at a time.
+
+    Each piece's blob number goes to order; a binary or non-UTF-8 blob's number goes to skipped."""
+    for number, (oid, path) in enumerate(blobs):
         batch.stdin.write(f'{oid}\n'.encode())
         batch.stdin.flush()
         header = batch.stdout.readline().split()
         if len(header) != 3 or header[0].decode() != oid or header[1] != b'blob' or not header[2].isdigit():
             raise ValueError(f'cannot read {path} on {ref}')
-        blob = batch.stdout.read(int(header[2]) + 1)
-        if len(blob) != int(header[2]) + 1 or blob[-1:] != b'\n':
+        left, decoder, tail, lines, emitted = int(header[2]), codecs.getincrementaldecoder('utf-8')(), '', [], False
+        while left:
+            data = batch.stdout.read(min(left, READ_BYTES))
+            if not data:
+                raise ValueError(f'cannot read {path} on {ref}: short read')
+            left -= len(data)
+            if number in skipped:
+                continue
+            try:
+                text = decoder.decode(data)
+            except UnicodeDecodeError:
+                skipped.add(number)
+                continue
+            if '\0' in text:
+                skipped.add(number)
+                continue
+            parts = (tail + text).split('\n')
+            for line in parts[:-1]:
+                lines.append(line[:LINE_SEARCH_LIMIT])
+                if len(lines) >= CHUNK_LINES:
+                    order.append(number)
+                    yield path, lines
+                    lines, emitted = [], True
+            tail = parts[-1][:LINE_SEARCH_LIMIT]
+        if batch.stdout.read(1) != b'\n':
             raise ValueError(f'cannot read {path} on {ref}: short read')
+        if number in skipped:
+            continue
         try:
-            body = blob[:-1].decode()
+            tail += decoder.decode(b'', final=True)
         except UnicodeDecodeError:
+            skipped.add(number)
             continue
-        if '\0' in body:
-            continue
-        lines = body.split('\n')
-        if len(lines) > 1 and lines[-1] == '':
-            lines.pop()
-        yield path, lines
+        if tail or not (lines or emitted):
+            lines.append(tail[:LINE_SEARCH_LIMIT])
+        if lines:
+            order.append(number)
+            yield path, lines
 
 
 def main(argv):

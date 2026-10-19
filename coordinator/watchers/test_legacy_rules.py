@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tracemalloc
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -281,6 +282,94 @@ class RulesTests(IsolatedTestCase):
         with patch.object(legacy_rules, 'git', return_value=tree), \
                 patch.object(legacy_rules.subprocess, 'Popen', return_value=Batch(f'{oid} blob 5\n'.encode() + b'safe\n\n', 0)):
             self.assertEqual(legacy_rules.map_rows('repo', 'HEAD', rules_), [('A', 'a.js')])
+
+    def test_map_reads_blobs_in_bounded_pieces(self):
+        rules_ = rules(rule(kind='"A"', pattern="'needle'", paths='["**"]') + rule(kind='"B"', paths='["**"]'))
+        huge, text, small, long = 'a' * 40, 'b' * 40, 'c' * 40, 'd' * 40
+        span = 16 * legacy_rules.READ_BYTES
+        big = 64 << 20
+        reads, lines_fed = [], []
+
+        class Stream:
+            """cat-file output: a huge binary blob served lazily, a multi-piece text blob, an empty blob."""
+
+            def __init__(self):
+                body = ('é' * 3 + 'x' * (legacy_rules.READ_BYTES - 7) + '\nneedle\n' + 'y' * 50000 + '\n').encode()
+                self.parts = [f'{huge} blob {big}\n'.encode(), b'needle\nneedle\n' + b'z' * (legacy_rules.READ_BYTES - 14), ('lazy', big - legacy_rules.READ_BYTES), b'\n',
+                              f'{text} blob {len(body)}\n'.encode() + body + b'\n', f'{small} blob 0\n\n'.encode(),
+                              f'{long} blob {span + 1}\n'.encode(), ('lazy', span, b'w'), b'\n\n']
+                self.buffer = b''
+
+            def fill(self):
+                while not self.buffer and self.parts:
+                    part = self.parts.pop(0)
+                    if isinstance(part, tuple):
+                        self.lazy, self.byte = part[1], part[2] if len(part) > 2 else b'\0'
+                        return
+                    self.buffer = part
+
+            def read(self, size):
+                reads.append(size)
+                out = []
+                while size:
+                    if getattr(self, 'lazy', 0):
+                        step = min(size, self.lazy)
+                        self.lazy -= step
+                        out.append(self.byte * step)
+                    else:
+                        self.fill()
+                        if getattr(self, 'lazy', 0):
+                            continue
+                        if not self.buffer:
+                            break
+                        step = min(size, len(self.buffer))
+                        out.append(self.buffer[:step])
+                        self.buffer = self.buffer[step:]
+                    size -= step
+                return b''.join(out)
+
+            def readline(self):
+                self.fill()
+                line, sep, rest = self.buffer.partition(b'\n')
+                self.buffer = rest
+                return line + sep
+
+        class Batch:
+            def __init__(self):
+                self.stdin, self.stdout, self.returncode = io.BytesIO(), Stream(), None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def wait(self):
+                self.returncode = 0
+                return 0
+        tree = b''.join(f'100644 blob {oid}\t{name}\0'.encode()
+                        for oid, name in ((huge, 'huge.bin'), (text, 'text.txt'), (small, 'empty.txt'), (long, 'long.txt')))
+        real = legacy_rules.blob_lines
+
+        def blob_lines(*args):
+            for path, lines in real(*args):
+                lines_fed.append(len(lines))
+                yield path, lines
+        popen = subprocess.Popen
+        batch = Batch()
+
+        def fake_popen(args, *rest, **kw):
+            return batch if 'cat-file' in args else popen(args, *rest, **kw)
+        with patch.object(legacy_rules, 'git', return_value=tree), patch.object(legacy_rules.subprocess, 'Popen', side_effect=fake_popen), \
+                patch.object(legacy_rules, 'blob_lines', blob_lines), patch.object(legacy_rules, 'CHUNK_LINES', 2):
+            tracemalloc.start()
+            rows = legacy_rules.map_rows('repo', 'HEAD', rules_)
+            peak = tracemalloc.get_traced_memory()[1]
+            tracemalloc.stop()
+        self.assertEqual(rows, [('A', 'text.txt'), ('B', 'empty.txt'), ('B', 'long.txt'), ('B', 'text.txt')])
+        self.assertLess(peak, 8 * legacy_rules.READ_BYTES)
+        self.assertLessEqual(max(reads), legacy_rules.READ_BYTES)
+        self.assertLessEqual(max(lines_fed), 2)
 
     def test_map_skips_submodules_and_without_rules_exits_with_its_own_status(self):
         root = self.base / 'repo'
