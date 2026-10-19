@@ -11,9 +11,9 @@ from pathlib import Path
 from watcher_platform import MissingMetric
 
 ROOT = Path(__file__).resolve().parents[2]
-GITHUB_REMOTE = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
+GITHUB_REMOTE = re.compile(r"github\.com(?::\d+)?[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
 NO_REMOTE = re.compile(r"No such remote", re.I)
-GONE = re.compile(r"cannot change to", re.I)
+GONE = re.compile(r"cannot change to .*: No such file or directory", re.I)
 READ_ERRORS = (OSError, ValueError, KeyError, TypeError, AttributeError, MissingMetric, subprocess.SubprocessError)
 ADAPTERS = {}
 

@@ -83,6 +83,25 @@ class DiscoveryTest(IsolatedTestCase):
             self.assertEqual(discovery.repos(timeout), found)
         self.assertEqual(discovery.saved(), found)
 
+    def test_github_origins_in_every_url_form_name_the_repo(self):
+        for url in ('git@github.com:acme/web.git', 'https://github.com/acme/web', 'https://github.com/acme/web.git/',
+                    'ssh://git@github.com/acme/web.git', 'ssh://git@github.com:22/acme/web.git', 'git://github.com/acme/web'):
+            with self.subTest(url=url):
+                self.assertEqual(discovery.github_repo(lambda *argv: url + '\n', '/r/web'), 'acme/web')
+        self.assertIsNone(discovery.github_repo(lambda *argv: 'git@gitlab.com:acme/web.git\n', '/r/web'))
+
+    def test_a_permission_error_is_not_a_gone_folder(self):
+        found = discovery.repos(self.command)
+        for path in ('/r/web', '/wt/tools/x/sub'):
+            def deny(*argv, path=path):
+                if argv[0] == 'git' and argv[2] == path:
+                    raise subprocess.CalledProcessError(128, argv, stderr=f"fatal: cannot change to '{path}': Permission denied")
+                return self.command(*argv)
+            with self.subTest(path=path):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(discovery.repos(deny), found)
+                self.assertEqual(discovery.saved(), found)
+
     def test_an_unreadable_adapter_falls_back_to_the_saved_set_and_logs_it(self):
         found = discovery.repos(self.command)
         stderr = io.StringIO()
