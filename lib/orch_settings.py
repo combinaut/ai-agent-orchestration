@@ -317,7 +317,7 @@ def load_remote(repo, ref, committed_text, clone=None, environ=None):
     return merged(layers, environ)
 
 
-GITHUB_REMOTE = re.compile(r'^(?:[a-z][a-z0-9+.-]*://)?(?:[^@/\s]+@)?github\.com(?::\d+)?[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$', re.I)
+GITHUB_REMOTE = re.compile(r'^(?:[a-z][a-z0-9+.-]*://)?(?:[^@/\s]+@)?github\.com(?::\d+)?[:/]/?([^/\s]+/[^/\s]+?)(?:\.git)?/?$', re.I)
 
 
 NO_ORIGIN = re.compile(r'No such remote|cannot change to .*: No such file or directory', re.I)
