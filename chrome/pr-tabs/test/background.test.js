@@ -346,3 +346,47 @@ test("a restarted worker restores ownership before grouping persisted PR metadat
   await installedListener();
   assert.equal(grouped.at(-1).title, "Finder");
 });
+
+test("a delayed persisted restore cannot overwrite fresh ownership from a check", async () => {
+  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
+  store = { owners: { "acme/webapp:feature": "Old" }, meta: {
+    "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
+  } };
+  const get = chrome.storage.local.get;
+  const set = chrome.storage.local.set;
+  let release, signalRead, signalFresh;
+  const held = new Promise(resolve => { release = resolve; });
+  const reading = new Promise(resolve => { signalRead = resolve; });
+  const fresh = new Promise(resolve => { signalFresh = resolve; });
+  let intercepted = false;
+  chrome.storage.local.get = async defaults => {
+    const snapshot = await get(defaults);
+    if ("owners" in defaults && !intercepted) {
+      intercepted = true;
+      signalRead();
+      await held;
+    }
+    return snapshot;
+  };
+  chrome.storage.local.set = async values => {
+    await set(values);
+    if (values.owners?.["acme/webapp:feature"] === "Fresh") signalFresh();
+  };
+  nativeHandler = async () => ({ ok: true, owners: { "acme/webapp:feature": "Fresh" }, prs: {
+    "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
+  } });
+  try {
+    const worker = await import("../extension/background.js?ownership-restore-race");
+    const starting = installedListener();
+    await reading;
+    const checking = worker.checkNow();
+    await fresh;
+    release();
+    await Promise.all([starting, checking]);
+    assert.equal(grouped.at(-1).title, "Fresh");
+  } finally {
+    release();
+    chrome.storage.local.get = get;
+    chrome.storage.local.set = set;
+  }
+});

@@ -211,12 +211,15 @@ def ownership():
                 return saved["owners"]
         except (OSError, ValueError, KeyError, TypeError):
             pass
-        spec = importlib.util.spec_from_file_location("pr_tabs_adapter", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        owners = module.branch_owners(values)
-        if not isinstance(owners, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in owners.items()):
-            return {}
+        try:
+            spec = importlib.util.spec_from_file_location("pr_tabs_adapter", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            owners = module.branch_owners(values)
+            if not isinstance(owners, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in owners.items()):
+                owners = {}
+        except Exception:  # Cache failures too: optional discovery must not stall every search page.
+            owners = {}
         try:
             cache.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(mode="w", dir=cache.parent, delete=False) as out:

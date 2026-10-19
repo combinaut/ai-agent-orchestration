@@ -123,7 +123,11 @@ async function groupFor(windowId, groupInfo) {
 // Moves the tab into its architect group; a tab already there is left alone.
 async function groupTab(tab, pr, rules, meta) {
   if (tab.pinned) return;
-  owners ??= (await chrome.storage.local.get({ owners: {} })).owners;
+  if (owners === undefined) {
+    const saved = await chrome.storage.local.get({ owners: {} });
+    // A host refresh can finish while storage is being read.
+    owners ??= saved.owners;
+  }
   const info = meta[pr.key] || {};
   const groupInfo = groupForPr(owners, { ...pr, branch: info.headRefName, headRepository: info.headRepository });
   const group = await groupFor(tab.windowId, groupInfo);

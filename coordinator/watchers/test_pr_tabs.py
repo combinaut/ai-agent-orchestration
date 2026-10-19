@@ -91,3 +91,16 @@ class PrTabsTest(IsolatedTestCase):
                     self.assertEqual(host.ownership(), {'acme/webapp:feature': 'Tooling'})
                 with patch.dict(os.environ, {'ORCH_ENV': 'none'}):
                     self.assertEqual(host.ownership(), {})
+
+    def test_failed_discovery_is_cached_for_the_normal_ttl(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / 'config.toml'
+            config.write_text('[install]\nenv = "herdr"\n')
+            environ = {'ORCH_CONFIG': str(config), 'PR_TABS_LOG': str(Path(directory) / 'host.log'), 'ORCH_ENV': 'herdr'}
+            with patch.dict(os.environ, environ), patch.object(host.subprocess, 'run', side_effect=subprocess.TimeoutExpired('herdr', 5)) as run, patch.object(host.time, 'time', return_value=100):
+                self.assertEqual(host.ownership(), {})
+                self.assertEqual(host.ownership(), {})
+                self.assertEqual(run.call_count, 1)
+                with patch.object(host.time, 'time', return_value=131):
+                    self.assertEqual(host.ownership(), {})
+                    self.assertEqual(run.call_count, 2)
