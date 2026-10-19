@@ -13,7 +13,7 @@ A repo key in the global file, a global key in a repo file, an unknown key, a va
 Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestration.local.toml`, an exported variable. A later file replaces a key of an earlier one; a list is replaced, not merged.
 
 - A tool acting in a checkout (the Bash guard, the focus report for the repo an architect works in) reads the two files at the root of that checkout, found from its working directory.
-- A tool acting on a PR (the audit and `legacy-scan.sh`) reads `.orchestration.toml` from the PR's base branch, then `.orchestration.local.toml` from your clone of that repo when an open workspace has one (matched by its `origin` remote).
+- A tool acting on a PR (the audit and `legacy-scan.sh`) reads `.orchestration.toml` from the PR's base branch, then `.orchestration.local.toml` from your clone of that repo when an open workspace has one (matched by its GitHub `origin` remote).
 - A linked worktree also reads the `.orchestration.local.toml` of its main checkout; its own local file wins over it.
 - No file means the built-in defaults: every repo feature is off.
 
