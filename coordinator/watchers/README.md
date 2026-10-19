@@ -6,7 +6,7 @@ and is deliberately not versioned.
 
 The production service templates are in `service/macos/` and
 `service/linux/`: `com.combinaut.coord-watcher-context` produces context alerts and
-`com.combinaut.coord-watcher-inbox-context` writes context, host, hog, balance, workers, audit, pulls and todo alerts to the feed with `--deliver file --configured-only --modes context host hog balance workers audit pulls todo`; `--configured-only` leaves out audit and pulls while `ORCH_PR_REPOS` or `ORCH_PR_AUTHOR` is empty.
+`com.combinaut.coord-watcher-inbox-context` writes context, host, hog, balance, workers, audit, pulls and todo alerts to the feed with `--deliver file --configured-only --modes context host hog balance workers audit pulls todo`; `--configured-only` leaves out audit and pulls while `ORCH_PR_AUTHOR` is empty.
 `com.combinaut.coord-watcher-host` collects host metrics every 60 seconds.
 `com.combinaut.coord-watcher-hog` collects processes every 5 seconds.
 `com.combinaut.coord-watcher-pulls` polls PR events every 150 seconds.
