@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -485,6 +486,15 @@ def from_env(setting, text):
 NO_BUILTIN_RULES = 'legacy.scan has no built-in rules; add the [[legacy.rules]] this repo needs (docs/settings.md, "Legacy rules")'
 
 
+def rg_problem(pattern, rg=None):
+    """Why rg rejects pattern as a regex, or None."""
+    rg = rg or shutil.which('rg')
+    if rg is None:
+        return 'rg (ripgrep) is not on PATH'
+    result = subprocess.run([rg, '--no-config', '--regexp', pattern, '-'], input=b'', capture_output=True, timeout=30)
+    return None if result.returncode in (0, 1) else ' '.join(result.stderr.decode(errors='replace').split())
+
+
 def legacy_rule(pattern):
     return {'kind': 'LEGACY', 'pattern': pattern, 'paths': ['**']}
 
@@ -520,7 +530,13 @@ def repo_layers(values, report):
     for repo in legacy:
         layer = repos.setdefault(repo, {})
         layer[BY_KEY['legacy.scan']] = True
-        layer.update(legacy_layer(values.get('ORCH_LEGACY_EXTRA_PATTERN', ''), values.get('ORCH_LEGACY_EXEMPT_PATHS', '').split()))
+        pattern = values.get('ORCH_LEGACY_EXTRA_PATTERN', '')
+        problem = rg_problem(pattern) if pattern else None
+        if problem:
+            report.append(f'not converted: ORCH_LEGACY_EXTRA_PATTERN for {repo} is not an rg regex ({problem}); '
+                          'add it as a [[legacy.rules]] pattern by hand')
+            pattern = ''
+        layer.update(legacy_layer(pattern, values.get('ORCH_LEGACY_EXEMPT_PATHS', '').split()))
         report.append(f'{repo}: {NO_BUILTIN_RULES}')
     gates = repo_setting('audit.merge_gate_checks', 'ORCH_MERGE_GATE_CHECKS')
     if gates is not None:
@@ -557,6 +573,9 @@ def upgrade(path):
     pattern, exempt = old.get('extra_pattern', ''), old.get('exempt_paths', [])
     if not isinstance(pattern, str) or not check_type(BY_KEY['legacy.exempt'], exempt):
         raise ConfigError(f'{label}: legacy.extra_pattern must be a string and legacy.exempt_paths a list of strings; edit it by hand')
+    problem = rg_problem(pattern) if pattern else None
+    if problem:
+        raise ConfigError(f'{label}: legacy.extra_pattern is not an rg regex ({problem}); rewrite it as a [[legacy.rules]] pattern by hand')
     lines, table = [], None
     for line in text.splitlines():
         header = TABLE.match(line)

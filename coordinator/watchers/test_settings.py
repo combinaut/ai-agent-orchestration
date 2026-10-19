@@ -324,7 +324,8 @@ class LegacyUpgradeTest(SettingsTest):
     def test_upgrade_refuses_what_it_cannot_convert_in_place(self):
         for text in ('[legacy]\nextra_pattern = """x"""\n', '[legacy]\nexempt_paths = ["a"]\nexempt = ["b"]\n',
                      '[legacy]\nextra_pattern = 1\n',
-                     '[focus]\npattern = """\n[legacy]\nexempt_paths = "old-widget"\n"""\n[legacy]\nexempt_paths = ["a"]\n'):
+                     '[focus]\npattern = """\n[legacy]\nexempt_paths = "old-widget"\n"""\n[legacy]\nexempt_paths = ["a"]\n',
+                     '[legacy]\nextra_pattern = \'(ab)\\1\'\n'):
             path = self.write('local.toml', text)
             with self.assertRaises(s.ConfigError, msg=text):
                 s.upgrade(path)
@@ -338,6 +339,10 @@ class LegacyUpgradeTest(SettingsTest):
                                  s.BY_KEY['legacy.rules']: [{'kind': 'LEGACY', 'pattern': 'old-widget', 'paths': ['**']}],
                                  s.BY_KEY['legacy.exempt']: ['a.js', 'b.js']})
         self.assertEqual(report, [f'acme/webapp: {s.NO_BUILTIN_RULES}'])
+        report = []
+        layer = s.repo_layers(dict(values, ORCH_LEGACY_EXTRA_PATTERN='(ab)\\1'), report)['acme/webapp']
+        self.assertNotIn(s.BY_KEY['legacy.rules'], layer)
+        self.assertTrue(report[0].startswith('not converted: ORCH_LEGACY_EXTRA_PATTERN for acme/webapp is not an rg regex ('), report)
         self.assertEqual(s.validate(s.parse(s.render(layer), 'x'), 'x', 'repo'), layer)
 
 

@@ -76,10 +76,9 @@ def compile_pattern(pattern):
         return None
     if not isinstance(pattern, str) or not pattern or '\0' in pattern:
         raise ValueError('pattern must be a non-empty string')
-    result = subprocess.run([rg(), *RG_FLAGS, '--regexp', pattern, '-'], input=b'', capture_output=True, timeout=30)
-    if result.returncode not in (0, 1):
-        reason = ' '.join(result.stderr.decode(errors='replace').split())
-        raise ValueError(f'pattern is not a valid rg regex: {reason}')
+    problem = orch_settings.rg_problem(pattern, rg())
+    if problem:
+        raise ValueError(f'pattern is not a valid rg regex: {problem}')
     return pattern
 
 
