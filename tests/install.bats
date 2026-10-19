@@ -34,9 +34,9 @@ load test_helper
   printf '%s\n' '[pr_tabs]' 'org = ""' >>"$TMP/old.toml"
   cp "$TMP/old.toml" "$HOME/.claude/orchestration.toml"
   install_ok
-  contains "$output" "Project features are off until you configure missing keys in $HOME/.claude/orchestration.toml: ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS ORCH_FOCUS_SKIP_ARCHITECTS"
+  contains "$output" "Project features are off until you configure missing keys in $HOME/.claude/orchestration.toml: ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_FOCUS_SKIP_ARCHITECTS"
   cmp "$TMP/old.toml" "$HOME/.claude/orchestration.toml"
-  config_set ORCH_PR_TABS_DEFAULT_REPO "" ORCH_PR_TABS_OPEN_ALL "" ORCH_PR_TABS_TOPICS "" ORCH_FOCUS_SKIP_ARCHITECTS ""
+  config_set ORCH_PR_TABS_DEFAULT_REPO "" ORCH_PR_TABS_OPEN_ALL "" ORCH_FOCUS_SKIP_ARCHITECTS ""
   install_ok
   not_contains "$output" 'Project features are off until you configure missing keys'
   after=$(find "$HOME/.claude" -type l -exec sh -c 'printf "%s -> %s\\n" "$1" "$(readlink "$1")"' sh {} \; | sort)
@@ -1132,4 +1132,19 @@ EOF
   run env ORCH_CONFIG="$TMP/bad.toml" bash "$BATS_TEST_DIRNAME/../hooks/orch-update-check.sh"
   [ "$status" -ne 0 ]
   contains "$output" "orch-update-check: $TMP/bad.toml: pr.nope: unknown key"
+}
+
+@test "installer drops retired multiline topic rules once and preserves personal settings" {
+  fresh_install
+  cat >>"$HOME/.claude/orchestration.toml" <<'TOML'
+topics = [
+  { name = "Old", color = "blue", repo = ["webapp"] },
+]
+TOML
+  install_ok
+  contains "$output" 'removed pr_tabs.topics (architect grouping is automatic)'
+  run grep '^topics' "$HOME/.claude/orchestration.toml"
+  [ "$status" -eq 1 ]
+  install_ok
+  not_contains "$output" 'removed pr_tabs.topics'
 }

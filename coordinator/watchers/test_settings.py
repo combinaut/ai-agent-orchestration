@@ -53,11 +53,11 @@ class GlobalFileTest(SettingsTest):
                                     '[recycle]\npark_idle = true\npct = 55.5\ntokens = 1000\n'
                                     '[focus]\nskip_architects = ["A", "B"]\n'
                                     '[watchers]\npath = ["~/bin", "/usr/bin"]\n'
-                                    '[pr_tabs]\ntopics = [{ name = "W", color = "blue", repo = ["^w$"] }]\n')
+                                    '[pr_tabs]\norg = "acme"\n')
         self.assertEqual(s.load_global(path), {
             'ORCH_PR_REPOS': 'a/b c/d', 'ORCH_PR_AUTHOR': 'me', 'ORCH_PARK_IDLE': '1', 'ORCH_RECYCLE_PCT': '55.5',
             'ORCH_RECYCLE_TOKENS': '1000', 'ORCH_FOCUS_SKIP_ARCHITECTS': 'A,B', 'ORCH_PATH': f'{Path.home()}/bin:/usr/bin',
-            'ORCH_PR_TABS_TOPICS': '[{"name":"W","color":"blue","repo":["^w$"]}]'})
+            'ORCH_PR_TABS_ORG': 'acme'})
 
     def test_a_missing_file_sets_nothing(self):
         self.assertEqual(s.load_global(self.base / 'missing.toml'), {})
@@ -307,3 +307,22 @@ class DriftTest(SettingsTest):
         values = {setting: example_value(setting) for setting in s.scoped('global')}
         path = self.write('round.toml', s.render(values))
         self.assertEqual(s.read_file(path, 'global'), values)
+
+
+class RemovedKeysTest(SettingsTest):
+    def test_drop_retired_rules_preserves_other_lines_and_is_idempotent(self):
+        for rules in ['topics = []\n', '"topics" = [\n {name="Old", any=["foo"]},\n]\n']:
+            text = '# personal\n[pr_tabs]\norg = "acme" # keep\n' + rules + 'open_all = "is:pr"\n'
+            path = self.write('removed.toml', text)
+            self.assertTrue(s.drop_removed_keys(path))
+            self.assertEqual(path.read_text(), text.replace(rules, ''))
+            self.assertFalse(s.drop_removed_keys(path))
+
+    def test_dotted_and_array_table_rules_are_removed(self):
+        for text, expected in [
+            ('pr_tabs.topics = []\n[pr]\nauthor = "me"\n', '[pr]\nauthor = "me"\n'),
+            ('[pr_tabs]\norg = "acme"\n[[pr_tabs.topics]]\nname="Old"\n[[pr_tabs.topics]]\nname="Two"\n', '[pr_tabs]\norg = "acme"\n'),
+        ]:
+            path = self.write('removed.toml', text)
+            self.assertTrue(s.drop_removed_keys(path))
+            self.assertEqual(path.read_text(), expected)

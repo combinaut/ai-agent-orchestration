@@ -4,7 +4,7 @@ A Chrome extension for PR tabs in `ORCH_PR_TABS_ORG`. It sorts PR tabs into name
 
 ## What it does
 
-- **Groups** every unpinned PR tab by the JSON topic rules in `ORCH_PR_TABS_TOPICS`, or into Other when no topic matches. Empty means no custom topics. New tabs sort themselves when they load.
+- **Groups** every unpinned PR tab by the architect owning its checked-out head branch, or by repository name when no owner is available. Group colours are a stable hash of the name. Ownership changes are picked up on the existing check cadence. New tabs sort themselves when they load.
 - **Go to a PR**: paste a PR number or URL and press Enter. A number uses `ORCH_PR_TABS_ORG` and `ORCH_PR_TABS_DEFAULT_REPO`; a URL decides the repo, but only when its owner is `ORCH_PR_TABS_ORG`; a PR URL of another owner is rejected. An open tab for that PR is focused (its window comes forward, its group expands); otherwise the PR opens in its group.
 - **Open all my open PRs** opens up to 30 PRs matching `ORCH_PR_TABS_OPEN_ALL`, in the order defined by that query, skipping ones already open. Over 30, the badge shows how many are left (`+N`), or an estimate (`~N`, "about N more") when not every search result was fetched. Click again for the next batch.
 - **Close merged PRs** runs the merged/closed check at once. The popup says what it closed, which merged tab stayed because it is in view, or the error.
@@ -19,7 +19,7 @@ GitHub access goes through your local `gh` login, via a native messaging host. N
 1. Run the [install command](../README.md#1-install). With a Chrome profile present it renders `~/.claude/chrome-pr-tabs/pr-tabs-host` (a launcher using `ORCH_PYTHON3` and `ORCH_PATH`, which must reach `gh`) and registers it in Chrome's `NativeMessagingHosts` directory (macOS: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`, Linux: `~/.config/google-chrome/NativeMessagingHosts/`). Without a profile it prints `skipped`.
 2. Load the extension once. Chrome cannot load an unpacked extension from a script, so this step is manual:
    1. Open `chrome://extensions` and turn on **Developer mode**.
-   2. Click **Load unpacked** and choose `chrome/pr-tabs/extension` inside the clone (`~/.claude/ai-agent-orchestration/chrome/pr-tabs/extension` unless you set `ORCH_REPO_PATH`).
+   2. Click **Load unpacked** and choose `chrome/pr-tabs/extension` inside the clone (`~/.claude/ai-agent-orchestration/chrome/pr-tabs/extension` unless you set `install.repo_path` in `~/.claude/orchestration.toml`).
    3. Pin **PR tabs** from the puzzle-piece menu so the button stays in the toolbar.
 
    While no Chrome profile has the extension (read from each profile's `Preferences` and `Secure Preferences`, never written), the installer helps: it copies the extension path to the clipboard (`pbcopy`; on Linux `wl-copy` or `xclip`), opens `chrome://extensions` in Chrome, and prints one `load once` line:
@@ -30,16 +30,11 @@ GitHub access goes through your local `gh` login, via a native messaging host. N
 
 After an update, run the install command, then click the reload icon on the extension card at `chrome://extensions`.
 
-## Rules
+## Settings and ownership
 
-Topics live as an array of tables in `pr_tabs.topics` in `orchestration.toml` (`ORCH_PR_TABS_TOPICS` holds them as JSON); empty means no custom topics. Each topic has a name, a [tab group colour](https://developer.chrome.com/docs/extensions/reference/api/tabGroups#type-Color), and case-insensitive regular expressions: `repo`, `branch` and `title` test that field; `any` tests all three. The first matching topic wins. `ORCH_PR_TABS_ORG` selects the organization, `ORCH_PR_TABS_DEFAULT_REPO` is the repo for bare numbers, and `ORCH_PR_TABS_OPEN_ALL` is the GitHub search behind the button. After changing settings, click the reload icon on the extension card. For example:
+`pr_tabs.org` selects the organization, `pr_tabs.default_repo` is the repo for bare numbers, and `pr_tabs.open_all` is the GitHub search behind the button. Their environment overrides are `ORCH_PR_TABS_ORG`, `ORCH_PR_TABS_DEFAULT_REPO` and `ORCH_PR_TABS_OPEN_ALL`. Reload the extension after changing settings.
 
-```toml
-[pr_tabs]
-topics = [
-  { name = "Webapp", color = "blue", repo = ["^webapp$"] },
-]
-```
+The native host asks the selected environment adapter for checked-out branches and their workspace owners, caching results for 30 seconds. Herdr resolves the worker workspace's `owner` token to the architect workspace label. Repository identity and branch must both match; missing owners, unavailable adapters and conflicting ownership use the repo name. Pinned tabs stay untouched. The installer removes retired topic rules from existing personal config, printing one migration line.
 
 ## Troubleshooting
 

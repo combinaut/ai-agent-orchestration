@@ -1,5 +1,4 @@
 import {
-  compileRules,
   duplicateTabIds,
   prKey,
   findOpenTab,
@@ -19,7 +18,7 @@ import {
   FIRST_POLL_SECONDS,
   POLL_SECONDS,
   tabsToClose,
-  topicFor,
+  groupForPr,
 } from "./core.js";
 import { messageListener } from "./messages.js";
 
@@ -31,6 +30,7 @@ const POLL_SOON_MS = 5000;
 const SEARCH_LIMIT = 100;
 
 const SETTINGS_RETRY_MS = 60000;
+let owners = {};
 let rulesPromise;
 let retryRulesAt = 0;
 function loadRules() {
@@ -43,9 +43,9 @@ function loadRules() {
     .then(async (rules) => {
       try {
         const settings = await askHost({ type: "settings" });
-        const compiled = compileRules({ ...rules, ...settings });
+        const configured = { ...rules, ...settings };
         await chrome.storage.local.set({ prTabsSettings: settings });
-        return compiled;
+        return configured;
       } catch (error) {
         retryRulesAt = Date.now() + SETTINGS_RETRY_MS;
         const { prTabsSettings } = await chrome.storage.local.get({ prTabsSettings: null });
@@ -54,7 +54,7 @@ function loadRules() {
           throw error;
         }
         console.warn("PR tabs: using cached settings:", error);
-        return compileRules({ ...rules, ...prTabsSettings });
+        return { ...rules, ...prTabsSettings };
       }
     })
     .catch((error) => {
@@ -115,25 +115,25 @@ function updateMeta(change) {
   return run;
 }
 
-async function groupFor(windowId, topic) {
-  const [group] = await chrome.tabGroups.query({ windowId, title: topic.name });
+async function groupFor(windowId, groupInfo) {
+  const [group] = await chrome.tabGroups.query({ windowId, title: groupInfo.name });
   return group || null;
 }
 
-// Moves the tab into its topic group; a tab already there is left alone.
+// Moves the tab into its architect group; a tab already there is left alone.
 async function groupTab(tab, pr, rules, meta) {
   if (tab.pinned) return;
   const info = meta[pr.key] || {};
-  const topic = topicFor(rules, { repo: pr.repo, branch: info.headRefName || "", title: info.title || tab.title || "" });
-  const group = await groupFor(tab.windowId, topic);
-  if (group && group.color !== topic.color) await chrome.tabGroups.update(group.id, { color: topic.color });
+  const groupInfo = groupForPr(owners, { ...pr, branch: info.headRefName, headRepository: info.headRepository });
+  const group = await groupFor(tab.windowId, groupInfo);
+  if (group && group.color !== groupInfo.color) await chrome.tabGroups.update(group.id, { color: groupInfo.color });
   if (group && tab.groupId === group.id) return;
   if (group) {
     await chrome.tabs.group({ groupId: group.id, tabIds: [tab.id] });
     return;
   }
   const groupId = await chrome.tabs.group({ tabIds: [tab.id], createProperties: { windowId: tab.windowId } });
-  await chrome.tabGroups.update(groupId, { title: topic.name, color: topic.color });
+  await chrome.tabGroups.update(groupId, { title: groupInfo.name, color: groupInfo.color });
 }
 
 async function groupTabId(tabId) {
@@ -190,7 +190,7 @@ function poll() {
   return current;
 }
 
-async function checkNow() {
+export async function checkNow() {
   if (current) await current;
   return poll();
 }
@@ -222,6 +222,7 @@ async function checkOnce() {
     await chrome.alarms.create(ALARM, { delayInMinutes: nextDelaySeconds(failures) / 60 });
     return { error: `GitHub check failed: ${error.message}` };
   }
+  owners = reply.owners || {};
   const keyById = new Map(entries.map(({ tab, pr }) => [tab.id, pr.key]));
   const closed = [];
   for (const id of tabsToClose(entries, reply.prs)) {
@@ -252,7 +253,7 @@ function openPr({ hit, pr }, rules) {
   return serial(async () => {
     if ((await prEntries(rules)).some((entry) => entry.pr.key === pr.key)) return false;
     const tab = await chrome.tabs.create({ url: pr.url, active: false });
-    await groupTab(tab, pr, rules, { [pr.key]: { title: hit.title, headRefName: hit.headRefName } });
+    await groupTab(tab, pr, rules, { [pr.key]: { title: hit.title, headRefName: hit.headRefName, headRepository: hit.headRepository } });
     return true;
   });
 }
@@ -270,6 +271,7 @@ export async function openAll() {
   let after;
   for (let page = 0; page < MAX_SEARCH_PAGES; page++) {
     const reply = await askHost({ type: "search", query: rules.openAll, limit: SEARCH_LIMIT, ...(after && { after }) });
+    owners = reply.owners || {};
     search.total = reply.total;
     search.prs.push(...reply.prs);
     if (!reply.hasNextPage || planOpenAll(search, openKeys, rules.org).open.length >= OPEN_ALL_CAP) break;
@@ -284,7 +286,7 @@ export async function openAll() {
   return { opened: opened.length, remaining: plan.remaining, estimated: plan.estimated };
 }
 
-// Focuses the PR's open tab (window, group, tab) or opens it in its topic group, one request at a time.
+// Focuses the PR's open tab (window, group, tab) or opens it in its architect group, one request at a time.
 export const goTo = (input) => serial(() => findOrOpen(input));
 
 async function findOrOpen(input) {

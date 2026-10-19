@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Chrome native messaging host for PR tabs: one request, at most one gh call, one reply, then exit."""
 from pathlib import Path
+import importlib.util
+import hashlib
+import tempfile
 import json
 import os
 import re
@@ -15,10 +18,10 @@ GH_TIMEOUT_SECONDS = 30
 MAX_STATES = 100
 MAX_SEARCH = 100
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
-PR_FIELDS = "state title headRefName"
+PR_FIELDS = "state title headRefName headRepository { nameWithOwner }"
 SEARCH = (
     "query($q: String!, $n: Int!, $a: String) { search(query: $q, type: ISSUE, first: $n, after: $a) { issueCount"
-    " pageInfo { endCursor hasNextPage } nodes { ... on PullRequest { url title headRefName } } } }"
+    " pageInfo { endCursor hasNextPage } nodes { ... on PullRequest { url title headRefName headRepository { nameWithOwner } } } } }"
 )
 
 
@@ -103,7 +106,7 @@ def states(request):
         result[key] = node if isinstance(node, dict) else None
     if not any(result.values()):
         raise RequestError(failure)
-    return {"ok": True, "prs": result}
+    return {"ok": True, "prs": result, "owners": ownership()}
 
 
 def search(request):
@@ -124,6 +127,7 @@ def search(request):
     page = found.get("pageInfo") or {}
     return {
         "ok": True,
+        "owners": ownership(),
         "total": found.get("issueCount") or len(prs),
         "prs": prs,
         "endCursor": page.get("endCursor"),
@@ -139,7 +143,7 @@ def project_settings():
             "/bin/bash",
             "-e",
             "-c",
-            '. "$1"; orch_load_config; printf "%s\\0" "$ORCH_PR_TABS_ORG" "$ORCH_PR_TABS_DEFAULT_REPO" "$ORCH_PR_TABS_OPEN_ALL" "$ORCH_PR_TABS_TOPICS"',
+            '. "$1"; orch_load_config; printf "%s\\0" "$ORCH_PR_TABS_ORG" "$ORCH_PR_TABS_DEFAULT_REPO" "$ORCH_PR_TABS_OPEN_ALL"',
             "orch-config",
             str(library),
         ],
@@ -148,12 +152,12 @@ def project_settings():
         timeout=2,
         check=True,
     )
-    return result.stdout.split("\0")[:4]
+    return result.stdout.split("\0")[:3]
 
 
 def settings(request):
     try:
-        org, repo, query, raw_topics = project_settings()
+        org, repo, query = project_settings()
     except (OSError, subprocess.SubprocessError, UnicodeError) as error:
         config = os.environ.get(
             "ORCH_CONFIG", str(Path.home() / ".claude/orchestration.toml")
@@ -161,42 +165,6 @@ def settings(request):
         raise RequestError(
             f"Cannot load PR-tabs settings from {config}: {type(error).__name__}"
         ) from None
-    try:
-        topics = json.loads(raw_topics) if raw_topics else []
-    except ValueError:
-        raise RequestError(
-            "pr_tabs.topics (ORCH_PR_TABS_TOPICS) must be an array of topic tables"
-        ) from None
-    if not isinstance(topics, list) or any(
-        not isinstance(topic, dict)
-        or not isinstance(topic.get("name"), str)
-        or not isinstance(topic.get("color"), str)
-        or any(
-            not isinstance(topic.get(field, []), list)
-            or any(not isinstance(pattern, str) for pattern in topic.get(field, []))
-            for field in ("any", "repo", "title", "branch")
-        )
-        for topic in topics
-    ):
-        raise RequestError(
-            "ORCH_PR_TABS_TOPICS must list named, colored topics with arrays of regex strings"
-        )
-    # Chrome's tabGroups.Color enum; validate before any browser mutation.
-    colors = {
-        "grey",
-        "blue",
-        "red",
-        "yellow",
-        "green",
-        "pink",
-        "purple",
-        "cyan",
-        "orange",
-    }
-    if any(topic["color"] not in colors for topic in topics):
-        raise RequestError(
-            "ORCH_PR_TABS_TOPICS color must be one of: " + ", ".join(sorted(colors))
-        )
     if org and not re.fullmatch(r"[A-Za-z0-9-]{1,39}", org):
         raise RequestError(
             "ORCH_PR_TABS_ORG must be a GitHub owner name (1-39 letters, digits, or hyphens)"
@@ -210,8 +178,55 @@ def settings(request):
         "org": org,
         "defaultRepo": repo,
         "openAll": query,
-        "topics": topics,
     }
+
+
+OWNER_CACHE_SECONDS = 30
+
+
+def ownership():
+    """The optional env adapter owns runtime discovery; cache across one-shot hosts."""
+    root = Path(__file__).resolve().parents[3]
+    try:
+        spec = importlib.util.spec_from_file_location("orch_settings", root / "lib/orch_settings.py")
+        config = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = config
+        spec.loader.exec_module(config)
+        values = config.load_global(os.environ.get("ORCH_CONFIG", str(Path.home() / ".claude/orchestration.toml")))
+        values.update({key: value for key, value in os.environ.items() if key.startswith("ORCH_")})
+        adapter = values.get("ORCH_ENV") or "herdr"
+        if not NAME.fullmatch(adapter):
+            return {}
+        path = root / "env" / adapter / "pr_tabs.py"
+        if not path.is_file():
+            return {}
+        identity = json.dumps([str(root), str(path.stat().st_mtime_ns), values,
+                               os.environ.get("HERDR_SOCKET_PATH"), os.environ.get("HERDR_BIN_PATH")], sort_keys=True)
+        key = hashlib.sha256(identity.encode()).hexdigest()[:20]
+        cache = Path(log_path()).parent / f"owners-{key}.json"
+        try:
+            saved = json.loads(cache.read_text())
+            age = time.time() - saved["time"]
+            if 0 <= age < OWNER_CACHE_SECONDS:
+                return saved["owners"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        spec = importlib.util.spec_from_file_location("pr_tabs_adapter", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        owners = module.branch_owners(values)
+        if not isinstance(owners, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in owners.items()):
+            return {}
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(mode="w", dir=cache.parent, delete=False) as out:
+                json.dump({"time": time.time(), "owners": owners}, out)
+            os.replace(out.name, cache)
+        except OSError:
+            pass
+        return owners
+    except Exception:  # Optional runtime discovery must never break GitHub checks.
+        return {}
 
 
 HANDLERS = {"states": states, "search": search, "settings": settings}

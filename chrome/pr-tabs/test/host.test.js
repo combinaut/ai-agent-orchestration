@@ -28,7 +28,7 @@ function ask(message, { reply = {}, status = 0, stderr = "", raw } = {}) {
   writeFileSync(calls, "");
   const done = spawnSync("python3", ["-I", HOST], {
     input: raw ?? frame(Buffer.from(JSON.stringify(message))),
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GH_CALLS: calls, GH_REPLY: join(dir, "reply.json"), GH_STATUS: String(status), GH_STDERR: stderr, PR_TABS_LOG: join(dir, "host.log") },
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GH_CALLS: calls, GH_REPLY: join(dir, "reply.json"), GH_STATUS: String(status), GH_STDERR: stderr, ORCH_ENV: "none", PR_TABS_LOG: join(dir, "host.log") },
     timeout: 20000,
   });
   assert.equal(done.status, 0, done.stderr.toString());
@@ -70,30 +70,7 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
     org: "acme",
     defaultRepo: "webapp",
     openAll: "",
-    topics: [],
   });
-  writeFileSync(
-    config,
-    `[pr_tabs]\n${tabs}topics = [ { name = "Webapp", color = "blue", repo = ["^webapp$"] } ]\n`,
-  );
-  assert.deepEqual(ask({ type: "settings" }).reply.topics, [
-    { name: "Webapp", color: "blue", repo: ["^webapp$"] },
-  ]);
-  writeFileSync(
-    config,
-    `[pr_tabs]\n${tabs}topics = [ { name = "Webapp", color = "chartreuse", repo = ["^webapp$"] } ]\n`,
-  );
-  const invalidColor = ask({ type: "settings" });
-  assert.equal(invalidColor.reply.ok, false);
-  assert.match(invalidColor.reply.error, /ORCH_PR_TABS_TOPICS/);
-  process.env.ORCH_PR_TABS_TOPICS = "";
-  assert.deepEqual(ask({ type: "settings" }).reply.topics, []);
-  delete process.env.ORCH_PR_TABS_TOPICS;
-  writeFileSync(config, `[pr_tabs]\n${tabs}topics = {}\n`);
-  assert.equal(ask({ type: "settings" }).reply.ok, false);
-  writeFileSync(config, `[pr_tabs]\n${tabs}topics = "not json"\n`);
-  assert.equal(ask({ type: "settings" }).reply.ok, false);
-  writeFileSync(config, `[pr_tabs]\n${tabs}topics = []\n`);
   process.env.ORCH_PR_TABS_DEFAULT_REPO = "";
   assert.equal(ask({ type: "settings" }).reply.defaultRepo, "");
   delete process.env.ORCH_PR_TABS_DEFAULT_REPO;
@@ -103,7 +80,6 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
     org: "",
     defaultRepo: "",
     openAll: "",
-    topics: [],
   });
   for (const [key, name, value] of [
     ["ORCH_PR_TABS_ORG", "org", "bad org"],
@@ -148,6 +124,7 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
   assert.equal(calls.length, 1);
   assert.deepEqual(reply, {
     ok: true,
+    owners: {},
     prs: {
       "acme/webapp#1": { state: "MERGED", title: "One", headRefName: "a" },
       "acme/webapp#2": { state: "OPEN", title: "Two", headRefName: "b" },
@@ -196,7 +173,7 @@ test("search returns the hits, the total and the next page in one gh call", () =
   assert.equal(calls.length, 1);
   assert.doesNotMatch(calls[0], / a=/);
   assert.match(calls[0], /author:tester/);
-  assert.deepEqual(reply, { ok: true, total: 140, prs: [nodes[0]], endCursor: "Y3Vyc29yOjEwMA==", hasNextPage: true });
+  assert.deepEqual(reply, { ok: true, owners: {}, total: 140, prs: [nodes[0]], endCursor: "Y3Vyc29yOjEwMA==", hasNextPage: true });
 });
 
 test("search continues after the given cursor", () => {

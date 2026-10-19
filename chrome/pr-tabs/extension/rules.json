@@ -1,7 +1,5 @@
 {
   "org": "",
   "defaultRepo": "",
-  "openAll": "",
-  "topics": [],
-  "fallback": { "name": "Other", "color": "grey" }
+  "openAll": ""
 }

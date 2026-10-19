@@ -95,7 +95,6 @@ SETTINGS = [
     _g('pr_tabs.org', 'ORCH_PR_TABS_ORG', 'str', '', 'Organization the PR tabs extension manages; empty turns org actions off'),
     _g('pr_tabs.default_repo', 'ORCH_PR_TABS_DEFAULT_REPO', 'str', '', 'Repo name for bare PR numbers; empty turns number jumps off'),
     _g('pr_tabs.open_all', 'ORCH_PR_TABS_OPEN_ALL', 'str', '', 'GitHub search behind the Open all button; empty turns it off'),
-    _g('pr_tabs.topics', 'ORCH_PR_TABS_TOPICS', 'json', [], 'Tab-group rules: tables with name, color and repo/title/any regex lists'),
     _r('guard.big_repo', 'ORCH_BIG_REPO', 'bool', False, 'Broad Git reads (git grep, cat-file over all objects) are blocked in this repo'),
     _r('audit.merge_gate_checks', 'ORCH_MERGE_GATE_CHECKS', 'list', [], 'Check names that only run on a full CI run; an approved PR on a non-default base reports "full CI ran" or "full CI not run"', sep='|'),
     _r('legacy.scan', 'ORCH_LEGACY_SCAN', 'bool', False, 'Open PRs of this repo are scanned for lines that build on legacy front-end code (LEGACY line)'),
@@ -646,6 +645,44 @@ def set_key(path, env, text):
     Path(path).write_text(text_out)
 
 
+def drop_removed_keys(path):
+    """Remove retired topic rules while preserving every unrelated byte/value."""
+    path = Path(path)
+    text = path.read_text()
+    data = parse(text, str(path))
+    if not isinstance(data.get('pr_tabs'), dict) or 'topics' not in data['pr_tabs']:
+        return False
+    del data['pr_tabs']['topics']
+    lines = text.splitlines(keepends=True)
+    # Locate an assignment or array-table block, then let TOML verify its extent.
+    # Comparing parsed data protects unrelated keys and handles multiline strings.
+    table = None
+    for start, line in enumerate(lines):
+        header = re.match(r"^\s*\[\s*['\"]?([\w-]+)['\"]?\s*\]\s*(?:#.*)?$", line)
+        if header:
+            table = header[1]
+        plain = table == 'pr_tabs' and re.match(r"^\s*['\"]?topics['\"]?\s*=", line)
+        dotted = table is None and re.match(r"^\s*['\"]?pr_tabs['\"]?\s*\.\s*['\"]?topics['\"]?\s*=", line)
+        block = re.match(r"^\s*\[\[?\s*['\"]?pr_tabs['\"]?\s*\.\s*['\"]?topics['\"]?\s*\]", line)
+        if not (plain or dotted or block):
+            continue
+        for end in range(start + 1, len(lines) + 1):
+            candidate = ''.join(lines[:start] + lines[end:])
+            try:
+                parsed = parse(candidate, str(path))
+            except ConfigError:
+                continue
+            # Removing a table can also remove its now-empty parent.
+            expected = dict(data)
+            if expected.get('pr_tabs') == {} and 'pr_tabs' not in parsed:
+                del expected['pr_tabs']
+            if parsed == expected:
+                validate(parsed, str(path), 'global')
+                path.write_text(candidate)
+                return True
+    raise ConfigError(f'{path}: cannot remove retired pr_tabs.topics in place')
+
+
 def file_keys(path, scope):
     return [s.env for s in read_file(path, scope)]
 
@@ -672,6 +709,9 @@ def main(argv):
         elif command == 'set' and len(argv) >= 5 and len(argv) % 2 == 1:
             for name, value in zip(argv[3::2], argv[4::2]):
                 set_key(argv[2], name, value)
+        elif command == 'drop-removed' and len(argv) == 3:
+            if drop_removed_keys(argv[2]):
+                print('removed pr_tabs.topics (architect grouping is automatic)')
         elif command == 'keys' and len(argv) == 3:
             print(' '.join(file_keys(argv[2], 'global')))
         elif command == 'names' and len(argv) == 2:

@@ -14,9 +14,6 @@ let createdAlarms = [];
 let alarmListener;
 let installedListener;
 let hostSettings = {
-  topics: JSON.parse(
-    readFileSync(new URL("./fixtures/topics.json", import.meta.url)),
-  ),
   ok: true,
   org: "acme",
   defaultRepo: "webapp",
@@ -72,7 +69,7 @@ globalThis.chrome = {
       ).then(callback),
   },
 };
-const { closeDuplicates, goTo, openAll, prEntries } = await import("../extension/background.js");
+const { closeDuplicates, goTo, openAll, prEntries, checkNow: chromeMessageCheck } = await import("../extension/background.js");
 
 test("PR tabs whose URL differs from the org in case are kept; other orgs are dropped", async () => {
   const configured = hostSettings;
@@ -95,7 +92,7 @@ test("PR tabs whose URL differs from the org in case are kept; other orgs are dr
   Date.now = () => now;
   try {
     tabs = []; store = {}; grouped = []; settingsCalls = 0;
-    hostSettings = { ...configured, topics: [{ name: "Cached", color: "blue", repo: ["^webapp$"] }] };
+    hostSettings = { ...configured, defaultRepo: "cached" };
     const seed = await import("../extension/background.js?cache-seed");
     await seed.goTo("1");
     assert.deepEqual(store.prTabsSettings, hostSettings);
@@ -104,7 +101,7 @@ test("PR tabs whose URL differs from the org in case are kept; other orgs are dr
     const offline = await import("../extension/background.js?cache-offline");
     const before = settingsCalls;
     await offline.goTo("2");
-    assert.equal(grouped.at(-1).title, "Cached");
+    assert.equal(grouped.at(-1).title, "cached");
     for (let i = 0; i < 5; i++) await offline.goTo("2");
     assert.equal(settingsCalls, before + 1, "failed host retries are backed off");
     assert.deepEqual(store.prTabsSettings, good);
@@ -319,4 +316,22 @@ test("Close duplicate tabs keeps the active tab of the focused window (window 1)
   ];
   await closeDuplicates();
   assert.deepEqual(ids(), [2]);
+});
+
+
+test("existing check cadence regroups tabs after ownership changes or disappears", async () => {
+  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
+  store = {}; grouped = [];
+  let owners = { "acme/webapp:feature": "Finder" };
+  nativeHandler = async () => ({ ok: true, owners, prs: {
+    "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
+  } });
+  await chromeMessageCheck();
+  assert.equal(grouped.at(-1).title, "Finder");
+  owners = { "acme/webapp:feature": "Agent::Tooling" };
+  await chromeMessageCheck();
+  assert.equal(grouped.at(-1).title, "Agent::Tooling");
+  owners = {};
+  await chromeMessageCheck();
+  assert.equal(grouped.at(-1).title, "webapp");
 });
