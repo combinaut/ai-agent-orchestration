@@ -183,9 +183,12 @@ def map_rows(repo, ref, rules):
             batch.stdin.write(f'{oid}\n'.encode())
             batch.stdin.flush()
             header = batch.stdout.readline().split()
-            if len(header) != 3:
+            if len(header) != 3 or header[0].decode() != oid or header[1] != b'blob' or not header[2].isdigit():
                 raise ValueError(f'cannot read {path} on {ref}')
-            blob = batch.stdout.read(int(header[2]) + 1)[:-1]
+            blob = batch.stdout.read(int(header[2]) + 1)
+            if len(blob) != int(header[2]) + 1 or blob[-1:] != b'\n':
+                raise ValueError(f'cannot read {path} on {ref}: short read')
+            blob = blob[:-1]
             try:
                 body = blob.decode()
             except UnicodeDecodeError:
@@ -197,6 +200,8 @@ def map_rows(repo, ref, rules):
                 lines.pop()
             rows.update((kind, path) for text in lines if (kind := rules.classify(path, text)))
         batch.stdin.close()
+        if batch.wait() != 0:
+            raise ValueError(f'git cat-file failed with status {batch.returncode} on {ref}')
     return sorted(rows)
 
 

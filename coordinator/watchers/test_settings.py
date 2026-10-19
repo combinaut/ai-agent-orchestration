@@ -323,7 +323,8 @@ class LegacyUpgradeTest(SettingsTest):
 
     def test_upgrade_refuses_what_it_cannot_convert_in_place(self):
         for text in ('[legacy]\nextra_pattern = """x"""\n', '[legacy]\nexempt_paths = ["a"]\nexempt = ["b"]\n',
-                     '[legacy]\nextra_pattern = 1\n'):
+                     '[legacy]\nextra_pattern = 1\n',
+                     '[focus]\npattern = """\n[legacy]\nexempt_paths = "old-widget"\n"""\n[legacy]\nexempt_paths = ["a"]\n'):
             path = self.write('local.toml', text)
             with self.assertRaises(s.ConfigError, msg=text):
                 s.upgrade(path)

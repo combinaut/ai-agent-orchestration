@@ -1,9 +1,11 @@
+import io
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from test_support import IsolatedTestCase
 import legacy_rules
@@ -162,6 +164,35 @@ class RulesTests(IsolatedTestCase):
         self.assertFalse(match('a/{b,c}/x?.rb', 'a/d/x1.rb'))
         self.assertFalse(match('app/x.rb', 'app/xarb'))
         self.assertTrue(match('**/*.js', 'a.js'))
+
+    def test_map_rejects_a_short_or_failed_cat_file(self):
+        rules_ = rules(rule(kind='"A"', paths='["**"]'))
+        oid = 'a' * 40
+
+        class Batch:
+            def __init__(self, reply, status):
+                self.stdin, self.stdout, self.returncode, self.status = io.BytesIO(), io.BytesIO(reply), None, status
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def wait(self):
+                self.returncode = self.status
+                return self.status
+        tree = f'100644 blob {oid}\ta.js\0'.encode()
+        for reply, status, message in ((f'{oid} blob 100\n'.encode() + b'safe\n', 7, 'short read'),
+                                       (f'{oid} blob 5\n'.encode() + b'safe\n\n', 7, 'git cat-file failed with status 7'),
+                                       (f'{"b" * 40} blob 5\n'.encode() + b'safe\n\n', 0, 'cannot read a.js')):
+            with patch.object(legacy_rules, 'git', return_value=tree), \
+                    patch.object(legacy_rules.subprocess, 'Popen', return_value=Batch(reply, status)):
+                with self.assertRaisesRegex(ValueError, message):
+                    legacy_rules.map_rows('repo', 'HEAD', rules_)
+        with patch.object(legacy_rules, 'git', return_value=tree), \
+                patch.object(legacy_rules.subprocess, 'Popen', return_value=Batch(f'{oid} blob 5\n'.encode() + b'safe\n\n', 0)):
+            self.assertEqual(legacy_rules.map_rows('repo', 'HEAD', rules_), [('A', 'a.js')])
 
     def test_map_skips_submodules_and_without_rules_exits_with_its_own_status(self):
         root = self.base / 'repo'

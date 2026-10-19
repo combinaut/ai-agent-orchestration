@@ -574,6 +574,15 @@ def upgrade(path):
     if pattern:
         lines += ['', '[[legacy.rules]]'] + [f'{key} = {toml_value(value)}' for key, value in legacy_rule(pattern).items()]
     out = '\n'.join(lines) + '\n'
+    expected = parse(text, label)
+    for key in old:
+        del expected['legacy'][key]
+    if 'exempt_paths' in old:
+        expected['legacy']['exempt'] = exempt
+    if pattern:
+        expected['legacy']['rules'] = expected['legacy'].get('rules', []) + [legacy_rule(pattern)]
+    if parse(out, label) != expected:
+        raise ConfigError(f'{label}: legacy.extra_pattern or legacy.exempt_paths cannot be converted in place; edit it by hand')
     written = validate(parse(out, label), label, 'repo')
     Path(path).write_text(out)
     report = [f'converted {label}: ' + ', '.join(
