@@ -298,3 +298,13 @@ keep_previous_map() {
   contains "$output" 'cannot convert the removed legacy settings'
   [ "$(cat "$BIG_REPO/.orchestration.local.toml")" = "$(printf '%s\n' '[legacy]' 'exempt_paths = ["a.js"]' 'exempt = ["b.js"]')" ]
 }
+
+@test "install.sh also converts the personal file of a watched worktree's main checkout" {
+  fresh_install
+  git -C "$BIG_REPO" worktree add -q -b side "$TMP/side"
+  config_set ORCH_GIT_WATCH_REPOS "$TMP/side"
+  printf '%s\n' '[legacy]' 'exempt_paths = ["a.js"]' >"$BIG_REPO/.orchestration.local.toml"
+  install_ok
+  contains "$output" "converted $(cd "$BIG_REPO" && pwd -P)/.orchestration.local.toml: legacy.exempt_paths -> legacy.exempt"
+  [ "$(cat "$BIG_REPO/.orchestration.local.toml")" = "$(printf '%s\n' '[legacy]' 'exempt = ["a.js"]')" ]
+}

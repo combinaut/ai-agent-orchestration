@@ -116,6 +116,7 @@ class RulesTests(IsolatedTestCase):
             'legacy.rules[1] (A): exclude must be a list of non-empty strings': rule(kind='"A"', paths='["**"]', exclude='[1]'),
             'legacy.rules[1] (A): pattern must be a non-empty string': rule(kind='"A"', paths='["**"]', pattern='1'),
             'legacy.rules[1] (A): pattern is not a valid regex': rule(kind='"A"', paths='["**"]', pattern="'('"),
+            'legacy.rules[1] (A): pattern repeats a group that holds a repeat or an alternation': rule(kind='"A"', paths='["**"]', pattern="'(a+)+$'"),
             "legacy.rules[1] (A): paths: bad brace group in '{a'": rule(kind='"A"', paths='["{a"]'),
             "legacy.exempt: bad brace group in '{a'": '[legacy]\nexempt = ["{a"]\n' + rule(kind='"A"', paths='["**"]'),
         }
@@ -136,6 +137,13 @@ class RulesTests(IsolatedTestCase):
         self.assertEqual(legacy_rules.from_settings(
             {'ORCH_LEGACY_RULES': '[{"kind":"A","paths":["**"]}]', 'ORCH_LEGACY_EXEMPT': 'x y'}).classify('y', ''), None)
 
+    def test_patterns_that_backtrack_without_bound_are_rejected(self):
+        for pattern in ('(a+)+$', '(a|aa)*', '(a*)*', '(?:x+y?)+', '((a)+)+', '(?=(a+)+)b', '(a|ab)+?'):
+            with self.assertRaisesRegex(ValueError, 'catastrophic backtracking', msg=pattern):
+                legacy_rules.compile_pattern(pattern)
+        for pattern in ('a+b+', '(ab)+', '(a|b)*', '(ab)?c*', 'ajax:(success|error)', 'remote: *true', '(?:ab){2}'):
+            self.assertIsNotNone(legacy_rules.compile_pattern(pattern), pattern)
+
     def test_long_lines_are_searched_up_to_a_limit(self):
         parsed = rules(rule(kind='"A"', pattern="'needle'", paths='["**"]'))
         self.assertEqual(parsed.classify('a', 'x' * (legacy_rules.LINE_SEARCH_LIMIT - 6) + 'needle'), 'A')
@@ -154,7 +162,7 @@ class RulesTests(IsolatedTestCase):
         self.assertFalse(match('app/x.rb', 'app/xarb'))
         self.assertTrue(match('**/*.js', 'a.js'))
 
-    def test_map_without_rules_exits_with_its_own_status(self):
+    def test_map_skips_submodules_and_without_rules_exits_with_its_own_status(self):
         root = self.base / 'repo'
         root.mkdir()
         git = ['git', '-C', str(root), '-c', 'user.email=t@example.invalid', '-c', 'user.name=t']
@@ -162,6 +170,16 @@ class RulesTests(IsolatedTestCase):
         (root / 'a.js').write_text('$(x)\n')
         subprocess.run([*git, 'add', '-A'], check=True)
         subprocess.run([*git, 'commit', '-qm', 'seed'], check=True)
+        subprocess.run([*git, 'update-index', '--add', '--cacheinfo', f'160000,{"1" * 40},vendor/sub'], check=True)
+        (root / orch_settings.REPO_FILE).write_text(rule(kind='"ALL"', paths='["**"]'))
+        subprocess.run([*git, 'add', orch_settings.REPO_FILE], check=True)
+        subprocess.run([*git, 'commit', '-qm', 'rules and a submodule'], check=True)
+        env = {key: value for key, value in os.environ.items() if not key.startswith('ORCH_LEGACY_')}
+        mapped = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'HEAD'],
+                                capture_output=True, text=True, env=env)
+        self.assertEqual((mapped.returncode, mapped.stdout, mapped.stderr), (0, 'ALL\t.orchestration.toml\nALL\ta.js\n', ''))
+        subprocess.run([*git, 'rm', '-q', '--cached', 'vendor/sub', orch_settings.REPO_FILE], check=True)
+        subprocess.run([*git, 'commit', '-qm', 'no rules'], check=True)
         env = {key: value for key, value in os.environ.items() if not key.startswith('ORCH_LEGACY_')}
         result = subprocess.run([sys.executable, str(w.ROOT / 'legacy_rules.py'), 'map', str(root), 'HEAD'],
                                 capture_output=True, text=True, env=env)

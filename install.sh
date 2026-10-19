@@ -501,11 +501,17 @@ convert_old_config() {
   say "moved" "$OLD_CONFIG -> $backup"
 }
 
-# upgrade_repo_files: rewrites legacy.extra_pattern and legacy.exempt_paths as rules in the watched clones' personal files and the snippets.
+# upgrade_repo_files: rewrites legacy.extra_pattern and legacy.exempt_paths as rules in the personal files of the watched clones
+# (and of their main checkouts) and in the snippets.
 upgrade_repo_files() {
-  local clone file files=() line report
+  local clone common dir file files=() line report
   for clone in $(config_value ORCH_GIT_WATCH_REPOS); do
     [ ! -f "$clone/.orchestration.local.toml" ] || files+=("$clone/.orchestration.local.toml")
+    common=$(git -C "$clone" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || continue
+    dir=${common%/.git}
+    [ "$dir" != "$common" ] && [ -f "$dir/.orchestration.local.toml" ] || continue
+    [ "$(cd "$dir" && pwd -P)" != "$(cd "$clone" && pwd -P)" ] || continue
+    files+=("$dir/.orchestration.local.toml")
   done
   for file in "$SNIPPET_DIR"/*/*.toml; do
     [ ! -f "$file" ] || files+=("$file")

@@ -2,6 +2,8 @@
 import hashlib
 import json
 import re
+import re._constants as sre
+import re._parser as sre_parse
 import subprocess
 import sys
 import warnings
@@ -58,6 +60,29 @@ def globs(value, key, required=False):
         raise ValueError(f'{key}: {error}') from error
 
 
+def nested_repeat(items, repeated=False):
+    """True when a group repeated more than once holds a repeat or an alternation (catastrophic backtracking)."""
+    for op, arg in items:
+        if op in (sre.MAX_REPEAT, sre.MIN_REPEAT, sre.POSSESSIVE_REPEAT):
+            low, high, body = arg
+            many = high > 1
+            if repeated and many or nested_repeat(body, repeated or many):
+                return True
+        elif op is sre.BRANCH:
+            if repeated or any(nested_repeat(branch, repeated) for branch in arg[1]):
+                return True
+        elif op is sre.SUBPATTERN:
+            if nested_repeat(arg[3], repeated):
+                return True
+        elif op in (sre.ASSERT, sre.ASSERT_NOT):
+            if nested_repeat(arg[1], repeated):
+                return True
+        elif op is sre.ATOMIC_GROUP:
+            if nested_repeat(arg, repeated):
+                return True
+    return False
+
+
 def compile_pattern(pattern):
     if pattern is None:
         return None
@@ -66,9 +91,13 @@ def compile_pattern(pattern):
     try:
         with warnings.catch_warnings():
             warnings.simplefilter('error')
-            return re.compile(pattern)
+            compiled = re.compile(pattern)
+            parsed = sre_parse.parse(pattern)
     except (re.error, Warning, RecursionError, OverflowError) as error:
         raise ValueError(f'pattern is not a valid regex: {error}') from error
+    if nested_repeat(parsed.data):
+        raise ValueError('pattern repeats a group that holds a repeat or an alternation (catastrophic backtracking)')
+    return compiled
 
 
 class Rule:
@@ -145,8 +174,8 @@ def clone_rules(repo, ref):
 
 def map_rows(repo, ref, rules):
     """(kind, path) for every file on `ref` with a line a rule counts."""
-    paths = [path.decode() for path in git(repo, 'ls-tree', '-r', '-z', '--name-only', ref).split(b'\0') if path]
-    paths = [path for path in paths if rules.for_path(path)]
+    entries = [entry.decode().split('\t', 1) for entry in git(repo, 'ls-tree', '-r', '-z', ref).split(b'\0') if entry]
+    paths = [path for meta, path in entries if meta.split()[1] == 'blob' and rules.for_path(path)]
     rows = set()
     with subprocess.Popen(['git', '-C', repo, 'cat-file', '--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as batch:
         for path in paths:
