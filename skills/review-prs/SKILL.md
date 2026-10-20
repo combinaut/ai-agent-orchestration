@@ -9,7 +9,7 @@ argument-hint: "[watch] [--repo owner/name | --org ORG | --all] [--actionable] [
 
 # Review PRs
 
-Scripts: `~/.claude/skills/review-prs/scripts/` (`prs.py`, `dispatch.sh`, `watch-events.sh`). State: `~/.cache/review-prs/`.
+Scripts: `~/.claude/skills/review-prs/scripts/` (`prs.sh` runs `prs.py` on the orchestration's Python 3.11+; `dispatch.sh`; `watch-events.sh`). State: `~/.cache/review-prs/`.
 
 - **list** (default): open PRs that still request your review (`review-requested:@me`), bucketed by whether you can review now.
 - **watch**: the list once, then a background watcher that reports each change. It stays silent while nothing changes.
@@ -40,7 +40,7 @@ With no scope flag, the script uses the GitHub repo of the current directory, el
 ## List
 
 ```bash
-python3 ~/.claude/skills/review-prs/scripts/prs.py list [scope] [--actionable]
+~/.claude/skills/review-prs/scripts/prs.sh list [scope] [--actionable]
 ```
 
 It prints markdown tables. **The user cannot see tool output rendered**: copy the script's output into your reply **verbatim, as markdown**. Every table stays a table, and every PR stays its full bare `https://github.com/...` URL. Never answer "see above", never summarize the tables into prose or bullets, and never shorten a URL to `#1234`.
@@ -67,7 +67,7 @@ After the tables, add only what the buckets do not already say: months-old parke
 3. Start the watcher in the background, scope explicit, its output appended to a log in your scratchpad:
 
    ```bash
-   python3 ~/.claude/skills/review-prs/scripts/prs.py watch [scope] >>"<scratchpad>/pr-watch.log" 2>&1
+   ~/.claude/skills/review-prs/scripts/prs.sh watch [scope] >>"<scratchpad>/pr-watch.log" 2>&1
    ```
 
    Default interval 120s (`--interval` overrides). Follow it with one Monitor on `~/.claude/skills/review-prs/scripts/watch-events.sh "<scratchpad>/pr-watch.log"`: it prints only event lines, from line one on first attach and after the last line it read on a restart, so no event is skipped.
@@ -94,7 +94,7 @@ Requires `HERDR_ENV=1`. If not inside Herdr, say so and stop dispatch (list/watc
 ### Queue
 
 ```bash
-python3 ~/.claude/skills/review-prs/scripts/prs.py dispatch-queue [scope]
+~/.claude/skills/review-prs/scripts/prs.sh dispatch-queue [scope]
 ```
 
 JSON fields per item: `url`, `number`, `title`, `author`, `repo`, `sha`, `kind` (`review` | `re-review`), `agent` (`rev<number>-<sha7>-<repo hash>`, unique per repo and head), `cwd` (local clone or `null`), `model`.

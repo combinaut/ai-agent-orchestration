@@ -10,6 +10,7 @@ url=$1 num=$2 title=$3 author=$4 sha=$5 kind=$6 agent=$7 cwd=$8 repo=$9 dir=${10
 
 orch_load_config
 orch_load_repo_config "$cwd"
+py=$(orch_python) || exit 2
 model=${ORCH_CODEX_WORKER_MODEL:-}
 case "$model" in "" | "<"*">") orch_die "set models.codex_worker (ORCH_CODEX_WORKER_MODEL) in $(orch_config_path)" ;; esac
 
@@ -17,7 +18,7 @@ opened=""
 pane=${PANE:-}
 if [ -z "$pane" ]; then
   pane=$(herdr pane split --current --direction "$dir" --cwd "$cwd" --no-focus |
-    python3 -c 'import sys,json;print(json.load(sys.stdin)["result"]["pane"]["pane_id"])') || exit 1
+    "$py" -c 'import sys,json;print(json.load(sys.stdin)["result"]["pane"]["pane_id"])') || exit 1
   opened=1
 fi
 echo "PANE $pane AGENT $agent PR $url"
@@ -48,7 +49,7 @@ if herdr agent read "$agent" --source recent-unwrapped --lines 30 | grep -qi "up
   sleep 5
 fi
 mark() {
-  python3 "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane" --state "$1"
+  "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane" --state "$1"
 }
 mark pending
 
@@ -85,15 +86,18 @@ status=$?
 echo "PROMPT_EXIT $status"
 herdr agent read "$agent" --source recent-unwrapped --lines 80 | tail -25
 me=$(gh_bounded api user --jq .login)
-review=$(gh_bounded api --paginate "repos/$repo/pulls/$num/reviews" --jq ".[] | select(.user.login==\"$me\" and .commit_id==\"$sha\") | \"LASTREVIEW \(.state) \(.submitted_at) \(.html_url)\"" | tail -1)
+review=$(gh_bounded api --paginate "repos/$repo/pulls/$num/reviews" --jq ".[] | select(.user.login==\"$me\" and .commit_id==\"$sha\" and .submitted_at != null) | \"LASTREVIEW \(.state) \(.submitted_at) \(.html_url)\"" | tail -1)
 if [ -n "$review" ]; then
   echo "$review"
   mark "done"
   if [ "$status" -eq 0 ]; then close_opened; else echo "LEFT OPEN $pane"; fi
 else
   echo "INCOMPLETE no review of $sha"
-  if [ "$status" -ne 0 ] && ! herdr agent read "$agent" --source recent-unwrapped --lines 200 2>/dev/null | grep -qF "Head SHA: $sha"; then
-    python3 "$here/prs.py" release-dispatched --url "$url" --sha "$sha" && echo "RELEASED $sha"
+  # Released only when the agent is idle, readable, and never showed the prompt.
+  if [ "$status" -ne 0 ] && herdr agent wait "$agent" --until idle --timeout 5000 >/dev/null 2>&1 &&
+    transcript=$(herdr agent read "$agent" --source recent-unwrapped --lines 2000 2>/dev/null) &&
+    ! grep -qF "Head SHA: $sha" <<<"$transcript"; then
+    "$py" "$here/prs.py" release-dispatched --url "$url" --sha "$sha" && echo "RELEASED $sha"
   fi
   echo "LEFT OPEN $pane"
 fi

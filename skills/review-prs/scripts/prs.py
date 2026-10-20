@@ -448,6 +448,10 @@ def cmd_mark_dispatched(args, _scope, _label):
 
     def mark(data):
         prev = data.get(args.url) or {}
+        if args.state == "done" and prev.get("sha") not in (None, args.sha):
+            if (prev.get("previous") or {}).get("sha") == args.sha:
+                prev["previous"] = entry
+            return
         earlier = prev.get("previous") if prev.get("sha") == args.sha else dict(prev, previous=None)
         if args.state == "pending" and earlier and earlier.get("sha"):
             entry["previous"] = {k: v for k, v in earlier.items() if k != "previous"}

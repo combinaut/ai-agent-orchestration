@@ -13,7 +13,11 @@ printf '%s\n' "$*" >>"$TMP/review-herdr.calls"
 case "$1 $2" in
   'pane split') printf '%s\n' '{"result":{"pane":{"pane_id":"w9-p2"}}}' ;;
   'agent prompt') printf '%s' "$4" >"$TMP/review.prompt"; exit "${PROMPT_STATUS:-0}" ;;
-  'agent read') [ -z "${PROMPT_DELIVERED:-}" ] || printf 'Head SHA: abc123\n'; printf 'APPROVE — https://github.com/acme/app/pull/7\n' ;;
+  'agent read')
+    [ -z "${AGENT_READ_FAILS:-}" ] || exit 1
+    [ -z "${PROMPT_DELIVERED:-}" ] || printf 'Head SHA: abc123\n'
+    printf 'APPROVE — https://github.com/acme/app/pull/7\n' ;;
+  'agent wait') [ -z "${AGENT_BUSY:-}" ] || exit 1 ;;
 esac
 EOF
   cat >"$BIN/gh" <<'EOF'
@@ -113,13 +117,14 @@ dispatch() {
   [ ! -e "$TMP/closed/w9-p5" ]
 }
 
-@test "dispatch reports only reviews of the dispatched head" {
+@test "dispatch reports only submitted reviews of the dispatched head" {
   stub_review_tools
   : >"$TMP/none.toml"
   # shellcheck disable=SC2016 # The stub expands these.
   printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >>"$TMP/gh.calls"' >"$BIN/gh"
   dispatch
   grep -q 'commit_id=="abc123"' "$TMP/gh.calls"
+  grep -q 'submitted_at != null' "$TMP/gh.calls"
 }
 
 @test "queue entries never reach an unknown merge state and agent names differ per repo and head" {
@@ -220,4 +225,68 @@ print(prs.needs_dispatch(pr, data)[0], json.dumps(data.get(pr["url"], {}).get("s
   [ "$(readlink "$HOME/.agents/skills/coordinate")" = "$TMP/elsewhere/coordinate" ]
   printf '%s\n' "$output" | grep -q "^collision  *$HOME/.agents/skills/architect "
   printf '%s\n' "$output" | grep -q "^collision  *$HOME/.agents/skills/coordinate "
+}
+
+@test "a failed prompt keeps the head reserved while the agent is busy or unreadable" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PROMPT_STATUS=1 GH_NO_REVIEW=1 AGENT_BUSY=1 dispatch
+  not_contains "$output" 'RELEASED'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+  rm -rf "$HOME/.cache/review-prs"
+  PROMPT_STATUS=1 GH_NO_REVIEW=1 AGENT_READ_FAILS=1 dispatch
+  not_contains "$output" 'RELEASED'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "an older head finishing never replaces a newer head's mark" {
+  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
+  u=https://github.com/acme/app/pull/7
+  prs mark-dispatched --url "$u" --sha old --state pending
+  prs mark-dispatched --url "$u" --sha new --state pending
+  prs mark-dispatched --url "$u" --sha old --state "done"
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+e = json.load(open(sys.argv[1]))[sys.argv[2]]
+print(e["sha"], e["state"], e["previous"]["sha"], e["previous"]["state"])
+' "$HOME/.cache/review-prs/dispatched.json" "$u"
+  [ "$output" = 'new pending old done' ]
+  prs release-dispatched --url "$u" --sha new
+  run python3 -c 'import json, sys; e = json.load(open(sys.argv[1]))[sys.argv[2]]; print(e["sha"], e["state"])' "$HOME/.cache/review-prs/dispatched.json" "$u"
+  [ "$output" = 'old done' ]
+}
+
+@test "install leaves an agents skills folder that links into the clone alone" {
+  mkdir -p "$HOME/.agents"
+  ln -s "$HOME/.claude/ai-agent-orchestration/skills" "$HOME/.agents/skills"
+  fresh_install
+  [ -d "$CLONE/skills/review-prs" ] && [ ! -L "$CLONE/skills/review-prs" ]
+  [ -f "$CLONE/skills/review-prs/SKILL.md" ]
+  [ -z "$(git -C "$CLONE" status --porcelain)" ]
+}
+
+@test "prs.sh runs prs.py on the configured Python, not the first python3 on PATH" {
+  mkdir -p "$TMP/oldpy"
+  printf '%s\n' '#!/bin/sh' 'echo old python >&2; exit 3' >"$TMP/oldpy/python3"
+  chmod +x "$TMP/oldpy/python3"
+  : >"$TMP/none.toml"
+  run env PATH="$TMP/oldpy:$PATH" ORCH_PYTHON3="$(command -v python3)" ORCH_PYTHON_FALLBACKS= ORCH_CONFIG="$TMP/none.toml" \
+    bash "$ROOT/$SKILL_DIR/scripts/prs.sh" --help
+  [ "$status" -eq 0 ]
+  contains "$output" 'usage: prs.py'
+}
+
+@test "watch-events forwards change lines and the now: counts from line one" {
+  log="$TMP/pr-watch.log"
+  printf '%s\n' 'noise' 'ready: https://github.com/acme/app/pull/7 — t: CI green' 'now: 1 actionable, 1 total' >"$log"
+  set -m
+  bash "$ROOT/$SKILL_DIR/scripts/watch-events.sh" "$log" >"$TMP/events" &
+  pid=$!
+  set +m
+  for _ in $(seq 1 100); do [ "$(wc -l <"$TMP/events")" -ge 2 ] && break; sleep 0.05; done
+  kill -TERM -- "-$pid"
+  wait "$pid" 2>/dev/null || true
+  [ "$(cat "$TMP/events")" = "$(printf '%s\n' 'ready: https://github.com/acme/app/pull/7 — t: CI green' 'now: 1 actionable, 1 total')" ]
+  [ "$(cat "$log.pos")" = 3 ]
 }

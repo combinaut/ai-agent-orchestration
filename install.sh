@@ -375,7 +375,10 @@ link_shared_files() {
       [ -z "$real" ] || [ "$real" != "$claude_real" ] || owned=1
     fi
     link_entry "$ORCH_REPO/skills/$name" "$CLAUDE_DIR/skills/$name"
-    if [ -n "$owned" ]; then
+    if [ -n "$owned" ] && [ ! -L "$agents" ] && [ "$real" = "$ORCH_REPO/skills/$name" ]; then
+      say "already linked" "$agents (through a linked parent)"
+      n_ok=$((n_ok + 1))
+    elif [ -n "$owned" ]; then
       link_entry "$ORCH_REPO/skills/$name" "$agents"
     elif [ -L "$agents" ] || [ -e "$agents" ]; then
       say "collision" "$agents (another skill of the same name; left as it is)"
