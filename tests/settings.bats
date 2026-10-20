@@ -84,7 +84,7 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
   printf '%s\n' "$output" | grep -qxF "ORCH_FOCUS_PATTERN=local"
   printf '%s\n' "$output" | grep -qxF "ORCH_BIG_REPO=1"
   names=$(printf '%s\n' "$output" | sed 's/=.*//')
-  [ "$(printf '%s\n' "$names" | wc -l)" -eq 7 ]
+  [ "$(printf '%s\n' "$names" | wc -l)" -eq 8 ]
   for name in $names; do export "$name=env-$name"; done
 
   run load_settings "$TMP/repo/sub"
@@ -238,6 +238,7 @@ ENV
   [ "$status" -eq 0 ]
   [ "$output" = "ORCH_BIG_REPO=1
 ORCH_MERGE_GATE_CHECKS=Gate A|Gate B
+ORCH_REVIEW_FINALIZE_COMMANDS=
 ORCH_LEGACY_SCAN=1
 ORCH_LEGACY_RULES=[{\"kind\":\"LEGACY\",\"pattern\":\"old-widget\",\"paths\":[\"**\"]}]
 ORCH_LEGACY_EXEMPT=a.js b.js
