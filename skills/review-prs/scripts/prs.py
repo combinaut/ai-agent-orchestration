@@ -4,7 +4,8 @@
   prs.py list          [scope] [--actionable]     markdown tables + snapshot for watch
   prs.py watch         [scope] [--interval S]     one line per change, forever
   prs.py dispatch-queue [scope]                   JSON: Ready PRs needing (re)review
-  prs.py mark-dispatched --url U --sha S [--agent N] [--pane P]
+  prs.py mark-dispatched --url U --sha S [--state pending|done] [--agent N] [--pane P]
+  prs.py release-dispatched --url U --sha S       drops a pending mark of S, back to the mark before it
 
 Scope: --repo owner/name | --org ORG | --all. Default: cwd's GitHub repo, else watchers.pr_scope, else --all.
 """
@@ -231,13 +232,13 @@ def load_dispatched():
     return json.loads(DISPATCH_FILE.read_text())
 
 
-def update_dispatched(url, entry):
-    """Sets one entry under an exclusive lock and replaces the file atomically."""
+def update_dispatched(change):
+    """Applies change(data) under an exclusive lock and replaces the file atomically."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     with open(STATE_DIR / "dispatched.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         data = load_dispatched()
-        data[url] = entry
+        change(data)
         tmp = DISPATCH_FILE.with_suffix(f".{os.getpid()}.tmp")
         tmp.write_text(json.dumps(data, indent=1))
         os.replace(tmp, DISPATCH_FILE)
@@ -439,17 +440,42 @@ def cmd_mark_dispatched(args, _scope, _label):
         sys.exit("mark-dispatched needs --url and --sha")
     entry = {
         "sha": args.sha,
+        "state": args.state,
         "agent": args.agent,
         "pane": args.pane,
         "at": datetime.now(timezone.utc).isoformat(),
     }
-    update_dispatched(args.url, entry)
+
+    def mark(data):
+        prev = data.get(args.url) or {}
+        earlier = prev.get("previous") if prev.get("sha") == args.sha else dict(prev, previous=None)
+        if args.state == "pending" and earlier and earlier.get("sha"):
+            entry["previous"] = {k: v for k, v in earlier.items() if k != "previous"}
+        data[args.url] = entry
+
+    update_dispatched(mark)
     print(json.dumps(entry))
+
+
+def cmd_release_dispatched(args, _scope, _label):
+    if not args.url or not args.sha:
+        sys.exit("release-dispatched needs --url and --sha")
+
+    def release(data):
+        entry = data.get(args.url) or {}
+        if entry.get("sha") != args.sha or entry.get("state") != "pending":
+            return
+        if entry.get("previous"):
+            data[args.url] = entry["previous"]
+        else:
+            data.pop(args.url, None)
+
+    update_dispatched(release)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("mode", choices=["list", "watch", "dispatch-queue", "mark-dispatched"],
+    parser.add_argument("mode", choices=["list", "watch", "dispatch-queue", "mark-dispatched", "release-dispatched"],
                         nargs="?", default="list")
     parser.add_argument("--repo")
     parser.add_argument("--org")
@@ -459,6 +485,8 @@ def main():
     parser.add_argument("--interval", type=int, default=120, help="watch: seconds between checks")
     parser.add_argument("--url", help="mark-dispatched: PR URL")
     parser.add_argument("--sha", help="mark-dispatched: head SHA that was dispatched")
+    parser.add_argument("--state", choices=["pending", "done"], default="done",
+                        help="mark-dispatched: pending while the review runs, done once it is posted")
     parser.add_argument("--agent", help="mark-dispatched: herdr agent name")
     parser.add_argument("--pane", help="mark-dispatched: herdr pane id")
     args = parser.parse_args()
@@ -468,6 +496,7 @@ def main():
         "watch": cmd_watch,
         "dispatch-queue": cmd_dispatch_queue,
         "mark-dispatched": cmd_mark_dispatched,
+        "release-dispatched": cmd_release_dispatched,
     }[args.mode](args, scope, label)
 
 

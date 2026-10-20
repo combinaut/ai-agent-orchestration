@@ -13,14 +13,14 @@ printf '%s\n' "$*" >>"$TMP/review-herdr.calls"
 case "$1 $2" in
   'pane split') printf '%s\n' '{"result":{"pane":{"pane_id":"w9-p2"}}}' ;;
   'agent prompt') printf '%s' "$4" >"$TMP/review.prompt"; exit "${PROMPT_STATUS:-0}" ;;
-  'agent read') printf 'APPROVE — https://github.com/acme/app/pull/7\n' ;;
+  'agent read') [ -z "${PROMPT_DELIVERED:-}" ] || printf 'Head SHA: abc123\n'; printf 'APPROVE — https://github.com/acme/app/pull/7\n' ;;
 esac
 EOF
   cat >"$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   'api user --jq .login') echo reviewer ;;
-  *'/reviews'*) echo 'LASTREVIEW APPROVED 2026-01-01T00:00:00Z https://github.com/acme/app/pull/7#review' ;;
+  *'/reviews'*) [ -n "${GH_NO_REVIEW:-}" ] || echo 'LASTREVIEW APPROVED 2026-01-01T00:00:00Z https://github.com/acme/app/pull/7#review' ;;
 esac
 EOF
   chmod +x "$BIN/herdr-review" "$BIN/gh"
@@ -161,4 +161,63 @@ assert lines and lines[0].startswith("ready:"), lines
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
+}
+
+@test "dispatch leaves the pane open when the turn ends without a review of the head" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GH_NO_REVIEW=1 dispatch
+  [ "$status" -eq 0 ]
+  contains "$output" 'INCOMPLETE no review of abc123'
+  contains "$output" 'LEFT OPEN w9-p2'
+  [ ! -e "$TMP/closed/w9-p2" ]
+}
+
+# dispatch_state: prints whether the next dispatch-queue would dispatch PR 7 at abc123, and the stored entry.
+dispatch_state() {
+  # shellcheck disable=SC2016 # Python source.
+  python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+data = prs.load_dispatched()
+pr = {"url": "https://github.com/acme/app/pull/7", "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": "abc123",
+      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}}
+print(prs.needs_dispatch(pr, data)[0], json.dumps(data.get(pr["url"], {}).get("state")))
+' "$ROOT/$SKILL_DIR/scripts"
+}
+
+@test "an undelivered prompt releases the head for the next dispatch-queue" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PROMPT_STATUS=1 GH_NO_REVIEW=1 dispatch
+  contains "$output" 'RELEASED abc123'
+  [ "$(dispatch_state)" = 'True null' ]
+}
+
+@test "a delivered prompt that times out keeps the head reserved" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PROMPT_STATUS=1 PROMPT_DELIVERED=1 GH_NO_REVIEW=1 dispatch
+  not_contains "$output" 'RELEASED'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "a posted review marks the head done" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  dispatch
+  [ "$(dispatch_state)" = 'False "done"' ]
+}
+
+@test "install leaves unrelated skills in the agents folder alone" {
+  mkdir -p "$HOME/.agents/skills/architect" "$TMP/elsewhere/coordinate"
+  printf mine >"$HOME/.agents/skills/architect/SKILL.md"
+  ln -s "$TMP/elsewhere/coordinate" "$HOME/.agents/skills/coordinate"
+  fresh_install
+  [ ! -L "$HOME/.agents/skills/architect" ]
+  [ "$(cat "$HOME/.agents/skills/architect/SKILL.md")" = mine ]
+  [ "$(readlink "$HOME/.agents/skills/coordinate")" = "$TMP/elsewhere/coordinate" ]
+  printf '%s\n' "$output" | grep -q "^collision  *$HOME/.agents/skills/architect "
+  printf '%s\n' "$output" | grep -q "^collision  *$HOME/.agents/skills/coordinate "
 }

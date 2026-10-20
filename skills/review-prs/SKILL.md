@@ -101,7 +101,7 @@ JSON fields per item: `url`, `number`, `title`, `author`, `repo`, `sha`, `kind` 
 
 `cwd` comes from the clones of the open work, the current directory, or `~/Projects/<owner>/<name>`. Skip entries with `cwd: null` and tell the user no local clone was found.
 
-Skip entries already marked for the same `sha` (script does this). Concurrency: **up to 3 Codex reviews at once**. Queue the rest; when any in-flight review finishes, start the next queued item until 3 are running again (or the queue is empty).
+Skip entries already marked for the same `sha`, pending or done (script does this). Concurrency: **up to 3 Codex reviews at once**. Queue the rest; when any in-flight review finishes, start the next queued item until 3 are running again (or the queue is empty).
 
 ### Launch one review
 
@@ -111,9 +111,9 @@ Run one dispatch per queue item in the background:
 ~/.claude/skills/review-prs/scripts/dispatch.sh "<url>" <number> "<title>" "<author>" <sha> <kind> <agent> "<cwd>" <owner/repo> [right|down]
 ```
 
-It splits a sibling pane in the current tab without taking focus (`down` when the pane is already narrow; `PANE=<id>` reuses an empty pane instead), starts Codex on `$ORCH_CODEX_WORKER_MODEL`, marks the PR dispatched for that SHA, sends the review prompt and waits for the turn to end. The prompt tells Codex to post the review, reply `APPROVE|COMMENT|CHANGES_REQUESTED — <url>` and end its turn: no polling, no waiting for CI or replies.
+It splits a sibling pane in the current tab without taking focus (`down` when the pane is already narrow; `PANE=<id>` reuses an empty pane instead), starts Codex on `$ORCH_CODEX_WORKER_MODEL`, marks that SHA `pending`, sends the review prompt and waits for the turn to end. The prompt tells Codex to post the review, reply `APPROVE|COMMENT|CHANGES_REQUESTED — <url>` and end its turn: no polling, no waiting for CI or replies.
 
-Output lines: `PANE <id> AGENT <name> PR <url>` at start; `PROMPT_EXIT <n>`, the agent's last lines and `LASTREVIEW <state> <time> <url>` at the end; then `CLOSED <pane>` (a pane it opened, prompt finished) or `LEFT OPEN <pane>` (prompt failed, a pane passed in as `PANE`, or the close failed); `DONE`. `LASTREVIEW` counts only your reviews of the dispatched SHA.
+Output lines: `PANE <id> AGENT <name> PR <url>` at start; `PROMPT_EXIT <n>` and the agent's last lines at the end. Then either `LASTREVIEW <state> <time> <url>` (your review of the dispatched SHA exists; the SHA is marked `done`), or `INCOMPLETE no review of <sha>` (the SHA stays `pending`; when the prompt failed and the agent never showed it, `RELEASED <sha>` drops the mark so the next `dispatch-queue` retries it). Then `CLOSED <pane>` (a pane it opened, review posted, prompt finished) or `LEFT OPEN <pane>`; `DONE`. gh calls stop after 45 seconds.
 
 Tell the user which pane/agent is reviewing which PR (full URL). When the review finishes you **must** announce the outcome — silence after dispatch is not enough.
 
@@ -127,7 +127,7 @@ Report in one short line with the full bare PR URL:
 
 Take it from the agent's one-liner, else from `LASTREVIEW`. If still unclear, say **Review finished (outcome unclear)** with the PR URL and a one-sentence note from the agent's lines — do not invent an approval.
 
-Close review panes only with `~/.claude/coordinator/watchers/close-pane.sh <pane_id>`: it marks the pane closed on purpose, so the workers watcher reports it as closed, not dead. `dispatch.sh` does this itself for a pane it opened once the prompt finished. For `LEFT OPEN` (timeout, `blocked`, or a pane passed in as `PANE`), report first and close only when it is done or the user says to abandon it. Never close panes you did not create for this dispatch.
+Close review panes only with `~/.claude/coordinator/watchers/close-pane.sh <pane_id>`: it marks the pane closed on purpose, so the workers watcher reports it as closed, not dead. `dispatch.sh` does this itself for a pane it opened once the review is posted and the prompt finished. For `LEFT OPEN` (no review yet, timeout, `blocked`, or a pane passed in as `PANE`), report first and close only when it is done or the user says to abandon it. Never close panes you did not create for this dispatch.
 
 ### Re-review
 

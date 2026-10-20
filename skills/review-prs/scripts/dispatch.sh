@@ -22,6 +22,11 @@ if [ -z "$pane" ]; then
 fi
 echo "PANE $pane AGENT $agent PR $url"
 
+# gh_bounded <args>: gh, killed after 45 seconds.
+gh_bounded() {
+  perl -e 'alarm shift; exec @ARGV' 45 gh "$@"
+}
+
 close_opened() {
   if [ -n "$opened" ] && "$orch/coordinator/watchers/close-pane.sh" "$pane"; then
     echo "CLOSED $pane"
@@ -42,7 +47,10 @@ if herdr agent read "$agent" --source recent-unwrapped --lines 30 | grep -qi "up
   herdr agent send-keys "$agent" enter
   sleep 5
 fi
-python3 "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane"
+mark() {
+  python3 "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane" --state "$1"
+}
+mark pending
 
 repo_rules=""
 [ "${ORCH_BIG_REPO:-0}" != 1 ] || repo_rules="$repo_rules
@@ -76,11 +84,17 @@ herdr agent prompt "$agent" "$prompt" --wait --timeout 1800000
 status=$?
 echo "PROMPT_EXIT $status"
 herdr agent read "$agent" --source recent-unwrapped --lines 80 | tail -25
-me=$(gh api user --jq .login)
-gh api --paginate "repos/$repo/pulls/$num/reviews" --jq ".[] | select(.user.login==\"$me\" and .commit_id==\"$sha\") | \"LASTREVIEW \(.state) \(.submitted_at) \(.html_url)\"" | tail -1
-if [ "$status" -eq 0 ]; then
-  close_opened
+me=$(gh_bounded api user --jq .login)
+review=$(gh_bounded api --paginate "repos/$repo/pulls/$num/reviews" --jq ".[] | select(.user.login==\"$me\" and .commit_id==\"$sha\") | \"LASTREVIEW \(.state) \(.submitted_at) \(.html_url)\"" | tail -1)
+if [ -n "$review" ]; then
+  echo "$review"
+  mark "done"
+  if [ "$status" -eq 0 ]; then close_opened; else echo "LEFT OPEN $pane"; fi
 else
+  echo "INCOMPLETE no review of $sha"
+  if [ "$status" -ne 0 ] && ! herdr agent read "$agent" --source recent-unwrapped --lines 200 2>/dev/null | grep -qF "Head SHA: $sha"; then
+    python3 "$here/prs.py" release-dispatched --url "$url" --sha "$sha" && echo "RELEASED $sha"
+  fi
   echo "LEFT OPEN $pane"
 fi
 echo "DONE $agent $pane"

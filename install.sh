@@ -355,7 +355,7 @@ write_manifest() {
 }
 
 link_shared_files() {
-  local d f name backup
+  local d f name backup agents owned real claude_real
   for d in heavy-slots context-usage; do
     if [ ! -d "$CLAUDE_DIR/$d" ]; then
       mkdir -p "$CLAUDE_DIR/$d"
@@ -365,10 +365,20 @@ link_shared_files() {
   for d in "$ORCH_REPO"/skills/*/; do
     [ -d "$d" ] || continue
     name=$(basename "$d")
+    # The shared agents folder entry is ours when it resolves into the clone or is what ~/.claude/skills/<name> links to.
+    agents="$HOME/.agents/skills/$name"
+    owned=""
+    if [ -L "$agents" ] || [ -e "$agents" ]; then
+      real=$(cd "$agents" 2>/dev/null && pwd -P) || real=""
+      claude_real=$(cd "$CLAUDE_DIR/skills/$name" 2>/dev/null && pwd -P) || claude_real=""
+      case "$real/" in "$ORCH_REPO/"*) owned=1 ;; esac
+      [ -z "$real" ] || [ "$real" != "$claude_real" ] || owned=1
+    fi
     link_entry "$ORCH_REPO/skills/$name" "$CLAUDE_DIR/skills/$name"
-    # A copy of the skill in the shared agents folder is replaced by the same link.
-    if [ -L "$HOME/.agents/skills/$name" ] || [ -e "$HOME/.agents/skills/$name" ]; then
-      link_entry "$ORCH_REPO/skills/$name" "$HOME/.agents/skills/$name"
+    if [ -n "$owned" ]; then
+      link_entry "$ORCH_REPO/skills/$name" "$agents"
+    elif [ -L "$agents" ] || [ -e "$agents" ]; then
+      say "collision" "$agents (another skill of the same name; left as it is)"
     fi
     f="$CLAUDE_DIR/commands/$name.md"
     if [ -L "$f" ] || [ -e "$f" ]; then
