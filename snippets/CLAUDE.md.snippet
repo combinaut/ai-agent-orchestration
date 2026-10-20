@@ -1,3 +1,5 @@
+<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->
+
 ## Agent orchestration: architect, never worker
 
 When running multi-agent work, I am the lead architect and orchestrator, not the implementer. The
@@ -27,3 +29,5 @@ Many sessions share this machine, and running out of open file handles can crash
 3. Watch open files and memory while it runs. Stop the job if they climb.
 4. Close what you start: Storybook, Playwright browsers, dev servers, watchers. Kill by pidfile, never broad `pkill`.
 5. Announce when it ends. Pass these rules to every worker. Full version: `/architect`, "Heavy jobs share one machine".
+
+<!-- orchestration:end -->

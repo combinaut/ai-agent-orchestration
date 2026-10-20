@@ -11,6 +11,54 @@ load test_helper
   [ -d "$HOME/.claude/coordinator/watchers/bindings" ]
 }
 
+@test "CLAUDE.md marked orchestration block is replaced without changing surrounding text" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  end='<!-- orchestration:end -->'
+  printf 'before\n%s\nold managed text\n%s\nafter\n' "$start" "$end" >"$claude_md"
+  chmod 640 "$claude_md"
+  install_ok
+  contains "$output" 'updated'
+  [ "$(head -n 1 "$claude_md")" = before ]
+  [ "$(tail -n 1 "$claude_md")" = after ]
+  cmp "$CLONE/snippets/CLAUDE.md.snippet" <(sed -n "/$start/,/$end/p" "$claude_md")
+  [ "$(stat -f '%Lp' "$claude_md" 2>/dev/null || stat -c '%a' "$claude_md")" = 640 ]
+  for backup in "$HOME"/.claude/backups/*/CLAUDE.md; do [ -f "$backup" ]; done
+  [ "$(cat "$backup")" = "$(printf 'before\n%s\nold managed text\n%s\nafter' "$start" "$end")" ]
+}
+
+@test "CLAUDE.md marked orchestration block is a no-op when current" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  before=$(cksum "$claude_md")
+  backups_before=$(find "$HOME/.claude/backups" -type f 2>/dev/null | wc -l | tr -d ' ')
+  install_ok
+  contains "$output" 'already set'
+  [ "$(cksum "$claude_md")" = "$before" ]
+  [ "$(find "$HOME/.claude/backups" -type f 2>/dev/null | wc -l | tr -d ' ')" = "$backups_before" ]
+}
+
+@test "CLAUDE.md is appended with marked orchestration block when absent" {
+  fresh_install
+  rm "$HOME/.claude/CLAUDE.md"
+  install_ok
+  contains "$output" 'added'
+  cmp "$CLONE/snippets/CLAUDE.md.snippet" "$HOME/.claude/CLAUDE.md"
+}
+
+@test "unmarked CLAUDE.md orchestration sections are left unchanged with a marker hint" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  printf 'personal instructions\n\n## Agent orchestration: architect, never worker\nold text\n' >"$claude_md"
+  before=$(cksum "$claude_md")
+  install_ok
+  contains "$output" 'wrap once'
+  contains "$output" 'orchestration:start'
+  contains "$output" 'orchestration:end'
+  [ "$(cksum "$claude_md")" = "$before" ]
+}
+
 @test "documented context watcher command emits a JSON recycle alert" {
   fresh_install
   mkdir -p "$HOME/.claude/context-usage"

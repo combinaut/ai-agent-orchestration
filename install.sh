@@ -956,10 +956,47 @@ guide_chrome_load() {
 }
 
 claude_md_hint() {
-  if grep -q "Agent orchestration: architect, never worker" "$CLAUDE_DIR/CLAUDE.md" 2>/dev/null; then
-    say "already set" "$CLAUDE_DIR/CLAUDE.md: orchestration sections"
+  local claude_md="$CLAUDE_DIR/CLAUDE.md" snippet="$ORCH_REPO/snippets/CLAUDE.md.snippet"
+  local start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  local end='<!-- orchestration:end -->'
+  local start_line end_line tmp backup mode=""
+
+  if [ -f "$claude_md" ] && grep -F -q "$start" "$claude_md" && grep -F -q "$end" "$claude_md"; then
+    start_line=$(LC_ALL=C grep -n -F "$start" "$claude_md" | sed -n '1s/:.*//p')
+    end_line=$(LC_ALL=C awk -v start="$start" -v end="$end" '$0 == start { found = 1; next } found && $0 == end { print NR; exit }' "$claude_md")
+    [ -n "$end_line" ] || die "$claude_md has an orchestration start marker without its end marker"
+    if sed -n "${start_line},${end_line}p" "$claude_md" | cmp -s - "$snippet"; then
+      say "already set" "$claude_md: orchestration sections"
+      return
+    fi
+
+    backup=$(backup_name "$claude_md")
+    cp -p "$claude_md" "$backup"
+    say "backed up" "$claude_md -> $backup"
+    n_backup=$((n_backup + 1))
+    mode=$(stat -f '%Lp' "$claude_md" 2>/dev/null || stat -c '%a' "$claude_md")
+    tmp=$(mktemp "$claude_md.tmp.XXXXXX")
+    head -n "$((start_line - 1))" "$claude_md" >"$tmp"
+    cat "$snippet" >>"$tmp"
+    tail -n "+$((end_line + 1))" "$claude_md" >>"$tmp"
+    chmod "$mode" "$tmp"
+    mv "$tmp" "$claude_md"
+    say "updated" "$claude_md: orchestration sections"
+  elif [ -f "$claude_md" ] && grep -F -q "Agent orchestration: architect, never worker" "$claude_md"; then
+    say "wrap once" "$claude_md: surround the existing orchestration text with $start and $end"
   else
-    say "paste" "$ORCH_REPO/snippets/CLAUDE.md.snippet into $CLAUDE_DIR/CLAUDE.md"
+    tmp=$(mktemp "$claude_md.tmp.XXXXXX")
+    if [ -f "$claude_md" ]; then
+      cat "$claude_md" >"$tmp"
+      if [ -s "$claude_md" ] && [ "$(tail -c 1 "$claude_md" | wc -l | tr -d ' ')" = 0 ]; then
+        printf '\n' >>"$tmp"
+      fi
+      mode=$(stat -f '%Lp' "$claude_md" 2>/dev/null || stat -c '%a' "$claude_md")
+    fi
+    cat "$snippet" >>"$tmp"
+    [ -z "$mode" ] || chmod "$mode" "$tmp"
+    mv "$tmp" "$claude_md"
+    say "added" "$claude_md: orchestration sections"
   fi
 }
 
