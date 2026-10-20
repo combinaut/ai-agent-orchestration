@@ -9,7 +9,8 @@ start=$(($(cat "$pos" 2>/dev/null || echo 0) + 1))
 n=$((start - 1))
 tail -n +"$start" -F "$log" | while IFS= read -r line; do
   n=$((n + 1))
+  if [[ $line =~ $events ]]; then
+    printf '%s\n' "$line" || exit 1
+  fi
   echo "$n" >"$pos"
-  [[ $line =~ $events ]] || continue
-  printf '%s\n' "$line"
 done

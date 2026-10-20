@@ -24,7 +24,9 @@ EOF
 #!/usr/bin/env bash
 case "$*" in
   'api user --jq .login') echo reviewer ;;
-  *'/reviews'*) [ -n "${GH_NO_REVIEW:-}" ] || echo 'LASTREVIEW APPROVED 2026-01-01T00:00:00Z https://github.com/acme/app/pull/7#review' ;;
+  *'/reviews'*)
+    [ -n "${GH_NO_REVIEW:-}" ] || echo 'LASTREVIEW APPROVED 2026-01-01T00:00:00Z https://github.com/acme/app/pull/7#review'
+    [ -z "${GH_REVIEWS_FAIL:-}" ] || exit 1 ;;
 esac
 EOF
   chmod +x "$BIN/herdr-review" "$BIN/gh"
@@ -454,4 +456,43 @@ print(prs.status(pr))
   echo "$output"
   [ "$status" -eq 0 ]
   contains "$output" '0+ threads'
+}
+
+@test "a review lookup that fails part way leaves the head pending and the pane open" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GH_REVIEWS_FAIL=1 dispatch
+  contains "$output" 'VERIFY FAILED'
+  contains "$output" 'LEFT OPEN w9-p2'
+  [ ! -e "$TMP/closed/w9-p2" ]
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "a merge state that turns unknown is a change" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+pr = dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s")
+url = "https://github.com/acme/app/pull/7"
+lines = prs.changes({url: dict(pr, conflict=False)}, {url: dict(pr, conflict=None)})[0]
+assert lines and lines[0].startswith("changed:") and "merge state unknown" in lines[0], lines
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "watch-events keeps an event it could not print for the next start" {
+  log="$TMP/pr-watch.log"
+  printf '%s\n' 'noise' 'new: https://github.com/acme/app/pull/7 — t by a (ready)' >"$log"
+  set -m
+  bash "$ROOT/$SKILL_DIR/scripts/watch-events.sh" "$log" >&- 2>/dev/null &
+  pid=$!
+  set +m
+  for _ in $(seq 1 100); do [ -s "$log.pos" ] && break; sleep 0.05; done
+  sleep 0.3
+  kill -TERM -- "-$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  [ "$(cat "$log.pos")" = 1 ]
 }

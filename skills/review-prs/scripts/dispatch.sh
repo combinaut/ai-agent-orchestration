@@ -120,8 +120,14 @@ herdr agent prompt "$agent" "$prompt" --wait --timeout 1800000
 status=$?
 echo "PROMPT_EXIT $status"
 herdr agent read "$agent" --source recent-unwrapped --lines 80 | tail -25
-me=$(gh_bounded api user --jq .login)
-review=$(gh_bounded api --paginate "repos/$repo/pulls/$num/reviews" --jq ".[] | select(.user.login==\"$me\" and .commit_id==\"$sha\" and .submitted_at != null) | \"LASTREVIEW \(.state) \(.submitted_at) \(.html_url)\"" | tail -1)
+if ! me=$(gh_bounded api user --jq .login) ||
+  ! reviews=$(gh_bounded api --paginate "repos/$repo/pulls/$num/reviews" --jq ".[] | select(.user.login==\"$me\" and .commit_id==\"$sha\" and .submitted_at != null) | \"LASTREVIEW \(.state) \(.submitted_at) \(.html_url)\""); then
+  echo "VERIFY FAILED could not read the reviews of $url"
+  echo "LEFT OPEN $pane"
+  echo "DONE $agent $pane"
+  exit 0
+fi
+review=$(printf '%s\n' "$reviews" | tail -1)
 if [ -n "$review" ]; then
   echo "$review"
   mark "done"

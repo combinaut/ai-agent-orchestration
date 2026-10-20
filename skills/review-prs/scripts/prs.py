@@ -356,6 +356,8 @@ def changes(before, after):
             parts.append("conflicts cleared")
         elif was["conflict"] is None and now["conflict"] is False:
             parts.append("merge state known")
+        elif was["conflict"] is not None and now["conflict"] is None:
+            parts.append("merge state unknown")
         if parts:
             became_ready = (
                 not now["draft"] and now["conflict"] is False
