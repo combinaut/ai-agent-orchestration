@@ -28,6 +28,40 @@ load test_helper
   [ "$(cat "$backup")" = "$(printf 'before\n%s\nold managed text\n%s\nafter' "$start" "$end")" ]
 }
 
+@test "CLAUDE.md replacement ignores inline marker text outside the managed block" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  end='<!-- orchestration:end -->'
+  printf 'quoted marker: %s\npersonal instructions\n%s\nold managed text\n%s\nafter\n' "$start" "$start" "$end" >"$claude_md"
+  install_ok
+  contains "$output" 'updated'
+  [ "$(head -n 2 "$claude_md")" = "$(printf 'quoted marker: %s\npersonal instructions' "$start")" ]
+  [ "$(tail -n 1 "$claude_md")" = after ]
+}
+
+@test "CLAUDE.md replacement uses a clean GNU stat mode fallback" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  end='<!-- orchestration:end -->'
+  printf 'personal instructions\n%s\nold managed text\n%s\n' "$start" "$end" >"$claude_md"
+  cat >"$BIN/stat" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = -f ]; then
+  printf 'unexpected filesystem output\n'
+  exit 1
+fi
+[ "$1" = -c ] && { printf '640\n'; exit 0; }
+exit 1
+EOF
+  chmod +x "$BIN/stat"
+  install_ok
+  contains "$output" 'updated'
+  mode=$(stat -f '%Lp' "$claude_md" 2>/dev/null) || mode=$(stat -c '%a' "$claude_md")
+  [ "$mode" = 640 ]
+}
+
 @test "CLAUDE.md marked orchestration block is a no-op when current" {
   fresh_install
   claude_md="$HOME/.claude/CLAUDE.md"
