@@ -9,6 +9,10 @@ big_repo = false
 # Check names that only run on a full CI run; an approved PR on a non-default base reports "full CI ran" or "full CI not run"
 merge_gate_checks = []
 
+[review]
+# Slash commands workers run before calling a PR done or ready; empty skips this step
+finalize_commands = []
+
 [legacy]
 # Open PRs of this repo are scanned for added lines that legacy.rules count (LEGACY line)
 scan = false

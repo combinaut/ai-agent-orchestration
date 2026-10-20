@@ -177,6 +177,14 @@ class RepoFileTest(SettingsTest):
                                                 for setting in s.scoped('repo')})
         self.assertEqual(s.load_repo(self.base, {})['ORCH_BIG_REPO'], '0')
 
+    def test_finalize_commands_read_from_toml_and_environment_with_an_empty_default(self):
+        root = self.repo()
+        self.assertEqual(s.load_repo(root, {})['ORCH_REVIEW_FINALIZE_COMMANDS'], '')
+        (root / s.REPO_FILE).write_text('[review]\nfinalize_commands = ["/finalize-change-footprint"]\n')
+        self.assertEqual(s.load_repo(root, {})['ORCH_REVIEW_FINALIZE_COMMANDS'], '/finalize-change-footprint')
+        self.assertEqual(s.load_repo(root, {'ORCH_REVIEW_FINALIZE_COMMANDS': '/finalize-code-comments'})
+                         ['ORCH_REVIEW_FINALIZE_COMMANDS'], '/finalize-code-comments')
+
     def test_the_repo_file_is_found_from_a_subdirectory(self):
         root = self.repo()
         (root / s.REPO_FILE).write_text('[guard]\nbig_repo = true\n[legacy]\nexempt = ["a", "b"]\n')

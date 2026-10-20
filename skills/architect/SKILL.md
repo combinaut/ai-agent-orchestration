@@ -180,6 +180,7 @@ No code starts until the Coordinator answers `LEGACY OK`. Other projects skip th
 - A pure refactor edits **no spec**, and the test count matches before and after.
 - **"Done" means the checks were actually run** — not that the file looks right. For anything deployable, the acceptance test is a real request against a real dependency.
 - For repos whose repo settings turn `legacy.scan` on, run `legacy-scan.sh` on your own diff before review.
+- When the repo sets `review.finalize_commands`, tell the worker to run each command on its branch before calling the PR done or ready, send you each findings table and wait, then apply only the approved findings.
 - Respect the repo's own rules on attribution, commit signing and language choice.
 - **Never change shared config to get past a block** — the repo's `.git/config`, global gitconfig, `CLAUDE.md`, settings, credentials. A blocked worker stops and reports `BLOCKED: …`.
 
@@ -229,6 +230,7 @@ Before you report a task complete, every line must hold:
    reference and proves each is handled. Grep the whole repo, including the languages the test suite
    does not cover (CoffeeScript, ERB, YAML, client overrides). A dangling reference is invisible to a
    green suite: nothing tests the path nobody thought about.
+9. **The repo's finalize commands ran on the current head and their approved findings are applied.**
 
 When something fails the gate, it goes back to the pane that owns the branch. You do not fix it.
 

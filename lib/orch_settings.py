@@ -95,6 +95,7 @@ SETTINGS = [
     _g('pr_tabs.open_all', 'ORCH_PR_TABS_OPEN_ALL', 'str', '', 'GitHub search behind the Open all button; empty turns it off'),
     _r('guard.big_repo', 'ORCH_BIG_REPO', 'bool', False, 'Broad Git reads (git grep, cat-file over all objects) are blocked in this repo'),
     _r('audit.merge_gate_checks', 'ORCH_MERGE_GATE_CHECKS', 'list', [], 'Check names that only run on a full CI run; an approved PR on a non-default base reports "full CI ran" or "full CI not run"', sep='|'),
+    _r('review.finalize_commands', 'ORCH_REVIEW_FINALIZE_COMMANDS', 'list', [], 'Slash commands workers run before calling a PR done or ready; empty skips this step'),
     _r('legacy.scan', 'ORCH_LEGACY_SCAN', 'bool', False, 'Open PRs of this repo are scanned for added lines that legacy.rules count (LEGACY line)'),
     _r('legacy.rules', 'ORCH_LEGACY_RULES', 'tables', [], 'Legacy rules ([[legacy.rules]]: kind, paths, optional pattern and exclude); the first rule that counts a line names its kind. No rules: nothing is scanned or mapped'),
     _r('legacy.exempt', 'ORCH_LEGACY_EXEMPT', 'list', [], 'Path globs no legacy rule counts'),
