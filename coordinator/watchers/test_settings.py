@@ -180,8 +180,9 @@ class RepoFileTest(SettingsTest):
     def test_finalize_commands_read_from_toml_and_environment_with_an_empty_default(self):
         root = self.repo()
         self.assertEqual(s.load_repo(root, {})['ORCH_REVIEW_FINALIZE_COMMANDS'], '')
-        (root / s.REPO_FILE).write_text('[review]\nfinalize_commands = ["/finalize-change-footprint"]\n')
-        self.assertEqual(s.load_repo(root, {})['ORCH_REVIEW_FINALIZE_COMMANDS'], '/finalize-change-footprint')
+        (root / s.REPO_FILE).write_text('[review]\nfinalize_commands = ["/finalize-change-footprint", "/finalize-code-comments --fix"]\n')
+        self.assertEqual(s.load_repo(root, {})['ORCH_REVIEW_FINALIZE_COMMANDS'],
+                         '/finalize-change-footprint|/finalize-code-comments --fix')
         self.assertEqual(s.load_repo(root, {'ORCH_REVIEW_FINALIZE_COMMANDS': '/finalize-code-comments'})
                          ['ORCH_REVIEW_FINALIZE_COMMANDS'], '/finalize-code-comments')
 
