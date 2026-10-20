@@ -114,6 +114,10 @@ def merge(directory, output, state_path, now=None):
         return {"now": visible, "unreadable": unreadable, "read": sorted(read), "scanned": str(directory) not in unreadable}
 
 
+AGE_PREFIX = re.compile(r"\[(now|\d+[mhd])\] (.*)")
+AGE_SUFFIX = re.compile(r" \[(now|\d+[mhd])\]$")
+
+
 def age(seconds):
     if seconds < 60:
         return "now"
@@ -131,7 +135,7 @@ def render(output, current):
     lines = []
     for source, items in groups.items():
         lines += ["", f"## {source}"]
-        lines += ["- " + (item["display"] if "display" in item else f"{item['text']} [{age(item['age'])}]")
+        lines += ["- " + (item["display"] if "display" in item else f"[{age(item['age'])}] {item['text']}")
                   for item in items]
     atomic_write(output, ("\n".join(lines) if lines else "Nothing waits on you.") + "\n")
 
@@ -235,10 +239,12 @@ def rendered_items(output, state_path=None):
         if line.startswith("## "):
             source = line[3:]
         elif source and line.startswith("- "):
-            display = line[2:]
-            text, marker, age = display.rpartition(" [")
-            if not marker or not age.endswith("]"):
-                text = display
+            text, tag = line[2:], None
+            if match := AGE_PREFIX.match(text):
+                tag, text = match.groups()
+            elif match := AGE_SUFFIX.search(text):
+                text, tag = text[:match.start()], match.group(1)
+            display = f"[{tag}] {text}" if tag else text
             items.append({"source": source, "text": text, "display": display,
                           "id": source + "\0" + text})
     dismissed = dismissed_ids(state_path) if state_path else set()

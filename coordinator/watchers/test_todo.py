@@ -249,10 +249,30 @@ class TodoTest(IsolatedTestCase):
             return type("Result", (), {"stdout": json.dumps(rows), "returncode": 0 if argv[-1] == "list" else 1})()
         self.assertEqual(todo.jump({"text": "Go -> Coordinator"}, run=focus_failed), "focus failed: coord")
 
+    def test_rendered_url_item_ends_with_the_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "todo.md"
+            todo.render(output, [{"source": "A.md", "text": "Merge -> https://example.test/pull/1", "age": 57600, "id": "x"}])
+            self.assertEqual(output.read_text(), "\n## A.md\n- [16h] Merge -> https://example.test/pull/1\n")
+
+    def test_rendered_items_round_trip_and_read_the_legacy_age_suffix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "todo.md"
+            item = {"source": "A.md", "text": "Merge -> https://example.test/pull/1", "age": 120, "id": "x"}
+            todo.render(output, [item])
+            [read] = todo.rendered_items(output)
+            self.assertEqual(read["text"], item["text"])
+            self.assertEqual(read["display"], "[2m] " + item["text"])
+            output.write_text("## A.md\n- Merge -> https://example.test/pull/1 [2m]\n- Plain [text]\n")
+            legacy, plain = todo.rendered_items(output)
+            self.assertEqual(legacy["text"], item["text"])
+            self.assertEqual(legacy["display"], "[2m] " + item["text"])
+            self.assertEqual(plain["text"], "Plain [text]")
+
     def test_follow_reads_rendered_list_once_per_key_and_exits_on_eof(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "todo.md"
-            output.write_text("## Architect.md\n- Open -> Coordinator [now]\n")
+            output.write_text("## Architect.md\n- [now] Open -> Coordinator\n")
             args = type("Args", (), {"output": output, "pane": None})()
             keys = iter([b"1", b"\n", b""])
             jumped, reports = [], []
@@ -309,7 +329,7 @@ class TodoTest(IsolatedTestCase):
     def follow_paged(self, keys, lines=6):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "todo.md"
-            output.write_text("## Architect.md\n" + "".join(f"- task{n} -> Coordinator [now]\n" for n in range(1, 7)))
+            output.write_text("## Architect.md\n" + "".join(f"- [now] task{n} -> Coordinator\n" for n in range(1, 7)))
             args = type("Args", (), {"output": output, "pane": None})()
             keys, jumped, screen = iter(keys), [], io.StringIO()
             with redirect_stdout(screen), patch.object(todo.os, "get_terminal_size", return_value=os.terminal_size((80, lines))), \
@@ -353,7 +373,7 @@ class TodoTest(IsolatedTestCase):
     def test_follow_footer_stays_on_one_row_with_the_page_indicator_first(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "todo.md"
-            output.write_text("## A.md\n" + "".join(f"- t{n} -> Coordinator [now]\n" for n in range(1, 7)))
+            output.write_text("## A.md\n" + "".join(f"- [now] t{n} -> Coordinator\n" for n in range(1, 7)))
             args = type("Args", (), {"output": output, "pane": None})()
             screen = io.StringIO()
             with redirect_stdout(screen), patch.object(todo.os, "get_terminal_size", return_value=os.terminal_size((50, 6))), \
@@ -380,7 +400,7 @@ class TodoTest(IsolatedTestCase):
     def test_follow_buffers_a_fragmented_sgr_click(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "todo.md"
-            output.write_text("## Architect.md\n- Open -> Coordinator [now]\n")
+            output.write_text("## Architect.md\n- [now] Open -> Coordinator\n")
             args = type("Args", (), {"output": output, "pane": None})()
             keys = iter([b"\x1b[<0;5;", b"1M", b""])
             jumped = []
@@ -391,7 +411,7 @@ class TodoTest(IsolatedTestCase):
     def test_follow_click_on_first_screen_row_selects_first_item(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "todo.md"
-            output.write_text("## Architect.md\n- Open -> Coordinator [now]\n")
+            output.write_text("## Architect.md\n- [now] Open -> Coordinator\n")
             args = type("Args", (), {"output": output, "pane": None})()
             keys = iter([b"\x1b[<0;5;1M", b""])
             jumped = []
@@ -405,13 +425,13 @@ class TodoTest(IsolatedTestCase):
     def test_follow_preserves_rendered_ages(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "todo.md"
-            output.write_text("## Architect.md\n- Open -> Coordinator [2h]\n")
+            output.write_text("## Architect.md\n- [2h] Open -> Coordinator\n")
             args = type("Args", (), {"output": output, "pane": None})()
             screen = io.StringIO()
             with redirect_stdout(screen):
                 todo.follow(args, wait=lambda *_: ([0], [], []), read=lambda *_: b"",
                             run_jump=lambda item: "focused", report=lambda *_: None)
-            self.assertIn("1. Architect.md: Open -> Coordinator [2h]", screen.getvalue())
+            self.assertIn("1. Architect.md: [2h] Open -> Coordinator", screen.getvalue())
 
     def test_render_has_no_count_and_empty_state_is_exact(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -421,7 +441,7 @@ class TodoTest(IsolatedTestCase):
             todo.merge(status, output, state, now=1)
             rendered = output.read_text()
             self.assertNotIn("YOUR TO-DO", rendered)
-            self.assertIn("- Act -> Coordinator [now]", rendered)
+            self.assertIn("- [now] Act -> Coordinator", rendered)
             (status / "Architect.md").write_text("## Waits on the user\n")
             todo.merge(status, output, state, now=2)
             self.assertEqual(output.read_text(), "Nothing waits on you.\n")
@@ -451,7 +471,7 @@ class TodoTest(IsolatedTestCase):
             output, state = root / "todo.md", root / "state.json"
             item = {"id": "Architect.md\0Act -> Coordinator", "source": "Architect.md",
                     "text": "Act -> Coordinator"}
-            output.write_text("## Architect.md\n- Act -> Coordinator [now]\n")
+            output.write_text("## Architect.md\n- [now] Act -> Coordinator\n")
             state.write_text(json.dumps({"items": {item["id"]: item}}))
             self.assertTrue(todo.dismiss_item(item, state, output))
             self.assertEqual(output.read_text(), "Nothing waits on you.\n")
@@ -464,17 +484,17 @@ class TodoTest(IsolatedTestCase):
                      "text": "First -> Coordinator"}
             second = {"id": "Architect.md\0Second -> Coordinator", "source": "Architect.md",
                       "text": "Second -> Coordinator"}
-            output.write_text("## Architect.md\n- First -> Coordinator [now]\n- Second -> Coordinator [2m]\n")
+            output.write_text("## Architect.md\n- [now] First -> Coordinator\n- [2m] Second -> Coordinator\n")
             state.write_text(json.dumps({"items": {first["id"]: first, second["id"]: second}}))
             self.assertTrue(todo.dismiss_item(first, state, output))
-            self.assertEqual(output.read_text(), "\n## Architect.md\n- Second -> Coordinator [2m]\n")
+            self.assertEqual(output.read_text(), "\n## Architect.md\n- [2m] Second -> Coordinator\n")
 
     def test_follow_dismisses_only_after_a_successful_jump(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             output, state = root / "todo.md", root / "state.json"
             def reset():
-                output.write_text("## Architect.md\n- Act -> Coordinator [now]\n")
+                output.write_text("## Architect.md\n- [now] Act -> Coordinator\n")
                 state.write_text(json.dumps({"items": {"Architect.md\u0000Act -> Coordinator":
                                              {"id": "Architect.md\u0000Act -> Coordinator", "source": "Architect.md",
                                               "text": "Act -> Coordinator"}}}))
@@ -496,7 +516,7 @@ class TodoTest(IsolatedTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             output, state = root / "todo.md", root / "state.json"
-            output.write_text("## Architect.md\n- Act -> Coordinator [now]\n")
+            output.write_text("## Architect.md\n- [now] Act -> Coordinator\n")
             args = type("Args", (), {"output": output, "state": state, "pane": None})()
             keys = iter([b"\x1b[<0;5;1M", b""])
             todo.follow(args, wait=lambda *_: ([0], [], []), read=lambda *_: next(keys),
@@ -507,7 +527,7 @@ class TodoTest(IsolatedTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             output, state = root / "todo.md", root / "state.json"
-            output.write_text("## Architect.md\n- One -> Coordinator [now]\n- Two -> Coordinator [now]\n")
+            output.write_text("## Architect.md\n- [now] One -> Coordinator\n- [now] Two -> Coordinator\n")
             args = type("Args", (), {"output": output, "state": state, "pane": None})()
             keys, jumped = iter([b"1\n1\n", b""]), []
             todo.follow(args, wait=lambda *_: ([0], [], []), read=lambda *_: next(keys),
@@ -518,7 +538,7 @@ class TodoTest(IsolatedTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             output, state = root / "todo.md", root / "state.json"
-            output.write_text("## Architect.md\n- One -> Coordinator [now]\n- Two -> Coordinator [now]\n")
+            output.write_text("## Architect.md\n- [now] One -> Coordinator\n- [now] Two -> Coordinator\n")
             args = type("Args", (), {"output": output, "state": state, "pane": None})()
             keys, jumped = iter([b"\x1b[<0;5;1M\x1b[<0;5;2M", b""]), []
             todo.follow(args, wait=lambda *_: ([0], [], []), read=lambda *_: next(keys),
@@ -529,7 +549,7 @@ class TodoTest(IsolatedTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             output, state = root / "todo.md", root / "state.json"
-            output.write_text("## Architect.md\n- One -> Coordinator [now]\n- Two -> Coordinator [now]\n")
+            output.write_text("## Architect.md\n- [now] One -> Coordinator\n- [now] Two -> Coordinator\n")
             args = type("Args", (), {"output": output, "state": state, "pane": None})()
             keys, jumped = iter([b"\x1b[<0;5;1M1\n", b""]), []
             todo.follow(args, wait=lambda *_: ([0], [], []), read=lambda *_: next(keys),
