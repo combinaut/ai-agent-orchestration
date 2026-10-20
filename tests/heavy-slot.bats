@@ -447,7 +447,8 @@ ready = os.path.join(slot_dir, "agent-interrupt.ready")
 terminated = os.path.join(slot_dir, "agent-interrupt.terminated")
 wrapper = subprocess.Popen([helper, "take", "agent-interrupt", "--", "bash", "-c",
                             "trap \"printf terminated > \\\"$2\\\"; exit 0\" TERM; printf ready > \"$1\"; while :; do sleep 1; done", "_", ready, terminated])
-for _ in range(100):
+deadline = time.monotonic() + 15
+while time.monotonic() < deadline:
     if (os.path.getsize(slot) if os.path.exists(slot) else 0) and os.path.exists(ready):
         break
     time.sleep(0.05)
@@ -457,8 +458,9 @@ else:
     raise SystemExit("child never became ready")
 child = int(open(slot).read().split()[0])
 os.kill(wrapper.pid, signal.SIGINT)
+deadline = time.monotonic() + 15
 try:
-    status = wrapper.wait(timeout=3)
+    status = wrapper.wait(timeout=max(0, deadline - time.monotonic()))
 except subprocess.TimeoutExpired:
     wrapper.terminate()
     wrapper.wait()
