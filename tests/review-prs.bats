@@ -144,3 +144,21 @@ assert all(len(n) <= 32 for n in names), names
   wait
   [ "$(python3 -c 'import json, sys; print(len(json.load(open(sys.argv[1]))))' "$HOME/.cache/review-prs/dispatched.json")" = 6 ]
 }
+
+@test "a PR whose merge state turns known on the same head becomes ready" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+pr = dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s1")
+url = "https://github.com/acme/app/pull/7"
+unknown, known = {url: dict(pr, conflict=None)}, {url: dict(pr, conflict=False)}
+assert prs.changes(unknown, unknown)[0] == [], "unknown twice"
+assert prs.changes(dict(unknown), {url: dict(pr, conflict=None, sha="s2")})[0][0].startswith("changed:"), "new head, still unknown"
+lines = prs.changes(unknown, known)[0]
+assert lines and lines[0].startswith("ready:"), lines
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}

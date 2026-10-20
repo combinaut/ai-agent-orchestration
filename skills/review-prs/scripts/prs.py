@@ -302,9 +302,7 @@ def changes(before, after):
             kind = "draft" if now["draft"] else "ready"
             lines.append(f"new: {url} — {now['title']} by {now['author']} ({kind})")
             continue
-        # GitHub reports UNKNOWN while it recomputes mergeability; keep the last known state.
-        if now["conflict"] is None:
-            now["conflict"] = bool(was["conflict"])
+        # conflict: True, False, or None while GitHub recomputes mergeability.
         parts = []
         if was["draft"] and not now["draft"]:
             parts.append("now ready for review")
@@ -321,15 +319,17 @@ def changes(before, after):
                 "EXPECTED": "CI running",
             }.get(now["ci"] or "", f"CI {now['ci'] or 'cleared'}")
             parts.append(label)
-        if not was["conflict"] and now["conflict"]:
+        if was["conflict"] is not True and now["conflict"] is True:
             parts.append("now conflicts")
-        elif was["conflict"] and not now["conflict"]:
+        elif was["conflict"] is True and now["conflict"] is False:
             parts.append("conflicts cleared")
+        elif was["conflict"] is None and now["conflict"] is False:
+            parts.append("merge state known")
         if parts:
             became_ready = (
-                not now["draft"] and not now["conflict"]
+                not now["draft"] and now["conflict"] is False
                 and now["ci"] in (None, "SUCCESS")
-                and (was["draft"] or was["conflict"] or was["ci"] not in (None, "SUCCESS")
+                and (was["draft"] or was["conflict"] is not False or was["ci"] not in (None, "SUCCESS")
                      or (was.get("sha") != now.get("sha")))
             )
             prefix = "ready" if became_ready else "changed"
