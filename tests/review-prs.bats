@@ -103,3 +103,44 @@ dispatch() {
   install_ok
   printf '%s\n' "$output" | grep -q "^already linked  *$HOME/.agents/skills/review-prs\$"
 }
+
+@test "dispatch leaves a pane passed in as PANE open" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PANE=w9-p5 dispatch
+  [ "$status" -eq 0 ]
+  contains "$output" 'LEFT OPEN w9-p5'
+  [ ! -e "$TMP/closed/w9-p5" ]
+}
+
+@test "dispatch reports only reviews of the dispatched head" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  # shellcheck disable=SC2016 # The stub expands these.
+  printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >>"$TMP/gh.calls"' >"$BIN/gh"
+  dispatch
+  grep -q 'commit_id=="abc123"' "$TMP/gh.calls"
+}
+
+@test "queue entries never reach an unknown merge state and agent names differ per repo and head" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+pr = {"isDraft": False, "mergeable": "UNKNOWN", "commits": {"nodes": []}}
+assert prs.bucket(pr) == "unknown"
+names = {prs.agent_name("acme/app", 7, "a" * 40), prs.agent_name("acme/api", 7, "a" * 40), prs.agent_name("acme/app", 7, "b" * 40)}
+assert len(names) == 3, names
+assert all(len(n) <= 32 for n in names), names
+' "$ROOT/$SKILL_DIR/scripts"
+  [ "$status" -eq 0 ]
+}
+
+@test "mark-dispatched keeps every entry when calls overlap" {
+  for n in 1 2 3 4 5 6; do
+    python3 "$ROOT/$SKILL_DIR/scripts/prs.py" mark-dispatched --url "https://github.com/acme/app/pull/$n" --sha "s$n" >/dev/null &
+  done
+  wait
+  [ "$(python3 -c 'import json, sys; print(len(json.load(open(sys.argv[1]))))' "$HOME/.cache/review-prs/dispatched.json")" = 6 ]
+}

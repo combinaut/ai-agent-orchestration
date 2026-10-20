@@ -9,6 +9,7 @@
 Scope: --repo owner/name | --org ORG | --all. Default: cwd's GitHub repo, else watchers.pr_scope, else --all.
 """
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ BOT_TITLES = ("Automatic Update of README", "Changes by create-pull-request")
 BOT_LOGINS = {"copilot-pull-request-reviewer", "copilot", "github-actions"}
 STATE_DIR = Path.home() / ".cache" / "review-prs"
 DISPATCH_FILE = STATE_DIR / "dispatched.json"
+GH_TIMEOUT_S = 45
 PROJECTS = Path.home() / "Projects"
 OPEN_WORK = Path.home() / ".claude" / "coordinator" / "open-work.json"
 
@@ -66,7 +68,10 @@ def worker_model():
 
 
 def gh(*args):
-    result = subprocess.run(["gh", *args], capture_output=True, text=True)
+    try:
+        result = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"gh timed out after {GH_TIMEOUT_S}s") from None
     if result.returncode != 0:
         raise RuntimeError((result.stderr.strip().splitlines() or ["gh failed"])[-1])
     return result.stdout
@@ -185,6 +190,8 @@ def bucket(pr):
         return "draft"
     if pr["mergeable"] == "CONFLICTING":
         return "conflict"
+    if pr["mergeable"] == "UNKNOWN":
+        return "unknown"
     ci = ci_state(pr)
     if ci in ("FAILURE", "ERROR"):
         return "ci_fail"
@@ -224,9 +231,16 @@ def load_dispatched():
     return json.loads(DISPATCH_FILE.read_text())
 
 
-def save_dispatched(data):
+def update_dispatched(url, entry):
+    """Sets one entry under an exclusive lock and replaces the file atomically."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    DISPATCH_FILE.write_text(json.dumps(data, indent=1))
+    with open(STATE_DIR / "dispatched.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        data = load_dispatched()
+        data[url] = entry
+        tmp = DISPATCH_FILE.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(data, indent=1))
+        os.replace(tmp, DISPATCH_FILE)
 
 
 def open_work_clones():
@@ -238,24 +252,19 @@ def open_work_clones():
 
 def resolve_cwd(name_with_owner):
     owner, name = name_with_owner.split("/", 1)
-    for clone in open_work_clones():
+    candidates = [*open_work_clones(), PROJECTS / owner / name, PROJECTS / name, Path.cwd()]
+    for clone in candidates:
         try:
             if (clone / ".git").exists() and orch_settings.origin_matches(clone, name_with_owner):
                 return str(clone)
         except (OSError, subprocess.SubprocessError):
             continue
-    for candidate in (
-        PROJECTS / owner / name,
-        PROJECTS / name,
-        Path.cwd() if Path.cwd().name == name else None,
-    ):
-        if candidate and (candidate / ".git").exists():
-            return str(candidate)
     return None
 
 
-def agent_name(number):
-    return f"rev{number}"[:32]
+def agent_name(repo, number, sha):
+    """Unique per repo, PR and head: rev<number>-<sha7>-<repo hash>."""
+    return f"rev{number}-{sha[:7]}-{hashlib.sha1(repo.lower().encode()).hexdigest()[:6]}"[:32]
 
 
 def needs_dispatch(pr, dispatched):
@@ -279,7 +288,7 @@ def dispatch_entry(pr, kind, model):
         "repo": repo,
         "sha": pr.get("headRefOid") or "",
         "kind": kind,
-        "agent": agent_name(pr["number"]),
+        "agent": agent_name(repo, pr["number"], pr.get("headRefOid") or ""),
         "cwd": resolve_cwd(repo),
         "model": model,
     }
@@ -328,11 +337,8 @@ def changes(before, after):
     for url, was in before.items():
         if url in after:
             continue
-        try:
-            st = gh("pr", "view", url, "--json", "state", "--jq", ".state").strip()
-        except RuntimeError:
-            st = "UNKNOWN"
-        if st in ("OPEN", "UNKNOWN"):
+        st = gh("pr", "view", url, "--json", "state", "--jq", ".state").strip()
+        if st == "OPEN":
             lines.append(f"cleared: {url} — {was['title']} (no longer requesting you)")
             continue
         lines.append(f"{st.lower()}: {url} — {was['title']}")
@@ -356,7 +362,7 @@ def table(title, prs):
 
 
 def counts(nodes):
-    actionable = sum(1 for p in nodes if bucket(p) == "ready" and p["mergeable"] != "UNKNOWN")
+    actionable = sum(1 for p in nodes if bucket(p) == "ready")
     return f"{actionable} actionable, {len(nodes)} total"
 
 
@@ -366,9 +372,10 @@ def cmd_list(args, scope, label):
         time.sleep(3)
         nodes = fetch(scope)
     save_state(scope, snapshot(nodes))
-    order = ("ready", "ci_run", "ci_fail", "conflict", "draft")
+    order = ("ready", "unknown", "ci_run", "ci_fail", "conflict", "draft")
     titles = {
         "ready": "🔔 Ready for your review",
+        "unknown": "❔ Merge state unknown",
         "ci_run": "⏳ Waiting on CI",
         "ci_fail": "🔴 CI failing",
         "conflict": "🔴 Conflicting",
@@ -430,15 +437,14 @@ def cmd_dispatch_queue(args, scope, label):
 def cmd_mark_dispatched(args, _scope, _label):
     if not args.url or not args.sha:
         sys.exit("mark-dispatched needs --url and --sha")
-    data = load_dispatched()
-    data[args.url] = {
+    entry = {
         "sha": args.sha,
         "agent": args.agent,
         "pane": args.pane,
         "at": datetime.now(timezone.utc).isoformat(),
     }
-    save_dispatched(data)
-    print(json.dumps(data[args.url]))
+    update_dispatched(args.url, entry)
+    print(json.dumps(entry))
 
 
 def main():

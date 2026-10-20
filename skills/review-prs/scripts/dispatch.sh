@@ -23,8 +23,11 @@ fi
 echo "PANE $pane AGENT $agent PR $url"
 
 close_opened() {
-  [ -n "$opened" ] || return 0
-  "$orch/coordinator/watchers/close-pane.sh" "$pane" && echo "CLOSED $pane"
+  if [ -n "$opened" ] && "$orch/coordinator/watchers/close-pane.sh" "$pane"; then
+    echo "CLOSED $pane"
+  else
+    echo "LEFT OPEN $pane"
+  fi
 }
 
 for try in 1 2 3 4 5; do
@@ -74,7 +77,7 @@ status=$?
 echo "PROMPT_EXIT $status"
 herdr agent read "$agent" --source recent-unwrapped --lines 80 | tail -25
 me=$(gh api user --jq .login)
-gh api --paginate "repos/$repo/pulls/$num/reviews" --jq ".[] | select(.user.login==\"$me\") | \"LASTREVIEW \(.state) \(.submitted_at) \(.html_url)\"" | tail -1
+gh api --paginate "repos/$repo/pulls/$num/reviews" --jq ".[] | select(.user.login==\"$me\" and .commit_id==\"$sha\") | \"LASTREVIEW \(.state) \(.submitted_at) \(.html_url)\"" | tail -1
 if [ "$status" -eq 0 ]; then
   close_opened
 else

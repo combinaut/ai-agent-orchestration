@@ -51,6 +51,7 @@ The buckets, first match wins:
 |---|---|
 | 📝 Drafts | `isDraft` |
 | 🔴 Conflicting | `mergeable == CONFLICTING` |
+| ❔ Merge state unknown | `mergeable == UNKNOWN` after one retry; never dispatched |
 | 🔴 CI failing | rollup `FAILURE` / `ERROR` |
 | ⏳ Waiting on CI | rollup `PENDING` / `EXPECTED` |
 | 🔔 Ready for your review | none of the above |
@@ -69,7 +70,7 @@ After the tables, add only what the buckets do not already say: months-old parke
    python3 ~/.claude/skills/review-prs/scripts/prs.py watch [scope] >>"<scratchpad>/pr-watch.log" 2>&1
    ```
 
-   Default interval 120s (`--interval` overrides). Follow it with one Monitor on `~/.claude/skills/review-prs/scripts/watch-events.sh "<scratchpad>/pr-watch.log"`: it prints only event lines and resumes after the last line it read, so a restarted Monitor skips nothing.
+   Default interval 120s (`--interval` overrides). Follow it with one Monitor on `~/.claude/skills/review-prs/scripts/watch-events.sh "<scratchpad>/pr-watch.log"`: it prints only event lines, from line one on first attach and after the last line it read on a restart, so no event is skipped.
 
 4. Tell the user: you only speak on changes; watch lasts until the session ends; "stop the PR watch" ends it. On `new:` / `ready:` events for actionable PRs, run Auto-dispatch again (skip SHAs already dispatched).
 
@@ -96,7 +97,7 @@ Requires `HERDR_ENV=1`. If not inside Herdr, say so and stop dispatch (list/watc
 python3 ~/.claude/skills/review-prs/scripts/prs.py dispatch-queue [scope]
 ```
 
-JSON fields per item: `url`, `number`, `title`, `author`, `repo`, `sha`, `kind` (`review` | `re-review`), `agent` (e.g. `rev1234`), `cwd` (local clone or `null`), `model`.
+JSON fields per item: `url`, `number`, `title`, `author`, `repo`, `sha`, `kind` (`review` | `re-review`), `agent` (`rev<number>-<sha7>-<repo hash>`, unique per repo and head), `cwd` (local clone or `null`), `model`.
 
 `cwd` comes from the clones of the open work, the current directory, or `~/Projects/<owner>/<name>`. Skip entries with `cwd: null` and tell the user no local clone was found.
 
@@ -112,7 +113,7 @@ Run one dispatch per queue item in the background:
 
 It splits a sibling pane in the current tab without taking focus (`down` when the pane is already narrow; `PANE=<id>` reuses an empty pane instead), starts Codex on `$ORCH_CODEX_WORKER_MODEL`, marks the PR dispatched for that SHA, sends the review prompt and waits for the turn to end. The prompt tells Codex to post the review, reply `APPROVE|COMMENT|CHANGES_REQUESTED — <url>` and end its turn: no polling, no waiting for CI or replies.
 
-Output lines: `PANE <id> AGENT <name> PR <url>` at start; `PROMPT_EXIT <n>`, the agent's last lines and `LASTREVIEW <state> <time> <url>` at the end; then `CLOSED <pane>` (a pane it opened, prompt finished) or `LEFT OPEN <pane>`; `DONE`.
+Output lines: `PANE <id> AGENT <name> PR <url>` at start; `PROMPT_EXIT <n>`, the agent's last lines and `LASTREVIEW <state> <time> <url>` at the end; then `CLOSED <pane>` (a pane it opened, prompt finished) or `LEFT OPEN <pane>` (prompt failed, a pane passed in as `PANE`, or the close failed); `DONE`. `LASTREVIEW` counts only your reviews of the dispatched SHA.
 
 Tell the user which pane/agent is reviewing which PR (full URL). When the review finishes you **must** announce the outcome — silence after dispatch is not enough.
 
@@ -146,4 +147,4 @@ Close review panes only with `~/.claude/coordinator/watchers/close-pane.sh <pane
 - `review-requested:@me` clears after you (or Codex) submit a review; further pushes need a new request unless you still have a pending one.
 - GraphQL search must paginate; `mergeStateStatus` needs the `merge-info-preview` Accept header.
 - Herdr `agent start` needs an empty shell pane; it does not create layout — `dispatch.sh` splits first.
-- Agent names: `[a-z][a-z0-9_-]{0,31}`, unique among live agents (`rev1234`).
+- Agent names: `[a-z][a-z0-9_-]{0,31}`, unique among live agents (`dispatch-queue` makes them so).
