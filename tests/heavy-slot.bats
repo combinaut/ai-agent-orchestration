@@ -478,7 +478,7 @@ except ProcessLookupError:
 else:
     raise SystemExit("SIGINT left the child running")
 ' "$HELPER" "$ORCH_HEAVY_SLOTS_DIR"
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
 }
 
 @test "SIGTERM kills a child that ignores TERM and removes the slot" {
