@@ -366,6 +366,10 @@ link_shared_files() {
     [ -d "$d" ] || continue
     name=$(basename "$d")
     link_entry "$ORCH_REPO/skills/$name" "$CLAUDE_DIR/skills/$name"
+    # A copy of the skill in the shared agents folder is replaced by the same link.
+    if [ -L "$HOME/.agents/skills/$name" ] || [ -e "$HOME/.agents/skills/$name" ]; then
+      link_entry "$ORCH_REPO/skills/$name" "$HOME/.agents/skills/$name"
+    fi
     f="$CLAUDE_DIR/commands/$name.md"
     if [ -L "$f" ] || [ -e "$f" ]; then
       backup=$(backup_name "$f")

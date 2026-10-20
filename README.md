@@ -82,6 +82,10 @@ python3 ~/.claude/coordinator/user-todo.py --follow
 
 `user-todo.py` without `--follow` writes the file once. In the pane, press a number then Enter (or click) to jump to the item. `n` and `p` change page. A jump removes the item from the list. An empty list reads `Nothing waits on you.`
 
+### Review PRs
+
+`/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`) in a Herdr pane for every PR that is ready; Codex posts the review and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
+
 ### Heavy jobs
 
 Many sessions share one machine. `heavy-slot` caps how many test runs, browsers or builds run at once (`ORCH_HEAVY_SLOTS_MAX`):
