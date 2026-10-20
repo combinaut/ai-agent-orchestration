@@ -41,7 +41,7 @@ query($q: String!, $me: String, $endCursor: String) {
       author { __typename login }
       repository { nameWithOwner }
       mergeable mergeStateStatus reviewDecision
-      reviewThreads(first: 100) { nodes { isResolved } }
+      reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       reviewRequests(first: 20) { nodes { requestedReviewer {
         __typename ... on User { login } ... on Team { slug } ... on Bot { login } } } }
@@ -177,8 +177,11 @@ def status(pr):
         parts.append("CI failing")
     elif ci in ("PENDING", "EXPECTED"):
         parts.append("CI running")
-    open_threads = sum(1 for t in pr["reviewThreads"]["nodes"] if not t["isResolved"])
-    if open_threads:
+    threads = pr["reviewThreads"]
+    open_threads = sum(1 for t in threads["nodes"] if not t["isResolved"])
+    if (threads.get("pageInfo") or {}).get("hasNextPage"):
+        parts.append(f"{open_threads}+ threads (first 100 checked)")
+    elif open_threads:
         parts.append(f"{open_threads} thread{'s' if open_threads > 1 else ''}")
     if pr["mergeable"] == "CONFLICTING":
         parts.append("conflicts")
