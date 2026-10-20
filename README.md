@@ -32,7 +32,7 @@ s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestratio
 
 It clones this repo to `~/.claude/ai-agent-orchestration`, links the files into `~/.claude`, adds the hooks and status line to `~/.claude/settings.json`, and runs the env adapter, which for `herdr` installs [Herdr](https://herdr.dev) 0.9 or newer with the Radar plugin. Pick another env with `--env <name>` after the final `_`, or skip the env step with `env = "none"` under `[install]` in `~/.claude/orchestration.toml`. If it prints `PATH setup`, add the line it shows to your shell startup file and open a new shell.
 
-The installer adds a marked orchestration block to `~/.claude/CLAUDE.md` and refreshes only that block on later runs. If you already pasted the older unmarked sections, it leaves them alone and tells you how to wrap them once with the markers from [`snippets/CLAUDE.md.snippet`](snippets/CLAUDE.md.snippet).
+The installer adds a marked orchestration block to `~/.claude/CLAUDE.md`. Later runs replace the text between those markers. If you already pasted the older unmarked sections, it leaves them alone and tells you how to wrap them once with the markers from [`snippets/CLAUDE.md.snippet`](snippets/CLAUDE.md.snippet); any custom text inside the markers will be replaced on the next run.
 
 ## 2. Set it up
 

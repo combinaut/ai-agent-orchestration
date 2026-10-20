@@ -314,7 +314,10 @@ print(" ".join(s + "=" + h["state"] for s, h in sorted(prs.heads(e).items())))
   bash "$ROOT/$SKILL_DIR/scripts/watch-events.sh" "$log" >"$TMP/events" &
   pid=$!
   set +m
-  for _ in $(seq 1 100); do [ "$(wc -l <"$TMP/events")" -ge 2 ] && break; sleep 0.05; done
+  for _ in $(seq 1 100); do
+    [ "$(wc -l <"$TMP/events")" -ge 2 ] && [ -f "$log.pos" ] && [ "$(cat "$log.pos")" = 3 ] && break
+    sleep 0.05
+  done
   kill -TERM -- "-$pid"
   wait "$pid" 2>/dev/null || true
   [ "$(cat "$TMP/events")" = "$(printf '%s\n' 'ready: https://github.com/acme/app/pull/7 — t: CI green' 'now: 1 actionable, 1 total')" ]
