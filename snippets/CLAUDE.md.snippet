@@ -16,6 +16,7 @@ easy to forget:
 - **Tag my own pane as the architect** when I start orchestrating:
   `herdr pane report-metadata "$HERDR_PANE_ID" --source orchestrate --token role=architect`.
   Radar puts that pane first in its group.
+- In a repo with `guard.big_repo = true`, search with `rg` scoped to directories; never `git grep` or whole-tree `git cat-file` batch reads (`--batch`, `--batch-check` or `--batch-all-objects`); read another ref with `git show <ref>:<path>`.
 
 ## Heavy jobs share one machine — agree first
 
