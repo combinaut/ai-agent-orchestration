@@ -7,6 +7,7 @@
   prs.py mark-dispatched --url U --sha S [--state pending|done] [--agent N] [--pane P]
   prs.py claim-dispatched --url U --sha S [--agent N]   marks S pending; exit 3 when S is already pending or done
   prs.py release-dispatched --url U --sha S       drops S while it is pending
+  prs.py last-review --login L --sha S --since T  stdin: gh api --paginate --slurp .../reviews
 
 Scope: --repo owner/name | --org ORG | --all. Default: cwd's GitHub repo, else watchers.pr_scope, else --all.
 """
@@ -533,9 +534,19 @@ def cmd_release_dispatched(args, _scope, _label):
     update_dispatched(release)
 
 
+def cmd_last_review(args, _scope, _label):
+    """Prints LASTREVIEW for the newest review by --login of --sha submitted at or after --since."""
+    mine = [r for page in json.load(sys.stdin) for r in page
+            if (r.get("user") or {}).get("login") == args.login and r.get("commit_id") == args.sha
+            and r.get("submitted_at") and r["submitted_at"] >= args.since]
+    if mine:
+        r = max(mine, key=lambda r: r["submitted_at"])
+        print(f"LASTREVIEW {r['state']} {r['submitted_at']} {r['html_url']}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("mode", choices=["list", "watch", "dispatch-queue", "claim-dispatched", "mark-dispatched", "release-dispatched"],
+    parser.add_argument("mode", choices=["list", "watch", "dispatch-queue", "claim-dispatched", "mark-dispatched", "release-dispatched", "last-review"],
                         nargs="?", default="list")
     parser.add_argument("--repo")
     parser.add_argument("--org")
@@ -543,6 +554,8 @@ def main():
     parser.add_argument("--actionable", action="store_true",
                         help="list: only Ready-for-review PRs")
     parser.add_argument("--interval", type=int, default=120, help="watch: seconds between checks")
+    parser.add_argument("--login", help="last-review: reviewer login")
+    parser.add_argument("--since", help="last-review: earliest submitted_at, ISO 8601 UTC")
     parser.add_argument("--url", help="mark-dispatched: PR URL")
     parser.add_argument("--sha", help="mark-dispatched: head SHA that was dispatched")
     parser.add_argument("--state", choices=["pending", "done"], default="done",
@@ -550,7 +563,7 @@ def main():
     parser.add_argument("--agent", help="mark-dispatched: herdr agent name")
     parser.add_argument("--pane", help="mark-dispatched: herdr pane id")
     args = parser.parse_args()
-    scope, label = resolve_scope(args)
+    scope, label = resolve_scope(args) if args.mode in ("list", "watch", "dispatch-queue") else ("", "")
     {
         "list": cmd_list,
         "watch": cmd_watch,
@@ -558,6 +571,7 @@ def main():
         "claim-dispatched": cmd_claim_dispatched,
         "mark-dispatched": cmd_mark_dispatched,
         "release-dispatched": cmd_release_dispatched,
+        "last-review": cmd_last_review,
     }[args.mode](args, scope, label)
 
 

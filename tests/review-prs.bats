@@ -12,7 +12,10 @@ stub_review_tools() {
 printf '%s\n' "$*" >>"$TMP/review-herdr.calls"
 case "$1 $2" in
   'pane split') printf '%s\n' '{"result":{"pane":{"pane_id":"w9-p2"}}}' ;;
-  'agent prompt') printf '%s' "$4" >"$TMP/review.prompt"; exit "${PROMPT_STATUS:-0}" ;;
+  'agent prompt')
+    if [ -n "${PROMPT_REJECTED:-}" ]; then echo '{"error":{"code":"agent_blocked"}}' >&2; exit 1; fi
+    printf '%s' "$4" >"$TMP/review.prompt"
+    exit "${PROMPT_STATUS:-0}" ;;
   'agent read')
     [ -z "${AGENT_READ_FAILS:-}" ] || exit 1
     [ -z "${PROMPT_DELIVERED:-}" ] || printf 'Head SHA: %s\n' "$SHA"
@@ -25,7 +28,11 @@ EOF
 case "$*" in
   'api user --jq .login') echo reviewer ;;
   *'/reviews'*)
-    [ -n "${GH_NO_REVIEW:-}" ] || echo 'LASTREVIEW APPROVED 2026-01-01T00:00:00Z https://github.com/acme/app/pull/7#review'
+    at=2099-01-01T00:00:00Z
+    [ -z "${GH_OLD_REVIEW:-}" ] || at=2020-01-01T00:00:00Z
+    review="{\"id\":1,\"user\":{\"login\":\"reviewer\"},\"commit_id\":\"$SHA\",\"state\":\"APPROVED\",\"submitted_at\":\"$at\",\"html_url\":\"https://github.com/acme/app/pull/7#review-1\"}"
+    [ -z "${GH_NO_REVIEW:-}" ] || review=""
+    printf '%s\n' "${REVIEWS_JSON:-[[$review]]}"
     [ -z "${GH_REVIEWS_FAIL:-}" ] || exit 1 ;;
 esac
 EOF
@@ -122,14 +129,13 @@ dispatch() {
   [ ! -e "$TMP/closed/w9-p5" ]
 }
 
-@test "dispatch reports only submitted reviews of the dispatched head" {
+@test "dispatch counts only your submitted reviews of the dispatched head" {
   stub_review_tools
   : >"$TMP/none.toml"
-  # shellcheck disable=SC2016 # The stub expands these.
-  printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >>"$TMP/gh.calls"' >"$BIN/gh"
-  dispatch
-  grep -qF "commit_id==\"$SHA\"" "$TMP/gh.calls"
-  grep -q 'submitted_at != null' "$TMP/gh.calls"
+  r='"state":"APPROVED","html_url":"u"'
+  REVIEWS_JSON="[[{\"user\":{\"login\":\"someone\"},\"commit_id\":\"$SHA\",\"submitted_at\":\"2099-01-01T00:00:00Z\",$r},{\"user\":{\"login\":\"reviewer\"},\"commit_id\":\"other\",\"submitted_at\":\"2099-01-01T00:00:00Z\",$r}],[{\"user\":{\"login\":\"reviewer\"},\"commit_id\":\"$SHA\",\"submitted_at\":null,$r}]]" dispatch
+  contains "$output" "INCOMPLETE no review of $SHA"
+  not_contains "$output" 'CLOSED'
 }
 
 @test "queue entries never reach an unknown merge state and agent names differ per repo and head" {
@@ -197,10 +203,10 @@ print(prs.needs_dispatch(pr, data)[0], json.dumps(prs.heads(data.get(pr["url"], 
 ' "$ROOT/$SKILL_DIR/scripts" "$SHA"
 }
 
-@test "an undelivered prompt releases the head for the next dispatch-queue" {
+@test "a prompt Herdr rejected before sending releases the head for the next dispatch-queue" {
   stub_review_tools
   : >"$TMP/none.toml"
-  PROMPT_STATUS=1 GH_NO_REVIEW=1 dispatch
+  PROMPT_REJECTED=1 GH_NO_REVIEW=1 dispatch
   contains "$output" "RELEASED $SHA"
   contains "$output" 'CLOSED w9-p2'
   [ "$(dispatch_state)" = 'True null' ]
@@ -326,7 +332,7 @@ print(" ".join(s + "=" + h["state"] for s, h in sorted(prs.heads(e).items())))
 @test "an undelivered prompt in a caller's pane keeps the head reserved" {
   stub_review_tools
   : >"$TMP/none.toml"
-  PANE=w9-p5 PROMPT_STATUS=1 GH_NO_REVIEW=1 dispatch
+  PANE=w9-p5 PROMPT_REJECTED=1 GH_NO_REVIEW=1 dispatch
   not_contains "$output" 'RELEASED'
   contains "$output" 'LEFT OPEN w9-p5'
   [ "$(dispatch_state)" = 'False "pending"' ]
@@ -495,4 +501,24 @@ assert lines and lines[0].startswith("changed:") and "merge state unknown" in li
   kill -TERM -- "-$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
   [ "$(cat "$log.pos")" = 1 ]
+}
+
+@test "an approval from before this dispatch does not count as its review" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GH_OLD_REVIEW=1 dispatch
+  contains "$output" "INCOMPLETE no review of $SHA"
+  contains "$output" 'LEFT OPEN w9-p2'
+  [ ! -e "$TMP/closed/w9-p2" ]
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "a failed prompt whose text scrolled out of the transcript stays pending and open" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PROMPT_STATUS=1 GH_NO_REVIEW=1 dispatch
+  not_contains "$output" 'RELEASED'
+  contains "$output" 'LEFT OPEN w9-p2'
+  [ ! -e "$TMP/closed/w9-p2" ]
+  [ "$(dispatch_state)" = 'False "pending"' ]
 }

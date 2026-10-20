@@ -116,33 +116,33 @@ Rules:
 - When finished, reply with one line: APPROVE|COMMENT|CHANGES_REQUESTED — $url
 - After posting the review, reply with that one line and end your turn. Do not poll, sleep, or wait for CI, other reviewers or replies."
 
-herdr agent prompt "$agent" "$prompt" --wait --timeout 1800000
+started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+prompt_out=$(herdr agent prompt "$agent" "$prompt" --wait --timeout 1800000 2>&1)
 status=$?
+[ -z "$prompt_out" ] || printf '%s\n' "$prompt_out"
 echo "PROMPT_EXIT $status"
 herdr agent read "$agent" --source recent-unwrapped --lines 80 | tail -25
+# Your newest review of the dispatched head submitted after this dispatch started.
 if ! me=$(gh_bounded api user --jq .login) ||
-  ! reviews=$(gh_bounded api --paginate "repos/$repo/pulls/$num/reviews" --jq ".[] | select(.user.login==\"$me\" and .commit_id==\"$sha\" and .submitted_at != null) | \"LASTREVIEW \(.state) \(.submitted_at) \(.html_url)\""); then
+  ! reviews=$(gh_bounded api --paginate --slurp "repos/$repo/pulls/$num/reviews") ||
+  ! review=$(printf '%s' "$reviews" | "$py" "$here/prs.py" last-review --login "$me" --sha "$sha" --since "$started"); then
   echo "VERIFY FAILED could not read the reviews of $url"
   echo "LEFT OPEN $pane"
   echo "DONE $agent $pane"
   exit 0
 fi
-review=$(printf '%s\n' "$reviews" | tail -1)
 if [ -n "$review" ]; then
   echo "$review"
   mark "done"
   if [ "$status" -eq 0 ]; then close_opened; else echo "LEFT OPEN $pane"; fi
 else
   echo "INCOMPLETE no review of $sha"
-  # Released only when the agent is idle, readable, never showed the prompt, and its pane is closed.
-  undelivered=""
-  [ "$status" -ne 0 ] && [ -n "$opened" ] && herdr agent wait "$agent" --until idle --timeout 5000 >/dev/null 2>&1 &&
-    transcript=$(herdr agent read "$agent" --source recent-unwrapped --lines 2000 2>/dev/null) &&
-    ! grep -qF "Head SHA: $sha" <<<"$transcript" && undelivered=1
-  if [ -z "$undelivered" ]; then
+  # Released only when Herdr rejected the prompt before sending any input, and the pane it opened is closed.
+  if [ "$status" -ne 0 ] && [ -n "$opened" ] && grep -q agent_blocked <<<"$prompt_out"; then
+    echo "UNDELIVERED agent_blocked"
+    close_opened && release
+  else
     echo "LEFT OPEN $pane"
-  elif close_opened; then
-    release
   fi
 fi
 echo "DONE $agent $pane"
