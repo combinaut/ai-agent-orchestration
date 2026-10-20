@@ -35,6 +35,15 @@ release() {
   "$py" "$here/prs.py" release-dispatched --url "$url" --sha "$sha" && echo "RELEASED $sha"
 }
 
+# Ids of your submitted reviews before this dispatch; only a review outside this set counts as its result.
+if ! me=$(gh_bounded api user --jq .login) ||
+  ! snapshot=$(gh_bounded api --paginate --slurp "repos/$repo/pulls/$num/reviews") ||
+  ! seen=$(printf '%s' "$snapshot" | "$py" "$here/prs.py" review-ids --login "$me"); then
+  echo "SNAPSHOT FAILED could not read the reviews of $url; prompt not sent"
+  release
+  exit 1
+fi
+
 # A worktree left at this path is stale: this dispatch holds the claim on its head.
 wt="${XDG_CACHE_HOME:-$HOME/.cache}/review-prs/worktrees/$agent"
 if [ ! -d "$wt" ]; then
@@ -116,16 +125,14 @@ Rules:
 - When finished, reply with one line: APPROVE|COMMENT|CHANGES_REQUESTED — $url
 - After posting the review, reply with that one line and end your turn. Do not poll, sleep, or wait for CI, other reviewers or replies."
 
-started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 prompt_out=$(herdr agent prompt "$agent" "$prompt" --wait --timeout 1800000 2>&1)
 status=$?
 [ -z "$prompt_out" ] || printf '%s\n' "$prompt_out"
 echo "PROMPT_EXIT $status"
 herdr agent read "$agent" --source recent-unwrapped --lines 80 | tail -25
-# Your newest review of the dispatched head submitted after this dispatch started.
-if ! me=$(gh_bounded api user --jq .login) ||
-  ! reviews=$(gh_bounded api --paginate --slurp "repos/$repo/pulls/$num/reviews") ||
-  ! review=$(printf '%s' "$reviews" | "$py" "$here/prs.py" last-review --login "$me" --sha "$sha" --since "$started"); then
+# Your newest submitted review of the dispatched head that was not there before this dispatch.
+if ! reviews=$(gh_bounded api --paginate --slurp "repos/$repo/pulls/$num/reviews") ||
+  ! review=$(printf '%s' "$reviews" | "$py" "$here/prs.py" last-review --login "$me" --sha "$sha" --seen "$seen"); then
   echo "VERIFY FAILED could not read the reviews of $url"
   echo "LEFT OPEN $pane"
   echo "DONE $agent $pane"

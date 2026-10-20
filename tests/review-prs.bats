@@ -28,11 +28,17 @@ EOF
 case "$*" in
   'api user --jq .login') echo reviewer ;;
   *'/reviews'*)
-    at=2099-01-01T00:00:00Z
-    [ -z "${GH_OLD_REVIEW:-}" ] || at=2020-01-01T00:00:00Z
-    review="{\"id\":1,\"user\":{\"login\":\"reviewer\"},\"commit_id\":\"$SHA\",\"state\":\"APPROVED\",\"submitted_at\":\"$at\",\"html_url\":\"https://github.com/acme/app/pull/7#review-1\"}"
-    [ -z "${GH_NO_REVIEW:-}" ] || review=""
-    printf '%s\n' "${REVIEWS_JSON:-[[$review]]}"
+    r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "$2" "$1"; }
+    old=""
+    [ -z "${GH_OLD_REVIEW:-}" ] || old=$(r 1 "${OLD_AT:-2020-01-01T00:00:00Z}")
+    if [ ! -e "$TMP/review.prompt" ]; then
+      [ -z "${GH_SNAPSHOT_FAIL:-}" ] || exit 1
+      printf '[[%s]]\n' "$old"
+      exit 0
+    fi
+    new=""
+    [ -n "${GH_NO_REVIEW:-}" ] || new=$(r 2 "${NEW_AT:-2099-01-01T00:00:00Z}")
+    printf '%s\n' "${REVIEWS_JSON:-[[$old${old:+${new:+,}}$new]]}"
     [ -z "${GH_REVIEWS_FAIL:-}" ] || exit 1 ;;
 esac
 EOF
@@ -506,7 +512,7 @@ assert lines and lines[0].startswith("changed:") and "merge state unknown" in li
 @test "an approval from before this dispatch does not count as its review" {
   stub_review_tools
   : >"$TMP/none.toml"
-  GH_OLD_REVIEW=1 dispatch
+  GH_OLD_REVIEW=1 GH_NO_REVIEW=1 dispatch
   contains "$output" "INCOMPLETE no review of $SHA"
   contains "$output" 'LEFT OPEN w9-p2'
   [ ! -e "$TMP/closed/w9-p2" ]
@@ -521,4 +527,33 @@ assert lines and lines[0].startswith("changed:") and "merge state unknown" in li
   contains "$output" 'LEFT OPEN w9-p2'
   [ ! -e "$TMP/closed/w9-p2" ]
   [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "an earlier approval stamped after a slow local clock still does not count" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GH_OLD_REVIEW=1 OLD_AT=2099-01-01T00:00:00Z GH_NO_REVIEW=1 dispatch
+  contains "$output" "INCOMPLETE no review of $SHA"
+  contains "$output" 'LEFT OPEN w9-p2'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "a new review stamped before a fast local clock counts" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GH_OLD_REVIEW=1 NEW_AT=2000-01-01T00:00:00Z dispatch
+  contains "$output" 'review-2'
+  contains "$output" 'CLOSED w9-p2'
+  [ "$(dispatch_state)" = 'False "done"' ]
+}
+
+@test "a failed review snapshot sends no prompt and releases the claim" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GH_SNAPSHOT_FAIL=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'SNAPSHOT FAILED'
+  contains "$output" "RELEASED $SHA"
+  [ ! -e "$TMP/review-herdr.calls" ]
+  [ "$(dispatch_state)" = 'True null' ]
 }
