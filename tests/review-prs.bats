@@ -405,3 +405,16 @@ assert "os.replace" in inspect.getsource(prs.save_state)
   echo "$output"
   [ "$status" -eq 0 ]
 }
+
+@test "dispatch uses the configured Herdr executable for every call" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  # shellcheck disable=SC2016 # The stub expands these.
+  printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$1 $2" >>"$TMP/configured-herdr.calls"' 'exec "$BIN/herdr-review" "$@"' >"$TMP/configured-herdr"
+  chmod +x "$TMP/configured-herdr"
+  HERDR_BIN_PATH="$TMP/configured-herdr" dispatch
+  [ "$status" -eq 0 ]
+  [ "$(grep -cE '^(pane|agent) ' "$TMP/review-herdr.calls")" -eq "$(wc -l <"$TMP/configured-herdr.calls")" ]
+  grep -qx 'pane split' "$TMP/configured-herdr.calls"
+  grep -qx 'pane close' "$TMP/configured-herdr.calls"
+}

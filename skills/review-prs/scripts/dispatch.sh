@@ -12,6 +12,11 @@ url=$1 num=$2 title=$3 author=$4 sha=$5 kind=$6 agent=$7 cwd=$8 repo=$9 dir=${10
 orch_load_config
 orch_load_repo_config "$cwd"
 py=$(orch_python) || exit 2
+
+# herdr: the executable close-pane.sh uses too.
+herdr() {
+  command "${HERDR_BIN_PATH:-${ORCH_HERDR_BIN:-herdr}}" "$@"
+}
 model=${ORCH_CODEX_WORKER_MODEL:-}
 case "$model" in "" | "<"*">") orch_die "set models.codex_worker (ORCH_CODEX_WORKER_MODEL) in $(orch_config_path)" ;; esac
 
