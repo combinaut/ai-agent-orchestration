@@ -224,7 +224,10 @@ def load_state(scope):
 
 def save_state(scope, snap):
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    state_file(scope).write_text(json.dumps(snap, indent=1))
+    path = state_file(scope)
+    tmp = path.with_suffix(f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(snap, indent=1))
+    os.replace(tmp, path)
 
 
 def load_dispatched():
@@ -284,7 +287,7 @@ def needs_dispatch(pr, dispatched):
     prev = dispatched.get(pr["url"]) or {}
     if claimed(prev, sha):
         return False, None
-    kind = "re-review" if prev.get("sha") else "review"
+    kind = "re-review" if prev.get("sha") or my_review_sha(pr) else "review"
     return True, kind
 
 
@@ -520,6 +523,10 @@ def cmd_release_dispatched(args, _scope, _label):
 
     def release(data):
         entry = data.get(args.url) or {}
+        earlier = entry.get("previous") or {}
+        if earlier.get("sha") == args.sha and earlier.get("state") == "pending":
+            entry.pop("previous")
+            return
         if entry.get("sha") != args.sha or entry.get("state") != "pending":
             return
         if entry.get("previous"):

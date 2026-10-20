@@ -379,3 +379,29 @@ assert label(draft=True) == "draft)"
   echo "$output"
   [ "$status" -eq 0 ]
 }
+
+@test "releasing an older pending head clears it behind a newer claim" {
+  stub_review_tools
+  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
+  u=https://github.com/acme/app/pull/7
+  prs claim-dispatched --url "$u" --sha "$SHA"
+  prs claim-dispatched --url "$u" --sha newer
+  prs release-dispatched --url "$u" --sha "$SHA"
+  prs release-dispatched --url "$u" --sha newer
+  [ "$(dispatch_state)" = 'True null' ]
+}
+
+@test "a moved head you reviewed without this skill is a re-review, and snapshots are replaced atomically" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import inspect, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+pr = {"url": "u", "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": "new",
+      "commits": {"nodes": []}, "myReviews": {"nodes": [{"commit": {"oid": "old"}}]}}
+assert prs.needs_dispatch(pr, {}) == (True, "re-review"), prs.needs_dispatch(pr, {})
+assert "os.replace" in inspect.getsource(prs.save_state)
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
