@@ -35,7 +35,7 @@ EOF
   printf mine >"$HOME/.claude/skills/architect/SKILL.md"
   install_ok
   [ -L "$HOME/.claude/skills/architect" ]
-  [ "$(find "$HOME/.claude/skills" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 2 ]
+  [ "$(find "$HOME/.claude/skills" -mindepth 1 -maxdepth 1 | wc -l)" -eq "$(find "$CLONE/skills" -mindepth 1 -maxdepth 1 -type d | wc -l)" ]
   for backup in "$HOME"/.claude/backups/*/skills/architect/SKILL.md; do [ "$(cat "$backup")" = mine ]; done
 }
 
