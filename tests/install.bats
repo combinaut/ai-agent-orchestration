@@ -23,7 +23,8 @@ load test_helper
   [ "$(head -n 1 "$claude_md")" = before ]
   [ "$(tail -n 1 "$claude_md")" = after ]
   cmp "$CLONE/snippets/CLAUDE.md.snippet" <(sed -n "/$start/,/$end/p" "$claude_md")
-  [ "$(stat -f '%Lp' "$claude_md" 2>/dev/null || stat -c '%a' "$claude_md")" = 640 ]
+  mode=$(stat -f '%Lp' "$claude_md" 2>/dev/null) || mode=$(stat -c '%a' "$claude_md")
+  [ "$mode" = 640 ]
   for backup in "$HOME"/.claude/backups/*/CLAUDE.md; do [ -f "$backup" ]; done
   [ "$(cat "$backup")" = "$(printf 'before\n%s\nold managed text\n%s\nafter' "$start" "$end")" ]
 }
