@@ -138,6 +138,25 @@ EOF
   [ "$(cat "$backup")" = 'personal instructions' ]
 }
 
+@test "CLAUDE.md replacement stops safely when interrupted during its prefix copy" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  end='<!-- orchestration:end -->'
+  printf 'personal instructions\n%s\nold managed text\n%s\nafter\n' "$start" "$end" >"$claude_md"
+  before=$(cksum "$claude_md")
+  cat >"$BIN/head" <<'EOF'
+#!/usr/bin/env bash
+kill -TERM "$PPID"
+exit 0
+EOF
+  chmod +x "$BIN/head"
+  run /bin/bash "$CLONE/install.sh"
+  [ "$status" -ne 0 ]
+  [ "$(cksum "$claude_md")" = "$before" ]
+  [ -z "$(find "$HOME/.claude" -name 'CLAUDE.md.tmp.*' -print)" ]
+}
+
 @test "CLAUDE.md marked orchestration block is a no-op when current" {
   fresh_install
   claude_md="$HOME/.claude/CLAUDE.md"

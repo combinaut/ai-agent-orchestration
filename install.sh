@@ -988,7 +988,8 @@ replace_claude_md_block() (
   target=$1 start_line=$2 end_line=$3 snippet=$4 mode=$5 tmp=""
   # shellcheck disable=SC2329 # Called by the EXIT trap below.
   cleanup() { [ -z "$tmp" ] || rm -f "$tmp"; }
-  trap cleanup EXIT HUP INT TERM
+  trap cleanup EXIT
+  trap 'cleanup; exit 1' HUP INT TERM
   tmp=$(mktemp "$target.tmp.XXXXXX") || exit
   if [ "$start_line" -gt 1 ]; then
     head -n "$((start_line - 1))" "$target" >"$tmp"
@@ -1004,7 +1005,8 @@ append_claude_md_block() (
   target=$1 snippet=$2 mode=${3:-} tmp=""
   # shellcheck disable=SC2329 # Called by the EXIT trap below.
   cleanup() { [ -z "$tmp" ] || rm -f "$tmp"; }
-  trap cleanup EXIT HUP INT TERM
+  trap cleanup EXIT
+  trap 'cleanup; exit 1' HUP INT TERM
   tmp=$(mktemp "$target.tmp.XXXXXX") || exit
   if [ -f "$target" ]; then
     cat "$target" >"$tmp"
