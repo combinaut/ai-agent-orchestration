@@ -303,6 +303,7 @@ print(e["sha"], e["state"], e["previous"]["sha"], e["previous"]["state"])
   grep -qF -- "--cwd $wt" "$TMP/review-herdr.calls"
   contains "$output" "REMOVED $wt"
   [ ! -e "$wt" ]
+  rm "$HOME/.cache/review-prs/dispatched.json"
   GH_NO_REVIEW=1 dispatch
   [ "$(git -C "$wt" rev-parse HEAD)" = "$SHA" ]
   contains "$output" "WORKTREE $wt"
@@ -333,4 +334,48 @@ print(e["sha"], e["state"], e["previous"]["sha"], e["previous"]["state"])
   # shellcheck disable=SC2016 # Python source.
   run bash -c 'cd "$1/sub/dir" && python3 -c "import sys; sys.path.insert(0, sys.argv[1]); import prs; print(prs.resolve_cwd(\"acme/app\"))" "$2"' _ "$TMP/app" "$ROOT/$SKILL_DIR/scripts"
   [ "$output" = "$(cd "$TMP/app" && pwd -P)" ]
+}
+
+@test "a reused pane starts Codex in the worktree" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PANE=w9-p5 dispatch
+  grep -qF -- "agent start rev7 --kind codex --pane w9-p5 -- --no-daemon --model test-worker-model --cd $HOME/.cache/review-prs/worktrees/rev7" "$TMP/review-herdr.calls"
+}
+
+@test "a head another dispatch already claimed is refused before any pane, agent or worktree" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url https://github.com/acme/app/pull/7 --sha "$SHA" --agent other
+  mkdir -p "$HOME/.cache/review-prs/worktrees/rev7"
+  dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" "TAKEN $SHA"
+  [ ! -e "$TMP/review-herdr.calls" ]
+  [ -d "$HOME/.cache/review-prs/worktrees/rev7" ]
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "your earlier review is found beyond the first reviewers, and new PRs are labelled by their blockers" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+assert "author: $me" in prs.QUERY, "review lookup is not filtered by the viewer"
+pr = {"myReviews": {"nodes": [{"commit": {"oid": "old"}}]}}
+assert prs.my_review_sha(pr) == "old"
+base = dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)
+url = "https://github.com/acme/app/pull/7"
+def label(**kw):
+    return prs.changes({}, {url: dict(base, **kw)})[0][0].rsplit("(", 1)[1]
+assert label() == "ready)", label()
+assert label(conflict=True) == "conflicting)", label(conflict=True)
+assert label(conflict=None) == "merge state unknown)"
+assert label(ci="FAILURE") == "CI failing)"
+assert label(ci="PENDING") == "waiting on CI)"
+assert label(draft=True) == "draft)"
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
 }

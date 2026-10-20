@@ -24,12 +24,21 @@ except subprocess.TimeoutExpired:
     sys.exit("gh timed out after 45s")' gh "$@"
 }
 
+"$py" "$here/prs.py" claim-dispatched --url "$url" --sha "$sha" --agent "$agent" || exit 3
+
+release() {
+  "$py" "$here/prs.py" release-dispatched --url "$url" --sha "$sha" && echo "RELEASED $sha"
+}
+
+# A worktree left at this path is stale: this dispatch holds the claim on its head.
 wt="${XDG_CACHE_HOME:-$HOME/.cache}/review-prs/worktrees/$agent"
 if [ ! -d "$wt" ]; then
-  git -C "$cwd" cat-file -e "$sha^{commit}" 2>/dev/null || git -C "$cwd" fetch -q origin "pull/$num/head" || exit 1
-  mkdir -p "$(dirname "$wt")"
-  git -C "$cwd" worktree prune
-  git -C "$cwd" worktree add -q --detach "$wt" "$sha" || exit 1
+  if ! { git -C "$cwd" cat-file -e "$sha^{commit}" 2>/dev/null || git -C "$cwd" fetch -q origin "pull/$num/head"; } ||
+    ! mkdir -p "$(dirname "$wt")" || ! git -C "$cwd" worktree prune ||
+    ! git -C "$cwd" worktree add -q --detach "$wt" "$sha"; then
+    release
+    exit 1
+  fi
 fi
 echo "WORKTREE $wt"
 
@@ -41,7 +50,7 @@ opened=""
 pane=${PANE:-}
 if [ -z "$pane" ]; then
   pane=$(herdr pane split --current --direction "$dir" --cwd "$wt" --no-focus |
-    "$py" -c 'import sys,json;print(json.load(sys.stdin)["result"]["pane"]["pane_id"])') || { remove_worktree; exit 1; }
+    "$py" -c 'import sys,json;print(json.load(sys.stdin)["result"]["pane"]["pane_id"])') || { remove_worktree; release; exit 1; }
   opened=1
 fi
 echo "PANE $pane AGENT $agent PR $url"
@@ -58,8 +67,8 @@ close_opened() {
 }
 
 for try in 1 2 3 4 5; do
-  herdr agent start "$agent" --kind codex --pane "$pane" -- --no-daemon --model "$model" && break
-  [ "$try" = 5 ] && { echo "START FAILED"; close_opened; [ -n "$opened" ] || remove_worktree; exit 1; }
+  herdr agent start "$agent" --kind codex --pane "$pane" -- --no-daemon --model "$model" --cd "$wt" && break
+  [ "$try" = 5 ] && { echo "START FAILED"; close_opened; [ -n "$opened" ] || remove_worktree; release; exit 1; }
   sleep 3
 done
 herdr agent wait "$agent" --until idle --timeout 120000 >/dev/null 2>&1 || sleep 15
@@ -122,7 +131,7 @@ else
   if [ -z "$undelivered" ]; then
     echo "LEFT OPEN $pane"
   elif close_opened; then
-    "$py" "$here/prs.py" release-dispatched --url "$url" --sha "$sha" && echo "RELEASED $sha"
+    release
   fi
 fi
 echo "DONE $agent $pane"

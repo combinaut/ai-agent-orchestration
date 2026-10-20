@@ -5,6 +5,7 @@
   prs.py watch         [scope] [--interval S]     one line per change, forever
   prs.py dispatch-queue [scope]                   JSON: Ready PRs needing (re)review
   prs.py mark-dispatched --url U --sha S [--state pending|done] [--agent N] [--pane P]
+  prs.py claim-dispatched --url U --sha S [--agent N]   marks S pending; exit 3 when S is already claimed
   prs.py release-dispatched --url U --sha S       drops a pending mark of S, back to the mark before it
 
 Scope: --repo owner/name | --org ORG | --all. Default: cwd's GitHub repo, else watchers.pr_scope, else --all.
@@ -32,7 +33,7 @@ PROJECTS = Path.home() / "Projects"
 OPEN_WORK = Path.home() / ".claude" / "coordinator" / "open-work.json"
 
 QUERY = """
-query($q: String!, $endCursor: String) {
+query($q: String!, $me: String, $endCursor: String) {
   search(query: $q, type: ISSUE, first: 50, after: $endCursor) {
     pageInfo { hasNextPage endCursor }
     nodes { ... on PullRequest {
@@ -44,7 +45,8 @@ query($q: String!, $endCursor: String) {
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       reviewRequests(first: 20) { nodes { requestedReviewer {
         __typename ... on User { login } ... on Team { slug } ... on Bot { login } } } }
-      latestReviews(first: 20) { nodes { author { __typename login } state commit { oid } } }
+      myReviews: reviews(last: 1, author: $me, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) {
+        nodes { commit { oid } } }
     } }
   }
 }"""
@@ -102,27 +104,26 @@ def resolve_scope(args):
     return f"repo:{repo}", repo
 
 
-def search(q):
+def search(q, me):
     raw = gh("api", "graphql", "--paginate", "--slurp",
              "-H", "Accept: application/vnd.github.merge-info-preview+json",
-             "-f", f"query={QUERY}", "-f", f"q={q}")
+             "-f", f"query={QUERY}", "-f", f"q={q}", "-f", f"me={me}")
     return [n for page in json.loads(raw) for n in page["data"]["search"]["nodes"] if n]
 
 
-def my_review_sha(pr, me):
-    for review in pr["latestReviews"]["nodes"]:
-        if ((review.get("author") or {}).get("login") or "").lower() == me:
-            return (review.get("commit") or {}).get("oid")
-    return None
+def my_review_sha(pr):
+    nodes = (pr.get("myReviews") or {}).get("nodes") or []
+    return ((nodes[-1].get("commit") or {}).get("oid")) if nodes else None
 
 
 def fetch(scope):
-    me = viewer_login().lower()
-    requested = search(f"is:pr is:open review-requested:@me archived:false {scope}".strip())
+    login = viewer_login()
+    me = login.lower()
+    requested = search(f"is:pr is:open review-requested:@me archived:false {scope}".strip(), login)
     # PRs I reviewed whose head moved since, with no new review request.
-    reviewed = search(f"is:pr is:open reviewed-by:@me -review-requested:@me archived:false {scope}".strip())
+    reviewed = search(f"is:pr is:open reviewed-by:@me -review-requested:@me archived:false {scope}".strip(), login)
     moved = [n for n in reviewed
-             if my_review_sha(n, me) and my_review_sha(n, me) != n.get("headRefOid")]
+             if my_review_sha(n) and my_review_sha(n) != n.get("headRefOid")]
     seen = set()
     nodes = []
     for n in requested + moved:
@@ -281,8 +282,7 @@ def needs_dispatch(pr, dispatched):
         return False, None
     sha = pr.get("headRefOid") or ""
     prev = dispatched.get(pr["url"]) or {}
-    earlier = prev.get("previous") or {}
-    if sha and (prev.get("sha") == sha or (earlier.get("sha") == sha and earlier.get("state") == "pending")):
+    if claimed(prev, sha):
         return False, None
     kind = "re-review" if prev.get("sha") else "review"
     return True, kind
@@ -304,12 +304,27 @@ def dispatch_entry(pr, kind, model):
     }
 
 
+def blocker(snap):
+    """What keeps a snapshot entry from review, in bucket() order; None when it is ready."""
+    if snap["draft"]:
+        return "draft"
+    if snap["conflict"] is True:
+        return "conflicting"
+    if snap["conflict"] is None:
+        return "merge state unknown"
+    if snap["ci"] in ("FAILURE", "ERROR"):
+        return "CI failing"
+    if snap["ci"] in ("PENDING", "EXPECTED"):
+        return "waiting on CI"
+    return None
+
+
 def changes(before, after):
     lines = []
     for url, now in after.items():
         was = before.get(url)
         if was is None:
-            kind = "draft" if now["draft"] else "ready"
+            kind = blocker(now) or "ready"
             lines.append(f"new: {url} — {now['title']} by {now['author']} ({kind})")
             continue
         # conflict: True, False, or None while GitHub recomputes mergeability.
@@ -444,12 +459,41 @@ def cmd_dispatch_queue(args, scope, label):
     }, indent=2))
 
 
+def claimed(entry, sha):
+    earlier = entry.get("previous") or {}
+    return bool(sha) and (entry.get("sha") == sha or (earlier.get("sha") == sha and earlier.get("state") == "pending"))
+
+
+def cmd_claim_dispatched(args, scope, label):
+    if not args.url or not args.sha:
+        sys.exit("claim-dispatched needs --url and --sha")
+    taken = []
+
+    def claim(data):
+        if claimed(data.get(args.url) or {}, args.sha):
+            taken.append(True)
+            return
+        mark_entry(args, "pending")(data)
+
+    update_dispatched(claim)
+    print(f"{'TAKEN' if taken else 'CLAIMED'} {args.sha}")
+    if taken:
+        sys.exit(3)
+
+
 def cmd_mark_dispatched(args, _scope, _label):
     if not args.url or not args.sha:
         sys.exit("mark-dispatched needs --url and --sha")
+    entry = mark_entry(args, args.state)
+    update_dispatched(entry)
+    print(json.dumps(entry.entry))
+
+
+def mark_entry(args, state):
+    """A change for update_dispatched that marks args.sha as state."""
     entry = {
         "sha": args.sha,
-        "state": args.state,
+        "state": state,
         "agent": args.agent,
         "pane": args.pane,
         "at": datetime.now(timezone.utc).isoformat(),
@@ -457,17 +501,17 @@ def cmd_mark_dispatched(args, _scope, _label):
 
     def mark(data):
         prev = data.get(args.url) or {}
-        if args.state == "done" and prev.get("sha") not in (None, args.sha):
+        if state == "done" and prev.get("sha") not in (None, args.sha):
             if (prev.get("previous") or {}).get("sha") == args.sha:
                 prev["previous"] = entry
             return
         earlier = prev.get("previous") if prev.get("sha") == args.sha else dict(prev, previous=None)
-        if args.state == "pending" and earlier and earlier.get("sha"):
+        if state == "pending" and earlier and earlier.get("sha"):
             entry["previous"] = {k: v for k, v in earlier.items() if k != "previous"}
         data[args.url] = entry
 
-    update_dispatched(mark)
-    print(json.dumps(entry))
+    mark.entry = entry
+    return mark
 
 
 def cmd_release_dispatched(args, _scope, _label):
@@ -488,7 +532,7 @@ def cmd_release_dispatched(args, _scope, _label):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("mode", choices=["list", "watch", "dispatch-queue", "mark-dispatched", "release-dispatched"],
+    parser.add_argument("mode", choices=["list", "watch", "dispatch-queue", "claim-dispatched", "mark-dispatched", "release-dispatched"],
                         nargs="?", default="list")
     parser.add_argument("--repo")
     parser.add_argument("--org")
@@ -508,6 +552,7 @@ def main():
         "list": cmd_list,
         "watch": cmd_watch,
         "dispatch-queue": cmd_dispatch_queue,
+        "claim-dispatched": cmd_claim_dispatched,
         "mark-dispatched": cmd_mark_dispatched,
         "release-dispatched": cmd_release_dispatched,
     }[args.mode](args, scope, label)
