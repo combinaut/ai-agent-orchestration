@@ -251,9 +251,17 @@ def open_work_clones():
         return []
 
 
+def current_repo_root():
+    try:
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [Path(out.stdout.strip())] if out.returncode == 0 and out.stdout.strip() else []
+
+
 def resolve_cwd(name_with_owner):
     owner, name = name_with_owner.split("/", 1)
-    candidates = [*open_work_clones(), PROJECTS / owner / name, PROJECTS / name, Path.cwd()]
+    candidates = [*open_work_clones(), PROJECTS / owner / name, PROJECTS / name, *current_repo_root()]
     for clone in candidates:
         try:
             if (clone / ".git").exists() and orch_settings.origin_matches(clone, name_with_owner):
@@ -273,7 +281,8 @@ def needs_dispatch(pr, dispatched):
         return False, None
     sha = pr.get("headRefOid") or ""
     prev = dispatched.get(pr["url"]) or {}
-    if prev.get("sha") == sha and sha:
+    earlier = prev.get("previous") or {}
+    if sha and (prev.get("sha") == sha or (earlier.get("sha") == sha and earlier.get("state") == "pending")):
         return False, None
     kind = "re-review" if prev.get("sha") else "review"
     return True, kind

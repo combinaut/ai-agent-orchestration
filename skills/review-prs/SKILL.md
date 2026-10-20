@@ -111,9 +111,9 @@ Run one dispatch per queue item in the background:
 ~/.claude/skills/review-prs/scripts/dispatch.sh "<url>" <number> "<title>" "<author>" <sha> <kind> <agent> "<cwd>" <owner/repo> [right|down]
 ```
 
-It splits a sibling pane in the current tab without taking focus (`down` when the pane is already narrow; `PANE=<id>` reuses an empty pane instead), starts Codex on `$ORCH_CODEX_WORKER_MODEL`, marks that SHA `pending`, sends the review prompt and waits for the turn to end. The prompt tells Codex to post the review, reply `APPROVE|COMMENT|CHANGES_REQUESTED — <url>` and end its turn: no polling, no waiting for CI or replies.
+It checks out a detached worktree at the SHA under `~/.cache/review-prs/worktrees/<agent>` (fetching `pull/<n>/head` when the clone lacks it), splits a sibling pane there in the current tab without taking focus (`down` when the pane is already narrow; `PANE=<id>` reuses an empty pane instead), starts Codex on `$ORCH_CODEX_WORKER_MODEL`, marks that SHA `pending`, sends the review prompt and waits for the turn to end. The prompt tells Codex to post the review, reply `APPROVE|COMMENT|CHANGES_REQUESTED — <url>` and end its turn: no polling, no waiting for CI or replies.
 
-Output lines: `PANE <id> AGENT <name> PR <url>` at start; `PROMPT_EXIT <n>` and the agent's last lines at the end. Then either `LASTREVIEW <state> <time> <url>` (your review of the dispatched SHA exists; the SHA is marked `done`), or `INCOMPLETE no review of <sha>` (the SHA stays `pending`; when the prompt failed and the agent never showed it, `RELEASED <sha>` drops the mark so the next `dispatch-queue` retries it). Then `CLOSED <pane>` (a pane it opened, review posted, prompt finished) or `LEFT OPEN <pane>`; `DONE`. gh calls stop after 45 seconds.
+Output lines: `WORKTREE <path>` and `PANE <id> AGENT <name> PR <url>` at start; `PROMPT_EXIT <n>` and the agent's last lines at the end. Then either `LASTREVIEW <state> <time> <url>` (your review of the dispatched SHA exists; the SHA is marked `done`), or `INCOMPLETE no review of <sha>` (the SHA stays `pending`; when the prompt failed and the agent never showed it, `RELEASED <sha>` drops the mark so the next `dispatch-queue` retries it). A release closes the pane it opened first, so the agent name is free for the retry; a pane passed in as `PANE` is never released. Then `CLOSED <pane>` and `REMOVED <worktree>` (a pane it opened, review posted, prompt finished) or `LEFT OPEN <pane>`; `DONE`. After closing a `LEFT OPEN` pane yourself, remove its worktree: `git -C <cwd> worktree remove --force <worktree>`. gh calls stop after 45 seconds.
 
 Tell the user which pane/agent is reviewing which PR (full URL). When the review finishes you **must** announce the outcome — silence after dispatch is not enough.
 
@@ -144,7 +144,7 @@ Close review panes only with `~/.claude/coordinator/watchers/close-pane.sh <pane
 ## Common pitfalls
 
 - GitHub MCP often misses private org repos — use `gh` (the script does).
-- `review-requested:@me` clears after you (or Codex) submit a review; further pushes need a new request unless you still have a pending one.
+- `review-requested:@me` clears after you (or Codex) submit a review. A PR you reviewed whose head moved stays in the queue without a new request (`reviewed-by:@me`), so watch mode re-reviews it after further pushes.
 - GraphQL search must paginate; `mergeStateStatus` needs the `merge-info-preview` Accept header.
 - Herdr `agent start` needs an empty shell pane; it does not create layout — `dispatch.sh` splits first.
 - Agent names: `[a-z][a-z0-9_-]{0,31}`, unique among live agents (`dispatch-queue` makes them so).

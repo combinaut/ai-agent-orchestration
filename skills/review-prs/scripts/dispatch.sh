@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # dispatch.sh <url> <number> <title> <author> <sha> <kind> <agent> <cwd> <owner/repo> [direction]
-# Starts a Codex review of one PR in a new Herdr pane (or $PANE), reports it, and closes a pane it opened.
+# Starts a Codex review of one PR in a detached worktree at <sha>, in a new Herdr pane (or $PANE), reports it,
+# and closes a pane it opened.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -u
 here="$(cd "$(dirname "$0")" && pwd -P)"
@@ -14,31 +15,51 @@ py=$(orch_python) || exit 2
 model=${ORCH_CODEX_WORKER_MODEL:-}
 case "$model" in "" | "<"*">") orch_die "set models.codex_worker (ORCH_CODEX_WORKER_MODEL) in $(orch_config_path)" ;; esac
 
+# gh_bounded <args>: gh, stopped after 45 seconds.
+gh_bounded() {
+  "$py" -c 'import subprocess, sys
+try:
+    sys.exit(subprocess.run(sys.argv[1:], timeout=45).returncode)
+except subprocess.TimeoutExpired:
+    sys.exit("gh timed out after 45s")' gh "$@"
+}
+
+wt="${XDG_CACHE_HOME:-$HOME/.cache}/review-prs/worktrees/$agent"
+if [ ! -d "$wt" ]; then
+  git -C "$cwd" cat-file -e "$sha^{commit}" 2>/dev/null || git -C "$cwd" fetch -q origin "pull/$num/head" || exit 1
+  mkdir -p "$(dirname "$wt")"
+  git -C "$cwd" worktree prune
+  git -C "$cwd" worktree add -q --detach "$wt" "$sha" || exit 1
+fi
+echo "WORKTREE $wt"
+
+remove_worktree() {
+  git -C "$cwd" worktree remove --force "$wt" && echo "REMOVED $wt"
+}
+
 opened=""
 pane=${PANE:-}
 if [ -z "$pane" ]; then
-  pane=$(herdr pane split --current --direction "$dir" --cwd "$cwd" --no-focus |
-    "$py" -c 'import sys,json;print(json.load(sys.stdin)["result"]["pane"]["pane_id"])') || exit 1
+  pane=$(herdr pane split --current --direction "$dir" --cwd "$wt" --no-focus |
+    "$py" -c 'import sys,json;print(json.load(sys.stdin)["result"]["pane"]["pane_id"])') || { remove_worktree; exit 1; }
   opened=1
 fi
 echo "PANE $pane AGENT $agent PR $url"
 
-# gh_bounded <args>: gh, killed after 45 seconds.
-gh_bounded() {
-  perl -e 'alarm shift; exec @ARGV' 45 gh "$@"
-}
-
+# close_opened: closes a pane this script opened and removes its worktree; else LEFT OPEN.
 close_opened() {
   if [ -n "$opened" ] && "$orch/coordinator/watchers/close-pane.sh" "$pane"; then
     echo "CLOSED $pane"
+    remove_worktree
   else
     echo "LEFT OPEN $pane"
+    false
   fi
 }
 
 for try in 1 2 3 4 5; do
   herdr agent start "$agent" --kind codex --pane "$pane" -- --no-daemon --model "$model" && break
-  [ "$try" = 5 ] && { echo "START FAILED"; close_opened; exit 1; }
+  [ "$try" = 5 ] && { echo "START FAILED"; close_opened; [ -n "$opened" ] || remove_worktree; exit 1; }
   sleep 3
 done
 herdr agent wait "$agent" --until idle --timeout 120000 >/dev/null 2>&1 || sleep 15
@@ -93,12 +114,15 @@ if [ -n "$review" ]; then
   if [ "$status" -eq 0 ]; then close_opened; else echo "LEFT OPEN $pane"; fi
 else
   echo "INCOMPLETE no review of $sha"
-  # Released only when the agent is idle, readable, and never showed the prompt.
-  if [ "$status" -ne 0 ] && herdr agent wait "$agent" --until idle --timeout 5000 >/dev/null 2>&1 &&
+  # Released only when the agent is idle, readable, never showed the prompt, and its pane is closed.
+  undelivered=""
+  [ "$status" -ne 0 ] && [ -n "$opened" ] && herdr agent wait "$agent" --until idle --timeout 5000 >/dev/null 2>&1 &&
     transcript=$(herdr agent read "$agent" --source recent-unwrapped --lines 2000 2>/dev/null) &&
-    ! grep -qF "Head SHA: $sha" <<<"$transcript"; then
+    ! grep -qF "Head SHA: $sha" <<<"$transcript" && undelivered=1
+  if [ -z "$undelivered" ]; then
+    echo "LEFT OPEN $pane"
+  elif close_opened; then
     "$py" "$here/prs.py" release-dispatched --url "$url" --sha "$sha" && echo "RELEASED $sha"
   fi
-  echo "LEFT OPEN $pane"
 fi
 echo "DONE $agent $pane"

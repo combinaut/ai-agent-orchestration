@@ -15,7 +15,7 @@ case "$1 $2" in
   'agent prompt') printf '%s' "$4" >"$TMP/review.prompt"; exit "${PROMPT_STATUS:-0}" ;;
   'agent read')
     [ -z "${AGENT_READ_FAILS:-}" ] || exit 1
-    [ -z "${PROMPT_DELIVERED:-}" ] || printf 'Head SHA: abc123\n'
+    [ -z "${PROMPT_DELIVERED:-}" ] || printf 'Head SHA: %s\n' "$SHA"
     printf 'APPROVE — https://github.com/acme/app/pull/7\n' ;;
   'agent wait') [ -z "${AGENT_BUSY:-}" ] || exit 1 ;;
 esac
@@ -30,12 +30,15 @@ EOF
   chmod +x "$BIN/herdr-review" "$BIN/gh"
   export HERDR_TEST_STUB="$BIN/herdr-review" HERDR_STUB_DIRECT=1
   export ORCH_CODEX_WORKER_MODEL=test-worker-model ORCH_CLOSED_DIR="$TMP/closed"
-  mkdir -p "$TMP/app"
+  git init -q "$TMP/app"
+  git -C "$TMP/app" -c user.email=test@example.invalid -c user.name=test commit -q --allow-empty -m pr
+  SHA=$(git -C "$TMP/app" rev-parse HEAD)
+  export SHA
 }
 
 dispatch() {
   run env ORCH_CONFIG="$TMP/none.toml" bash "$ROOT/$SKILL_DIR/scripts/dispatch.sh" \
-    https://github.com/acme/app/pull/7 7 'Fix it' author abc123 review rev7 "$TMP/app" acme/app
+    https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" review rev7 "$TMP/app" acme/app
 }
 
 @test "dispatch closes the finished review pane through close-pane.sh" {
@@ -123,7 +126,7 @@ dispatch() {
   # shellcheck disable=SC2016 # The stub expands these.
   printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >>"$TMP/gh.calls"' >"$BIN/gh"
   dispatch
-  grep -q 'commit_id=="abc123"' "$TMP/gh.calls"
+  grep -qF "commit_id==\"$SHA\"" "$TMP/gh.calls"
   grep -q 'submitted_at != null' "$TMP/gh.calls"
 }
 
@@ -173,12 +176,12 @@ assert lines and lines[0].startswith("ready:"), lines
   : >"$TMP/none.toml"
   GH_NO_REVIEW=1 dispatch
   [ "$status" -eq 0 ]
-  contains "$output" 'INCOMPLETE no review of abc123'
+  contains "$output" "INCOMPLETE no review of $SHA"
   contains "$output" 'LEFT OPEN w9-p2'
   [ ! -e "$TMP/closed/w9-p2" ]
 }
 
-# dispatch_state: prints whether the next dispatch-queue would dispatch PR 7 at abc123, and the stored entry.
+# dispatch_state: prints whether the next dispatch-queue would dispatch PR 7 at $SHA, and the stored entry.
 dispatch_state() {
   # shellcheck disable=SC2016 # Python source.
   python3 -c '
@@ -186,17 +189,18 @@ import json, sys
 sys.path.insert(0, sys.argv[1])
 import prs
 data = prs.load_dispatched()
-pr = {"url": "https://github.com/acme/app/pull/7", "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": "abc123",
+pr = {"url": "https://github.com/acme/app/pull/7", "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": sys.argv[2],
       "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}}
 print(prs.needs_dispatch(pr, data)[0], json.dumps(data.get(pr["url"], {}).get("state")))
-' "$ROOT/$SKILL_DIR/scripts"
+' "$ROOT/$SKILL_DIR/scripts" "$SHA"
 }
 
 @test "an undelivered prompt releases the head for the next dispatch-queue" {
   stub_review_tools
   : >"$TMP/none.toml"
   PROMPT_STATUS=1 GH_NO_REVIEW=1 dispatch
-  contains "$output" 'RELEASED abc123'
+  contains "$output" "RELEASED $SHA"
+  contains "$output" 'CLOSED w9-p2'
   [ "$(dispatch_state)" = 'True null' ]
 }
 
@@ -233,7 +237,7 @@ print(prs.needs_dispatch(pr, data)[0], json.dumps(data.get(pr["url"], {}).get("s
   PROMPT_STATUS=1 GH_NO_REVIEW=1 AGENT_BUSY=1 dispatch
   not_contains "$output" 'RELEASED'
   [ "$(dispatch_state)" = 'False "pending"' ]
-  rm -rf "$HOME/.cache/review-prs"
+  rm "$HOME/.cache/review-prs/dispatched.json"
   PROMPT_STATUS=1 GH_NO_REVIEW=1 AGENT_READ_FAILS=1 dispatch
   not_contains "$output" 'RELEASED'
   [ "$(dispatch_state)" = 'False "pending"' ]
@@ -289,4 +293,44 @@ print(e["sha"], e["state"], e["previous"]["sha"], e["previous"]["state"])
   wait "$pid" 2>/dev/null || true
   [ "$(cat "$TMP/events")" = "$(printf '%s\n' 'ready: https://github.com/acme/app/pull/7 — t: CI green' 'now: 1 actionable, 1 total')" ]
   [ "$(cat "$log.pos")" = 3 ]
+}
+
+@test "dispatch reviews in a detached worktree at the head and removes it with the pane" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  dispatch
+  wt="$HOME/.cache/review-prs/worktrees/rev7"
+  grep -qF -- "--cwd $wt" "$TMP/review-herdr.calls"
+  contains "$output" "REMOVED $wt"
+  [ ! -e "$wt" ]
+  GH_NO_REVIEW=1 dispatch
+  [ "$(git -C "$wt" rev-parse HEAD)" = "$SHA" ]
+  contains "$output" "WORKTREE $wt"
+}
+
+@test "an undelivered prompt in a caller's pane keeps the head reserved" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PANE=w9-p5 PROMPT_STATUS=1 GH_NO_REVIEW=1 dispatch
+  not_contains "$output" 'RELEASED'
+  contains "$output" 'LEFT OPEN w9-p5'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "a head still pending behind a newer mark is not offered again" {
+  stub_review_tools
+  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
+  u=https://github.com/acme/app/pull/7
+  prs mark-dispatched --url "$u" --sha "$SHA" --state pending
+  prs mark-dispatched --url "$u" --sha older --state pending
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "dispatch-queue finds the clone from a subdirectory of it" {
+  stub_review_tools
+  git -C "$TMP/app" remote add origin https://github.com/acme/app.git
+  mkdir -p "$TMP/app/sub/dir"
+  # shellcheck disable=SC2016 # Python source.
+  run bash -c 'cd "$1/sub/dir" && python3 -c "import sys; sys.path.insert(0, sys.argv[1]); import prs; print(prs.resolve_cwd(\"acme/app\"))" "$2"' _ "$TMP/app" "$ROOT/$SKILL_DIR/scripts"
+  [ "$output" = "$(cd "$TMP/app" && pwd -P)" ]
 }
