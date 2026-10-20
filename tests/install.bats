@@ -162,7 +162,22 @@ EOF
   claude_md="$HOME/.claude/CLAUDE.md"
   rm "$claude_md"
   ln -s CLAUDE.md "$claude_md"
-  run env PATH="/opt/homebrew/bin:$PATH" timeout 20 /bin/bash "$CLONE/install.sh"
+  # shellcheck disable=SC2016 # Python receives this program literally.
+  run python3 -c '
+import subprocess
+import sys
+
+try:
+    result = subprocess.run(sys.argv[1:], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=20)
+except subprocess.TimeoutExpired as error:
+    if error.stdout:
+        sys.stdout.write(error.stdout)
+    print("command timed out after 20 seconds", file=sys.stderr)
+    raise SystemExit(124)
+
+sys.stdout.write(result.stdout)
+raise SystemExit(result.returncode)
+' /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   contains "$output" 'skipped'
   contains "$output" 'cannot resolve'
