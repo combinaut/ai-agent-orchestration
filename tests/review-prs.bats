@@ -191,7 +191,7 @@ import prs
 data = prs.load_dispatched()
 pr = {"url": "https://github.com/acme/app/pull/7", "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": sys.argv[2],
       "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}}
-print(prs.needs_dispatch(pr, data)[0], json.dumps(data.get(pr["url"], {}).get("state")))
+print(prs.needs_dispatch(pr, data)[0], json.dumps(prs.heads(data.get(pr["url"], {})).get(sys.argv[2], {}).get("state")))
 ' "$ROOT/$SKILL_DIR/scripts" "$SHA"
 }
 
@@ -243,22 +243,34 @@ print(prs.needs_dispatch(pr, data)[0], json.dumps(data.get(pr["url"], {}).get("s
   [ "$(dispatch_state)" = 'False "pending"' ]
 }
 
-@test "an older head finishing never replaces a newer head's mark" {
+@test "overlapping heads keep every reservation through claims, completion and release" {
   prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
-  u=https://github.com/acme/app/pull/7
-  prs mark-dispatched --url "$u" --sha old --state pending
-  prs mark-dispatched --url "$u" --sha new --state pending
-  prs mark-dispatched --url "$u" --sha old --state "done"
-  # shellcheck disable=SC2016 # Python source.
-  run python3 -c '
+  states() {
+    # shellcheck disable=SC2016 # Python source.
+    python3 -c '
 import json, sys
-e = json.load(open(sys.argv[1]))[sys.argv[2]]
-print(e["sha"], e["state"], e["previous"]["sha"], e["previous"]["state"])
-' "$HOME/.cache/review-prs/dispatched.json" "$u"
-  [ "$output" = 'new pending old done' ]
-  prs release-dispatched --url "$u" --sha new
-  run python3 -c 'import json, sys; e = json.load(open(sys.argv[1]))[sys.argv[2]]; print(e["sha"], e["state"])' "$HOME/.cache/review-prs/dispatched.json" "$u"
-  [ "$output" = 'old done' ]
+sys.path.insert(0, sys.argv[1])
+import prs
+e = json.load(open(sys.argv[2]))[sys.argv[3]]
+print(" ".join(s + "=" + h["state"] for s, h in sorted(prs.heads(e).items())))
+' "$ROOT/$SKILL_DIR/scripts" "$HOME/.cache/review-prs/dispatched.json" "$u"
+  }
+  u=https://github.com/acme/app/pull/7
+  prs claim-dispatched --url "$u" --sha a
+  prs claim-dispatched --url "$u" --sha b
+  prs mark-dispatched --url "$u" --sha b --state "done"
+  [ "$(states)" = 'a=pending b=done' ]
+  prs claim-dispatched --url "$u" --sha c
+  [ "$(states)" = 'a=pending b=done c=pending' ]
+  prs mark-dispatched --url "$u" --sha a --state pending
+  prs mark-dispatched --url "$u" --sha a --state "done"
+  [ "$(states)" = 'a=done b=done c=pending' ]
+  prs release-dispatched --url "$u" --sha c
+  [ "$(states)" = 'a=done b=done' ]
+  for sha in a b; do
+    run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$u" --sha "$sha"
+    [ "$status" -eq 3 ]
+  done
 }
 
 @test "install leaves an agents skills folder that links into the clone alone" {

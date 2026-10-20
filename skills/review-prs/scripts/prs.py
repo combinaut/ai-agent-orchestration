@@ -5,8 +5,8 @@
   prs.py watch         [scope] [--interval S]     one line per change, forever
   prs.py dispatch-queue [scope]                   JSON: Ready PRs needing (re)review
   prs.py mark-dispatched --url U --sha S [--state pending|done] [--agent N] [--pane P]
-  prs.py claim-dispatched --url U --sha S [--agent N]   marks S pending; exit 3 when S is already claimed
-  prs.py release-dispatched --url U --sha S       drops a pending mark of S, back to the mark before it
+  prs.py claim-dispatched --url U --sha S [--agent N]   marks S pending; exit 3 when S is already pending or done
+  prs.py release-dispatched --url U --sha S       drops S while it is pending
 
 Scope: --repo owner/name | --org ORG | --all. Default: cwd's GitHub repo, else watchers.pr_scope, else --all.
 """
@@ -284,10 +284,10 @@ def needs_dispatch(pr, dispatched):
     if bucket(pr) != "ready":
         return False, None
     sha = pr.get("headRefOid") or ""
-    prev = dispatched.get(pr["url"]) or {}
-    if claimed(prev, sha):
+    known = heads(dispatched.get(pr["url"]) or {})
+    if sha and sha in known:
         return False, None
-    kind = "re-review" if prev.get("sha") or my_review_sha(pr) else "review"
+    kind = "re-review" if known or my_review_sha(pr) else "review"
     return True, kind
 
 
@@ -462,21 +462,40 @@ def cmd_dispatch_queue(args, scope, label):
     }, indent=2))
 
 
-def claimed(entry, sha):
-    earlier = entry.get("previous") or {}
-    return bool(sha) and (entry.get("sha") == sha or (earlier.get("sha") == sha and earlier.get("state") == "pending"))
+HEADS_KEPT = 20
 
 
-def cmd_claim_dispatched(args, scope, label):
+def heads(entry):
+    """sha -> {state, agent, pane, at} for one PR; a mark from before per-head records counts as done."""
+    if "heads" in entry:
+        return entry["heads"]
+    return {entry["sha"]: {"state": "done", **{k: entry.get(k) for k in ("agent", "pane", "at")}}} if entry.get("sha") else {}
+
+
+def set_head(data, url, sha, record):
+    """Stores one head's record; the newest HEADS_KEPT done heads and every pending head stay."""
+    known = dict(heads(data.get(url) or {}))
+    known[sha] = record
+    done = sorted((s for s, h in known.items() if h.get("state") == "done"), key=lambda s: known[s].get("at") or "")
+    for old in done[:-HEADS_KEPT]:
+        del known[old]
+    data[url] = {"heads": known}
+
+
+def head_record(args, state):
+    return {"state": state, "agent": args.agent, "pane": args.pane, "at": datetime.now(timezone.utc).isoformat()}
+
+
+def cmd_claim_dispatched(args, _scope, _label):
     if not args.url or not args.sha:
         sys.exit("claim-dispatched needs --url and --sha")
     taken = []
 
     def claim(data):
-        if claimed(data.get(args.url) or {}, args.sha):
+        if args.sha in heads(data.get(args.url) or {}):
             taken.append(True)
             return
-        mark_entry(args, "pending")(data)
+        set_head(data, args.url, args.sha, head_record(args, "pending"))
 
     update_dispatched(claim)
     print(f"{'TAKEN' if taken else 'CLAIMED'} {args.sha}")
@@ -487,34 +506,9 @@ def cmd_claim_dispatched(args, scope, label):
 def cmd_mark_dispatched(args, _scope, _label):
     if not args.url or not args.sha:
         sys.exit("mark-dispatched needs --url and --sha")
-    entry = mark_entry(args, args.state)
-    update_dispatched(entry)
-    print(json.dumps(entry.entry))
-
-
-def mark_entry(args, state):
-    """A change for update_dispatched that marks args.sha as state."""
-    entry = {
-        "sha": args.sha,
-        "state": state,
-        "agent": args.agent,
-        "pane": args.pane,
-        "at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    def mark(data):
-        prev = data.get(args.url) or {}
-        if state == "done" and prev.get("sha") not in (None, args.sha):
-            if (prev.get("previous") or {}).get("sha") == args.sha:
-                prev["previous"] = entry
-            return
-        earlier = prev.get("previous") if prev.get("sha") == args.sha else dict(prev, previous=None)
-        if state == "pending" and earlier and earlier.get("sha"):
-            entry["previous"] = {k: v for k, v in earlier.items() if k != "previous"}
-        data[args.url] = entry
-
-    mark.entry = entry
-    return mark
+    record = head_record(args, args.state)
+    update_dispatched(lambda data: set_head(data, args.url, args.sha, record))
+    print(json.dumps(record))
 
 
 def cmd_release_dispatched(args, _scope, _label):
@@ -522,15 +516,12 @@ def cmd_release_dispatched(args, _scope, _label):
         sys.exit("release-dispatched needs --url and --sha")
 
     def release(data):
-        entry = data.get(args.url) or {}
-        earlier = entry.get("previous") or {}
-        if earlier.get("sha") == args.sha and earlier.get("state") == "pending":
-            entry.pop("previous")
+        known = dict(heads(data.get(args.url) or {}))
+        if (known.get(args.sha) or {}).get("state") != "pending":
             return
-        if entry.get("sha") != args.sha or entry.get("state") != "pending":
-            return
-        if entry.get("previous"):
-            data[args.url] = entry["previous"]
+        del known[args.sha]
+        if known:
+            data[args.url] = {"heads": known}
         else:
             data.pop(args.url, None)
 
