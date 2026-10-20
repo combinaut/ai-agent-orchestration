@@ -956,9 +956,11 @@ guide_chrome_load() {
 }
 
 resolve_link_path() {
-  local path=$1 link dir
+  local path=$1 link dir hops=0 max_hops=40
   [ -L "$path" ] || { printf '%s\n' "$path"; return; }
   while [ -L "$path" ]; do
+    hops=$((hops + 1))
+    [ "$hops" -le "$max_hops" ] || return 1
     link=$(readlink "$path") || return
     case "$link" in
       /*) path=$link ;;
@@ -986,7 +988,7 @@ claude_md_mode() {
 
 replace_claude_md_block() (
   target=$1 start_line=$2 end_line=$3 snippet=$4 mode=$5 tmp=""
-  # shellcheck disable=SC2329 # Called by the EXIT trap below.
+  # shellcheck disable=SC2317,SC2329 # Called by the traps below.
   cleanup() { [ -z "$tmp" ] || rm -f "$tmp"; }
   trap cleanup EXIT
   trap 'cleanup; exit 1' HUP INT TERM
@@ -1003,7 +1005,7 @@ replace_claude_md_block() (
 
 append_claude_md_block() (
   target=$1 snippet=$2 mode=${3:-} tmp=""
-  # shellcheck disable=SC2329 # Called by the EXIT trap below.
+  # shellcheck disable=SC2317,SC2329 # Called by the traps below.
   cleanup() { [ -z "$tmp" ] || rm -f "$tmp"; }
   trap cleanup EXIT
   trap 'cleanup; exit 1' HUP INT TERM
@@ -1025,7 +1027,10 @@ claude_md_hint() {
   local start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
   local end='<!-- orchestration:end -->'
   snippet="$ORCH_REPO/snippets/CLAUDE.md.snippet"
-  claude_md=$(resolve_link_path "$CLAUDE_DIR/CLAUDE.md") || die "cannot resolve $CLAUDE_DIR/CLAUDE.md"
+  if ! claude_md=$(resolve_link_path "$CLAUDE_DIR/CLAUDE.md"); then
+    say "skipped" "$CLAUDE_DIR/CLAUDE.md: cannot resolve symlink; leaving it unchanged"
+    return
+  fi
 
   marker_info=$(LC_ALL=C awk -v start="$start" -v end="$end" '
     { line = $0; sub(/\r$/, "", line) }

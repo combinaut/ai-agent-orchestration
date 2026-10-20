@@ -157,6 +157,18 @@ EOF
   [ -z "$(find "$HOME/.claude" -name 'CLAUDE.md.tmp.*' -print)" ]
 }
 
+@test "self-linked CLAUDE.md is skipped without hanging the installer" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  rm "$claude_md"
+  ln -s CLAUDE.md "$claude_md"
+  run env PATH="/opt/homebrew/bin:$PATH" timeout 2 /bin/bash "$CLONE/install.sh"
+  [ "$status" -eq 0 ]
+  contains "$output" 'skipped'
+  contains "$output" 'cannot resolve'
+  [ -L "$claude_md" ]
+}
+
 @test "CLAUDE.md marked orchestration block is a no-op when current" {
   fresh_install
   claude_md="$HOME/.claude/CLAUDE.md"
