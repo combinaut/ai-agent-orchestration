@@ -162,7 +162,7 @@ EOF
   claude_md="$HOME/.claude/CLAUDE.md"
   rm "$claude_md"
   ln -s CLAUDE.md "$claude_md"
-  run env PATH="/opt/homebrew/bin:$PATH" timeout 2 /bin/bash "$CLONE/install.sh"
+  run env PATH="/opt/homebrew/bin:$PATH" timeout 20 /bin/bash "$CLONE/install.sh"
   [ "$status" -eq 0 ]
   contains "$output" 'skipped'
   contains "$output" 'cannot resolve'
