@@ -245,7 +245,23 @@ todo_key_block() {
   printf '%s\n[[keys.command]]\nkey = "prefix+t"\ntype = "plugin_action"\ncommand = "%s.open"\ndescription = "to-do list"\n%s\n' "$TODO_KEY_START" "$TODO_ID" "$TODO_KEY_END"
 }
 
-# todo_config_without_key <file>: the file without our key block and the blank line before it.
+# todo_key_markers_ok <file>: succeeds when the file has no key block markers or exactly one start followed by one end.
+todo_key_markers_ok() {
+  awk -v start="$TODO_KEY_START" -v end="$TODO_KEY_END" '
+    $0 == start { starts++ }
+    $0 == end { ends++; if (!starts) end_first = 1 }
+    END { exit !((!starts && !ends) || (starts == 1 && ends == 1 && !end_first)) }
+  ' "$1"
+}
+
+# todo_config_check: ends the install before anything changes when the key block markers in Herdr's config.toml are unpaired.
+todo_config_check() {
+  local target
+  target=$(resolve_link_path "$(herdr_config_file)") || die "cannot resolve $(herdr_config_file)"
+  [ ! -f "$target" ] || todo_key_markers_ok "$target" || die "$target has an unpaired '$TODO_KEY_START' or '$TODO_KEY_END' marker; fix or remove it, then run install.sh again (the file is unchanged)"
+}
+
+# todo_config_without_key <file>: the file without our key block and the blank line before it; the markers must be paired.
 todo_config_without_key() {
   awk -v start="$TODO_KEY_START" -v end="$TODO_KEY_END" '
     $0 == start { skip = 1; held = ""; next }
@@ -256,27 +272,36 @@ todo_config_without_key() {
   ' "$1"
 }
 
-# todo_config_sync <enabled>: the prefix+t block is in Herdr's config.toml when enabled and absent otherwise; returns 0 when the file changed.
+# todo_config_sync <enabled>: the prefix+t block is in Herdr's config.toml when enabled and absent otherwise.
+# Returns 0 when the file changed, 1 when it did not; any failure ends the install and leaves the file as it was.
 todo_config_sync() {
-  local target want backup
+  local target want tmp backup mode
   target=$(resolve_link_path "$(herdr_config_file)") || die "cannot resolve $(herdr_config_file)"
   if [ ! -f "$target" ]; then
     [ "$1" = 1 ] || return 1
-    mkdir -p "$(dirname "$target")"
-    : >"$target"
+    mkdir -p "$(dirname "$target")" || die "cannot create $(dirname "$target")"
+    : >"$target" || die "cannot create $target"
   fi
-  want=$(mktemp)
-  todo_config_without_key "$target" >"$want"
-  [ "$1" != 1 ] || { printf '\n'; todo_key_block; } >>"$want"
+  todo_key_markers_ok "$target" || die "$target has an unpaired '$TODO_KEY_START' or '$TODO_KEY_END' marker; fix or remove it, then run install.sh again (the file is unchanged)"
+  want=$(mktemp "${TMPDIR:-/tmp}/orch-todo-key.XXXXXX") || die "cannot create a temporary file for $target"
+  todo_config_without_key "$target" >"$want" || { rm -f "$want"; die "cannot read $target"; }
+  if [ "$1" = 1 ]; then
+    { printf '\n'; todo_key_block; } >>"$want" || { rm -f "$want"; die "cannot prepare the new $target"; }
+  fi
   if cmp -s "$want" "$target"; then
     rm -f "$want"
     say "already set" "$target: to-do key block"
     return 1
   fi
-  backup=$(backup_name "$target")
-  cp -p "$target" "$backup"
+  backup=$(backup_name "$target") || { rm -f "$want"; die "cannot name a backup of $target"; }
+  cp -p "$target" "$backup" || { rm -f "$want"; die "cannot back up $target"; }
   say "backed up" "$target -> $backup"
-  cat "$want" >"$target"
+  mode=$(claude_md_mode "$target") || { rm -f "$want"; die "cannot read the mode of $target"; }
+  tmp=$(mktemp "$target.XXXXXX") || { rm -f "$want"; die "cannot create a temporary file beside $target"; }
+  if ! { cat "$want" >"$tmp" && chmod "$mode" "$tmp" && mv "$tmp" "$target"; }; then
+    rm -f "$want" "$tmp"
+    die "cannot write $target (backup: $backup)"
+  fi
   rm -f "$want"
   if [ "$1" = 1 ]; then say "added" "$target: prefix+t opens the to-do popup"; else say "removed" "$target: to-do key block"; fi
 }
@@ -286,6 +311,7 @@ install_todo_popup() {
   local enabled plugin source changed=0
   enabled=$(config_value ORCH_HERDR_TODO_POPUP)
   [ "$enabled" = 1 ] || enabled=0
+  todo_config_check
   plugin="$ORCH_REPO/env/herdr/todo-plugin"
   source=$("$HERDR_EXE" plugin list | sed -n "s/^- $TODO_ID .*\[\(.*\)\]\$/\1/p")
   source=$(printf '%s' "$source" | sed 's/; [0-9][0-9]* warning(s)$//')

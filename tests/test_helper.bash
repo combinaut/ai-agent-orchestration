@@ -173,6 +173,14 @@ case "$2" in
 esac
 printf 'mkdir -p "$HOME/.local/bin"\ncp "$BIN/%s.off" "$HOME/.local/bin/%s"\n' "$tool" "$tool" >"$4"
 EOF
+  cat >"$BIN/mktemp" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in *orch-todo-key*) [ -z "${MKTEMP_FAIL_TODO:-}" ] || exit 1 ;; esac
+exec "$REAL_MKTEMP" "$@"
+EOF
+  REAL_MKTEMP=$(command -v mktemp)
+  export REAL_MKTEMP
+  chmod +x "$BIN/mktemp"
   chmod +x "$BIN/mise" "$BIN/curl"
   chmod +x "$BIN/gh" "$BIN/herdr" "$BIN/node"
   export HERDR_TEST_STUB="$BIN/herdr"

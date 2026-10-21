@@ -78,3 +78,34 @@ popup_install() { run env "$@" /bin/bash "$CLONE/install.sh" --env herdr; [ "$st
   install_ok --env herdr
   contains "$(cat "$HCONF")" "$START"
 }
+
+@test "an unpaired start marker refuses to rewrite and leaves the file untouched" {
+  fresh_install
+  printf '[ui]\nsidebar_width = 40\n\n%s (managed by install.sh; edits inside are replaced)\n[[keys.command]]\nkey = "prefix+t"\n\n# >>> herdr-radar tab-bar block\nkeep = 1\n# <<< herdr-radar tab-bar block\n[theme]\nname = "x"\n' "$START" >"$HCONF"
+  cp "$HCONF" "$TMP/before"
+  for enabled in 1 0; do
+    run env ORCH_HERDR_TODO_POPUP=$enabled /bin/bash "$CLONE/install.sh" --env herdr
+    [ "$status" -ne 0 ]
+    contains "$output" 'unpaired'
+    cmp "$HCONF" "$TMP/before"
+  done
+  [ ! -f "$HERDR_TODO_PLUGIN" ]
+}
+
+@test "a failing temporary file leaves the config unchanged" {
+  fresh_install
+  cp "$HCONF" "$TMP/before"
+  run env ORCH_HERDR_TODO_POPUP=1 MKTEMP_FAIL_TODO=1 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -ne 0 ]
+  contains "$output" 'cannot create a temporary file'
+  cmp "$HCONF" "$TMP/before"
+}
+
+@test "an end marker before the start marker refuses to rewrite" {
+  fresh_install
+  printf '[ui]\nsidebar_width = 40\n# <<< ai-agent-orchestration to-do key\n[theme]\nname = "x"\n%s (managed by install.sh; edits inside are replaced)\n' "$START" >"$HCONF"
+  cp "$HCONF" "$TMP/before"
+  run env ORCH_HERDR_TODO_POPUP=1 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -ne 0 ]
+  cmp "$HCONF" "$TMP/before"
+}
