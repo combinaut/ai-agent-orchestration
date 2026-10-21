@@ -295,15 +295,24 @@ def label(text, flagged, note=""):
     return f"{mark}{body}{tag}" + (f"  ({note})" if note else "")
 
 
-def picker_lines(picker, hits, start, width, index):
-    """The inline time choice under an item; its buttons are added to hits."""
+def picker_lines(picker, width):
+    """The inline time choice under an item and its buttons as (line within these lines, first, last, action)."""
     if picker["mode"] == "type":
         prompt = wrap(f"Remind in (30m, 3h): {picker['entry']}▏", width)
-        return [f"\033[38;5;214m{row}\033[0m" for row in prompt] + ["\033[2mEnter ok · Esc cancels\033[0m"]
+        return [f"\033[38;5;214m{row}\033[0m" for row in prompt] + ["\033[2mEnter ok · Esc cancels\033[0m"], []
     rows, spans = button_rows(width, False, True, PICKS, "remind")
-    for offset, first, last, action in spans:
-        hits.append((start + offset + 2, first + GUTTER, last + GUTTER, action, index))
-    return ["\033[38;5;214mRemind me in:\033[0m"] + rows
+    return ["\033[38;5;214mRemind me in:\033[0m"] + rows, [(offset + 2, first, last, action)
+                                                          for offset, first, last, action in spans]
+
+
+def shorten(body, rows, width):
+    """The message cut to `rows` lines, the last one ending in an ellipsis."""
+    if len(body) <= rows:
+        return body
+    body = body[:rows]
+    if body:
+        body[-1] = fit(body[-1], max(1, width - 1)).rstrip() + "…"
+    return body
 
 
 def footer_rows(width):
@@ -317,9 +326,10 @@ def footer_rows(width):
     return rows
 
 
-def layout(rows, width, hidden_count, selected=0, showing=False, picker=None, open_count=None):
+def layout(rows, width, hidden_count, selected=0, showing=False, picker=None, open_count=None, height=None):
     """Screen lines (none wider than width) and mouse hits for the item rows (owner, text, flagged, note);
-    hits are (line, first, last, action, index) with 1-based lines and columns."""
+    hits are (line, first, last, action, index) with 1-based lines and columns. With a height, the selected item's
+    owner line, buttons and picker stay whole and its message is cut to what is left."""
     open_count = len(rows) if open_count is None else open_count
     width = max(1, width)
     lines, hits = [f"\033[2m{open_count} open · {hidden_count} on reminder\033[0m", ""], []
@@ -327,18 +337,23 @@ def layout(rows, width, hidden_count, selected=0, showing=False, picker=None, op
     for index, (owner, text, flagged, note) in enumerate(rows):
         picked = index == selected
         gutter = f"\033[38;5;141m▌{RESET} " if picked else "  "
-        start = len(lines)
-        lines += [f"\033[38;5;141m{row}{RESET}" for row in wrap(f"{index + 1}. {owner}", room, indent=0)]
+        head = [f"\033[38;5;141m{row}{RESET}" for row in wrap(f"{index + 1}. {owner}", room, indent=0)]
         body = wrap(label(text, flagged, note), room - 1, indent=0)
-        lines += [(("\033[1m" + row + RESET) if picked else row) for row in body]
         entries = BUTTONS[:2] + (CANCEL,) if note else BUTTONS
         button_lines, spans = button_rows(room, picked, picked, entries)
+        extra, extra_spans = picker_lines(picker, room) if picker and picker["index"] == index else ([], [])
+        if height is not None and picked:
+            free = height - 1 - len(button_lines) - len(extra)
+            if free < len(head):
+                head = []
+            body = shorten(body, max(0, free - len(head)), room - 1)
+        body = [(("\033[1m" + row + RESET) if picked else row) for row in body]
+        first_row = len(lines) + len(head) + len(body)
         for offset, first, last, action in spans:
-            hits.append((len(lines) + offset + 1, first + GUTTER, last + GUTTER, action, index))
-        lines += button_lines
-        if picker and picker["index"] == index:
-            lines += picker_lines(picker, hits, len(lines), room, index)
-        lines[start:] = [gutter + line for line in lines[start:]]
+            hits.append((first_row + offset + 1, first + GUTTER, last + GUTTER, action, index))
+        for line, first, last, action in extra_spans:
+            hits.append((first_row + len(button_lines) + line, first + GUTTER, last + GUTTER, action, index))
+        lines += [gutter + line for line in head + body + button_lines + extra]
         lines.append("")
     if not rows:
         lines.append("Everything is snoozed." if hidden_count else "Nothing waits on you.")
@@ -531,7 +546,7 @@ class App:
         if self.picker:
             picker = dict(self.picker, index=self.find(self.picker["key"]))
         lines, hits = layout(self.rows, columns, self.hidden.hidden_count(self.items), self.selected, self.show,
-                             picker, self.hidden.open_count(self.items))
+                             picker, self.hidden.open_count(self.items), rows - 1)
         self.top, window, self.hits = viewport(lines, hits, self.selected, self.top, rows - 1)
         status = f"\033[{rows};1H\033[2m{fit(self.status, columns)}\033[0m" if self.status else ""
         self.out.write("\033[H\033[2J" + "\r\n".join(window) + status)

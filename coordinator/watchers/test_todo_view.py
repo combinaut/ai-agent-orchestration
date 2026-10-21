@@ -650,6 +650,29 @@ class ViewportTest(AppCase):
                     label = {"open": "Open", "ignore": "Ignore", "remind": "Reminder"}[action]
                     self.assertIn(label, plain[line - 1][first - 1:last], (width, action))
 
+    def test_a_long_item_with_an_open_picker_keeps_its_controls_visible_and_clickable(self):
+        self.current = [("Architect::Frontend::Migration", "very long message " * 120 + "-> Architect::Frontend::Migration"),
+                        ("Architect::Other", "short")]
+        wanted = {"open", "ignore", "remind", "pick1", "pick2", "pick3", "pick4", "pick5", "type"}
+        labels = {"open": "Open", "ignore": "Ignore", "remind": "Reminder", "pick1": "15m", "pick2": "1h", "pick3": "2h",
+                  "pick4": "4h", "pick5": "tomorrow 9:00", "type": "type"}
+        for columns, lines in ((80, 24), (50, 12), (40, 9), (40, 7), (40, 6), (40, 5)):
+            with self.subTest(size=(columns, lines)):
+                self.screen.columns, self.screen.lines = columns, lines
+                self.screen.out.seek(0)
+                self.screen.out.truncate()
+                app = self.app()
+                app.feed("r")
+                frame = self.screen.last_frame().split("\x1b[")[0].split("\r\n")
+                self.assertLessEqual(len(frame), lines - 1)
+                mine = {h[3]: h for h in app.hits if h[4] == 0}
+                self.assertEqual(wanted - set(mine), set())
+                for action in wanted:
+                    row, first, last, _action, _index = mine[action]
+                    self.assertIn(labels[action], frame[row - 1][first - 1:last], (action, frame))
+                    self.assertEqual(self.click(app.hits, row, first), [(action, 0)])
+                self.assertEqual(any("…" in line for line in frame), lines >= 9, frame)
+
     def test_a_tall_item_starts_at_the_top_of_the_window(self):
         lines = ["head", ""] + [f"a{n}" for n in range(8)] + [""] + ["x", ""]
         top, window, _ = view.viewport(lines, [], 0, 0, 5)
