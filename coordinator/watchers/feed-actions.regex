@@ -7,3 +7,4 @@
 ^[^ ]+ todo: TODO [0-9]+ new: .* \(start\)$
 ^[^ ]+ todo: TODO READFAIL .* \(start\)$
 ^[^ ]+ answers: ANSWER [^:]+: .* \(start\)$
+^[^ ]+ todo: TODO IGNORED [^ ]+: .* \(start\)$
