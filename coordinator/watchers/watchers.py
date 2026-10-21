@@ -591,7 +591,7 @@ def collect_answers(before, consume=True):
                 continue
             claim = processing.name.split(".", 2)[1]
             answers.append((slug, text, str(processing), claim))
-        except OSError:
+        except (OSError, UnicodeError):
             blocked.add(slug)
             unreadable.append(str(processing))
     return {"answers": answers, "unreadable": unreadable}
@@ -977,7 +977,8 @@ def main():
                     return json.loads(args.fixture.read_text())
                 return collect(mode, before, args.scope, args.state_dir)
             if mode == "answers" and args.preview_answers:
-                _, events = reduce_answers(None, collect_answers(None, consume=False))
+                with runtime.deadline(2 * WATCH_TIMING["answers"]["soft_budget"], "answers preview"):
+                    _, events = reduce_answers(None, collect_answers(None, consume=False))
                 line = json.dumps({"mode": mode, "events": events}) if events else None
             else:
                 line = cycle(args.state_dir, mode, collector)

@@ -41,7 +41,7 @@ def read_key():
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
-        tty.setcbreak(fd)
+        tty.setcbreak(fd, termios.TCSANOW)
         return os.read(fd, 1).decode("latin1")
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)

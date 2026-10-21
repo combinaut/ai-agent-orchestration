@@ -326,6 +326,12 @@ class AnswersTest(IsolatedTestCase):
         self.assertNotIn('unparsed', policy)
 
     def test_pasted_typed_answer_is_not_stranded_in_key_buffer(self):
+        self._assert_pty_answer(b'tchosen\n', 'chosen\n')
+
+    def test_queued_escape_sequence_preserves_following_answer(self):
+        self._assert_pty_answer(b'\x1b[6~7', '7\n')
+
+    def _assert_pty_answer(self, payload, expected):
         import pty
         import select
         with tempfile.TemporaryDirectory() as tmp:
@@ -336,7 +342,7 @@ class AnswersTest(IsolatedTestCase):
                     'spec=importlib.util.spec_from_file_location("qp",sys.argv[1]); '
                     'qp=importlib.util.module_from_spec(spec); spec.loader.exec_module(qp); '
                     'original=qp.tty.setcbreak\n'
-                    'def ready(fd):\n original(fd); print("KEY READY",flush=True)\n'
+                    'def ready(fd,*args):\n original(fd,*args); print("KEY READY",flush=True)\n'
                     'qp.tty.setcbreak=ready\n'
                     'qp.show=lambda *args: None\n'
                     'qp.follow(sys.argv[2])\n')
@@ -353,10 +359,10 @@ class AnswersTest(IsolatedTestCase):
                     if select.select([master], [], [], .05)[0]:
                         output += os.read(master, 4096)
                     if not sent and b'KEY READY' in output:
-                        os.write(master, b'tchosen\n')
+                        os.write(master, payload)
                         sent = True
                 self.assertTrue(answer.exists(), output.decode(errors='replace'))
-                self.assertEqual(answer.read_text(), 'chosen\n')
+                self.assertEqual(answer.read_text(), expected)
             finally:
                 if slave is not None:
                     os.close(slave)
@@ -365,3 +371,34 @@ class AnswersTest(IsolatedTestCase):
                     if child.poll() is None:
                         child.terminate()
                     child.wait(timeout=5)
+
+    def test_undecodable_claim_does_not_block_other_questions(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, ORCH_USER_QUESTIONS_DIR=tmp):
+            directory, base = Path(tmp), Path(tmp) / 'state'
+            for slug in ('alpha', 'zulu'):
+                (directory / f'{slug}.md').touch()
+            bad = directory / 'alpha.bad.answer.processing'
+            bad.write_bytes(b'\xff')
+            (directory / 'zulu.answer').write_text('yes')
+            events = json.loads(w.cycle(base, 'answers', w.collect_answers))['events']
+            self.assertIn('ANSWER zulu: yes', events)
+            self.assertIn('ANSWERS READFAIL ' + str(bad), events)
+            self.assertTrue(bad.exists())
+            bad.write_text('recovered')
+            events = json.loads(w.cycle(base, 'answers', w.collect_answers))['events']
+            self.assertIn('ANSWER alpha: recovered', events)
+            self.assertIn('ANSWERS READ RECOVERED ' + str(bad), events)
+            self.assertFalse(any(event.startswith('ANSWER zulu:') for event in events))
+            self.assertIsNone(w.cycle(base, 'answers', w.collect_answers))
+
+    def test_answer_preview_keeps_its_watchdog(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code = ('import sys,time; import watchers as w; import watcher_runtime as r\n'
+                    'guard=r.deadline\n'
+                    'r.deadline=lambda seconds,label,**kwargs: guard(.05,label)\n'
+                    'w.collect_answers=lambda *args,**kwargs: time.sleep(1)\n'
+                    f'sys.argv=["watchers.py","answers","--preview-answers","--state-dir",{tmp!r}]\n'
+                    'w.main()\n')
+            child = subprocess.run([sys.executable, '-c', code], cwd=w.ROOT, capture_output=True, text=True, timeout=5)
+            self.assertEqual(child.returncode, 70, child.stderr)
+            self.assertIn('watcher deadline exceeded: answers preview', child.stderr)

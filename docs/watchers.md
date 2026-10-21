@@ -50,3 +50,5 @@ answers. Unreadable claims do not block other questions; recovery clears the
 corresponding read-failure alert. The panel discards terminal escape sequences.
 `coord-check.sh` and `coord-cycle.sh` inspect answers without claiming or
 acknowledging them, so previews cannot divert submissions from production.
+Queued terminal bytes are preserved; undecodable claims retry independently.
+Answer previews retain the watcher deadline without consuming submissions.
