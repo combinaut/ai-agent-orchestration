@@ -681,7 +681,12 @@ class TodoTest(IsolatedTestCase):
         calls = []
         with patch.dict(os.environ, {"HERDR_BIN_PATH": "/opt/herdr"}, clear=False):
             todo.report_metadata("w1:p1", 3, run=lambda argv, **kwargs: calls.append(argv))
-        self.assertEqual(calls, [["/opt/herdr", "pane", "report-metadata", "w1:p1", "--source", "orchestrate", "--token", "todo=3"]])
+        self.assertEqual(calls, [["/opt/herdr", "pane", "report-metadata", "w1:p1", "--source", "orchestrate", "--token", "todo=3", "--token", "tabbar=To-do 3"]])
+
+    def test_metadata_clears_the_tabbar_token_at_zero(self):
+        calls = []
+        todo.report_metadata("w1:p1", 0, run=lambda argv, **kwargs: calls.append(argv))
+        self.assertEqual(calls[0][-4:], ["--token", "todo=0", "--clear-token", "tabbar"])
 
     def test_multi_digit_selection_and_todo_readfail_policy(self):
         self.assertEqual(todo.number_selection("12", 20), 11)

@@ -234,6 +234,75 @@ env_install() {
     radar_daemon_wait start "$path" "$known" || die "Radar daemon is not running after state-start; run install.sh again, or see: $HERDR_EXE plugin log"
   fi
   say "running" "Radar daemon (mise Node $RADAR_NODE)"
+  install_todo_popup
+}
+
+TODO_ID="combinaut.todo"
+TODO_KEY_START="# >>> ai-agent-orchestration to-do key (managed by install.sh; edits inside are replaced)"
+TODO_KEY_END="# <<< ai-agent-orchestration to-do key"
+
+todo_key_block() {
+  printf '%s\n[[keys.command]]\nkey = "prefix+t"\ntype = "plugin_action"\ncommand = "%s.open"\ndescription = "to-do list"\n%s\n' "$TODO_KEY_START" "$TODO_ID" "$TODO_KEY_END"
+}
+
+# todo_config_without_key <file>: the file without our key block and the blank line before it.
+todo_config_without_key() {
+  awk -v start="$TODO_KEY_START" -v end="$TODO_KEY_END" '
+    $0 == start { skip = 1; held = ""; next }
+    skip { if ($0 == end) skip = 0; next }
+    /^$/ { printf "%s", held; held = "\n"; next }
+    { printf "%s", held; held = ""; print }
+    END { printf "%s", held }
+  ' "$1"
+}
+
+# todo_config_sync <enabled>: the prefix+t block is in Herdr's config.toml when enabled and absent otherwise; returns 0 when the file changed.
+todo_config_sync() {
+  local target want backup
+  target=$(resolve_link_path "$(herdr_config_file)") || die "cannot resolve $(herdr_config_file)"
+  if [ ! -f "$target" ]; then
+    [ "$1" = 1 ] || return 1
+    mkdir -p "$(dirname "$target")"
+    : >"$target"
+  fi
+  want=$(mktemp)
+  todo_config_without_key "$target" >"$want"
+  [ "$1" != 1 ] || { printf '\n'; todo_key_block; } >>"$want"
+  if cmp -s "$want" "$target"; then
+    rm -f "$want"
+    say "already set" "$target: to-do key block"
+    return 1
+  fi
+  backup=$(backup_name "$target")
+  cp -p "$target" "$backup"
+  say "backed up" "$target -> $backup"
+  cat "$want" >"$target"
+  rm -f "$want"
+  if [ "$1" = 1 ]; then say "added" "$target: prefix+t opens the to-do popup"; else say "removed" "$target: to-do key block"; fi
+}
+
+# install_todo_popup: herdr.todo_popup links the to-do plugin and writes the prefix+t block; off removes both.
+install_todo_popup() {
+  local enabled plugin source changed=0
+  enabled=$(config_value ORCH_HERDR_TODO_POPUP)
+  [ "$enabled" = 1 ] || enabled=0
+  plugin="$ORCH_REPO/env/herdr/todo-plugin"
+  source=$("$HERDR_EXE" plugin list | sed -n "s/^- $TODO_ID .*\[\(.*\)\]\$/\1/p")
+  source=$(printf '%s' "$source" | sed 's/; [0-9][0-9]* warning(s)$//')
+  if [ "$enabled" = 1 ]; then
+    if [ "$source" != "local:$plugin" ]; then
+      [ -z "$source" ] || "$HERDR_EXE" plugin unlink "$TODO_ID" >/dev/null
+      "$HERDR_EXE" plugin link "$plugin" >/dev/null
+      say "linked" "Herdr plugin $TODO_ID -> $plugin"
+    else
+      say "already linked" "Herdr plugin $TODO_ID -> $plugin"
+    fi
+  elif [ -n "$source" ]; then
+    "$HERDR_EXE" plugin unlink "$TODO_ID" >/dev/null
+    say "unlinked" "Herdr plugin $TODO_ID"
+  fi
+  if todo_config_sync "$enabled"; then changed=1; fi
+  [ "$changed" = 0 ] || "$HERDR_EXE" server reload-config >/dev/null 2>&1 || say "note" "Herdr did not reload its config; run: $HERDR_EXE server reload-config"
 }
 
 herdr_config_file() { printf '%s/herdr/config.toml' "${XDG_CONFIG_HOME:-$HOME/.config}"; }

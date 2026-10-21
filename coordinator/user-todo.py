@@ -203,7 +203,8 @@ def report_metadata(pane, count, run=subprocess.run):
     if pane:
         herdr = os.environ.get("HERDR_BIN_PATH") or os.environ.get("ORCH_HERDR_BIN") or "herdr"
         try:
-            run([herdr, "pane", "report-metadata", pane, "--source", "orchestrate", "--token", f"todo={count}"], check=False)
+            tabbar = ["--token", f"tabbar=To-do {count}"] if count else ["--clear-token", "tabbar"]
+            run([herdr, "pane", "report-metadata", pane, "--source", "orchestrate", "--token", f"todo={count}", *tabbar], check=False)
         except OSError:
             pass
 

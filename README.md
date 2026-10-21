@@ -84,6 +84,8 @@ python3 ~/.claude/coordinator/user-todo.py --follow
 
 For buttons instead, run `python3 ~/.claude/coordinator/user-todo-view.py` (`--demo` shows sample items). Each item has Open, Ignore and Reminder buttons (click, or `o` `i` `r` on the selected item; `↑↓` or a number selects). Open jumps to the target. Ignore removes the item for good: it returns only when the architect writes a new or changed item, and one `todo: TODO IGNORED <architect>: <text> (start)` line goes to the feed so the Coordinator can tell that architect. Reminder asks when (`1`-`5` for 15m, 1h, 2h, 4h, tomorrow 9:00; `t` types `30m` or `3h`) and hides the item until then; reminders are listed under `s` and come back marked `reminder:`; on a reminder item the button reads Cancel reminder. The top line reads `<n> open · <m> on reminder`. State is in `~/.claude/coordinator/user-todo-state.json` (not the generator's `user-todo.state.json`).
 
+To open the buttons view as a popup titled "Your to-do" on `prefix+t`, set `todo_popup = true` under `[herdr]` in `~/.claude/orchestration.toml` (off by default) and run `install.sh`. It links the Herdr plugin in `env/herdr/todo-plugin` and adds a marked `[[keys.command]]` block to Herdr's `config.toml`; `false` removes both. See [docs/settings.md](docs/settings.md).
+
 ### User questions
 
 Every user question gets a pane. Create its Markdown file under `~/.claude/coordinator/questions/`, then run `ask-user-question <slug> <file>`; it stacks below the to-do pane without taking focus. Number keys or `t` record an answer, which the shared feed Monitor reports. Run `ask-user-question close <slug>` after handling it to close the pane and remove its files.

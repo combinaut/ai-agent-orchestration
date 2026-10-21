@@ -55,6 +55,7 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `watchers.closed_dir` | `ORCH_CLOSED_DIR` | empty | Where close-pane.sh marks a pane as closed on purpose; empty means ~/.claude/coordinator/watchers/prod-context/closed. The workers watcher reads <state-dir>/closed, so a custom folder needs that --state-dir |
 | `herdr.bin` | `ORCH_HERDR_BIN` | empty | Absolute path of the Herdr executable |
 | `herdr.socket` | `ORCH_HERDR_SOCKET` | empty | Absolute path of the Herdr socket |
+| `herdr.todo_popup` | `ORCH_HERDR_TODO_POPUP` | `false` | install.sh links a Herdr plugin that opens the to-do view in a popup titled "Your to-do" on prefix+t, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env |
 | `user_todo.status_dir` | `ORCH_USER_TODO_STATUS_DIR` | empty | To-do status directory; empty means ~/.claude/coordinator/status |
 | `user_todo.output` | `ORCH_USER_TODO_OUTPUT` | empty | To-do output file; empty means ~/.claude/coordinator/user-todo.md |
 | `user_todo.state` | `ORCH_USER_TODO_STATE` | empty | To-do state file; empty means ~/.claude/coordinator/user-todo.state.json |

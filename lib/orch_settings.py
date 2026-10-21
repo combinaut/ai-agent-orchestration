@@ -76,6 +76,7 @@ SETTINGS = [
     _g('watchers.closed_dir', 'ORCH_CLOSED_DIR', 'str', '', 'Where close-pane.sh marks a pane as closed on purpose; empty means ~/.claude/coordinator/watchers/prod-context/closed. The workers watcher reads <state-dir>/closed, so a custom folder needs that --state-dir', paths=True),
     _g('herdr.bin', 'ORCH_HERDR_BIN', 'str', '', 'Absolute path of the Herdr executable', paths=True),
     _g('herdr.socket', 'ORCH_HERDR_SOCKET', 'str', '', 'Absolute path of the Herdr socket', paths=True),
+    _g('herdr.todo_popup', 'ORCH_HERDR_TODO_POPUP', 'bool', False, "install.sh links a Herdr plugin that opens the to-do view in a popup titled \"Your to-do\" on prefix+t, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env"),
     _g('user_todo.status_dir', 'ORCH_USER_TODO_STATUS_DIR', 'str', '', 'To-do status directory; empty means ~/.claude/coordinator/status', paths=True),
     _g('user_todo.output', 'ORCH_USER_TODO_OUTPUT', 'str', '', 'To-do output file; empty means ~/.claude/coordinator/user-todo.md', paths=True),
     _g('user_todo.state', 'ORCH_USER_TODO_STATE', 'str', '', 'To-do state file; empty means ~/.claude/coordinator/user-todo.state.json', paths=True),

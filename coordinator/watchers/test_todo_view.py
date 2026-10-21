@@ -432,9 +432,9 @@ class PaneTokenTest(AppCase):
             app = view.App(self.hidden(), False, self.screen.out, self.screen.size, self.mono)
             app.tick()
             app.tick()
-            self.assertEqual(self.calls(), ["pane report-metadata w1:p7 --source orchestrate --token todo=3"])
+            self.assertEqual(self.calls(), ["pane report-metadata w1:p7 --source orchestrate --token todo=3 --token tabbar=To-do 3"])
             app.feed("i")
-        self.assertEqual(self.calls()[-1], "pane report-metadata w1:p7 --source orchestrate --token todo=2")
+        self.assertEqual(self.calls()[-1], "pane report-metadata w1:p7 --source orchestrate --token todo=2 --token tabbar=To-do 2")
         self.assertEqual(len(self.calls()), 2)
 
     def test_reminders_still_count_as_open_in_the_token(self):
@@ -443,7 +443,7 @@ class PaneTokenTest(AppCase):
             app = view.App(self.hidden(), False, self.screen.out, self.screen.size, self.mono)
             app.hidden.remind(*self.items[0], self.clock.now + 600)
             app.tick()
-        self.assertEqual(self.calls(), ["pane report-metadata w1:p7 --source orchestrate --token todo=3"])
+        self.assertEqual(self.calls(), ["pane report-metadata w1:p7 --source orchestrate --token todo=3 --token tabbar=To-do 3"])
 
     def test_without_a_pane_nothing_is_reported(self):
         Path(os.environ["TEST_TOOL_LOG"]).write_text("")
