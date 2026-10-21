@@ -109,3 +109,37 @@ popup_install() { run env "$@" /bin/bash "$CLONE/install.sh" --env herdr; [ "$st
   [ "$status" -ne 0 ]
   cmp "$HCONF" "$TMP/before"
 }
+
+@test "a config write by another process before the rename is kept and the block still lands" {
+  fresh_install
+  printf 'printf "[theme]\\nname = \\"x\\"\\n" >>"%s"\n' "$HCONF" >"$TMP/hook.sh"
+  popup_install ORCH_HERDR_TODO_POPUP=1 CHMOD_HOOK="$TMP/hook.sh" CHMOD_HOOK_ONCE=1
+  contains "$(cat "$HCONF")" 'name = "x"'
+  [ "$(grep -c "$START" "$HCONF")" -eq 1 ]
+  contains "$output" 'changed while it was being edited'
+}
+
+@test "a config that keeps changing is left as the other writer wrote it" {
+  fresh_install
+  printf 'printf "# churn\\n" >>"%s"\n' "$HCONF" >"$TMP/hook.sh"
+  run env ORCH_HERDR_TODO_POPUP=1 CHMOD_HOOK="$TMP/hook.sh" /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -ne 0 ]
+  contains "$output" 'keeps changing'
+  not_contains "$(cat "$HCONF")" "$START"
+  [ "$(grep -c '^# churn' "$HCONF")" -eq 3 ]
+}
+
+@test "a CRLF config: opt-out removes the block and re-enable leaves exactly one binding" {
+  fresh_install
+  popup_install ORCH_HERDR_TODO_POPUP=1
+  sed 's/$/\r/' "$HCONF" >"$TMP/crlf" && cp "$TMP/crlf" "$HCONF"
+  popup_install ORCH_HERDR_TODO_POPUP=1
+  cmp "$HCONF" "$TMP/crlf"
+  popup_install ORCH_HERDR_TODO_POPUP=0
+  not_contains "$(cat "$HCONF")" "$START"
+  not_contains "$(cat "$HCONF")" 'prefix+t'
+  [ "$(head -n 1 "$HCONF" | od -c | grep -c '\\r')" -eq 1 ]
+  popup_install ORCH_HERDR_TODO_POPUP=1
+  [ "$(grep -c 'prefix+t' "$HCONF")" -eq 1 ]
+  [ "$(grep -c "$START" "$HCONF")" -eq 1 ]
+}

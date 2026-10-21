@@ -246,10 +246,12 @@ todo_key_block() {
 }
 
 # todo_key_markers_ok <file>: succeeds when the file has no key block markers or exactly one start followed by one end.
+# Marker lines match with trailing whitespace or a carriage return.
 todo_key_markers_ok() {
   awk -v start="$TODO_KEY_START" -v end="$TODO_KEY_END" '
-    $0 == start { starts++ }
-    $0 == end { ends++; if (!starts) end_first = 1 }
+    { line = $0; sub(/[ \t\r]+$/, "", line) }
+    line == start { starts++ }
+    line == end { ends++; if (!starts) end_first = 1 }
     END { exit !((!starts && !ends) || (starts == 1 && ends == 1 && !end_first)) }
   ' "$1"
 }
@@ -262,48 +264,70 @@ todo_config_check() {
 }
 
 # todo_config_without_key <file>: the file without our key block and the blank line before it; the markers must be paired.
+# Every other line keeps its bytes.
 todo_config_without_key() {
   awk -v start="$TODO_KEY_START" -v end="$TODO_KEY_END" '
-    $0 == start { skip = 1; held = ""; next }
-    skip { if ($0 == end) skip = 0; next }
-    /^$/ { printf "%s", held; held = "\n"; next }
+    { line = $0; sub(/[ \t\r]+$/, "", line) }
+    line == start { skip = 1; held = ""; next }
+    skip { if (line == end) skip = 0; next }
+    line == "" { printf "%s", held; held = $0 "\n"; next }
     { printf "%s", held; held = ""; print }
     END { printf "%s", held }
   ' "$1"
 }
 
+# todo_config_want <enabled> <target> <snap> <want>: builds <want> from <snap>, a copy of <target>; CRLF files get a CRLF block.
+todo_config_want() {
+  todo_config_without_key "$3" >"$4" || return 1
+  [ "$1" = 1 ] || return 0
+  if head -n 1 "$3" | grep -q "$(printf '\r')\$"; then
+    { printf '\n'; todo_key_block; } | sed "s/\$/$(printf '\r')/" >>"$4"
+  else
+    { printf '\n'; todo_key_block; } >>"$4"
+  fi
+}
+
 # todo_config_sync <enabled>: the prefix+t block is in Herdr's config.toml when enabled and absent otherwise.
 # Returns 0 when the file changed, 1 when it did not; any failure ends the install and leaves the file as it was.
+# Another writer changing the file before the rename restarts the edit from the fresh content, up to three times.
 todo_config_sync() {
-  local target want tmp backup mode
+  local target snap want tmp backup mode attempt
   target=$(resolve_link_path "$(herdr_config_file)") || die "cannot resolve $(herdr_config_file)"
   if [ ! -f "$target" ]; then
     [ "$1" = 1 ] || return 1
     mkdir -p "$(dirname "$target")" || die "cannot create $(dirname "$target")"
     : >"$target" || die "cannot create $target"
   fi
-  todo_key_markers_ok "$target" || die "$target has an unpaired '$TODO_KEY_START' or '$TODO_KEY_END' marker; fix or remove it, then run install.sh again (the file is unchanged)"
-  want=$(mktemp "${TMPDIR:-/tmp}/orch-todo-key.XXXXXX") || die "cannot create a temporary file for $target"
-  todo_config_without_key "$target" >"$want" || { rm -f "$want"; die "cannot read $target"; }
-  if [ "$1" = 1 ]; then
-    { printf '\n'; todo_key_block; } >>"$want" || { rm -f "$want"; die "cannot prepare the new $target"; }
-  fi
-  if cmp -s "$want" "$target"; then
-    rm -f "$want"
-    say "already set" "$target: to-do key block"
-    return 1
-  fi
-  backup=$(backup_name "$target") || { rm -f "$want"; die "cannot name a backup of $target"; }
-  cp -p "$target" "$backup" || { rm -f "$want"; die "cannot back up $target"; }
-  say "backed up" "$target -> $backup"
-  mode=$(claude_md_mode "$target") || { rm -f "$want"; die "cannot read the mode of $target"; }
-  tmp=$(mktemp "$target.XXXXXX") || { rm -f "$want"; die "cannot create a temporary file beside $target"; }
-  if ! { cat "$want" >"$tmp" && chmod "$mode" "$tmp" && mv "$tmp" "$target"; }; then
-    rm -f "$want" "$tmp"
-    die "cannot write $target (backup: $backup)"
-  fi
-  rm -f "$want"
-  if [ "$1" = 1 ]; then say "added" "$target: prefix+t opens the to-do popup"; else say "removed" "$target: to-do key block"; fi
+  for attempt in 1 2 3; do
+    snap=$(mktemp "${TMPDIR:-/tmp}/orch-todo-key.XXXXXX") || die "cannot create a temporary file for $target"
+    want=$(mktemp "${TMPDIR:-/tmp}/orch-todo-key.XXXXXX") || { rm -f "$snap"; die "cannot create a temporary file for $target"; }
+    cp "$target" "$snap" || { rm -f "$snap" "$want"; die "cannot read $target"; }
+    todo_key_markers_ok "$snap" || { rm -f "$snap" "$want"; die "$target has an unpaired '$TODO_KEY_START' or '$TODO_KEY_END' marker; fix or remove it, then run install.sh again (the file is unchanged)"; }
+    todo_config_want "$1" "$target" "$snap" "$want" || { rm -f "$snap" "$want"; die "cannot prepare the new $target"; }
+    if cmp -s "$want" "$snap"; then
+      rm -f "$snap" "$want"
+      say "already set" "$target: to-do key block"
+      return 1
+    fi
+    mode=$(claude_md_mode "$target") || { rm -f "$snap" "$want"; die "cannot read the mode of $target"; }
+    tmp=$(mktemp "$target.XXXXXX") || { rm -f "$snap" "$want"; die "cannot create a temporary file beside $target"; }
+    if ! { cat "$want" >"$tmp" && chmod "$mode" "$tmp"; }; then
+      rm -f "$snap" "$want" "$tmp"
+      die "cannot write $target"
+    fi
+    if cmp -s "$snap" "$target"; then
+      backup=$(backup_name "$target") || { rm -f "$snap" "$want" "$tmp"; die "cannot name a backup of $target"; }
+      cp -p "$target" "$backup" || { rm -f "$snap" "$want" "$tmp"; die "cannot back up $target"; }
+      say "backed up" "$target -> $backup"
+      mv "$tmp" "$target" || { rm -f "$snap" "$want" "$tmp"; die "cannot write $target (backup: $backup)"; }
+      rm -f "$snap" "$want"
+      if [ "$1" = 1 ]; then say "added" "$target: prefix+t opens the to-do popup"; else say "removed" "$target: to-do key block"; fi
+      return 0
+    fi
+    rm -f "$snap" "$want" "$tmp"
+    say "note" "$target changed while it was being edited; trying again ($attempt of 3)"
+  done
+  die "$target keeps changing; run install.sh again (the file is unchanged)"
 }
 
 # install_todo_popup: herdr.todo_popup links the to-do plugin and writes the prefix+t block; off removes both.

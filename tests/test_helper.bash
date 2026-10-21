@@ -183,6 +183,15 @@ EOF
   chmod +x "$BIN/mktemp"
   chmod +x "$BIN/mise" "$BIN/curl"
   chmod +x "$BIN/gh" "$BIN/herdr" "$BIN/node"
+  cat >"$BIN/chmod" <<'EOF'
+#!/usr/bin/env bash
+if [ -n "${CHMOD_HOOK:-}" ] && [ -f "$CHMOD_HOOK" ]; then
+  [ -z "${CHMOD_HOOK_ONCE:-}" ] || mv "$CHMOD_HOOK" "$CHMOD_HOOK.ran"
+  case "${CHMOD_HOOK_ONCE:-}" in "") bash "$CHMOD_HOOK" ;; *) bash "$CHMOD_HOOK.ran" ;; esac
+fi
+exec /bin/chmod "$@"
+EOF
+  /bin/chmod +x "$BIN/chmod"
   export HERDR_TEST_STUB="$BIN/herdr"
   git_bin=$(command -v git) || return 1
   export REAL_GIT="$git_bin"
