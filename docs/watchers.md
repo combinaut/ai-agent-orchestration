@@ -52,3 +52,5 @@ corresponding read-failure alert. The panel discards terminal escape sequences.
 acknowledging them, so previews cannot divert submissions from production.
 Queued terminal bytes are preserved; undecodable claims retry independently.
 Answer previews retain the watcher deadline without consuming submissions.
+Directory-read failures retain replay IDs. Failed pane setup closes the new pane
+through the intentional-close helper, leaving the question file available to retry.

@@ -402,3 +402,29 @@ class AnswersTest(IsolatedTestCase):
             child = subprocess.run([sys.executable, '-c', code], cwd=w.ROOT, capture_output=True, text=True, timeout=5)
             self.assertEqual(child.returncode, 70, child.stderr)
             self.assertIn('watcher deadline exceeded: answers preview', child.stderr)
+
+    def test_directory_read_failure_preserves_replay_deduplication(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            questions, base = Path(tmp) / 'questions', Path(tmp) / 'state'
+            questions.mkdir()
+            (questions / 'ship.md').touch()
+            (questions / 'ship.answer').write_text('yes')
+            with patch.dict(os.environ, ORCH_USER_QUESTIONS_DIR=str(questions)):
+                with patch.object(w, 'acknowledge_answers', side_effect=OSError('restart')):
+                    with self.assertRaises(OSError):
+                        w.cycle(base, 'answers', w.collect_answers)
+                original_list, original_glob = Path.iterdir, Path.glob
+                def listing(path):
+                    if path == questions:
+                        raise PermissionError('directory unreadable')
+                    return original_list(path)
+                def glob(path, *args, **kwargs):
+                    return iter(()) if path == questions else original_glob(path, *args, **kwargs)
+                with patch.object(Path, 'iterdir', listing), patch.object(Path, 'glob', glob):
+                    line = w.cycle(base, 'answers', w.collect_answers)
+                self.assertIn('ANSWERS READFAIL ' + str(questions), line)
+                self.assertEqual(len(json.loads((base / 'answers.json').read_text())['before']['committed']), 1)
+                line = w.cycle(base, 'answers', w.collect_answers)
+                self.assertIn('ANSWERS READ RECOVERED ' + str(questions), line)
+                self.assertNotIn('ANSWER ship:', line)
+                self.assertIsNone(w.cycle(base, 'answers', w.collect_answers))

@@ -63,7 +63,9 @@ for row in json.load(sys.stdin).get("result", {}).get("panes", []):
     pane=$("$herdr" pane split "$anchor" --direction down --no-focus |
       "${ORCH_PYTHON3:-python3}" -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')
     printf -v command '%q %q %q' "${ORCH_PYTHON3:-python3}" "$root/coordinator/question-pane.py" "$canonical"
-    "$herdr" pane run "$pane" "$command"
-    "$herdr" pane rename "$pane" "Q: $slug"
+    if ! "$herdr" pane run "$pane" "$command" || ! "$herdr" pane rename "$pane" "Q: $slug"; then
+      "$root/coordinator/watchers/close-pane.sh" "$pane"
+      exit 1
+    fi
     ;;
 esac

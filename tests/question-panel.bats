@@ -9,6 +9,7 @@ setup() {
   cat >"$BIN/herdr-question" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$TMP/question-herdr.calls"
+[ "${HERDR_FAIL:-}" != "$2" ] || exit 1
 case "$1 $2" in
   'pane list') printf '%s\n' "${HERDR_PANES:?}" ;;
   'pane split') printf '%s\n' '{"result":{"pane":{"pane_id":"question-pane"}}}' ;;
@@ -130,4 +131,17 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(cat "${question%.md}.answer")" = yes ]
   [ ! -e "$TMP/preview/answers.json" ]
+}
+
+@test "failed pane run or rename closes the new pane intentionally" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf question >"$question"
+  for failure in run rename; do
+    rm -f "$TMP/question-herdr.calls" "$ORCH_CLOSED_DIR/question-pane"
+    run env HERDR_FAIL="$failure" HERDR_PANES='{"result":{"panes":[{"pane_id":"todo","tokens":{"todo":"1"}}]}}' "$ROOT/ask-user-question" release "$question"
+    [ "$status" -ne 0 ]
+    grep -qx 'pane close question-pane' "$TMP/question-herdr.calls"
+    [ -f "$ORCH_CLOSED_DIR/question-pane" ]
+    [ -f "$question" ]
+  done
 }

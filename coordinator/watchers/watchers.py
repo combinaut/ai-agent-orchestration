@@ -563,9 +563,12 @@ def collect_answers(before, consume=True):
     directory = questions_directory()
     answers, unreadable, blocked = [], [], set()
     try:
-        claimed = sorted(directory.glob("*.answer.processing"), key=answer_order)
+        files = list(directory.iterdir())
+        claimed = sorted((path for path in files if path.name.endswith(".answer.processing")), key=answer_order)
         last_order = max((answer_order(path)[0] for path in claimed), default=0)
-        paths = claimed + sorted(directory.glob("*.answer"), key=answer_order)
+        paths = claimed + sorted((path for path in files if path.name.endswith(".answer")), key=answer_order)
+    except FileNotFoundError:
+        return {"answers": [], "unreadable": []}
     except OSError:
         return {"answers": [], "unreadable": [str(directory)]}
     for path in paths:
@@ -598,9 +601,14 @@ def collect_answers(before, consume=True):
 
 
 def reduce_answers(before, raw):
-    pending = {path.name.split(".", 2)[1] for path in questions_directory().glob("*.answer.processing")}
+    committed = set((before or {}).get("committed", []))
+    try:
+        pending = {path.name.split(".", 2)[1] for path in questions_directory().iterdir()
+                   if path.name.endswith(".answer.processing")}
+    except OSError:
+        pending = committed.copy()
     pending.update(key for _, text, _, key in raw["answers"] if text)
-    committed = set((before or {}).get("committed", [])) & pending
+    committed &= pending
     events = [f"ANSWER {slug}: {text}" for slug, text, _, key in raw["answers"] if text and key not in committed]
     events += [f"ANSWERS blank {slug}" for slug, text, _, _ in raw["answers"] if not text]
     events += [f"ANSWERS READFAIL {path}" for path in raw["unreadable"]]
