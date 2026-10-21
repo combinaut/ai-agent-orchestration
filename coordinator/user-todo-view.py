@@ -623,6 +623,8 @@ class App:
             events = input_events(token, self.hits, self.picker and self.picker["mode"])[0]
             for action, index in events:
                 self.apply(action, index)
+                if self.closing:
+                    return
             if events:
                 self.refresh()
 

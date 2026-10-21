@@ -543,6 +543,12 @@ class KeyboardTest(AppCase):
         app.lone_escape()
         self.assertTrue(app.closing)
 
+    def test_keys_after_q_in_the_same_read_are_dropped(self):
+        app = self.popup_app()
+        app.feed("qi")
+        self.assertTrue(app.closing)
+        self.assertFalse((self.root / "state.json").exists())
+
     def test_q_closes_a_popup_view(self):
         app = self.popup_app()
         app.feed("q")
