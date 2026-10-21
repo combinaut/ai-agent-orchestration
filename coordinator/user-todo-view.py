@@ -41,7 +41,6 @@ GUTTER = 2
 FOOTER = "↑↓ or 1-9 select · o open · i ignore · r reminder · s show reminders"
 SHOW_HINT = "s show reminders"
 CLOSE_HINT = "Esc/q close"
-TITLE = "Your to-do"
 DEMO = [("## Architect::Billing.md", "- [1h] Merge approved for 128 after reviews -> https://github.com/example/shop/pull/128"),
         ("## Architect::Tooling.md", "- [3h] Which PR to open first (131 or 120) -> Architect::Frontend"),
         ("## Architect::Setup.md", "- [now] Audit done: 12 fixes ranked; say which to start")]
@@ -335,7 +334,7 @@ def layout(rows, width, hidden_count, selected=0, showing=False, picker=None, op
     owner line, buttons and picker stay whole and its message is cut to what is left."""
     open_count = len(rows) if open_count is None else open_count
     width = max(1, width)
-    lines, hits = [f"\033[1m{TITLE}\033[0m", f"\033[2m{open_count} open · {hidden_count} on reminder\033[0m", ""], []
+    lines, hits = [f"\033[2m{open_count} open · {hidden_count} on reminder\033[0m", ""], []
     room = max(1, width - GUTTER)
     for index, (owner, text, flagged, note) in enumerate(rows):
         picked = index == selected
@@ -635,7 +634,7 @@ class App:
             self.refresh()
 
 
-ENTER = f"\033]2;{TITLE}\007\033[?1000h\033[?1006h\033[?25l"
+ENTER = "\033[?1000h\033[?1006h\033[?25l"
 LEAVE = "\033[?1000l\033[?1006l\033[?25h"
 
 

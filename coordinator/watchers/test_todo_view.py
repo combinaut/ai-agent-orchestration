@@ -306,17 +306,10 @@ class AutoHideTest(ViewCase):
         hidden.remind(*self.items[0], self.clock.now + 60)
         lines = self.plain(view.layout(hidden.visible(self.items), 80, hidden.hidden_count(self.items), 0, False, None,
                                        hidden.open_count(self.items))[0])
-        self.assertEqual(lines[:2], [view.TITLE, "3 open · 1 on reminder"])
+        self.assertEqual(lines[0], "3 open · 1 on reminder")
         self.assertTrue(any("show reminders (1)" in line for line in lines))
         shown = self.plain(view.layout(hidden.visible(self.items, True), 80, 1, 0, True, None, 3)[0])
         self.assertTrue(any("hide reminders (1)" in line for line in shown))
-
-    def test_the_title_is_the_first_line_above_the_counts(self):
-        lines = self.plain(view.layout([], 80, 0, 0, False, None, 0)[0])
-        self.assertEqual(lines[:2], ["Your to-do", "0 open · 0 on reminder"])
-
-    def test_the_start_sequence_sets_the_terminal_title(self):
-        self.assertIn("\033]2;Your to-do\007", view.ENTER)
 
     def test_the_toggle_and_the_s_hint_need_a_reminder(self):
         for count, expected in ((0, False), (1, True)):
