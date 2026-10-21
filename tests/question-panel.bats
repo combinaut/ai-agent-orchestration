@@ -44,3 +44,19 @@ EOF
   run env HERDR_PANES='{"result":{"panes":[]}}' "$ROOT/ask-user-question" release "$HOME/.claude/coordinator/questions/missing.md"
   [ "$status" -eq 66 ]
 }
+
+@test "ask-user-question rejects unsafe close slugs without deleting siblings" {
+  sibling="$HOME/.claude/coordinator/victim.md"
+  printf keep >"$sibling"
+  run env HERDR_PANES='{"result":{"panes":[]}}' "$ROOT/ask-user-question" close ../victim
+  [ "$status" -eq 64 ]
+  [ "$(cat "$sibling")" = keep ]
+}
+
+@test "close requires the exact question title" {
+  export HERDR_PANES='{"result":{"panes":[{"pane_id":"other","terminal_title_stripped":"Q: release-notes"}]}}'
+  run "$ROOT/ask-user-question" close release
+  [ "$status" -eq 0 ]
+  run grep -q 'pane close' "$TMP/question-herdr.calls"
+  [ "$status" -eq 1 ]
+}

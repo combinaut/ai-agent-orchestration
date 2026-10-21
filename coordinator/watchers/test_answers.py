@@ -28,10 +28,32 @@ class AnswersTest(IsolatedTestCase):
             questions.mkdir()
             (questions / "ship.answer").write_text("  option one\n")
             with patch.dict(os.environ, {"ORCH_USER_QUESTIONS_DIR": str(questions)}, clear=False):
-                state, events = w.reduce_answers(None, w.collect_answers(None))
-            self.assertEqual(state, {"unreadable": []})
+                raw = w.collect_answers(None)
+                state, events = w.reduce_answers(None, raw)
+                w.acknowledge_answers(raw)
+            self.assertEqual(state["unreadable"], [])
             self.assertEqual(events, ["ANSWER ship: option one"])
             self.assertFalse((questions / "ship.answer").exists())
             self.assertEqual((questions / "ship.answer.seen").read_text(), "  option one\n")
             line = "2026-10-21T12:00:00+00:00 answers: ANSWER ship: option one (start)"
             self.assertTrue(feed_actions.is_action(line, feed_actions.action_patterns()))
+
+    def test_processing_answer_replays_after_publish_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            questions, base = Path(tmp) / "questions", Path(tmp) / "state"
+            questions.mkdir()
+            (questions / "ship.answer").write_text("one\n")
+            with patch.dict(os.environ, {"ORCH_USER_QUESTIONS_DIR": str(questions)}, clear=False):
+                with patch.object(w, "publish_events", side_effect=OSError("disk full")):
+                    with self.assertRaises(OSError):
+                        w.cycle(base, "answers", lambda before: w.collect_answers(before))
+                self.assertTrue((questions / "ship.answer.processing").exists())
+                line = w.cycle(base, "answers", lambda before: w.collect_answers(before))
+            self.assertIn("ANSWER ship: one", line)
+            self.assertTrue((questions / "ship.answer.seen").exists())
+
+    def test_long_answer_is_not_truncated(self):
+        answer = "x" * 300 + " LAST IMPORTANT WORDS"
+        facts = feed_actions
+        import alert_policy
+        self.assertEqual(alert_policy.answer_facts("ANSWER ship: " + answer)[0]["text"], "ANSWER ship: " + answer)

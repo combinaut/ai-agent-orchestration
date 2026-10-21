@@ -222,7 +222,8 @@ def todo_facts(line):
 
 def answer_facts(line):
     if line.startswith("ANSWER ") and ": " in line:
-        return [fact("answers:" + line, line, terminal=True)]
+        return [dict(kind="alert", key="answers:" + line, text=line, value=None, limit=None,
+                     lower=False, clearable=False, terminal=True, danger=False)]
     if line.startswith("ANSWERS READFAIL "):
         return [fact("answers:readfail:" + line[len("ANSWERS READFAIL "):], line, clearable=True)]
     return None

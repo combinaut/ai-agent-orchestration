@@ -12,27 +12,30 @@ root=$(cd "$(dirname "$self")" && pwd)
 orch_load_config
 
 usage() { echo "usage: ask-user-question <slug> <file> | close <slug>" >&2; exit 64; }
+valid_slug() { [[ $1 =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; }
 questions=${ORCH_USER_QUESTIONS_DIR:-$HOME/.claude/coordinator/questions}
+questions=$(cd "$(dirname "$questions")" && pwd)/$(basename "$questions")
 herdr=${HERDR_BIN_PATH:-${ORCH_HERDR_BIN:-herdr}}
 
 pane_rows() { "$herdr" pane list; }
 find_pane() {
-  local prefix=$1
+  local title=$1 prefix=${2:-}
   pane_rows | "${ORCH_PYTHON3:-python3}" -c '
 import json, sys
-prefix = sys.argv[1]
+title, prefix = sys.argv[1:]
 rows = json.load(sys.stdin).get("result", {}).get("panes", [])
 matches = [row.get("pane_id") for row in rows
-           if isinstance(row, dict) and str(row.get("terminal_title_stripped") or row.get("title") or "").startswith(prefix)
+           if isinstance(row, dict) and (str(row.get("terminal_title_stripped") or row.get("title") or "") == title if not prefix else str(row.get("terminal_title_stripped") or row.get("title") or "").startswith(title))
            and row.get("pane_id")]
 print(matches[-1] if matches else "")
-' "$prefix"
+' "$title" "$prefix"
 }
 
 case ${1:-} in
   close)
     [ $# -eq 2 ] || usage
     slug=$2
+    valid_slug "$slug" || { echo "invalid question slug: $slug" >&2; exit 64; }
     pane=$(find_pane "Q: $slug")
     [ -z "$pane" ] || "$root/coordinator/watchers/close-pane.sh" "$pane"
     rm -f "$questions/$slug.md" "$questions/$slug.answer" "$questions/$slug.answer.seen"
@@ -40,11 +43,13 @@ case ${1:-} in
   *)
     [ $# -eq 2 ] || usage
     slug=$1 file=$2
-    case "$slug" in ""|*/*|.*) echo "invalid question slug: $slug" >&2; exit 64 ;; esac
+    valid_slug "$slug" || { echo "invalid question slug: $slug" >&2; exit 64; }
     [ -f "$file" ] || { echo "question is not a regular file: $file" >&2; exit 66; }
     existing=$(find_pane "Q: $slug")
     [ -z "$existing" ] || { echo "question pane already open: $existing" >&2; exit 73; }
-    anchor=$(find_pane "Q: ")
+    canonical="$questions/$slug.md"
+    [ "$(cd "$(dirname "$file")" && pwd)/$(basename "$file")" = "$canonical" ] || { echo "question file must be $canonical" >&2; exit 66; }
+    anchor=$(find_pane "Q: " prefix)
     if [ -z "$anchor" ]; then
       anchor=$(pane_rows | "${ORCH_PYTHON3:-python3}" -c '
 import json, sys
@@ -58,7 +63,8 @@ for row in json.load(sys.stdin).get("result", {}).get("panes", []):
     [ -n "$anchor" ] || { echo "to-do pane not found" >&2; exit 69; }
     pane=$("$herdr" pane split "$anchor" --direction down --no-focus |
       "${ORCH_PYTHON3:-python3}" -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')
-    "$herdr" pane run "$pane" "${ORCH_PYTHON3:-python3} $root/coordinator/question-pane.py $file"
+    printf -v command '%q %q %q' "${ORCH_PYTHON3:-python3}" "$root/coordinator/question-pane.py" "$canonical"
+    "$herdr" pane run "$pane" "$command"
     "$herdr" pane rename "$pane" "Q: $slug"
     ;;
 esac

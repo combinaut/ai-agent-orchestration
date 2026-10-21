@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import fcntl
 import importlib.util
 import json
+import hashlib
 import os
 import re
 import subprocess
@@ -551,25 +552,36 @@ def collect_answers(before):
     directory = Path(os.environ.get("ORCH_USER_QUESTIONS_DIR") or Path.home() / ".claude/coordinator/questions")
     answers = []
     try:
-        paths = sorted(directory.glob("*.answer"))
+        paths = sorted(list(directory.glob("*.answer.processing")) + list(directory.glob("*.answer")))
     except OSError:
         return {"answers": [], "unreadable": [str(directory)]}
     for path in paths:
         try:
-            text = " ".join(path.read_text().split())
+            processing = path if path.suffix == ".processing" else path.with_suffix(".answer.processing")
+            if path != processing:
+                path.replace(processing)
+            text = " ".join(processing.read_text().split())
             if not text:
                 continue
-            path.replace(path.with_suffix(".answer.seen"))
-            answers.append((path.stem, text))
+            slug = processing.name.removesuffix(".answer.processing")
+            answers.append((slug, text, str(processing), hashlib.sha256(text.encode()).hexdigest()))
         except OSError:
             return {"answers": answers, "unreadable": [str(path)]}
     return {"answers": answers, "unreadable": []}
 
 
 def reduce_answers(before, raw):
-    events = [f"ANSWER {slug}: {text}" for slug, text in raw["answers"]]
+    committed = set((before or {}).get("committed", []))
+    events = [f"ANSWER {slug}: {text}" for slug, text, _, key in raw["answers"] if key not in committed]
     events += [f"ANSWERS READFAIL {path}" for path in raw["unreadable"]]
-    return {"unreadable": raw["unreadable"]}, events
+    committed.update(key for _, _, _, key in raw["answers"])
+    return {"unreadable": raw["unreadable"], "committed": sorted(committed)[-1000:]}, events
+
+
+def acknowledge_answers(raw):
+    for _, _, path, _ in raw.get("answers", []):
+        processing = Path(path)
+        processing.replace(processing.with_name(processing.name.removesuffix(".processing") + ".seen"))
 
 
 def reduce(mode, before, raw):
@@ -772,7 +784,7 @@ def cycle_pass(base, mode, collector, failures, budget):
             with runtime.deadline(budget, mode, soft=True):
                 raw = collector(state["before"])
                 after, reduced_events = reduce(mode, state["before"], raw)
-            if not state.get("baseline_pending"):
+            if not state.get("baseline_pending") or mode == "answers":
                 events += reduced_events
             if mode == "hog":
                 hog_hits = after
@@ -788,6 +800,8 @@ def cycle_pass(base, mode, collector, failures, budget):
                 subprocess.TimeoutExpired, MissingMetric, AttributeError, IndexError) as error:
             events += failed_read(state, mode, failures, type(error).__name__)
         line = publish_events(base, mode, state, events)
+        if mode == "answers" and 'raw' in locals():
+            acknowledge_answers(raw)
         if mode == "hog":
             log_events = log_hog_hits(base, state, hog_hits)
             if log_events:
