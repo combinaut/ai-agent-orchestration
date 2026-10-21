@@ -40,3 +40,8 @@ FOCUS workers=<working> focus_workers_live=<n> slots=<live> idle_no_worker=<name
 A line `Paused: <reason>` in `~/.claude/coordinator/status/<architect>.md` leaves that architect out of both lists until the line is removed. A status file that exists but cannot be read makes the line `FOCUS READFAIL status <path>`; a missing file or folder means no waits.
 
 Alert kinds, deadlines, feed delivery and recovery rules are in the [watcher guide](../coordinator/watchers/README.md).
+
+Question answers are claimed with unique IDs and acknowledged after successful
+reduction and durable publication. Failed passes replay pending claims without
+duplicating committed answers. Closing a question shares the answer-pass lock,
+removes its pending claims, and prevents late orphan answers from being published.

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Event reducers. Never sends messages or mutates source state."""
+from question_lock import answers_lock, questions_directory
 import alert_policy
 import argparse
 import audit
@@ -549,7 +550,7 @@ def reduce_todo(before, raw):
 
 
 def collect_answers(before):
-    directory = Path(os.environ.get("ORCH_USER_QUESTIONS_DIR") or Path.home() / ".claude/coordinator/questions")
+    directory = questions_directory()
     answers = []
     try:
         paths = sorted(list(directory.glob("*.answer.processing")) + list(directory.glob("*.answer")))
@@ -558,6 +559,9 @@ def collect_answers(before):
     for path in paths:
         try:
             slug = path.name.split(".", 1)[0]
+            if not (directory / f"{slug}.md").is_file():
+                path.unlink(missing_ok=True)
+                continue
             processing = path if path.suffix == ".processing" else path.with_name(f"{slug}.{uuid.uuid4().hex}.answer.processing")
             if path != processing:
                 path.replace(processing)
@@ -574,12 +578,14 @@ def collect_answers(before):
 
 
 def reduce_answers(before, raw):
-    committed = set((before or {}).get("committed", []))
+    pending = {path.name.split(".", 2)[1] for path in questions_directory().glob("*.answer.processing")}
+    pending.update(key for _, text, _, key in raw["answers"] if text)
+    committed = set((before or {}).get("committed", [])) & pending
     events = [f"ANSWER {slug}: {text}" for slug, text, _, key in raw["answers"] if text and key not in committed]
     events += [f"ANSWERS blank {slug}" for slug, text, _, _ in raw["answers"] if not text]
     events += [f"ANSWERS READFAIL {path}" for path in raw["unreadable"]]
     committed.update(key for _, text, _, key in raw["answers"] if text)
-    return {"unreadable": raw["unreadable"], "committed": sorted(committed)[-1000:]}, events
+    return {"unreadable": raw["unreadable"], "committed": sorted(committed)}, events
 
 
 def acknowledge_answers(raw):
@@ -772,6 +778,9 @@ def load_state(state_path, mode):
 def cycle(base, mode, collector, failures=READ_FAILURES, budget=None):
     budget = WATCH_TIMING[mode]["soft_budget"] if budget is None else budget
     with runtime.deadline(2 * budget, mode):
+        if mode == "answers":
+            with answers_lock():
+                return cycle_pass(base, mode, collector, failures, budget)
         return cycle_pass(base, mode, collector, failures, budget)
 
 
@@ -786,10 +795,12 @@ def cycle_pass(base, mode, collector, failures, budget):
         state, reset_event = load_state(state_path, mode)
         events = []
         hog_hits = None
+        reduced = False
         try:
             with runtime.deadline(budget, mode, soft=True):
                 raw = collector(state["before"])
                 after, reduced_events = reduce(mode, state["before"], raw)
+            reduced = True
             if not state.get("baseline_pending") or mode == "answers":
                 events += reduced_events
             if mode == "hog":
@@ -806,7 +817,7 @@ def cycle_pass(base, mode, collector, failures, budget):
                 subprocess.TimeoutExpired, MissingMetric, AttributeError, IndexError) as error:
             events += failed_read(state, mode, failures, type(error).__name__)
         line = publish_events(base, mode, state, events)
-        if mode == "answers" and 'raw' in locals():
+        if mode == "answers" and reduced:
             acknowledge_answers(raw)
         if mode == "hog":
             log_events = log_hog_hits(base, state, hog_hits)

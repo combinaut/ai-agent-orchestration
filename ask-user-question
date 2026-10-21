@@ -37,8 +37,7 @@ case ${1:-} in
     slug=$2
     valid_slug "$slug" || { echo "invalid question slug: $slug" >&2; exit 64; }
     pane=$(find_pane "Q: $slug")
-    [ -z "$pane" ] || "$root/coordinator/watchers/close-pane.sh" "$pane"
-    rm -f "$questions/$slug.md" "$questions/$slug.answer" "$questions/$slug.answer.seen" "$questions/$slug".*.answer.processing "$questions/$slug".*.answer.seen
+    ORCH_USER_QUESTIONS_DIR="$questions" "${ORCH_PYTHON3:-python3}" "$root/coordinator/watchers/question_lock.py" "$slug" "$root/coordinator/watchers/close-pane.sh" "$pane"
     ;;
   *)
     [ $# -eq 2 ] || usage
