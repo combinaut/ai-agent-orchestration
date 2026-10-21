@@ -79,6 +79,7 @@ SETTINGS = [
     _g('user_todo.status_dir', 'ORCH_USER_TODO_STATUS_DIR', 'str', '', 'To-do status directory; empty means ~/.claude/coordinator/status', paths=True),
     _g('user_todo.output', 'ORCH_USER_TODO_OUTPUT', 'str', '', 'To-do output file; empty means ~/.claude/coordinator/user-todo.md', paths=True),
     _g('user_todo.state', 'ORCH_USER_TODO_STATE', 'str', '', 'To-do state file; empty means ~/.claude/coordinator/user-todo.state.json', paths=True),
+    _g('user_questions.dir', 'ORCH_USER_QUESTIONS_DIR', 'str', '', 'Question directory; empty means ~/.claude/coordinator/questions', paths=True),
     _g('host.pressure_min_pct', 'ORCH_HOST_PRESSURE_MIN_PCT', 'number', 20, 'Host watcher: lowest free memory percentage'),
     _g('host.swap_max_mb', 'ORCH_HOST_SWAP_MAX_MB', 'number', 1024, 'Host watcher: most swap used, in MB'),
     _g('host.procs_max', 'ORCH_HOST_PROCS_MAX', 'number', 1300, 'Host watcher: most processes'),

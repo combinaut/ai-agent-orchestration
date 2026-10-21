@@ -1186,7 +1186,7 @@ EOF
   [ -z "$output" ]
 }
 
-@test "coord-check runs all seven Coordinator modes once" {
+@test "coord-check runs all eight Coordinator modes once" {
   fresh_install
   cat >"$TMP/python" <<'EOF'
 #!/bin/bash
@@ -1196,7 +1196,7 @@ EOF
   chmod +x "$TMP/python"
   run env ORCH_PYTHON3="$TMP/python" WATCHER_MODES="$TMP/modes" "$HOME/.claude/coordinator/watchers/coord-check.sh" --state-dir "$TMP/state"
   [ "$status" -eq 0 ]
-  [ "$(cat "$TMP/modes")" = "$(printf '%s\n' context workers hog balance host audit todo)" ]
+  [ "$(cat "$TMP/modes")" = "$(printf '%s\n' context workers hog balance host audit todo answers)" ]
 }
 
 @test "coord-check continues after a mode command fails" {
@@ -1210,11 +1210,11 @@ EOF
   chmod +x "$TMP/python"
   run env ORCH_PYTHON3="$TMP/python" WATCHER_MODES="$TMP/modes" "$HOME/.claude/coordinator/watchers/coord-check.sh" --state-dir "$TMP/state"
   [ "$status" -eq 1 ]
-  [ "$(cat "$TMP/modes")" = "$(printf '%s\n' context workers hog balance host audit todo)" ]
+  [ "$(cat "$TMP/modes")" = "$(printf '%s\n' context workers hog balance host audit todo answers)" ]
   contains "$output" 'hog check failed'
 }
 
-@test "coord-cycle previews every Coordinator mode including todo" {
+@test "coord-cycle previews every Coordinator mode including answers" {
   fresh_install
   cat >"$TMP/python" <<'EOF'
 #!/bin/bash
@@ -1224,7 +1224,7 @@ EOF
   chmod +x "$TMP/python"
   run env ORCH_PYTHON3="$TMP/python" WATCHER_ARGS="$TMP/args" "$HOME/.claude/coordinator/watchers/coord-cycle.sh" "$TMP/state"
   [ "$status" -eq 0 ]
-  grep -F -- '--modes context workers hog balance host audit todo' "$TMP/args"
+  grep -F -- '--modes context workers hog balance host audit todo answers' "$TMP/args"
 }
 
 @test "unused watcher wrapper is absent and its managed link is removed" {

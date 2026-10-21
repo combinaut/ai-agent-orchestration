@@ -45,6 +45,7 @@
 		<string>audit</string>
 		<string>pulls</string>
 		<string>todo</string>
+		<string>answers</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>

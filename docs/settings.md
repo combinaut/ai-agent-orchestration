@@ -58,6 +58,7 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `user_todo.status_dir` | `ORCH_USER_TODO_STATUS_DIR` | empty | To-do status directory; empty means ~/.claude/coordinator/status |
 | `user_todo.output` | `ORCH_USER_TODO_OUTPUT` | empty | To-do output file; empty means ~/.claude/coordinator/user-todo.md |
 | `user_todo.state` | `ORCH_USER_TODO_STATE` | empty | To-do state file; empty means ~/.claude/coordinator/user-todo.state.json |
+| `user_questions.dir` | `ORCH_USER_QUESTIONS_DIR` | empty | Question directory; empty means ~/.claude/coordinator/questions |
 | `host.pressure_min_pct` | `ORCH_HOST_PRESSURE_MIN_PCT` | `20` | Host watcher: lowest free memory percentage |
 | `host.swap_max_mb` | `ORCH_HOST_SWAP_MAX_MB` | `1024` | Host watcher: most swap used, in MB |
 | `host.procs_max` | `ORCH_HOST_PROCS_MAX` | `1300` | Host watcher: most processes |

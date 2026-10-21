@@ -3,7 +3,7 @@ Description=Coordinator watcher inbox notifier
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart="@ORCH_CLAUDE_DIR@/coordinator/watchers/notify-inbox.sh" "--state-dir" "@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context" "--cursor" "@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/coordinator-deliver.cursor" "--binding" "@ORCH_CLAUDE_DIR@/coordinator/watchers/bindings/coordinator.json" "--deliver" "file" "--loop" "--configured-only" "--modes" "context" "host" "hog" "balance" "workers" "audit" "pulls" "todo"
+ExecStart="@ORCH_CLAUDE_DIR@/coordinator/watchers/notify-inbox.sh" "--state-dir" "@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context" "--cursor" "@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/coordinator-deliver.cursor" "--binding" "@ORCH_CLAUDE_DIR@/coordinator/watchers/bindings/coordinator.json" "--deliver" "file" "--loop" "--configured-only" "--modes" "context" "host" "hog" "balance" "workers" "audit" "pulls" "todo" "answers"
 WorkingDirectory=@ORCH_CLAUDE_DIR@/coordinator/watchers
 Environment="ORCH_CONFIG=@ORCH_CONFIG@"
 Environment="ORCH_PYTHON3=@ORCH_SERVICE_PYTHON@"

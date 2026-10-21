@@ -102,6 +102,10 @@ output = ""
 # To-do state file; empty means ~/.claude/coordinator/user-todo.state.json
 state = ""
 
+[user_questions]
+# Question directory; empty means ~/.claude/coordinator/questions
+dir = ""
+
 [host]
 # Host watcher: lowest free memory percentage
 pressure_min_pct = 20

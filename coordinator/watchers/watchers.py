@@ -17,7 +17,7 @@ from pathlib import Path
 from watcher_platform import MissingMetric, herdr_bin, host_metrics, process_rows, balance_metrics
 
 ROOT = Path(__file__).resolve().parent
-MODES = ("context", "workers", "hog", "balance", "host", "prs", "audit", "pulls", "todo")
+MODES = ("context", "workers", "hog", "balance", "host", "prs", "audit", "pulls", "todo", "answers")
 
 WATCH_TIMING = {
     "context": {"soft_budget": 120, "interval": 300, "heartbeat_grace": 900},
@@ -29,6 +29,7 @@ WATCH_TIMING = {
     "audit": {"soft_budget": 1800, "interval": 1800, "heartbeat_grace": 4500},
     "pulls": {"soft_budget": 600, "interval": 150, "heartbeat_grace": 900},
     "todo": {"soft_budget": 120, "interval": 60, "heartbeat_grace": 900},
+    "answers": {"soft_budget": 120, "interval": 60, "heartbeat_grace": 900},
 }
 YOUNG_PANE_SECONDS = 120
 HISTORY_BATCHES = 100
@@ -546,6 +547,31 @@ def reduce_todo(before, raw):
     return {"now": current, "unreadable": raw["unreadable"], "read": read, "scanned": scanned}, events
 
 
+def collect_answers(before):
+    directory = Path(os.environ.get("ORCH_USER_QUESTIONS_DIR") or Path.home() / ".claude/coordinator/questions")
+    answers = []
+    try:
+        paths = sorted(directory.glob("*.answer"))
+    except OSError:
+        return {"answers": [], "unreadable": [str(directory)]}
+    for path in paths:
+        try:
+            text = " ".join(path.read_text().split())
+            if not text:
+                continue
+            path.replace(path.with_suffix(".answer.seen"))
+            answers.append((path.stem, text))
+        except OSError:
+            return {"answers": answers, "unreadable": [str(path)]}
+    return {"answers": answers, "unreadable": []}
+
+
+def reduce_answers(before, raw):
+    events = [f"ANSWER {slug}: {text}" for slug, text in raw["answers"]]
+    events += [f"ANSWERS READFAIL {path}" for path in raw["unreadable"]]
+    return {"unreadable": raw["unreadable"]}, events
+
+
 def reduce(mode, before, raw):
     if mode == "audit":
         return audit.reduce(before, raw)
@@ -553,6 +579,8 @@ def reduce(mode, before, raw):
         return reduce_pulls(before, raw)
     if mode == "todo":
         return reduce_todo(before, raw)
+    if mode == "answers":
+        return reduce_answers(before, raw)
     if mode == "prs":
         after = pr_snapshot(raw)
         missing = set(before or {}) - set(after)
@@ -802,6 +830,8 @@ def collect(mode, before, scope="", base=None):
         return collect_pulls(command, before)
     if mode == "todo":
         return collect_todo(before)
+    if mode == "answers":
+        return collect_answers(before)
     if mode in ("context", "workers"):
         if os.environ.get("HERDR_ENV") != "1":
             raise RuntimeError("not inside Herdr")

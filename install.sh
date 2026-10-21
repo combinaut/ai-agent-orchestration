@@ -409,6 +409,7 @@ link_shared_files() {
   done
   link_entry "$ORCH_REPO/statusline-command.sh" "$CLAUDE_DIR/statusline-command.sh"
   link_entry "$ORCH_REPO/heavy-slot" "$HOME/.local/bin/heavy-slot"
+  link_entry "$ORCH_REPO/ask-user-question" "$HOME/.local/bin/ask-user-question"
   case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
     *) say "PATH setup" "Add export PATH=\"\$HOME/.local/bin:\$PATH\" to your shell startup file (e.g. $(platform_shell_profile)); then open a new shell for heavy-slot commands." ;;

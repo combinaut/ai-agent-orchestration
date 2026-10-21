@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>EnvironmentVariables</key><dict><key>ORCH_CONFIG</key><string>@ORCH_CONFIG@</string><key>ORCH_PYTHON3</key><string>@ORCH_SERVICE_PYTHON@</string><key>PATH</key><string>@ORCH_PATH@</string></dict>
+<key>KeepAlive</key><true/><key>Label</key><string>orch.coord-watcher-answers</string>
+<key>ProgramArguments</key><array><string>@ORCH_CLAUDE_DIR@/coordinator/watchers/watcher-log-exec.sh</string><string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/answers.stderr</string><string>@ORCH_CLAUDE_DIR@/coordinator/watchers/coord-user-answers-watch.sh</string><string>--state-dir</string><string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context</string><string>--loop</string><string>--interval</string><string>60</string></array>
+<key>RunAtLoad</key><true/><key>StandardErrorPath</key><string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/answers.stderr</string><key>StandardOutPath</key><string>@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context/answers.stdout</string><key>WorkingDirectory</key><string>@ORCH_CLAUDE_DIR@/coordinator/watchers</string>
+</dict></plist>

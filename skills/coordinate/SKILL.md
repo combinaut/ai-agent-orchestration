@@ -52,6 +52,7 @@ Before starting your Coordinator session, read [references/startup.md](reference
 - An FYI ends with "no reply needed"; recipients do not reply. Only questions and orders get answers. Batch FYIs into one message per architect per wake.
 - Read `~/.claude/coordinator/status/<architect-name>.md` with `cat` for PRs, waits-on and next step instead of asking for acknowledgements.
 - The user to-do list is generated from every status file at `~/.claude/coordinator/user-todo.md`; do not hand-maintain it. Architects own their `## Waits on the user` items and each target is a session name or GitHub URL.
+- Every user question gets a question pane through `ask-user-question <slug> <file>`; architects relay their user questions through the Coordinator, which owns those panes and their answers.
 - "pause X" from the user: add a line `Paused: <reason>` to `~/.claude/coordinator/status/<X>.md`; "unpause X": remove it. The focus check skips a paused architect.
 - Do not broadcast to parked or idle architects. Put broadcast rules in `~/.claude/coordinator/notes.md`; architects read it at the start of their next real turn and on recycle.
 

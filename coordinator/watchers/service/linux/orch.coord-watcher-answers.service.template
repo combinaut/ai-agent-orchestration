@@ -1,0 +1,16 @@
+[Unit]
+Description=Coordinator user-answer watcher
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart="@ORCH_CLAUDE_DIR@/coordinator/watchers/coord-user-answers-watch.sh" "--state-dir" "@ORCH_CLAUDE_DIR@/coordinator/watchers/prod-context" "--loop" "--interval" "60"
+WorkingDirectory=@ORCH_CLAUDE_DIR@/coordinator/watchers
+Environment="ORCH_CONFIG=@ORCH_CONFIG@"
+Environment="ORCH_PYTHON3=@ORCH_SERVICE_PYTHON@"
+Environment="HERDR_BIN_PATH=@ORCH_HERDR_BIN@"
+Environment="PATH=@ORCH_PATH@"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
