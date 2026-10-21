@@ -109,3 +109,25 @@ EOF
   run env HERDR_PANES="$panes" "$ROOT/ask-user-question" close release extra
   [ "$status" -eq 64 ]
 }
+
+@test "diagnostic check and cycle leave live answers for the production journal" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf question >"$question"
+  printf yes >"${question%.md}.answer"
+  export REAL_QUESTION_PYTHON="$ORCH_PYTHON3"
+  cat >"$BIN/preview-python" <<'EOF'
+#!/bin/bash
+case "$1" in -c | -I) exec "$REAL_QUESTION_PYTHON" "$@" ;; esac
+if [ "${2:-}" = answers ]; then exec "$REAL_QUESTION_PYTHON" "$@"; fi
+exit 0
+EOF
+  chmod +x "$BIN/preview-python"
+  run env ORCH_PYTHON3="$BIN/preview-python" "$ROOT/coordinator/watchers/coord-check.sh" --state-dir "$TMP/preview"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${question%.md}.answer")" = yes ]
+  [ ! -e "$TMP/preview/answers.json" ]
+  run env ORCH_PYTHON3="$BIN/preview-python" "$ROOT/coordinator/watchers/coord-cycle.sh" "$TMP/preview"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${question%.md}.answer")" = yes ]
+  [ ! -e "$TMP/preview/answers.json" ]
+}

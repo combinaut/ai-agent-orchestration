@@ -298,3 +298,70 @@ class AnswersTest(IsolatedTestCase):
                 alert_policy.apply(policy, [{'mode': 'answers', 'events': ['ANSWERS READFAIL ' + str(bad)]}], 1, cfg)
                 alert_policy.apply(policy, [{'mode': 'answers', 'events': [recovery]}], 2, cfg)
                 self.assertFalse(policy['keys'][failure['key']]['active'])
+
+    def test_preview_never_mutates_answers_and_production_still_delivers(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, ORCH_USER_QUESTIONS_DIR=tmp):
+            directory = Path(tmp)
+            for slug in ('ship', 'blank'):
+                (directory / f'{slug}.md').touch()
+            (directory / 'ship.answer').write_text('yes')
+            (directory / 'blank.answer').write_text(' ')
+            (directory / 'orphan.answer').write_text('stale')
+            before = {p.name: p.read_bytes() for p in directory.iterdir()}
+            with patch.object(sys, 'argv', ['watchers.py', 'answers', '--state-dir', str(directory / 'preview'), '--preview-answers']), \
+                    patch('builtins.print') as printed:
+                w.main()
+            self.assertIn('ANSWER ship: yes', printed.call_args.args[0])
+            self.assertEqual({p.name: p.read_bytes() for p in directory.iterdir()}, before)
+            self.assertIn('ANSWER ship: yes', w.cycle(directory / 'production', 'answers', w.collect_answers))
+
+    def test_producer_failure_recovery_clears_answer_health_alert(self):
+        import alert_policy
+        policy, cfg = {}, dict(alert_policy.limits(), hold=0)
+        alert_policy.apply(policy, [{'mode': 'answers', 'events': ['answers read failed 3 times: ValueError']}], 1, cfg)
+        key = 'answers:health:read'
+        self.assertTrue(policy['keys'][key]['active'])
+        alert_policy.apply(policy, [{'mode': 'answers', 'events': ['answers READ RECOVERED']}], 2, cfg)
+        self.assertFalse(policy['keys'][key]['active'])
+        self.assertNotIn('unparsed', policy)
+
+    def test_pasted_typed_answer_is_not_stranded_in_key_buffer(self):
+        import pty
+        import select
+        with tempfile.TemporaryDirectory() as tmp:
+            question = Path(tmp) / 'ship.md'
+            question.touch()
+            answer = question.with_suffix('.answer')
+            code = ('import importlib.util,sys; '
+                    'spec=importlib.util.spec_from_file_location("qp",sys.argv[1]); '
+                    'qp=importlib.util.module_from_spec(spec); spec.loader.exec_module(qp); '
+                    'original=qp.tty.setcbreak\n'
+                    'def ready(fd):\n original(fd); print("KEY READY",flush=True)\n'
+                    'qp.tty.setcbreak=ready\n'
+                    'qp.show=lambda *args: None\n'
+                    'qp.follow(sys.argv[2])\n')
+            master, slave = pty.openpty()
+            child = None
+            output = b''
+            try:
+                child = subprocess.Popen([sys.executable, '-u', '-c', code, str(w.ROOT.parent / 'question-pane.py'), str(question)],
+                                         stdin=slave, stdout=slave, stderr=slave)
+                os.close(slave)
+                slave = None
+                sent, limit = False, time.monotonic() + 5
+                while time.monotonic() < limit and not answer.exists():
+                    if select.select([master], [], [], .05)[0]:
+                        output += os.read(master, 4096)
+                    if not sent and b'KEY READY' in output:
+                        os.write(master, b'tchosen\n')
+                        sent = True
+                self.assertTrue(answer.exists(), output.decode(errors='replace'))
+                self.assertEqual(answer.read_text(), 'chosen\n')
+            finally:
+                if slave is not None:
+                    os.close(slave)
+                os.close(master)
+                if child is not None:
+                    if child.poll() is None:
+                        child.terminate()
+                    child.wait(timeout=5)

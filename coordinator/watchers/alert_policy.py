@@ -251,7 +251,7 @@ def facts(alert):
             continue
         health = health_line(mode, line)
         parsed = todo_facts(line) if mode == "todo" else answer_facts(line) if mode == "answers" else readfail_facts(mode, line) if mode != "audit" or health else None
-        if parsed is None and mode == "todo":
+        if parsed is None and mode in ("todo", "answers"):
             parsed = readfail_facts(mode, line)
         if parsed is None:
             parsed = state_reset_facts(mode, line)

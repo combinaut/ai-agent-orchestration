@@ -559,7 +559,7 @@ def answer_order(path):
         return 0, path.name
 
 
-def collect_answers(before):
+def collect_answers(before, consume=True):
     directory = questions_directory()
     answers, unreadable, blocked = [], [], set()
     try:
@@ -575,16 +575,18 @@ def collect_answers(before):
             if slug in blocked:
                 continue
             if not (directory / f"{slug}.md").is_file():
-                path.unlink(missing_ok=True)
+                if consume:
+                    path.unlink(missing_ok=True)
                 continue
-            if path.suffix != ".processing":
+            if consume and path.suffix != ".processing":
                 last_order = max(time.time_ns(), last_order + 1)
                 processing = path.with_name(f"{slug}.{last_order:020d}-{uuid.uuid4().hex}.answer.processing")
             if path != processing:
                 path.replace(processing)
             text = " ".join(processing.read_text().split())
             if not text:
-                processing.unlink()
+                if consume:
+                    processing.unlink()
                 answers.append((slug, "", "", "blank"))
                 continue
             claim = processing.name.split(".", 2)[1]
@@ -955,6 +957,7 @@ def main():
     parser.add_argument("mode", choices=MODES + ("all",))
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--fixture", type=Path)
+    parser.add_argument("--preview-answers", action="store_true", help="inspect answers without consuming or publishing them")
     parser.add_argument("--scope", default=os.environ.get("ORCH_WATCHERS_PR_SCOPE", ""))
     parser.add_argument("--interval", type=int)
     parser.add_argument("--loop", action="store_true")
@@ -973,7 +976,11 @@ def main():
                 if args.fixture:
                     return json.loads(args.fixture.read_text())
                 return collect(mode, before, args.scope, args.state_dir)
-            line = cycle(args.state_dir, mode, collector)
+            if mode == "answers" and args.preview_answers:
+                _, events = reduce_answers(None, collect_answers(None, consume=False))
+                line = json.dumps({"mode": mode, "events": events}) if events else None
+            else:
+                line = cycle(args.state_dir, mode, collector)
             if line:
                 with runtime.deadline(runtime.ITERATION_TIMEOUT, f"{mode} output"):
                     print(line, flush=True)
