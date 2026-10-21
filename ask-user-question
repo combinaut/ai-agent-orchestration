@@ -24,9 +24,13 @@ find_pane() {
 import json, sys
 title, prefix = sys.argv[1:]
 rows = json.load(sys.stdin).get("result", {}).get("panes", [])
+# pane rename sets label; the terminal title still describes the process.
+def pane_title(row):
+    return str(row.get("label") or row.get("terminal_title_stripped") or row.get("title") or "")
+
 matches = [row.get("pane_id") for row in rows
-           if isinstance(row, dict) and (str(row.get("terminal_title_stripped") or row.get("title") or "") == title if not prefix else str(row.get("terminal_title_stripped") or row.get("title") or "").startswith(title))
-           and row.get("pane_id")]
+           if isinstance(row, dict) and row.get("pane_id")
+           and (pane_title(row).startswith(title) if prefix else pane_title(row) == title)]
 print(matches[-1] if matches else "")
 ' "$title" "$prefix"
 }

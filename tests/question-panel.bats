@@ -12,6 +12,11 @@ printf '%s\n' "$*" >>"$TMP/question-herdr.calls"
 [ "${HERDR_FAIL:-}" != "$2" ] || exit 1
 case "$1 $2" in
   'pane list') printf '%s\n' "${HERDR_PANES:?}" ;;
+  'pane close')
+    if [ -n "${HERDR_REQUIRE_QUESTION:-}" ]; then
+      [ -f "$HERDR_REQUIRE_QUESTION" ] && [ -f "${HERDR_REQUIRE_QUESTION%.md}.answer" ] || exit 90
+    fi
+    ;;
   'pane split') printf '%s\n' '{"result":{"pane":{"pane_id":"question-pane"}}}' ;;
 esac
 EOF
@@ -44,6 +49,35 @@ EOF
   [ ! -e "${question%.md}.answer.seen" ]
   [ ! -e "${question%.md}.answer.processing" ]
   [ ! -e "${question%.md}.claim.answer.processing" ]
+}
+
+@test "close finds the exact renamed pane label before deleting files" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf question >"$question"
+  printf yes >"${question%.md}.answer"
+  export HERDR_REQUIRE_QUESTION="$question"
+  local panes='{"result":{"panes":[{"pane_id":"question-pane","label":"Q: release","terminal_title_stripped":"python3 question-pane.py","title":"old title"},{"pane_id":"other","label":"Q: release-notes","terminal_title_stripped":"Q: release"}]}}'
+  run env HERDR_PANES="$panes" "$ROOT/ask-user-question" close release
+  [ "$status" -eq 0 ]
+  grep -qx 'pane close question-pane' "$TMP/question-herdr.calls"
+  run grep -qx 'pane close other' "$TMP/question-herdr.calls"
+  [ "$status" -eq 1 ]
+  [ -f "$ORCH_CLOSED_DIR/question-pane" ]
+  [ ! -e "$question" ]
+  [ ! -e "${question%.md}.answer" ]
+}
+
+@test "failed close keeps question files and removes the intentional-close marker" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf question >"$question"
+  printf yes >"${question%.md}.answer"
+  local panes='{"result":{"panes":[{"pane_id":"question-pane","label":"Q: release","terminal_title_stripped":"python3 question-pane.py"}]}}'
+  run env HERDR_FAIL=close HERDR_PANES="$panes" "$ROOT/ask-user-question" close release
+  [ "$status" -ne 0 ]
+  grep -qx 'pane close question-pane' "$TMP/question-herdr.calls"
+  [ "$(cat "$question")" = question ]
+  [ "$(cat "${question%.md}.answer")" = yes ]
+  [ ! -e "$ORCH_CLOSED_DIR/question-pane" ]
 }
 
 @test "ask-user-question rejects a missing question file" {

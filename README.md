@@ -86,7 +86,7 @@ For buttons instead, run `python3 ~/.claude/coordinator/user-todo-view.py` (`--d
 
 ### User questions
 
-Every user question gets a pane. Create its Markdown file under `~/.claude/coordinator/questions/`, then run `ask-user-question <slug> <file>`; it stacks below the to-do pane without taking focus. Number keys or `t` record an answer, which the shared feed Monitor reports. Run `ask-user-question close <slug>` after handling it to close the pane and remove its files.
+Every user question gets a pane. Create its Markdown file under `~/.claude/coordinator/questions/`, then run `ask-user-question <slug> <file>`; it stacks below the to-do pane without taking focus. Number keys or `t` record an answer, which the shared feed Monitor reports. Run `ask-user-question close <slug>` after handling it to find the pane by its exact `Q: <slug>` label, close it through `close-pane.sh`, then remove its files. A failed close keeps the files for retry.
 
 ### Review PRs
 
