@@ -436,6 +436,37 @@ install_failing_mv() {
   [ "$status" -ne 0 ]
 }
 
+@test "SIGINT during admission lock release removes the lease" {
+  mkdir "$TMP/bin"
+  cat >"$TMP/bin/rm" <<'STUB'
+#!/usr/bin/env bash
+wrapper=
+if [ "${2:-}" = "$ORCH_HEAVY_SLOTS_DIR/.lock/pid" ] && [ ! -e "$TEST_ROOT/interrupted" ]; then
+  wrapper=$(cat "$2")
+fi
+/bin/rm "$@"
+status=$?
+if [ "$status" -eq 0 ] && [ -n "$wrapper" ]; then
+  : >"$TEST_ROOT/interrupted"
+  kill -INT "$wrapper"
+fi
+exit "$status"
+STUB
+  chmod +x "$TMP/bin/rm"
+  # The controller restores SIGINT before starting the asynchronous helper.
+  # shellcheck disable=SC2016 # Python receives this program literally.
+  run env PATH="$TMP/bin:$PATH" python3 -c '
+import signal, subprocess, sys
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+result = subprocess.run([sys.argv[1], "take", "agent-release-interrupt", "--", "sleep", "30"], timeout=30)
+raise SystemExit(0 if result.returncode == 130 else 1)
+' "$HELPER"
+  [ "$status" -eq 0 ]
+  [ -f "$TMP/interrupted" ]
+  [ ! -e "$ORCH_HEAVY_SLOTS_DIR/agent-release-interrupt" ]
+  [ ! -d "$ORCH_HEAVY_SLOTS_DIR/.lock" ]
+}
+
 @test "SIGINT terminates an asynchronous child and removes the slot" {
   # shellcheck disable=SC2016,SC2026 # The child shell, not this Bats shell, expands its literal script.
   run python3 -c '

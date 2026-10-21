@@ -217,8 +217,12 @@ take_lock() {
 release_lock() {
   [ -d "$LOCK_DIR" ] || return 0
   [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" = "$$" ] || return 0
-  rm -f "$LOCK_DIR/pid" "$LOCK_DIR/started"
-  rmdir "$LOCK_DIR" 2>/dev/null || true
+  # Finish both removals before the parent handles a signal. Otherwise its
+  # EXIT cleanup can see our lock without its owner metadata and leave a lease.
+  (
+    rm -f "$LOCK_DIR/pid" "$LOCK_DIR/started"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  )
   LOCK_HELD=0
 }
 
