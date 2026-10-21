@@ -1,10 +1,19 @@
 import importlib.util
+import io
 import json
 import os
+import pty
 import re
+import select
+import signal
+import struct
+import sys
 import tempfile
+import termios
+import threading
 import time
 import unittest
+import fcntl
 from pathlib import Path
 from unittest.mock import patch
 
@@ -162,6 +171,22 @@ class FeedTest(ViewCase):
                  "2026-10-21T10:00:00+0200 todo: TODO 1 fresh: x (start)"]
         self.assertEqual([line for line in quiet if feed_actions.is_action(line, patterns)], [])
 
+    def test_the_line_is_appended_under_the_shared_feed_lock(self):
+        events = []
+
+        class Lock:
+            def __enter__(self):
+                events.append("lock")
+
+            def __exit__(self, *exc):
+                events.append("unlock")
+
+        real = os.write
+        with patch.object(view.feed_attach, "locked", lambda feed: Lock()), \
+                patch.object(view.os, "write", lambda fd, data: (events.append("write"), real(fd, data))[1]):
+            self.hidden().ignore(*self.items[0])
+        self.assertEqual(events, ["lock", "write", "unlock"])
+
     def test_feed_text_is_one_line(self):
         line = view.feed_line("Architect::Finder", "a\nb\tc\x1b[31m", self.clock.now)
         self.assertEqual(line.count("\n"), 1)
@@ -213,7 +238,7 @@ class ClickTest(ViewCase):
         _lines, hits = self.layout(80)
         line, first, *_ = hits[0]
         sequence = f"\x1b[<0;{first};{line}M"
-        events, pending, _ = view.input_events(sequence[:5], hits)
+        events, pending = view.input_events(sequence[:5], hits)
         self.assertEqual((events, pending), ([], sequence[:5]))
         self.assertEqual(view.input_events(pending + sequence[5:], hits)[0], [("open", 0)])
 
@@ -221,7 +246,7 @@ class ClickTest(ViewCase):
         _lines, hits = self.layout(80)
         self.assertEqual(view.input_events("oir", hits)[0], [("open", None), ("ignore", None), ("remind", None)])
         self.assertEqual(view.input_events("\x1b[B\x1b[A", hits)[0], [("move", 1), ("move", -1)])
-        self.assertEqual(view.input_events("2", hits)[0], [("select", 1)])
+        self.assertEqual(view.input_events("2", hits)[0], [("digit", "2")])
 
     def test_a_reminder_item_offers_cancel_reminder_in_the_third_button(self):
         hidden = self.hidden()
@@ -244,8 +269,8 @@ class ClickTest(ViewCase):
         lines, hits = self.layout(80, 0, {"index": 0, "mode": "pick", "entry": ""})
         picks = {action for _l, _f, _t, action, _i in hits if action.startswith("pick")}
         self.assertEqual(picks, {"pick1", "pick2", "pick3", "pick4", "pick5"})
-        self.assertEqual(view.input_events("3", hits, "", "pick")[0], [("pick3", None)])
-        self.assertEqual(view.input_events("t", hits, "", "pick")[0], [("type", None)])
+        self.assertEqual(view.input_events("3", hits, "pick")[0], [("pick3", None)])
+        self.assertEqual(view.input_events("t", hits, "pick")[0], [("type", None)])
 
 
 class PickerTest(ViewCase):
@@ -290,6 +315,456 @@ class AutoHideTest(ViewCase):
         hidden = self.hidden()
         hidden.remind(*self.items[0], self.clock.now + 60)
         self.assertEqual(len(hidden.visible(self.items)), 2)
+
+
+class StateWriteTest(ViewCase):
+    def seed_expired(self):
+        first = self.hidden()
+        first.remind(*self.items[0], self.clock.now + 60)
+        self.clock.now += 60
+        return first
+
+    def stored(self):
+        return json.loads((self.root / "state.json").read_text())
+
+    def test_expiry_cleanup_keeps_what_another_viewer_wrote_meanwhile(self):
+        self.seed_expired()
+        stale = self.hidden()
+        other = self.hidden()
+        other.ignore(*self.items[1])
+        other.remind(*self.items[2], self.clock.now + 999)
+        stale.visible(self.items)
+        state = self.stored()
+        self.assertEqual(state["ignored"], [view.key(*self.items[1])])
+        self.assertEqual(list(state["later"]), [view.key(*self.items[2])])
+
+    def test_expiry_cleanup_keeps_a_reminder_another_viewer_extended(self):
+        self.seed_expired()
+        stale = self.hidden()
+        self.hidden().remind(*self.items[0], self.clock.now + 999)
+        stale.visible(self.items)
+        self.assertIn(view.key(*self.items[0]), self.stored()["later"])
+
+    def test_each_write_starts_from_the_file_not_from_the_loaded_copy(self):
+        for name, write in (("ignore", lambda h: h.ignore(*self.items[1])),
+                            ("remind", lambda h: h.remind(*self.items[1], self.clock.now + 60)),
+                            ("cancel", lambda h: h.cancel(*self.items[1]))):
+            with self.subTest(name):
+                (self.root / "state.json").unlink(missing_ok=True)
+                stale = self.hidden()
+                self.hidden().ignore(*self.items[2])
+                write(stale)
+                self.assertEqual(self.stored()["ignored"].count(view.key(*self.items[2])), 1, name)
+
+    def test_writers_in_parallel_lose_nothing(self):
+        names = [("Owner", f"item {n}") for n in range(12)]
+        real = view.Hidden.save
+
+        def slow_save(hidden):
+            time.sleep(0.005)
+            real(hidden)
+
+        with patch.object(view.Hidden, "save", slow_save):
+            threads = [threading.Thread(target=lambda n=n: self.hidden().ignore(*n)) for n in names]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(len(self.stored()["ignored"]), len(names))
+
+    def test_corrupt_state_reads_as_empty_and_the_next_write_repairs_it(self):
+        for bad in ("{not json", "[]", '{"ignored": 5, "later": "x"}', ""):
+            with self.subTest(bad):
+                (self.root / "state.json").write_text(bad)
+                hidden = self.hidden()
+                self.assertEqual(len(hidden.visible(self.items)), 3)
+                hidden.ignore(*self.items[0])
+                self.assertEqual(self.stored()["ignored"], [view.key(*self.items[0])])
+
+    def test_actions_outside_the_rows_change_nothing(self):
+        hidden = self.hidden()
+        rows = [(*self.items[0], False, "")]
+        for index in (-1, 1, 99, None):
+            self.assertEqual(view.act(hidden, rows, self.items, "ignore", index), "")
+        self.assertFalse((self.root / "state.json").exists())
+
+
+class Screen:
+    """A fake terminal for App: collects output and answers the size."""
+
+    def __init__(self, columns=80, lines=24):
+        self.out = io.StringIO()
+        self.columns, self.lines = columns, lines
+
+    def size(self):
+        return os.terminal_size((self.columns, self.lines))
+
+    def last_frame(self):
+        frame = self.out.getvalue().rsplit("\x1b[H\x1b[2J", 1)[-1]
+        return ANSI.sub("", frame)
+
+
+class AppCase(ViewCase):
+    def setUp(self):
+        super().setUp()
+        self.screen = Screen()
+        self.mono = Clock(100.0)
+        self.loads = []
+        self.current = list(self.items)
+        patcher = patch.object(view, "load_items", lambda demo: (self.loads.append(1), list(self.current))[1])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def app(self, **kwargs):
+        app = view.App(self.hidden(), False, self.screen.out, self.screen.size, self.mono, kwargs.get("jump", lambda text: "jumped"))
+        app.tick()
+        return app
+
+
+class PaneTokenTest(AppCase):
+    def calls(self):
+        log = Path(os.environ["TEST_TOOL_LOG"])
+        return [line for line in log.read_text().splitlines() if "report-metadata" in line] if log.exists() else []
+
+    def test_the_view_reports_the_todo_token_on_its_own_pane_at_start_and_on_change(self):
+        Path(os.environ["TEST_TOOL_LOG"]).write_text("")
+        with patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p7"}):
+            app = view.App(self.hidden(), False, self.screen.out, self.screen.size, self.mono)
+            app.tick()
+            app.tick()
+            self.assertEqual(self.calls(), ["pane report-metadata w1:p7 --source orchestrate --token todo=3"])
+            app.feed("i")
+        self.assertEqual(self.calls()[-1], "pane report-metadata w1:p7 --source orchestrate --token todo=2")
+        self.assertEqual(len(self.calls()), 2)
+
+    def test_reminders_still_count_as_open_in_the_token(self):
+        Path(os.environ["TEST_TOOL_LOG"]).write_text("")
+        with patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p7"}):
+            app = view.App(self.hidden(), False, self.screen.out, self.screen.size, self.mono)
+            app.hidden.remind(*self.items[0], self.clock.now + 600)
+            app.tick()
+        self.assertEqual(self.calls(), ["pane report-metadata w1:p7 --source orchestrate --token todo=3"])
+
+    def test_without_a_pane_nothing_is_reported(self):
+        Path(os.environ["TEST_TOOL_LOG"]).write_text("")
+        with patch.dict(os.environ, {"HERDR_PANE_ID": ""}):
+            view.App(self.hidden(), False, self.screen.out, self.screen.size, self.mono).tick()
+        self.assertEqual(self.calls(), [])
+
+
+class PickerIdentityTest(AppCase):
+    def test_a_refresh_that_reorders_the_list_keeps_the_picker_on_its_item(self):
+        app = self.app()
+        app.feed("r")
+        self.assertEqual(app.picker["key"], self.items[0])
+        self.current = [self.items[1], self.items[0], self.items[2]]
+        self.mono.now += 4
+        app.tick()
+        app.feed("1")
+        later = json.loads((self.root / "state.json").read_text())["later"]
+        self.assertEqual(list(later), [view.key(*self.items[0])])
+
+    def test_a_typed_time_goes_to_the_item_the_picker_was_opened_for(self):
+        app = self.app()
+        app.feed("r")
+        app.feed("t")
+        self.current = self.current[1:] + self.current[:1]
+        self.mono.now += 4
+        app.tick()
+        app.feed("30m\r")
+        self.assertEqual(list(json.loads((self.root / "state.json").read_text())["later"]), [view.key(*self.items[0])])
+
+    def test_the_picker_closes_when_its_item_disappears(self):
+        app = self.app()
+        app.feed("r")
+        self.current = self.current[1:]
+        self.mono.now += 4
+        app.tick()
+        self.assertIsNone(app.picker)
+        self.assertIn("gone", app.status)
+        app.feed("1")
+        self.assertFalse((self.root / "state.json").exists())
+
+    def test_the_selection_follows_its_item_through_a_refresh(self):
+        app = self.app()
+        app.feed("2")
+        self.current = [self.items[1], self.items[0], self.items[2]]
+        self.mono.now += 4
+        app.tick()
+        self.assertEqual(app.selected, 0)
+        self.current = [self.items[0]]
+        self.mono.now += 4
+        app.tick()
+        self.assertEqual(app.selected, 0)
+
+
+class KeyboardTest(AppCase):
+    def test_digits_select_only_existing_items_and_restart_after_a_miss(self):
+        app = self.app()
+        app.feed("9")
+        self.assertEqual(app.selected, 0)
+        app.feed("3")
+        self.assertEqual(app.selected, 2)
+        app.feed("12")
+        self.assertEqual(app.selected, 1)
+
+    def test_escape_closes_the_picker(self):
+        app = self.app()
+        app.feed("r\x1b")
+        self.assertEqual(app.buf, "\x1b")
+        app.lone_escape()
+        self.assertIsNone(app.picker)
+        self.assertEqual(app.buf, "")
+
+    def test_an_arrow_sequence_is_not_an_escape(self):
+        app = self.app()
+        app.feed("r")
+        app.feed("\x1b[")
+        self.assertEqual(app.buf, "\x1b[")
+        app.feed("B")
+        self.assertEqual((app.buf, app.selected), ("", 0))
+        self.assertIsNotNone(app.picker)
+
+    def test_keys_apply_in_the_order_typed(self):
+        app = self.app()
+        app.feed("i\x1b[B")
+        self.assertEqual(json.loads((self.root / "state.json").read_text())["ignored"], [view.key(*self.items[0])])
+        self.assertEqual(app.selected, 1)
+        app.feed("i")
+        self.assertEqual(json.loads((self.root / "state.json").read_text())["ignored"],
+                         sorted([view.key(*self.items[0]), view.key(*self.items[2])]))
+
+    def test_an_invalid_typed_time_keeps_the_picker_open_with_a_hint(self):
+        app = self.app()
+        app.feed("rtx\r")
+        self.assertEqual(app.status, view.TYPE_HINT)
+        self.assertEqual(app.picker["mode"], "type")
+        self.assertFalse((self.root / "state.json").exists())
+        app.feed("\x7f30m\r")
+        self.assertIsNone(app.picker)
+        self.assertIn("will remind", app.status)
+
+    def test_clicks_and_keys_in_one_read_keep_their_order(self):
+        app = self.app()
+        lines = self.screen.last_frame().split("\r\n")
+        row = next(n for n, line in enumerate(lines, 1) if "Ignore" in line)
+        column = lines[row - 1].index("Ignore") + 2
+        app.feed(f"\x1b[<0;{column};{row}Mo")
+        self.assertEqual(app.status, "jumped")
+        self.assertEqual(json.loads((self.root / "state.json").read_text())["ignored"], [view.key(*self.items[0])])
+
+
+class ClockTest(AppCase):
+    def test_refresh_and_idle_follow_the_monotonic_clock_not_the_wall_clock(self):
+        app = self.app()
+        count = len(self.loads)
+        wall = iter(range(10000, 0, -1))
+        with patch.object(view.time, "time", lambda: next(wall)):
+            self.mono.now += 4
+            app.tick()
+            self.assertEqual(len(self.loads), count + 1)
+            app.feed("s")
+            self.assertTrue(app.show)
+            self.mono.now += 31
+            app.tick()
+        self.assertFalse(app.show)
+
+    def test_reminder_deadlines_use_the_wall_clock(self):
+        app = self.app()
+        app.feed("r2")
+        later = json.loads((self.root / "state.json").read_text())["later"]
+        self.assertEqual(list(later.values()), [self.clock.now + 3600])
+
+    def test_default_clocks_are_the_monotonic_and_the_wall_clock(self):
+        with patch.object(view.time, "monotonic", lambda: 5.0), patch.object(view.time, "time", lambda: 7.0):
+            app = view.App(self.hidden(), False, self.screen.out, self.screen.size)
+            self.assertEqual(app.clock(), 5.0)
+            self.assertEqual(view.Hidden(self.root / "x.json", self.root / "f.log").clock(), 7.0)
+
+    def test_the_list_is_read_again_after_a_resize_and_after_three_seconds(self):
+        app = self.app()
+        count = len(self.loads)
+        app.tick()
+        self.assertEqual(len(self.loads), count)
+        self.screen.lines = 10
+        app.tick()
+        self.assertEqual(len(self.loads), count + 1)
+        self.mono.now += 3.5
+        app.tick()
+        self.assertEqual(len(self.loads), count + 2)
+
+    def test_reminders_hide_again_when_the_selection_leaves_them(self):
+        app = self.app()
+        app.hidden.remind(*self.items[0], self.clock.now + 600)
+        app.refresh()
+        app.feed("s1")
+        self.assertTrue(app.show)
+        self.assertEqual(app.selected, 0)
+        app.feed("\x1b[B")
+        self.assertFalse(app.show)
+
+
+class ViewportTest(AppCase):
+    def many(self, count):
+        self.current = [("Architect::Long::Owner::Name", f"message number {n}") for n in range(count)]
+        return self.app()
+
+    def hits_ok(self, app):
+        rows = self.screen.last_frame().split("\r\n")
+        for line, first, last, action, index in app.hits:
+            self.assertLessEqual(line, self.screen.lines - 1)
+            label = {"open": "Open", "ignore": "Ignore", "remind": "Reminder"}.get(action)
+            if label:
+                self.assertIn(label, rows[line - 1][first - 1:last])
+
+    def test_nothing_taller_than_the_pane_is_drawn(self):
+        app = self.many(12)
+        frame = self.screen.last_frame().split("\x1b[")[0]
+        self.assertLessEqual(len(frame.split("\r\n")), self.screen.lines - 1)
+        self.hits_ok(app)
+
+    def test_the_selected_item_scrolls_into_view_and_its_buttons_still_click(self):
+        app = self.many(12)
+        app.feed("\x1b[B" * 9)
+        self.assertEqual(app.selected, 9)
+        frame = self.screen.last_frame()
+        self.assertIn("10. Architect", frame)
+        self.hits_ok(app)
+        hit = next(h for h in app.hits if h[3] == "ignore" and h[4] == 9)
+        app.feed(f"\x1b[<0;{hit[1]};{hit[0]}M")
+        self.assertEqual(json.loads((self.root / "state.json").read_text())["ignored"], [view.key(*self.current[9])])
+
+    def test_every_line_fits_the_terminal_width_at_any_width(self):
+        self.current = [("Architect::Frontend::Migration", "a long message with several words -> Architect::Frontend::Migration")] * 2
+        for width in range(1, 70):
+            lines, hits = view.layout(self.hidden().visible(self.current), width, 0, 0, False, None, 2)
+            for line in lines:
+                self.assertLessEqual(view.cells(ANSI.sub("", line)), width, (width, line))
+
+    def test_every_button_stays_whole_and_clickable_at_narrow_widths(self):
+        for width in (30, 40, 60):
+            lines, hits = view.layout(self.hidden().visible(self.items), width, 0, 0, False, None, 3)
+            plain = self.plain(lines)
+            for line, first, last, action, index in hits:
+                if action in ("open", "ignore", "remind"):
+                    label = {"open": "Open", "ignore": "Ignore", "remind": "Reminder"}[action]
+                    self.assertIn(label, plain[line - 1][first - 1:last], (width, action))
+
+    def test_a_tall_item_starts_at_the_top_of_the_window(self):
+        lines = ["head", ""] + [f"a{n}" for n in range(8)] + [""] + ["x", ""]
+        top, window, _ = view.viewport(lines, [], 0, 0, 5)
+        self.assertEqual((top, window[0]), (2, "a0"))
+
+    def test_the_footer_still_shows_when_everything_fits(self):
+        self.screen.lines = 40
+        self.app()
+        self.assertIn("select", self.screen.last_frame())
+
+
+def run_in_pty(env_extra, act):
+    """Runs main() in a fresh PTY; act(pid, fd, read) drives it. Returns the output text."""
+    path = str(w.ROOT.parent / "user-todo-view.py")
+    script = f"""
+import importlib.util, os, sys, termios
+spec = importlib.util.spec_from_file_location("v", {path!r})
+v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v)
+sys.argv = ["x", "--demo"]
+if os.environ.get("VIEW_FAIL"):
+    def boom(*a): raise OSError("boom")
+    v.tty.setcbreak = boom
+code = 0
+try:
+    v.main()
+except SystemExit as stop:
+    code = stop.code
+except KeyboardInterrupt:
+    code = "interrupt"
+except OSError:
+    code = "oserror"
+flags = termios.tcgetattr(0)[3]
+print("RESULT", code, bool(flags & termios.ICANON), bool(flags & termios.ECHO), flush=True)
+"""
+    pid, fd = pty.fork()
+    if pid == 0:
+        fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+        os.environ.update(env_extra)
+        os.execvp(sys.executable, [sys.executable, "-I", "-c", script])
+    chunks = []
+
+    def read(wait=0.5, until=None):
+        end = time.time() + 8
+        while time.time() < end:
+            ready, _, _ = select.select([fd], [], [], wait)
+            if not ready:
+                if until is None:
+                    return
+                continue
+            try:
+                data = os.read(fd, 65536)
+            except OSError:
+                return
+            if not data:
+                return
+            chunks.append(data.decode(errors="ignore"))
+            if until and until in "".join(chunks):
+                return
+
+    try:
+        act(pid, fd, read)
+        read(until="RESULT")
+    finally:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+        os.waitpid(pid, 0)
+        os.close(fd)
+    return "".join(chunks)
+
+
+class PtyTest(IsolatedTestCase):
+    def test_main_draws_takes_keys_and_leaves_the_terminal_as_it_found_it(self):
+        def act(pid, fd, read):
+            read(until="3 open")
+            os.write(fd, b"rtx\r")
+            read(until="minutes or hours")
+            os.write(fd, b"\x7f30m\r")
+            read(until="will remind")
+            os.write(fd, b"\x03")
+
+        out = run_in_pty({}, act)
+        self.assertIn("minutes or hours", out)
+        self.assertIn("will remind you at", out)
+        self.assertIn("\x1b[?1000l", out)
+        self.assertRegex(out, r"RESULT interrupt True True")
+
+    def test_resizing_the_pane_redraws_within_the_new_height(self):
+        def act(pid, fd, read):
+            read(until="3 open")
+            fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 8, 50, 0, 0))
+            os.kill(pid, signal.SIGWINCH)
+            read(until="\x1b[8;1H")
+            os.write(fd, b"\x03")
+
+        out = run_in_pty({}, act)
+        frame = ANSI.sub("", out).rsplit("\x1b[H\x1b[2J", 1)[-1].split("\x1b[")[0]
+        self.assertLessEqual(len(frame.split("\r\n")), 7)
+
+    def test_sigterm_and_sighup_restore_the_terminal(self):
+        for name in (signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(name):
+                def act(pid, fd, read):
+                    read(until="3 open")
+                    os.kill(pid, name)
+
+                out = run_in_pty({}, act)
+                self.assertIn("\x1b[?1000l", out)
+                self.assertRegex(out, r"RESULT 143 True True")
+
+    def test_a_setup_failure_after_the_mode_change_restores_it(self):
+        out = run_in_pty({"VIEW_FAIL": "1"}, lambda pid, fd, read: read(until="RESULT"))
+        self.assertRegex(out, r"RESULT oserror True True")
+        self.assertIn("\x1b[?1000l", out)
 
 
 if __name__ == "__main__":

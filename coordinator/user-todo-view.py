@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Live view of the user to-do list with Open, Ignore and Reminder buttons under every item."""
 import fcntl
+import importlib.util
 import json
 import os
 import re
 import select
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -15,6 +17,9 @@ import tty
 import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "watchers"))
+import feed_attach  # noqa: E402
 
 COORDINATOR = Path.home() / ".claude/coordinator"
 TODO = Path(os.environ.get("ORCH_USER_TODO_OUTPUT") or COORDINATOR / "user-todo.md")
@@ -76,11 +81,12 @@ def feed_line(owner, text, now):
 
 
 def append_feed(path, line):
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    try:
-        os.write(fd, line.encode())
-    finally:
-        os.close(fd)
+    with feed_attach.locked(Path(path)):
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, line.encode())
+        finally:
+            os.close(fd)
 
 
 def remind_until(choice, now):
@@ -110,11 +116,19 @@ def reminders_idle(showing, last_input, now):
     return showing and now - last_input <= HIDE_AFTER
 
 
+def wall():
+    return time.time()
+
+
+def mono():
+    return time.monotonic()
+
+
 class Hidden:
     """Ignored items and reminders, keyed by owner and item text."""
 
-    def __init__(self, path, feed, clock=time.time):
-        self.path, self.feed, self.clock = Path(path), Path(feed), clock
+    def __init__(self, path, feed, clock=None):
+        self.path, self.feed, self.clock = Path(path), Path(feed), clock or wall
         self.ignored, self.later = set(), {}
         self.flagged = set()
         self.reload()
@@ -144,7 +158,7 @@ class Hidden:
             self.save()
         try:
             append_feed(self.feed, feed_line(owner, text, self.clock()))
-        except OSError:
+        except (OSError, TimeoutError):
             return False
         return True
 
@@ -164,7 +178,7 @@ class Hidden:
 
     def visible(self, items, show_hidden=False):
         """Rows (owner, text, flagged, note); a snooze that has run out flags the item until the view restarts."""
-        now, shown, changed = self.clock(), [], False
+        now, shown, expired = self.clock(), [], []
         for owner, text in items:
             k = key(owner, text)
             note = ""
@@ -174,14 +188,17 @@ class Hidden:
                 if now < self.later[k]:
                     note = "back at " + time.strftime("%H:%M", time.localtime(self.later[k]))
                 else:
-                    del self.later[k]
+                    expired.append(k)
                     self.flagged.add(k)
-                    changed = True
             if note and not show_hidden:
                 continue
             shown.append((owner, text, k in self.flagged, note))
-        if changed:
+        if expired:
             with self.lock():
+                self.reload()
+                for k in expired:
+                    if self.later.get(k, now + 1) <= now:
+                        del self.later[k]
                 self.save()
         return shown
 
@@ -198,6 +215,7 @@ def cells(text):
 
 
 RESET = "\033[0m"
+SGR = re.compile(r"(\x1b\[[0-9;]*m)")
 # bright fill in the button's colour on the selected item; one faint neutral tint on every other button
 COLORS = {"open": (75, 16), "ignore": (174, 16), "remind": (214, 16), "cancel": (214, 16), "show": (146, 16)}
 QUIET = (238, 252)
@@ -210,8 +228,24 @@ def paint(action, text, filled):
     return f"\033[48;5;{QUIET[0]};38;5;{QUIET[1]}m {text} {RESET}"
 
 
+def fit(line, width):
+    """The line cut to width terminal cells; colour codes cost none."""
+    out, used = [], 0
+    for part in SGR.split(line):
+        if SGR.fullmatch(part):
+            out.append(part)
+            continue
+        for char in part:
+            used += cells(char)
+            if used > width:
+                return "".join(out) + RESET
+            out.append(char)
+    return "".join(out)
+
+
 def wrap(text, width, indent=INDENT):
     """Rows broken at spaces; only a word wider than the row is split."""
+    width = max(1, width)
     rows, current = [], ""
     for word in text.split(" "):
         while cells(word) > width - (indent if rows else 0):
@@ -221,7 +255,7 @@ def wrap(text, width, indent=INDENT):
                 current = ""
                 continue
             cut = word[:room]
-            while cells(cut) > room:
+            while cells(cut) > room and len(cut) > 1:
                 cut = cut[:-1]
             rows.append((current + " " if current else "") + cut)
             current, word = "", word[len(cut):]
@@ -264,7 +298,8 @@ def label(text, flagged, note=""):
 def picker_lines(picker, hits, start, width, index):
     """The inline time choice under an item; its buttons are added to hits."""
     if picker["mode"] == "type":
-        return [f"\033[38;5;214mRemind in (30m, 3h): {picker['entry']}▏\033[0m", "\033[2mEnter ok · Esc cancels\033[0m"]
+        prompt = wrap(f"Remind in (30m, 3h): {picker['entry']}▏", width)
+        return [f"\033[38;5;214m{row}\033[0m" for row in prompt] + ["\033[2mEnter ok · Esc cancels\033[0m"]
     rows, spans = button_rows(width, False, True, PICKS, "remind")
     for offset, first, last, action in spans:
         hits.append((start + offset + 2, first + GUTTER, last + GUTTER, action, index))
@@ -283,24 +318,26 @@ def footer_rows(width):
 
 
 def layout(rows, width, hidden_count, selected=0, showing=False, picker=None, open_count=None):
-    """Screen lines and mouse hits for the item rows (owner, text, flagged); hits are (line, first, last, action, index)."""
+    """Screen lines (none wider than width) and mouse hits for the item rows (owner, text, flagged, note);
+    hits are (line, first, last, action, index) with 1-based lines and columns."""
     open_count = len(rows) if open_count is None else open_count
+    width = max(1, width)
     lines, hits = [f"\033[2m{open_count} open · {hidden_count} on reminder\033[0m", ""], []
-    width = max(INDENT + GUTTER + 20, width)
+    room = max(1, width - GUTTER)
     for index, (owner, text, flagged, note) in enumerate(rows):
         picked = index == selected
         gutter = f"\033[38;5;141m▌{RESET} " if picked else "  "
         start = len(lines)
-        body = wrap(label(text, flagged, note), width - 1 - GUTTER - INDENT, indent=0)
-        lines.append(f"\033[38;5;141m{index + 1}. {owner}{RESET}")
-        lines += [" " * INDENT + (("\033[1m" + row + RESET) if picked else row) for row in body]
+        lines += [f"\033[38;5;141m{row}{RESET}" for row in wrap(f"{index + 1}. {owner}", room, indent=0)]
+        body = wrap(label(text, flagged, note), room - 1, indent=0)
+        lines += [(("\033[1m" + row + RESET) if picked else row) for row in body]
         entries = BUTTONS[:2] + (CANCEL,) if note else BUTTONS
-        button_lines, spans = button_rows(width - GUTTER, picked, picked, entries)
+        button_lines, spans = button_rows(room, picked, picked, entries)
         for offset, first, last, action in spans:
             hits.append((len(lines) + offset + 1, first + GUTTER, last + GUTTER, action, index))
         lines += button_lines
         if picker and picker["index"] == index:
-            lines += picker_lines(picker, hits, len(lines), width - GUTTER, index)
+            lines += picker_lines(picker, hits, len(lines), room, index)
         lines[start:] = [gutter + line for line in lines[start:]]
         lines.append("")
     if not rows:
@@ -309,7 +346,32 @@ def layout(rows, width, hidden_count, selected=0, showing=False, picker=None, op
     footer = footer_rows(width - 1)
     lines += [paint("show", shown, False), ""] + [f"\033[2m{row}\033[0m" for row in footer]
     hits.append((len(lines) - len(footer) - 1, 1, len(shown) + 2, "show", None))
-    return lines, hits
+    return [fit(line, width) for line in lines], hits
+
+
+def item_range(lines, index):
+    """First and last line of item `index`; items end at an empty line and the header ends at the first one."""
+    blanks = [n for n, line in enumerate(lines) if line == ""]
+    if index + 1 >= len(blanks):
+        return 0, 0
+    return blanks[index] + 1, blanks[index + 1]
+
+
+def viewport(lines, hits, selected, top, height):
+    """The lines that fit in `height` rows with the selected item in view, the new top, and hits moved to window rows."""
+    height = max(1, height)
+    if len(lines) <= height:
+        top = 0
+    else:
+        start, end = item_range(lines, selected)
+        if end - start + 1 > height or start < top:
+            top = start
+        elif end >= top + height:
+            top = end - height + 1
+        top = max(0, min(top, len(lines) - height))
+    moved = [(row - top, first, last, action, index) for row, first, last, action, index in hits
+             if 1 <= row - top <= height]
+    return top, lines[top:top + height], moved
 
 
 def hit(hits, column, line):
@@ -319,41 +381,23 @@ def hit(hits, column, line):
     return None
 
 
-def mouse_clicks(buffer):
-    """(column, line) of each left-button press, and the buffer's unfinished tail."""
-    clicks = [(int(x), int(y)) for b, x, y, kind in MOUSE.findall(buffer) if b == "0" and kind == "M"]
-    rest = MOUSE.sub("", buffer)
-    partial = re.search(r"\x1b(?:\[(?:<[0-9;]*)?)?$", rest)
-    return clicks, partial.group() if partial else ""
-
-
-def agent_for(session_name):
-    try:
-        out = subprocess.run(["herdr", "agent", "list"], capture_output=True, text=True, timeout=5).stdout
-        agents = json.loads(out)["result"]["agents"]
-    except Exception:
-        return None
-    hits = [a for a in agents if a.get("terminal_title_stripped") == session_name]
-    if not hits:
-        return None
-    return max(hits, key=lambda a: a.get("state_change_seq", 0))["name"]
+def generator():
+    spec = importlib.util.spec_from_file_location("user_todo", Path(__file__).resolve().parent / "user-todo.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def jump(text):
-    m = TARGET.search(text)
-    if not m:
-        return "no target on this item"
-    target = m.group(1)
-    if target.startswith("http"):
-        result = subprocess.run(["open", "-a", "Google Chrome", target])
-        return f"opened {target}" if result.returncode == 0 else f"could not open {target}"
-    name = agent_for(target) or target
-    r = subprocess.run(["herdr", "agent", "focus", name], capture_output=True, text=True)
-    return f"jumped to {target}" if r.returncode == 0 else f"could not find {target}"
+    return generator().jump({"text": text})
 
 
-def load():
-    if DEMO_MODE:
+def report_count(pane, count):
+    generator().report_metadata(pane, count)
+
+
+def load_items(demo):
+    if demo:
         return parse("\n".join(line for pair in DEMO for line in pair))
     try:
         return parse(TODO.read_text())
@@ -380,48 +424,10 @@ def act(hidden, rows, items, action, index, run_jump=jump, until=None):
     return "will remind you at " + time.strftime("%H:%M", time.localtime(until))
 
 
-def draw(rows, hidden_count, selected, status, showing, picker=None, open_count=None):
-    width = os.get_terminal_size().columns or 80
-    lines, hits = layout(rows, width, hidden_count, selected, showing, picker, open_count)
-    out = "\033[H\033[2J" + "\r\n".join(lines)
-    if status:
-        out += f"\r\n\033[2m{status}\033[0m"
-    sys.stdout.write(out)
-    sys.stdout.flush()
-    return hits
-
-
 KEYS = {hotkey: action for hotkey, action, _ in BUTTONS} | {"s": "show", "\r": "open", "\n": "open"}
-
-
-def key_events(text, typed=""):
-    """(action, index) per key; a digit run selects an item, index None means the selected one."""
-    events = []
-    for char in text:
-        if char.isdigit():
-            typed += char
-            events.append(("select", int(typed) - 1))
-        elif char in KEYS:
-            typed = ""
-            events.append((KEYS[char], None))
-    return events, typed
-
-
-def input_events(buffer, hits, typed="", picking=None):
-    """Actions from raw terminal input, the unfinished escape tail, and the digits typed so far."""
-    clicks, pending = mouse_clicks(buffer)
-    plain = MOUSE.sub("", buffer)
-    plain = plain[:len(plain) - len(pending)] if pending else plain
-    events = [found for found in (hit(hits, x, y) for x, y in clicks) if found]
-    arrows = [("move", 1 if code in "B" else -1) for code in re.findall(r"\x1b[\[O]([AB])", plain)]
-    plain = re.sub(r"\x1b[\[O][0-9;<]*[A-Za-z~]", "", plain)
-    if picking == "type":
-        return events + [event for event in map(entry_event, plain) if event], pending, typed
-    if picking:
-        keys = {c: a for c, a, _ in PICKS}
-        return events + [(keys[c], None) for c in plain if c in keys], pending, typed
-    typed_events, typed = key_events(plain, typed)
-    return events + arrows + typed_events, pending, typed
+PICK_KEYS = {hotkey: action for hotkey, action, _ in PICKS}
+TOKEN = re.compile(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])|\x1b[\[O]([AB])|\x1b[\[O][0-9;<]*[A-Za-z~]|(.)", re.S)
+PENDING = re.compile(r"\x1b(?:[\[O][<0-9;]*)?$")
 
 
 def entry_event(char):
@@ -436,83 +442,209 @@ def edit_entry(entry, action, char):
     return entry[:-1] if action == "backspace" else entry + char if action == "char" else entry
 
 
-DEMO_MODE = "--demo" in sys.argv
+def split_input(buffer):
+    """The complete tokens (one key, arrow or mouse report each) and the unfinished escape tail."""
+    partial = PENDING.search(buffer)
+    pending = partial.group() if partial else ""
+    return [found.group(0) for found in TOKEN.finditer(buffer[:len(buffer) - len(pending)])], pending
+
+
+def input_events(buffer, hits, picking=None):
+    """Actions in the order they were typed or clicked, and the unfinished escape tail to keep for the next read."""
+    tokens, pending = split_input(buffer)
+    events = []
+    for found in map(TOKEN.fullmatch, tokens):
+        button, column, line, kind, arrow, char = found.groups()
+        if button is not None:
+            clicked = hit(hits, int(column), int(line)) if button == "0" and kind == "M" else None
+            if clicked:
+                events.append(clicked)
+        elif arrow:
+            if not picking:
+                events.append(("move", 1 if arrow == "B" else -1))
+        elif char is None or char == "\x1b":
+            continue
+        elif picking == "type":
+            event = entry_event(char)
+            if event:
+                events.append(event)
+        elif picking:
+            if char in PICK_KEYS:
+                events.append((PICK_KEYS[char], None))
+        elif char.isdigit():
+            events.append(("digit", char))
+        elif char in KEYS:
+            events.append((KEYS[char], None))
+    return events, pending
+
+
+class App:
+    """The screen state; every input and clock tick goes through here so it can run without a terminal."""
+
+    def __init__(self, hidden, demo, out, size, clock=None, run_jump=jump, report=report_count):
+        self.hidden, self.demo, self.out, self.size, self.run_jump = hidden, demo, out, size, run_jump
+        self.report, self.reported = report, None
+        self.clock = clock or mono
+        self.status, self.items, self.rows, self.hits = "", [], [], []
+        self.selected, self.selected_key, self.picker, self.show = 0, None, None, False
+        self.buf, self.typed, self.top = "", "", 0
+        self.last_refresh, self.shown_size, self.last_input = None, None, self.clock()
+
+    def find(self, item):
+        return next((n for n, row in enumerate(self.rows) if (row[0], row[1]) == item), None)
+
+    def remember(self):
+        row = self.rows[self.selected] if 0 <= self.selected < len(self.rows) else None
+        self.selected_key = (row[0], row[1]) if row else None
+
+    def refresh(self):
+        self.hidden.reload()
+        self.items = load_items(self.demo)
+        self.rows = self.hidden.visible(self.items, self.show)
+        found = self.find(self.selected_key) if self.selected_key else None
+        self.selected = found if found is not None else min(self.selected, max(0, len(self.rows) - 1))
+        self.remember()
+        if self.picker and self.find(self.picker["key"]) is None:
+            self.picker, self.status = None, "that item is gone"
+        self.last_refresh = self.clock()
+        count = self.hidden.open_count(self.items)
+        if count != self.reported:
+            self.report(os.environ.get("HERDR_PANE_ID"), count)
+            self.reported = count
+        self.render()
+
+    def tick(self):
+        now = self.clock()
+        if self.show and not reminders_idle(self.show, self.last_input, now):
+            self.show = False
+            self.refresh()
+            return
+        size = self.size()
+        if self.last_refresh is None or now - self.last_refresh > 3 or size != self.shown_size:
+            self.shown_size = size
+            self.refresh()
+
+    def render(self):
+        size = self.size()
+        columns, rows = size.columns or 80, size.lines or 24
+        picker = None
+        if self.picker:
+            picker = dict(self.picker, index=self.find(self.picker["key"]))
+        lines, hits = layout(self.rows, columns, self.hidden.hidden_count(self.items), self.selected, self.show,
+                             picker, self.hidden.open_count(self.items))
+        self.top, window, self.hits = viewport(lines, hits, self.selected, self.top, rows - 1)
+        status = f"\033[{rows};1H\033[2m{fit(self.status, columns)}\033[0m" if self.status else ""
+        self.out.write("\033[H\033[2J" + "\r\n".join(window) + status)
+        self.out.flush()
+
+    def remind(self, until):
+        index = self.find(self.picker["key"])
+        self.picker = None
+        if index is None:
+            self.status = "that item is gone"
+            return
+        self.status = act(self.hidden, self.rows, self.items, "remind", index, until=until)
+        self.show = self.show and not self.rows[index][3]
+
+    def apply(self, action, index):
+        if action == "digit":
+            candidate = self.typed + index
+            self.typed = candidate if 1 <= int(candidate) <= len(self.rows) else index
+            if 1 <= int(self.typed) <= len(self.rows):
+                self.selected = int(self.typed) - 1
+                self.remember()
+                self.show = reminders_stay(self.show, self.rows, self.selected) if self.rows else self.show
+            return
+        self.typed = ""
+        if self.picker and action in ("char", "backspace", "submit"):
+            self.picker["entry"] = edit_entry(self.picker["entry"], action, index)
+            if action == "submit":
+                until = remind_until(self.picker["entry"], self.hidden.clock())
+                if until is None:
+                    self.status = TYPE_HINT
+                else:
+                    self.remind(until)
+            return
+        if self.picker and action == "type":
+            self.picker["mode"] = "type"
+            return
+        if self.picker and action.startswith("pick"):
+            self.remind(remind_until(action, self.hidden.clock()))
+            return
+        action = key_action(action, self.rows, self.selected if index is None else index)
+        if action == "remind":
+            self.selected = self.selected if index is None else index
+            if 0 <= self.selected < len(self.rows):
+                self.remember()
+                self.picker = {"key": self.selected_key, "mode": "pick", "entry": ""}
+            return
+        self.picker = None
+        if action == "show":
+            self.show = not self.show
+        elif action == "move":
+            self.selected = min(max(0, self.selected + index), max(0, len(self.rows) - 1))
+            self.remember()
+            self.show = reminders_stay(self.show, self.rows, self.selected) if self.rows else self.show
+        else:
+            self.selected = self.selected if index is None else index
+            self.remember()
+            self.status = act(self.hidden, self.rows, self.items, action, self.selected, self.run_jump)
+            self.show = self.show and not (0 <= self.selected < len(self.rows) and self.rows[self.selected][3] != "")
+
+    def feed(self, data):
+        self.last_input = self.clock()
+        tokens, self.buf = split_input(self.buf + data)
+        for token in tokens:
+            events = input_events(token, self.hits, self.picker and self.picker["mode"])[0]
+            for action, index in events:
+                self.apply(action, index)
+            if events:
+                self.refresh()
+
+    def lone_escape(self):
+        if self.buf == "\x1b":
+            self.buf, self.picker = "", None
+            self.refresh()
+
+
+ENTER = "\033[?1000h\033[?1006h\033[?25l"
+LEAVE = "\033[?1000l\033[?1006l\033[?25h"
+
+
+def stop(*_):
+    sys.exit(143)
 
 
 def main():
-    scratch = Path(tempfile.mkdtemp(prefix="user-todo-demo.")) if DEMO_MODE else None
-    hidden = Hidden(scratch / "state.json", scratch / "feed.log") if DEMO_MODE else Hidden(HIDDEN, FEED)
+    demo = "--demo" in sys.argv[1:]
+    scratch = Path(tempfile.mkdtemp(prefix="user-todo-demo.")) if demo else None
+    hidden = Hidden(scratch / "state.json", scratch / "feed.log") if demo else Hidden(HIDDEN, FEED)
     fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    tty.setcbreak(fd)
-    sys.stdout.write("\033[?1000h\033[?1006h\033[?25l")
-    status, last, items, rows, hits, selected, buf, typed = "", 0, [], [], [], 0, "", ""
-    shown_size, show_hidden, picker, last_input = None, False, None, time.time()
+    previous = {number: signal.signal(number, stop) for number in (signal.SIGTERM, signal.SIGHUP)}
+    old = None
     try:
+        old = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+        sys.stdout.write(ENTER)
+        sys.stdout.flush()
+        app = App(hidden, demo, sys.stdout, os.get_terminal_size)
         while True:
-            if show_hidden and not reminders_idle(show_hidden, last_input, time.time()):
-                show_hidden, last = False, 0
-            size = os.get_terminal_size()
-            if time.time() - last > 3 or size != shown_size:
-                shown_size = size
-                hidden.reload()
-                items, last = load(), time.time()
-                rows = hidden.visible(items, show_hidden)
-                selected = min(selected, max(0, len(rows) - 1))
-                hits = draw(rows, hidden.hidden_count(items), selected, status, show_hidden, picker, hidden.open_count(items))
-            ready, _, _ = select.select([sys.stdin], [], [], 0.3 if buf == "\x1b" else 1)
+            app.tick()
+            ready, _, _ = select.select([fd], [], [], 0.3 if app.buf == "\x1b" else 1)
             if not ready:
-                if buf == "\x1b":
-                    buf, picker, last = "", None, 0
+                app.lone_escape()
                 continue
-            last_input = time.time()
-            events, buf, typed = input_events(buf + os.read(fd, 64).decode(errors="ignore"), hits, typed,
-                                              picker and picker["mode"])
-            for action, index in events:
-                if picker and action in ("char", "backspace", "submit"):
-                    picker["entry"] = edit_entry(picker["entry"], action, index)
-                    if action == "submit":
-                        until = remind_until(picker["entry"], time.time())
-                        if until is None:
-                            status = TYPE_HINT
-                        else:
-                            status = act(hidden, rows, items, "remind", picker["index"], until=until)
-                            show_hidden = show_hidden and not rows[picker["index"]][3]
-                            picker = None
-                    continue
-                if picker and action == "type":
-                    picker["mode"] = "type"
-                    continue
-                if picker and action.startswith("pick"):
-                    status = act(hidden, rows, items, "remind", picker["index"], until=remind_until(action, time.time()))
-                    show_hidden = show_hidden and not rows[picker["index"]][3]
-                    picker = None
-                    continue
-                action = key_action(action, rows, selected if index is None else index)
-                if action == "remind":
-                    picker = {"index": selected if index is None else index, "mode": "pick", "entry": ""}
-                    selected = picker["index"]
-                    continue
-                picker = None
-                if action == "show":
-                    show_hidden = not show_hidden
-                    continue
-                if action == "move":
-                    selected = min(max(0, selected + index), max(0, len(rows) - 1))
-                    show_hidden = reminders_stay(show_hidden, rows, selected) if rows else show_hidden
-                    continue
-                if action == "select":
-                    selected = index if 0 <= index < len(rows) else selected
-                    show_hidden = reminders_stay(show_hidden, rows, selected) if rows else show_hidden
-                    continue
-                selected = selected if index is None else index
-                status = act(hidden, rows, items, action, selected)
-                show_hidden = show_hidden and not (0 <= selected < len(rows) and rows[selected][3] != "")
-            if events:
-                last = 0
+            data = os.read(fd, 64)
+            if not data:
+                break
+            app.feed(data.decode(errors="ignore"))
     finally:
-        sys.stdout.write("\033[?1000l\033[?1006l\033[?25h")
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        if old is not None:
+            sys.stdout.write(LEAVE)
+            sys.stdout.flush()
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        for number, handler in previous.items():
+            signal.signal(number, handler)
         if scratch:
             shutil.rmtree(scratch, ignore_errors=True)
 
