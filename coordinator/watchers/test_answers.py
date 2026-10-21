@@ -34,7 +34,8 @@ class AnswersTest(IsolatedTestCase):
             self.assertEqual(state["unreadable"], [])
             self.assertEqual(events, ["ANSWER ship: option one"])
             self.assertFalse((questions / "ship.answer").exists())
-            self.assertEqual((questions / "ship.answer.seen").read_text(), "  option one\n")
+            [seen] = questions.glob("ship.*.answer.seen")
+            self.assertEqual(seen.read_text(), "  option one\n")
             line = "2026-10-21T12:00:00+00:00 answers: ANSWER ship: option one (start)"
             self.assertTrue(feed_actions.is_action(line, feed_actions.action_patterns()))
 
@@ -47,10 +48,10 @@ class AnswersTest(IsolatedTestCase):
                 with patch.object(w, "publish_events", side_effect=OSError("disk full")):
                     with self.assertRaises(OSError):
                         w.cycle(base, "answers", lambda before: w.collect_answers(before))
-                self.assertTrue((questions / "ship.answer.processing").exists())
+                self.assertEqual(len(list(questions.glob("ship.*.answer.processing"))), 1)
                 line = w.cycle(base, "answers", lambda before: w.collect_answers(before))
             self.assertIn("ANSWER ship: one", line)
-            self.assertTrue((questions / "ship.answer.seen").exists())
+            self.assertEqual(len(list(questions.glob("ship.*.answer.seen"))), 1)
 
     def test_long_answer_is_not_truncated(self):
         answer = "x" * 300 + " LAST IMPORTANT WORDS"

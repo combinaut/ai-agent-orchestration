@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import fcntl
 import importlib.util
 import json
-import hashlib
+import uuid
 import os
 import re
 import subprocess
@@ -557,14 +557,17 @@ def collect_answers(before):
         return {"answers": [], "unreadable": [str(directory)]}
     for path in paths:
         try:
-            processing = path if path.suffix == ".processing" else path.with_suffix(".answer.processing")
+            slug = path.name.split(".", 1)[0]
+            processing = path if path.suffix == ".processing" else path.with_name(f"{slug}.{uuid.uuid4().hex}.answer.processing")
             if path != processing:
                 path.replace(processing)
             text = " ".join(processing.read_text().split())
             if not text:
+                processing.unlink()
+                answers.append((slug, "", "", "blank"))
                 continue
-            slug = processing.name.removesuffix(".answer.processing")
-            answers.append((slug, text, str(processing), hashlib.sha256(text.encode()).hexdigest()))
+            claim = processing.name.split(".", 2)[1]
+            answers.append((slug, text, str(processing), claim))
         except OSError:
             return {"answers": answers, "unreadable": [str(path)]}
     return {"answers": answers, "unreadable": []}
@@ -572,14 +575,17 @@ def collect_answers(before):
 
 def reduce_answers(before, raw):
     committed = set((before or {}).get("committed", []))
-    events = [f"ANSWER {slug}: {text}" for slug, text, _, key in raw["answers"] if key not in committed]
+    events = [f"ANSWER {slug}: {text}" for slug, text, _, key in raw["answers"] if text and key not in committed]
+    events += [f"ANSWERS blank {slug}" for slug, text, _, _ in raw["answers"] if not text]
     events += [f"ANSWERS READFAIL {path}" for path in raw["unreadable"]]
-    committed.update(key for _, _, _, key in raw["answers"])
+    committed.update(key for _, text, _, key in raw["answers"] if text)
     return {"unreadable": raw["unreadable"], "committed": sorted(committed)[-1000:]}, events
 
 
 def acknowledge_answers(raw):
     for _, _, path, _ in raw.get("answers", []):
+        if not path:
+            continue
         processing = Path(path)
         processing.replace(processing.with_name(processing.name.removesuffix(".processing") + ".seen"))
 

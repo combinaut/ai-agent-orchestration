@@ -38,7 +38,7 @@ case ${1:-} in
     valid_slug "$slug" || { echo "invalid question slug: $slug" >&2; exit 64; }
     pane=$(find_pane "Q: $slug")
     [ -z "$pane" ] || "$root/coordinator/watchers/close-pane.sh" "$pane"
-    rm -f "$questions/$slug.md" "$questions/$slug.answer" "$questions/$slug.answer.seen"
+    rm -f "$questions/$slug.md" "$questions/$slug.answer" "$questions/$slug.answer.seen" "$questions/$slug".*.answer.processing "$questions/$slug".*.answer.seen
     ;;
   *)
     [ $# -eq 2 ] || usage
