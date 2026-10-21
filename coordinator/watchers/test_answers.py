@@ -222,4 +222,79 @@ class AnswersTest(IsolatedTestCase):
             after, _ = w.reduce_answers(before, raw)
             self.assertEqual(set(after['committed']), {'first', 'second'})
             _, events = w.reduce_answers(after, w.collect_answers(after))
-            self.assertEqual(events, [])
+            self.assertTrue(all(event.startswith("ANSWERS READ RECOVERED ") for event in events))
+            self.assertEqual(len(events), 1)
+
+    def test_terminal_escape_sequences_never_submit_answers(self):
+        keys = list('\x1b[5~\x1b[6~\x1b[3~\x1b[1;5A\x1bOP\x1b2') + ['7', KeyboardInterrupt]
+        with patch.object(question_pane, 'read_key', side_effect=keys), \
+                patch.object(question_pane, 'show'), patch.object(question_pane.time, 'sleep'), \
+                patch.object(question_pane, 'atomic_write') as write:
+            with self.assertRaises(KeyboardInterrupt):
+                question_pane.follow(Path('ship.md'))
+            self.assertEqual([call.args[1] for call in write.call_args_list], ['7'])
+        with patch.object(question_pane, 'read_key', side_effect=['', KeyboardInterrupt]), \
+                patch.object(question_pane, 'show'), patch.object(question_pane, 'atomic_write') as write:
+            question_pane.follow(Path('ship.md'))
+            write.assert_not_called()
+
+    def test_corrections_replay_in_persisted_submission_order(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, ORCH_USER_QUESTIONS_DIR=tmp):
+            directory, base = Path(tmp), Path(tmp) / 'state'
+            (directory / 'ship.md').touch()
+            old = directory / ('ship.' + 'f' * 32 + '.answer.processing')
+            old.write_text('yes')
+            os.utime(old, ns=(1, 1))
+            (directory / 'ship.answer').write_text('maybe')
+            with patch.object(w, 'publish_events', side_effect=OSError('restart')):
+                with self.assertRaises(OSError):
+                    w.cycle(base, 'answers', w.collect_answers)
+            (directory / 'ship.answer').write_text('no')
+            with patch.object(w, 'publish_events', side_effect=OSError('restart')):
+                with self.assertRaises(OSError):
+                    w.cycle(base, 'answers', w.collect_answers)
+            # File mtimes and random UUID order cannot reorder claims with persisted order values.
+            for path in directory.glob('*.processing'):
+                if path != old:
+                    os.utime(path, ns=(0, 0))
+            events = json.loads(w.cycle(base, 'answers', w.collect_answers))['events']
+            self.assertEqual(events, ['ANSWER ship: yes', 'ANSWER ship: maybe', 'ANSWER ship: no'])
+            self.assertIsNone(w.cycle(base, 'answers', w.collect_answers))
+
+    def test_unreadable_claim_does_not_block_later_answers_and_recovers(self):
+        import alert_policy
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, ORCH_USER_QUESTIONS_DIR=tmp):
+            directory = Path(tmp)
+            for slug in ('alpha', 'zulu'):
+                (directory / f'{slug}.md').touch()
+                (directory / f'{slug}.{slug}-claim.answer.processing').write_text('yes')
+            bad = directory / 'alpha.alpha-claim.answer.processing'
+            (directory / 'alpha.later.answer.processing').write_text('newer')
+            original = Path.read_text
+            def read(path, *args, **kwargs):
+                if path == bad:
+                    raise OSError('unreadable')
+                return original(path, *args, **kwargs)
+            with patch.object(Path, 'read_text', read):
+                raw = w.collect_answers(None)
+            before, events = w.reduce_answers(None, raw)
+            self.assertIn('ANSWER zulu: yes', events)
+            self.assertFalse(any(event.startswith('ANSWER alpha:') for event in events))
+            self.assertEqual(raw['unreadable'], [str(bad)])
+            self.assertTrue(bad.exists())
+            failure = alert_policy.answer_facts('ANSWERS READFAIL ' + str(bad))[0]
+            for closed in (False, True):
+                if closed:
+                    (directory / 'alpha.md').unlink()
+                after, events = w.reduce_answers(before, w.collect_answers(before))
+                self.assertEqual(after['unreadable'], [])
+                recovery = 'ANSWERS READ RECOVERED ' + str(bad)
+                self.assertIn(recovery, events)
+                cleared = alert_policy.answer_facts(recovery)[0]
+                self.assertEqual(cleared['kind'], 'clear')
+                self.assertEqual(cleared['prefix'], failure['key'])
+                self.assertTrue(cleared['exact'])
+                policy, cfg = {}, dict(alert_policy.limits(), hold=0)
+                alert_policy.apply(policy, [{'mode': 'answers', 'events': ['ANSWERS READFAIL ' + str(bad)]}], 1, cfg)
+                alert_policy.apply(policy, [{'mode': 'answers', 'events': [recovery]}], 2, cfg)
+                self.assertFalse(policy['keys'][failure['key']]['active'])

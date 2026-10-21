@@ -45,3 +45,6 @@ Question answers are claimed with unique IDs and acknowledged after successful
 reduction and durable publication. Failed passes replay pending claims without
 duplicating committed answers. Closing a question shares the answer-pass lock,
 removes its pending claims, and prevents late orphan answers from being published.
+Claims include a persisted submission order so corrections replay after older
+answers. Unreadable claims do not block other questions; recovery clears the
+corresponding read-failure alert. The panel discards terminal escape sequences.

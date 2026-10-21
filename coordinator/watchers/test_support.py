@@ -23,6 +23,7 @@ for key in tuple(os.environ):
         os.environ.pop(key)
 os.environ.update({'PATH': f'{TEST_TOOLS_DIR}:{os.environ.get("PATH", "")}',
                    'HERDR_BIN_PATH': str(TEST_TOOLS_DIR / 'herdr'),
+                   'ORCH_USER_QUESTIONS_DIR': str(TEST_TOOLS_DIR / 'questions'),
                    'TEST_TOOL_LOG': str(TEST_TOOL_LOG)})
 atexit.register(shutil.rmtree, TEST_TOOLS_DIR, ignore_errors=True)
 

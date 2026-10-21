@@ -50,8 +50,20 @@ def read_key():
 def follow(question):
     answer = answer_path(question)
     show(question)
+    escape = ""
     while True:
         key = read_key()
+        if not key:
+            return
+        if key == "\x1b":
+            escape = "start"
+            continue
+        if escape:
+            if escape == "start":
+                escape = "sequence" if key in "[O" else ""
+            elif "@" <= key <= "~":
+                escape = ""
+            continue
         if key in "123456789":
             atomic_write(answer, key)
             show(question, f"Sent: {key}. The Coordinator will pick it up.")

@@ -549,20 +549,37 @@ def reduce_todo(before, raw):
     return {"now": current, "unreadable": raw["unreadable"], "read": read, "scanned": scanned}, events
 
 
+def answer_order(path):
+    claim = path.name.split(".", 2)[1]
+    if re.fullmatch(r"[0-9]{20}-[0-9a-f]{32}", claim):
+        return int(claim.split("-", 1)[0]), path.name
+    try:
+        return path.stat().st_mtime_ns, path.name
+    except OSError:
+        return 0, path.name
+
+
 def collect_answers(before):
     directory = questions_directory()
-    answers = []
+    answers, unreadable, blocked = [], [], set()
     try:
-        paths = sorted(list(directory.glob("*.answer.processing")) + list(directory.glob("*.answer")))
+        claimed = sorted(directory.glob("*.answer.processing"), key=answer_order)
+        last_order = max((answer_order(path)[0] for path in claimed), default=0)
+        paths = claimed + sorted(directory.glob("*.answer"), key=answer_order)
     except OSError:
         return {"answers": [], "unreadable": [str(directory)]}
     for path in paths:
+        processing = path
         try:
             slug = path.name.split(".", 1)[0]
+            if slug in blocked:
+                continue
             if not (directory / f"{slug}.md").is_file():
                 path.unlink(missing_ok=True)
                 continue
-            processing = path if path.suffix == ".processing" else path.with_name(f"{slug}.{uuid.uuid4().hex}.answer.processing")
+            if path.suffix != ".processing":
+                last_order = max(time.time_ns(), last_order + 1)
+                processing = path.with_name(f"{slug}.{last_order:020d}-{uuid.uuid4().hex}.answer.processing")
             if path != processing:
                 path.replace(processing)
             text = " ".join(processing.read_text().split())
@@ -573,8 +590,9 @@ def collect_answers(before):
             claim = processing.name.split(".", 2)[1]
             answers.append((slug, text, str(processing), claim))
         except OSError:
-            return {"answers": answers, "unreadable": [str(path)]}
-    return {"answers": answers, "unreadable": []}
+            blocked.add(slug)
+            unreadable.append(str(processing))
+    return {"answers": answers, "unreadable": unreadable}
 
 
 def reduce_answers(before, raw):
@@ -584,6 +602,8 @@ def reduce_answers(before, raw):
     events = [f"ANSWER {slug}: {text}" for slug, text, _, key in raw["answers"] if text and key not in committed]
     events += [f"ANSWERS blank {slug}" for slug, text, _, _ in raw["answers"] if not text]
     events += [f"ANSWERS READFAIL {path}" for path in raw["unreadable"]]
+    events += [f"ANSWERS READ RECOVERED {path}" for path in sorted(
+        set((before or {}).get("unreadable", [])) - set(raw["unreadable"]))]
     committed.update(key for _, text, _, key in raw["answers"] if text)
     return {"unreadable": raw["unreadable"], "committed": sorted(committed)}, events
 
