@@ -15,14 +15,14 @@ case "$1 $2" in
 esac
 EOF
   chmod +x "$BIN/herdr-question"
-  export HERDR_BIN_PATH="$BIN/herdr-question" ORCH_CONFIG="$TMP/none.toml" ORCH_PYTHON3="$(command -v python3)"
+  python_bin=$(command -v python3)
+  export HERDR_BIN_PATH="$BIN/herdr-question" ORCH_CONFIG="$TMP/none.toml" ORCH_PYTHON3="$python_bin"
 }
 
 @test "ask-user-question stacks below the to-do pane and does not focus it" {
   question="$HOME/.claude/coordinator/questions/release.md"
   printf 'Which release?\n' >"$question"
-  export HERDR_PANES='{"result":{"panes":[{"pane_id":"todo-pane","tokens":{"todo":"1"}}]}}'
-  run "$ROOT/ask-user-question" release "$question"
+  run env HERDR_PANES='{"result":{"panes":[{"pane_id":"todo-pane","tokens":{"todo":"1"}}]}}' "$ROOT/ask-user-question" release "$question"
   [ "$status" -eq 0 ]
   grep -qx 'pane split todo-pane --direction down --no-focus' "$TMP/question-herdr.calls"
   grep -q '^pane run question-pane ' "$TMP/question-herdr.calls"
@@ -33,8 +33,7 @@ EOF
   question="$HOME/.claude/coordinator/questions/release.md"
   printf 'Which release?\n' >"$question"
   printf '1\n' >"${question%.md}.answer.seen"
-  export HERDR_PANES='{"result":{"panes":[{"pane_id":"question-pane","terminal_title_stripped":"Q: release"}]}}'
-  run "$ROOT/ask-user-question" close release
+  run env HERDR_PANES='{"result":{"panes":[{"pane_id":"question-pane","terminal_title_stripped":"Q: release"}]}}' "$ROOT/ask-user-question" close release
   [ "$status" -eq 0 ]
   grep -qx 'pane close question-pane' "$TMP/question-herdr.calls"
   [ ! -e "$question" ]
@@ -42,7 +41,6 @@ EOF
 }
 
 @test "ask-user-question rejects a missing question file" {
-  export HERDR_PANES='{"result":{"panes":[]}}'
-  run "$ROOT/ask-user-question" release "$HOME/.claude/coordinator/questions/missing.md"
+  run env HERDR_PANES='{"result":{"panes":[]}}' "$ROOT/ask-user-question" release "$HOME/.claude/coordinator/questions/missing.md"
   [ "$status" -eq 66 ]
 }
