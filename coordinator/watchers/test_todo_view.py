@@ -203,7 +203,7 @@ class ClickTest(ViewCase):
     def layout(self, width, selected=0, picker=None):
         hidden = self.hidden()
         rows = hidden.visible(self.items)
-        return view.layout(rows, width, 0, selected, False, picker, len(rows))
+        return view.layout(rows, width, 1, selected, False, picker, len(rows))
 
     def test_each_button_is_hit_across_its_whole_label_and_nowhere_else(self):
         for width in (80, 40, 24):
@@ -306,10 +306,26 @@ class AutoHideTest(ViewCase):
         hidden.remind(*self.items[0], self.clock.now + 60)
         lines = self.plain(view.layout(hidden.visible(self.items), 80, hidden.hidden_count(self.items), 0, False, None,
                                        hidden.open_count(self.items))[0])
-        self.assertEqual(lines[0], "3 open · 1 on reminder")
+        self.assertEqual(lines[:2], [view.TITLE, "3 open · 1 on reminder"])
         self.assertTrue(any("show reminders (1)" in line for line in lines))
         shown = self.plain(view.layout(hidden.visible(self.items, True), 80, 1, 0, True, None, 3)[0])
         self.assertTrue(any("hide reminders (1)" in line for line in shown))
+
+    def test_the_title_is_the_first_line_above_the_counts(self):
+        lines = self.plain(view.layout([], 80, 0, 0, False, None, 0)[0])
+        self.assertEqual(lines[:2], ["Your to-do", "0 open · 0 on reminder"])
+
+    def test_the_start_sequence_sets_the_terminal_title(self):
+        self.assertIn("\033]2;Your to-do\007", view.ENTER)
+
+    def test_the_toggle_and_the_s_hint_need_a_reminder(self):
+        for count, expected in ((0, False), (1, True)):
+            lines = self.plain(view.layout(self.hidden().visible(self.items), 80, count, 0, False, None, 3)[0])
+            text = "\n".join(lines)
+            self.assertEqual("show reminders" in text, expected)
+            self.assertEqual("s show reminders" in text, expected)
+            self.assertEqual(any("show" in h[3] for h in view.layout(self.hidden().visible(self.items), 80, count, 0, False, None, 3)[1]), expected)
+        self.assertNotIn(view.SHOW_HINT, " ".join(view.footer_rows(200, True, False)))
 
     def test_the_view_starts_with_reminders_hidden(self):
         hidden = self.hidden()
@@ -516,6 +532,68 @@ class KeyboardTest(AppCase):
         self.assertIsNone(app.picker)
         self.assertEqual(app.buf, "")
 
+    def popup_app(self, popup=True):
+        app = view.App(self.hidden(), False, self.screen.out, self.screen.size, self.mono, popup=popup)
+        app.tick()
+        return app
+
+    def test_escape_closes_a_popup_view(self):
+        app = self.popup_app()
+        app.feed("\x1b")
+        app.lone_escape()
+        self.assertTrue(app.closing)
+
+    def test_q_closes_a_popup_view(self):
+        app = self.popup_app()
+        app.feed("q")
+        self.assertTrue(app.closing)
+
+    def test_escape_with_the_picker_open_only_cancels_the_picker(self):
+        app = self.popup_app()
+        app.feed("r\x1b")
+        app.lone_escape()
+        self.assertIsNone(app.picker)
+        self.assertFalse(app.closing)
+        app.feed("\x1b")
+        app.lone_escape()
+        self.assertTrue(app.closing)
+
+    def test_nothing_closes_a_view_that_is_not_a_popup(self):
+        app = self.popup_app(popup=False)
+        app.feed("q")
+        self.assertFalse(app.closing)
+        app.feed("\x1b")
+        app.lone_escape()
+        self.assertFalse(app.closing)
+
+    def test_q_is_typed_into_the_reminder_entry(self):
+        app = self.popup_app()
+        app.feed("rtq")
+        self.assertFalse(app.closing)
+        self.assertEqual(app.picker["entry"], "q")
+
+    def test_q_does_nothing_while_the_reminder_choices_show(self):
+        app = self.popup_app()
+        app.feed("rq")
+        self.assertFalse(app.closing)
+        self.assertIsNotNone(app.picker)
+
+    def test_the_close_hint_shows_only_in_a_popup(self):
+        self.assertIn("Esc/q close", self.screen_text(self.popup_app()))
+        self.assertNotIn("Esc/q close", self.screen_text(self.popup_app(popup=False)))
+
+    def test_the_footer_with_the_close_hint_wraps_at_its_separators(self):
+        parts = (view.FOOTER + " · " + view.CLOSE_HINT).split(" · ")
+        for width in range(1, 120):
+            rows = view.footer_rows(width, True)
+            self.assertEqual(" · ".join(rows).split(" · "), parts)
+            for row in rows:
+                self.assertTrue(row in parts or view.cells(row) <= width)
+        self.assertEqual(len(view.footer_rows(200, True)), 1)
+
+    def screen_text(self, app):
+        return "\n".join(self.plain(self.screen.last_frame().split("\r\n")))
+
     def test_an_arrow_sequence_is_not_an_escape(self):
         app = self.app()
         app.feed("r")
@@ -557,6 +635,7 @@ class KeyboardTest(AppCase):
 class ClockTest(AppCase):
     def test_refresh_and_idle_follow_the_monotonic_clock_not_the_wall_clock(self):
         app = self.app()
+        app.hidden.remind(*self.items[0], self.clock.now + 600)
         count = len(self.loads)
         wall = iter(range(10000, 0, -1))
         with patch.object(view.time, "time", lambda: next(wall)):
@@ -568,6 +647,22 @@ class ClockTest(AppCase):
             self.mono.now += 31
             app.tick()
         self.assertFalse(app.show)
+
+    def test_s_does_nothing_without_reminders(self):
+        app = self.app()
+        app.feed("s")
+        self.assertFalse(app.show)
+
+    def test_the_reminder_list_closes_when_the_last_reminder_goes(self):
+        app = self.app()
+        app.hidden.remind(*self.items[0], self.clock.now + 600)
+        app.refresh()
+        app.feed("s")
+        self.assertTrue(app.show)
+        app.hidden.cancel(*self.items[0])
+        app.refresh()
+        self.assertFalse(app.show)
+        self.assertNotIn("reminders (", self.screen.last_frame())
 
     def test_reminder_deadlines_use_the_wall_clock(self):
         app = self.app()
@@ -691,7 +786,7 @@ def run_in_pty(env_extra, act):
 import importlib.util, os, sys, termios
 spec = importlib.util.spec_from_file_location("v", {path!r})
 v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v)
-sys.argv = ["x", "--demo"]
+sys.argv = ["x", "--demo", *os.environ.get("VIEW_ARGS", "").split()]
 if os.environ.get("VIEW_FAIL"):
     def boom(*a): raise OSError("boom")
     v.tty.setcbreak = boom
@@ -759,6 +854,28 @@ class PtyTest(IsolatedTestCase):
         self.assertIn("minutes or hours", out)
         self.assertIn("will remind you at", out)
         self.assertIn("\x1b[?1000l", out)
+        self.assertRegex(out, r"RESULT interrupt True True")
+
+    def test_q_and_a_lone_escape_close_a_popup_and_restore_the_terminal(self):
+        for name, keys in (("q", b"q"), ("escape", b"\x1b")):
+            with self.subTest(name):
+                def act(pid, fd, read):
+                    read(until="Esc/q close")
+                    os.write(fd, keys)
+
+                out = run_in_pty({"VIEW_ARGS": "--popup"}, act)
+                self.assertIn("\x1b[?1000l", out)
+                self.assertRegex(out, r"RESULT 0 True True")
+
+    def test_q_and_escape_leave_a_view_that_is_not_a_popup_running(self):
+        def act(pid, fd, read):
+            read(until="3 open")
+            os.write(fd, b"q\x1b")
+            read(wait=1)
+            os.write(fd, b"\x03")
+
+        out = run_in_pty({}, act)
+        self.assertNotIn("Esc/q close", out)
         self.assertRegex(out, r"RESULT interrupt True True")
 
     def test_resizing_the_pane_redraws_within_the_new_height(self):
