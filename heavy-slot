@@ -220,6 +220,7 @@ release_lock() {
   # Finish both removals before the parent handles a signal. Otherwise its
   # EXIT cleanup can see our lock without its owner metadata and leave a lease.
   (
+    trap '' INT TERM HUP
     rm -f "$LOCK_DIR/pid" "$LOCK_DIR/started"
     rmdir "$LOCK_DIR" 2>/dev/null || true
   )

@@ -448,23 +448,29 @@ fi
 status=$?
 if [ "$status" -eq 0 ] && [ -n "$wrapper" ]; then
   : >"$TEST_ROOT/interrupted"
-  kill -INT "$wrapper"
+  case "$INTERRUPT_TARGET" in
+    group) kill -INT -- "-$wrapper" ;;
+    parent) kill -INT "$wrapper" ;;
+  esac
 fi
 exit "$status"
 STUB
   chmod +x "$TMP/bin/rm"
-  # The controller restores SIGINT before starting the asynchronous helper.
-  # shellcheck disable=SC2016 # Python receives this program literally.
-  run env PATH="$TMP/bin:$PATH" python3 -c '
+  for target in parent group; do
+    rm -f "$TMP/interrupted"
+    # Isolate the helper group so the injected signal cannot reach the runner.
+    # shellcheck disable=SC2016 # Python receives this program literally.
+    run env PATH="$TMP/bin:$PATH" INTERRUPT_TARGET="$target" python3 -c '
 import signal, subprocess, sys
 signal.signal(signal.SIGINT, signal.SIG_DFL)
-result = subprocess.run([sys.argv[1], "take", "agent-release-interrupt", "--", "sleep", "30"], timeout=30)
+result = subprocess.run([sys.argv[1], "take", "agent-release-interrupt", "--", "sleep", "30"], timeout=30, start_new_session=True)
 raise SystemExit(0 if result.returncode == 130 else 1)
 ' "$HELPER"
-  [ "$status" -eq 0 ]
-  [ -f "$TMP/interrupted" ]
-  [ ! -e "$ORCH_HEAVY_SLOTS_DIR/agent-release-interrupt" ]
-  [ ! -d "$ORCH_HEAVY_SLOTS_DIR/.lock" ]
+    [ "$status" -eq 0 ]
+    [ -f "$TMP/interrupted" ]
+    [ ! -e "$ORCH_HEAVY_SLOTS_DIR/agent-release-interrupt" ]
+    [ ! -d "$ORCH_HEAVY_SLOTS_DIR/.lock" ]
+  done
 }
 
 @test "SIGINT terminates an asynchronous child and removes the slot" {
