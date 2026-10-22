@@ -41,7 +41,7 @@ The first run copies [`config/orchestration.toml.example`](config/orchestration.
 | Key (prompt) | Set it to |
 |---|---|
 | `[pr] author` (`ORCH_PR_AUTHOR`) | your GitHub login (`"@me"` works); the watchers find the repos from the open workspaces |
-| `[models] codex_worker`, `codex_smart` (`ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) | a Codex model name each. Fill both even without Codex: `/coordinate` and `/architect` stop while either is a placeholder |
+| `[models] codex_worker`, `codex_smart` (`ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) | a Codex model name each: `/coordinate` and `/architect` stop while either is a placeholder. No Codex? Set `[providers] enabled = ["claude"]` instead, and the installer stops asking |
 | `[herdr] bin`, `socket` (`ORCH_HERDR_BIN`, `ORCH_HERDR_SOCKET`) | Herdr's executable and socket; needed for the watcher services |
 
 Settings for one repo (big-repo guard, legacy scan and its rules, focus) go in that repo's `.orchestration.toml` (committed, shared), or `.orchestration.local.toml` for your own (keep it out of git). An exported `ORCH_*` variable beats both files. Restart Claude Code afterwards so it loads the hooks and skills. Every key: [`docs/settings.md`](docs/settings.md). Watcher services: [`docs/watchers.md`](docs/watchers.md).

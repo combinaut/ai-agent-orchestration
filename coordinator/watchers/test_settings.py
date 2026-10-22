@@ -470,6 +470,8 @@ class PullsSettingsTest(SettingsTest):
 
 
 def example_value(setting):
+    if setting.choices:
+        return list(setting.required) or setting.choices[:1]
     return {'str': 'x', 'int': 7, 'number': 7, 'bool': True, 'list': ['x', 'y'], 'json': [{'name': 'x'}], 'tables': [{'name': 'x'}]}[setting.kind]
 
 
@@ -565,6 +567,52 @@ class LegacyUpgradeTest(SettingsTest):
         self.assertNotIn(s.BY_KEY['legacy.rules'], layer)
         self.assertTrue(report[0].startswith('not converted: ORCH_LEGACY_EXTRA_PATTERN for acme/webapp is not an rg regex ('), report)
         self.assertEqual(s.validate(s.parse(s.render(layer), 'x'), 'x', 'repo'), layer)
+
+
+class ProvidersTest(SettingsTest):
+    def resolve(self, text='', **environ):
+        path = self.write('g.toml', text)
+        return s.resolved_global(path, environ)
+
+    def test_the_default_is_claude_and_codex_plus_pi_where_a_pi_model_is_set(self):
+        self.assertEqual(self.resolve()['ORCH_PROVIDERS'], 'claude,codex')
+        self.assertEqual(self.resolve('[models]\npi_smart = "lmstudio/q"\n')['ORCH_PROVIDERS'], 'claude,codex,pi')
+        self.assertEqual(s.required_models(self.resolve()),
+                         ['ORCH_COORDINATOR_MODEL', 'ORCH_ARCHITECT_MODEL', 'ORCH_CODEX_WORKER_MODEL', 'ORCH_CODEX_SMART_MODEL'])
+        self.assertEqual(s.fill_models(self.resolve()), ['ORCH_CODEX_WORKER_MODEL', 'ORCH_CODEX_SMART_MODEL'])
+
+    def test_codex_off_needs_no_codex_models(self):
+        values = self.resolve('[providers]\nenabled = ["claude"]\n[models]\ncodex_worker = ""\ncodex_smart = "<codex-smart-model>"\n')
+        self.assertEqual(values['ORCH_PROVIDERS'], 'claude')
+        self.assertEqual(s.required_models(values), ['ORCH_COORDINATOR_MODEL', 'ORCH_ARCHITECT_MODEL'])
+        self.assertEqual(s.fill_models(values), [])
+
+    def test_pi_listed_is_on_without_its_models_and_never_required(self):
+        values = self.resolve('[providers]\nenabled = ["pi", "claude"]\n')
+        self.assertEqual(values['ORCH_PROVIDERS'], 'claude,pi')
+        self.assertEqual(s.required_models(values), ['ORCH_COORDINATOR_MODEL', 'ORCH_ARCHITECT_MODEL'])
+
+    def test_an_exported_list_wins_over_the_file(self):
+        values = self.resolve('[providers]\nenabled = ["claude", "codex"]\n', ORCH_PROVIDERS='claude')
+        self.assertEqual(values['ORCH_PROVIDERS'], 'claude')
+
+    def test_a_list_without_claude_is_an_error_naming_the_file_and_key(self):
+        error = self.error('[providers]\nenabled = ["codex"]\n')
+        self.assertIn('providers.enabled: must include "claude" (the Coordinator and the architects run on it)', error)
+        with self.assertRaisesRegex(s.ConfigError, r'providers.enabled \(ORCH_PROVIDERS\): must include "claude"'):
+            self.resolve(ORCH_PROVIDERS='codex')
+
+    def test_an_unknown_provider_is_an_error(self):
+        self.assertIn('providers.enabled: unknown entry "gemini"; known: claude, codex, pi',
+                      self.error('[providers]\nenabled = ["claude", "gemini"]\n'))
+        with self.assertRaisesRegex(s.ConfigError, 'unknown entry ""'):
+            self.resolve(ORCH_PROVIDERS='claude,')
+
+    def test_every_provider_names_existing_model_settings(self):
+        self.assertEqual(s.BY_KEY['providers.enabled'].choices, [p.name for p in s.PROVIDERS])
+        for provider in s.PROVIDERS:
+            for model in provider.models:
+                self.assertIn(model, s.BY_ENV)
 
 
 class DriftTest(SettingsTest):

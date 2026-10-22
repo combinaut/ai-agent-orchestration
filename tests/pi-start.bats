@@ -205,3 +205,19 @@ teardown() {
   [[ "$output" == *"DeepSeek is off"* ]] || false
   [ ! -e "$HERDR_CALLS" ]
 }
+
+@test "pi left out of providers.enabled is refused before anything runs" {
+  printf '[providers]\nenabled = ["claude", "codex"]\n' >>"$ORCH_CONFIG"
+  run "$SCRIPT" w1 p1 worker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'pi is off; add "pi" to providers.enabled (ORCH_PROVIDERS)'* ]]
+  [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "a providers list without claude stops the pi start with the settings error" {
+  printf '[providers]\nenabled = ["pi"]\n' >>"$ORCH_CONFIG"
+  run "$SCRIPT" w1 p1 worker
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'providers.enabled: must include "claude"'* ]]
+  [ ! -e "$HERDR_CALLS" ]
+}

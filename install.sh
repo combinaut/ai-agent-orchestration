@@ -477,11 +477,20 @@ write_config_key() {
 # settings_cli <args>: runs the settings module with the installer's Python 3.11 or newer.
 settings_cli() { "$INSTALL_PYTHON" -I "$ORCH_REPO/lib/orch_settings.py" "$@"; }
 
+# fill_keys: the keys a working setup needs filled; the models of a provider providers.enabled leaves out are not among them.
+fill_keys() {
+  local models
+  models=$(settings_cli fill-models "$CONFIG" 2>&1) || die "${models#ERROR: }"
+  # shellcheck disable=SC2086 # One name per word.
+  printf '%s\n' ORCH_PR_AUTHOR $models ORCH_HERDR_BIN ORCH_HERDR_SOCKET
+}
+
 # First run on a terminal: asks for each empty or placeholder key; "-" leaves it empty.
 ask_config_keys() {
-  local key value
+  local key value keys
   interactive || return 0
-  for key in ORCH_PR_AUTHOR ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL ORCH_HERDR_BIN ORCH_HERDR_SOCKET; do
+  keys=$(fill_keys)
+  for key in $keys; do
     value=$(config_value "$key")
     [ -n "$value" ] || value=$(unset "$key" && config_value "$key")
     case "$value" in
@@ -566,7 +575,7 @@ drop_removed_keys() {
 }
 
 personal_config() {
-  local example="$ORCH_REPO/config/orchestration.toml.example" k v fill="" new="" have error
+  local example="$ORCH_REPO/config/orchestration.toml.example" k v fill="" new="" have error keys
   convert_old_config
   if [ -L "$CONFIG" ] || [ -e "$CONFIG" ]; then
     say "kept" "$CONFIG (yours, never overwritten)"
@@ -588,7 +597,8 @@ personal_config() {
     case "$have" in *" $k "*) ;; *) missing_project_keys="$missing_project_keys $k" ;; esac
   done
   [ -z "$missing_project_keys" ] || say "configure" "Project features are off until you configure missing keys in $CONFIG:$missing_project_keys"
-  for k in ORCH_PR_AUTHOR ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL ORCH_HERDR_BIN ORCH_HERDR_SOCKET; do
+  keys=$(fill_keys)
+  for k in $keys; do
     v=$(config_value "$k")
     case "$v" in "" | "<"*">") fill="$fill $k" ;; esac
   done

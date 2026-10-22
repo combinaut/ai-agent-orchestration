@@ -700,3 +700,15 @@ assert lines and lines[0].startswith("changed:") and "merge state unknown" in li
   [ ! -e "$TMP/review-herdr.calls" ]
   [ "$(dispatch_state)" = 'True null' ]
 }
+
+@test "with codex off neither dispatch nor the queue starts a Codex review" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  ORCH_PROVIDERS=claude dispatch
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'codex is off in providers.enabled (ORCH_PROVIDERS)'* ]]
+  [ ! -e "$TMP/review-herdr.calls" ]
+  run env ORCH_CONFIG="$TMP/none.toml" ORCH_PROVIDERS=claude python3 "$ROOT/$SKILL_DIR/scripts/prs.py" dispatch-queue
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'codex is off in providers.enabled'* ]]
+}

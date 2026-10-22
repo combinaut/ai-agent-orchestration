@@ -38,6 +38,10 @@ dir = ""
 # Seconds a stopped job gets before it is killed
 kill_grace = 10
 
+[providers]
+# Worker families this machine uses (claude, codex, pi); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi when a pi model is set. A family left out is never started or asked for, and its model settings may stay empty
+enabled = []
+
 [models]
 # Model of the Coordinator
 coordinator = "claude-opus-5-5"

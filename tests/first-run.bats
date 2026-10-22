@@ -940,3 +940,23 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/inst
   [ "$status" -eq 0 ]
   [ "$(config_get ORCH_PR_AUTHOR)" = owner-a ]
 }
+
+@test "with codex off the installer neither asks for nor lists the codex models" {
+  fresh_install
+  contains "$output" 'ORCH_CODEX_WORKER_MODEL'
+  config_set ORCH_PROVIDERS claude
+  install_ok
+  not_contains "$output" 'ORCH_CODEX_WORKER_MODEL'
+  not_contains "$output" 'ORCH_CODEX_SMART_MODEL'
+  on_tty $'\n\n-'
+  [ "$status" -eq 0 ]
+  not_contains "$output" 'ORCH_CODEX_WORKER_MODEL ('
+  not_contains "$output" 'ORCH_CODEX_SMART_MODEL ('
+  [ "$(config_line ORCH_CODEX_WORKER_MODEL)" = 'ORCH_CODEX_WORKER_MODEL="<codex-worker-model>"' ]
+}
+
+@test "a providers list without claude stops the installer with the settings error" {
+  fresh_install
+  ORCH_PROVIDERS=codex install_fails
+  contains "$output" 'providers.enabled (ORCH_PROVIDERS): must include "claude"'
+}

@@ -17,6 +17,7 @@ py=$(orch_python) || exit 2
 herdr() {
   command "${HERDR_BIN_PATH:-${ORCH_HERDR_BIN:-herdr}}" "$@"
 }
+orch_provider_enabled codex || orch_die "codex is off in providers.enabled (ORCH_PROVIDERS); Codex reviews are not dispatched"
 model=${ORCH_CODEX_WORKER_MODEL:-}
 case "$model" in "" | "<"*">") orch_die "set models.codex_worker (ORCH_CODEX_WORKER_MODEL) in $(orch_config_path)" ;; esac
 

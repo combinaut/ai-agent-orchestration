@@ -23,6 +23,18 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 
 > ⚠️ **Do not commit `.orchestration.local.toml`.** Add it to the repo's `.gitignore`, or to `.git/info/exclude` of your clone. A tracked local file is still read, with a warning that says how to untrack it.
 
+## 🧩 Worker families
+
+`[providers] enabled` turns worker families on and off. `claude` must be in the list: the Coordinator and the architects run on it. Left empty, it means `claude` and `codex`, plus `pi` when `models.pi_worker` or `models.pi_smart` is set. `orch-settings` prints the resolved list as `ORCH_PROVIDERS`.
+
+| Family | Model settings | Needed when on |
+|---|---|---|
+| `claude` | `models.coordinator`, `models.architect` | both |
+| `codex` | `models.codex_worker`, `models.codex_smart` | both |
+| `pi` | `models.pi_worker`, `models.pi_smart` | neither; an empty tier is not used |
+
+A family left out is never started: the installer does not ask for its models, architects do not pick it (a review falls back to a stronger tier of the author's family), `/review-prs` dispatches no Codex review, and `pi-start.sh` refuses. Its model settings may stay empty. A new family is one more entry in `PROVIDERS` in `lib/orch_settings.py`, with its model settings.
+
 ## Global settings
 
 | Key | Variable | Default | Meaning |
@@ -40,6 +52,7 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `heavy_slots.max` | `ORCH_HEAVY_SLOTS_MAX` | `4` | Most heavy jobs at once on the machine |
 | `heavy_slots.dir` | `ORCH_HEAVY_SLOTS_DIR` | empty | Slot directory; empty means ~/.claude/heavy-slots |
 | `heavy_slots.kill_grace` | `ORCH_HEAVY_SLOTS_KILL_GRACE` | `10` | Seconds a stopped job gets before it is killed |
+| `providers.enabled` | `ORCH_PROVIDERS` | empty | Worker families this machine uses (claude, codex, pi); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi when a pi model is set. A family left out is never started or asked for, and its model settings may stay empty |
 | `models.coordinator` | `ORCH_COORDINATOR_MODEL` | `"claude-opus-5-5"` | Model of the Coordinator |
 | `models.architect` | `ORCH_ARCHITECT_MODEL` | `"claude-opus-5-5"` | Model of the architects |
 | `models.codex_worker` | `ORCH_CODEX_WORKER_MODEL` | `"<codex-worker-model>"` | Codex model for routine work; replace the placeholder |

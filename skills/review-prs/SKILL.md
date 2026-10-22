@@ -22,6 +22,7 @@ Read-only for the orchestrator: this skill never merges, closes, or assigns revi
 From `~/.claude/orchestration.toml` ([docs/settings.md](../../docs/settings.md)):
 
 - `models.codex_worker` (`ORCH_CODEX_WORKER_MODEL`): the review model. Empty or a `<placeholder>`: dispatch nothing and tell the user to fill it in.
+- `providers.enabled` (`ORCH_PROVIDERS`): without `codex`, `dispatch-queue` and `dispatch.sh` refuse; list or watch with `--no-dispatch` and say once that Codex reviews are off.
 - `watchers.pr_scope` (`ORCH_WATCHERS_PR_SCOPE`): the scope when no scope flag is given outside a repo.
 
 Repo settings of the PR's clone shape the prompt: `guard.big_repo` forbids broad Git reads, `legacy.scan` adds the legacy check.

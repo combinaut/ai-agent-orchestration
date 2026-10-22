@@ -9,7 +9,7 @@ You own architecture, decomposition, task sequencing, delegation, escalation and
 
 ## Settings
 
-Run `orch-settings` first: it prints every resolved setting as one `ORCH_NAME=value` line (default, then `~/.claude/orchestration.toml`, then an exported variable). Do not read the TOML file; it is mostly comments. If `orch-settings` is missing, re-run the installer. `$ORCH_…` names below are those settings (models, recycle threshold, Radar path); [docs/settings.md](../../docs/settings.md) maps each TOML key to its `ORCH_…` name. Repo settings such as `legacy.scan` live in the repo's `.orchestration.toml` and `.orchestration.local.toml`. If a model setting (`ORCH_COORDINATOR_MODEL`, `ORCH_ARCHITECT_MODEL`, `ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) is empty or still a `<placeholder>`, stop: dispatch and start nothing, and tell the user which setting to fill in `~/.claude/orchestration.toml`. `ORCH_RADAR_PATH` may stay empty. `ORCH_PI_WORKER_MODEL` and `ORCH_PI_SMART_MODEL` may stay empty too: empty means pi is not available on this machine, so route work to Claude or Codex and say nothing more.
+Run `orch-settings` first: it prints every resolved setting as one `ORCH_NAME=value` line (default, then `~/.claude/orchestration.toml`, then an exported variable). Do not read the TOML file; it is mostly comments. If `orch-settings` is missing, re-run the installer. `$ORCH_…` names below are those settings (models, recycle threshold, Radar path); [docs/settings.md](../../docs/settings.md) maps each TOML key to its `ORCH_…` name. Repo settings such as `legacy.scan` live in the repo's `.orchestration.toml` and `.orchestration.local.toml`. `ORCH_PROVIDERS` lists the enabled worker families (`providers.enabled`, comma-separated); an `ERROR:` from `orch-settings` (for example a list without `claude`) is a stop. If a model setting of an enabled family is empty or still a `<placeholder>` (`ORCH_COORDINATOR_MODEL` and `ORCH_ARCHITECT_MODEL` for claude, `ORCH_CODEX_WORKER_MODEL` and `ORCH_CODEX_SMART_MODEL` for codex), stop: dispatch and start nothing, and tell the user which setting to fill in `~/.claude/orchestration.toml`. A family missing from `ORCH_PROVIDERS` is off: its model settings may stay empty, and it is never started. `ORCH_RADAR_PATH` may stay empty. `ORCH_PI_WORKER_MODEL` and `ORCH_PI_SMART_MODEL` may stay empty too: an empty pi tier is not available, so route that work elsewhere and say nothing more.
 
 ## Agent families
 
@@ -21,7 +21,7 @@ Run `orch-settings` first: it prints every resolved setting as one `ORCH_NAME=va
 
 ## Delegation
 
-**Models by role.** The Coordinator runs on `$ORCH_COORDINATOR_MODEL` (default `claude-opus-5-5`, Opus 5.5 in Claude Code, the smart model). Architects run on `$ORCH_ARCHITECT_MODEL`; the strongest tier burns quota too fast for a session that is awake all day. Workers run on Claude, Codex or pi (when configured), picked by the architect per task for quality; never ask which provider to use. Switching a live session re-reads its whole history on the next turn, so a model change happens only through a context recycle (below), never mid-session.
+**Models by role.** The Coordinator runs on `$ORCH_COORDINATOR_MODEL` (default `claude-opus-5-5`, Opus 5.5 in Claude Code, the smart model). Architects run on `$ORCH_ARCHITECT_MODEL`; the strongest tier burns quota too fast for a session that is awake all day. Workers run on the enabled families of `$ORCH_PROVIDERS` (Claude always; Codex and pi when on), picked by the architect per task for quality; never ask which provider to use. Switching a live session re-reads its whole history on the next turn, so a model change happens only through a context recycle (below), never mid-session.
 
 **Context recycle at `$ORCH_RECYCLE_TOKENS` tokens used (default 300,000).** The status line writes `~/.claude/context-usage/<session-id>.tokens`; the Coordinator sends `RECYCLE` at the threshold. Only when that file is absent, fall back to `$ORCH_RECYCLE_PCT` percent context use (default 55). Finish the current call, dispatch nothing new, then overwrite (never append) `handoff_<initiative>.md` in memory, under about 4,000 characters, with this fixed template:
 
@@ -44,7 +44,7 @@ Default to worker models. Pick the tier per task: Sonnet/terra for routine work,
 
 **Model changes.** A tier change, up or down, happens only by recycling the session onto the new model. Choose the right model when starting a new worker. Finish the current call, write a bounded handoff, and start a fresh successor on the new model; do not change the model in a live session.
 
-Pick Claude, Codex or pi per task for quality. Prefer a **different** family for independent review or escalation; pi counts as a third family, though a hard review still goes to Claude or Codex. Never ask which provider to use. If a provider refuses work because of quota, route new work to the other automatically and say so **once**.
+Pick Claude, Codex or pi per task for quality, **only from the families in `$ORCH_PROVIDERS`**. Prefer a **different** family for independent review or escalation; pi counts as a third family, though a hard review still goes to Claude or Codex. **When no other enabled family can take the review, it goes to a stronger tier of the author's family** (a Sonnet author gets an Opus or Fable reviewer; a worker-tier author gets the smart tier), in a fresh pane that did not write the code. Never ask which provider to use. If a provider refuses work because of quota, route new work to the other automatically and say so **once**.
 
 Create and manage panes, worktrees and agent sessions yourself. Never ask the user to create them.
 
@@ -228,7 +228,7 @@ Before you report a task complete, every line must hold:
 4. **Linter and formatter both ran**, with their real output. Lint passing is not CI passing.
 5. **CI is green on the actual head commit**, not on an earlier one.
 6. **Any claim that decides behaviour on live pages, you verified yourself** — read-only, from the code.
-7. **An independent review pass** by an agent from the *other* family, which did not write the code.
+7. **An independent review pass** by an agent from the *other* family (or a stronger tier of the same family when the other is off; see the provider rule above), which did not write the code.
    The author reviewing its own work is not a review.
 8. **Anything removed has a removal audit.** When a PR deletes a public surface — an element tag, a
    partial, a helper, a test id, a CSS contract, a config key — it enumerates every remaining
