@@ -45,7 +45,8 @@ PULLS_DEPARTED_SECONDS = 60
 PULLS_SELECTION = audit.SELECTION.replace(
     'nodes{isResolved}', 'nodes{id isResolved}').replace(
     'reviews(last:6){nodes{author{login} body}}',
-    'reviews(last:100){pageInfo{hasPreviousPage} nodes{id author{login} body}}')
+    'reviews(last:100){pageInfo{hasPreviousPage} nodes{id author{login}}} '
+    'recentReviews:reviews(last:6){nodes{id author{login} body}}')
 GITHUB_REMOTE = discovery.GITHUB_REMOTE
 
 BALANCE_LIMITS = {"free": 30, "slots": 4, "heavy": 4, "load5": 20, "cpu": 80}
@@ -636,8 +637,10 @@ def collect_pulls(command, before, clock=time.monotonic):
     found = discovery.repos(command, work)
     prs = audit.fetch_prs(command, page_nodes, found["repos"], selection=PULLS_SELECTION)
     searched = {f"{pr['repository']['nameWithOwner']}#{pr['number']}" for pr in prs}
-    departed, failed, attempted = {}, [], set()
-    pending = sorted(set(known) - searched, key=lambda key: (known[key].get("departure_reads", known[key].get("misses", 0)), key))
+    watched = {repo.lower() for repo in found["repos"]}
+    departed = {key: "UNWATCHED" for key in set(known) - searched if key.rsplit("#", 1)[0].lower() not in watched}
+    failed, attempted = [], set()
+    pending = sorted(set(known) - searched - set(departed), key=lambda key: (known[key].get("departure_reads", known[key].get("misses", 0)), key))
     deadline = clock() + PULLS_DEPARTED_SECONDS
     for key in pending[:PULLS_DEPARTED_MAX]:
         if clock() >= deadline:
@@ -667,11 +670,17 @@ def collect_pulls(command, before, clock=time.monotonic):
             except audit.READ_ERRORS:
                 settings_failed.append(f"settings:{key}")
                 raise
-        old = known.get(key, {})
+        old = dict(known.get(key, {}))
+        old["identities"] = pull_saved_identities(old)
         head, base = pr.get("headRefOid"), pr.get("baseRefName")
         same_scope = old.get("head") == head and old.get("base") == base
         try:
-            lines = {line.split(" ", 1)[0]: line for line in audit.pr_lines(pr, page_nodes, repo_settings)
+            # The 100-review connection is metadata for dedupe; bodies/classification keep the six-review window.
+            display_pr = dict(pr, reviews=pr.get("recentReviews", pr["reviews"]))
+            visible_bot_reviews = [review["id"] for review in pr["reviews"]["nodes"]
+                                   if (review.get("author") or {}).get("login") == os.environ.get(
+                                       "ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer")]
+            lines = {line.split(" ", 1)[0]: line for line in audit.pr_lines(display_pr, page_nodes, repo_settings)
                      if line.split(" ", 1)[0] in alert_policy.PULL_KINDS}
             visible, failing, checks_truncated = pull_check_evidence(pr)
             check_failures = sorted(failing)
@@ -693,24 +702,19 @@ def collect_pulls(command, before, clock=time.monotonic):
                 if stacked.endswith(", full CI not run]"):
                     lines["APPROVED-STACKED"] = stacked.removesuffix("full CI not run]") + "full CI unknown]"
                     incomplete.append("APPROVED-STACKED")
-            identities = pull_identities(pr, lines)
+            identities = pull_identities(display_pr, lines)
             if pr["reviewThreads"]["pageInfo"]["hasNextPage"]:
                 incomplete.append("THREADS")
-            if pr["reviews"].get("pageInfo", {}).get("hasPreviousPage") and not any(
-                    (review.get("author") or {}).get("login") == os.environ.get(
-                        "ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer")
-                    for review in pr["reviews"]["nodes"]):
-                incomplete.append("COPILOT")
             for kind in incomplete:
                 if kind == "APPROVED-STACKED" and not same_scope:
                     continue
                 if kind == "THREADS" and kind in old.get("identities", {}):
                     # A partial page can prove a visible resolution/new thread, never an unseen resolution.
                     threads = pr["reviewThreads"]["nodes"]
-                    unseen = set(old["identities"][kind][1]) - {thread["id"] for thread in threads}
+                    unseen = set(old["identities"][kind]) - {thread["id"] for thread in threads}
                     active = sorted(unseen | {thread["id"] for thread in threads if not thread["isResolved"]})
                     if active:
-                        identities[kind] = [pr["headRefOid"], active]
+                        identities[kind] = active
                         lines[kind] = f"THREADS {key} {pr['title']} [{len(active)} unresolved]"
                     else:
                         lines.pop(kind, None)
@@ -719,23 +723,23 @@ def collect_pulls(command, before, clock=time.monotonic):
                 if kind in old.get("lines", {}):
                     lines[kind] = old["lines"][kind]
                 if kind in old.get("identities", {}):
-                    identities[kind] = ([pr["headRefOid"], old["identities"][kind][1]] if kind == "APPROVED-STACKED"
-                                        else old["identities"][kind])
+                    identities[kind] = old["identities"][kind]
             if same_scope and f"settings:{key}" in settings_failed and "APPROVED-STACKED" in old.get("lines", {}):
                 lines["APPROVED-STACKED"] = old["lines"]["APPROVED-STACKED"]
                 if "APPROVED-STACKED" in old.get("identities", {}):
-                    identities["APPROVED-STACKED"] = [pr["headRefOid"], old["identities"]["APPROVED-STACKED"][1]]
+                    identities["APPROVED-STACKED"] = old["identities"]["APPROVED-STACKED"]
             if incomplete or checks_truncated:
                 unreadable.append(f"pr:{key}")
         except audit.READ_ERRORS:
             # Partial per-PR data must not discard readable siblings or saved evidence.
             lines, identities = old.get("lines", {}), old.get("identities", {})
             check_failures = old.get("check_failures")
+            visible_bot_reviews = None
             head, base = old.get("head"), old.get("base")
             unreadable.append(f"pr:{key}")
         owner = owners[key] if key in owners else old.get("owner")
         current[key] = dict(title=pr["title"], owner=owner, lines=lines, identities=identities,
-                            seen_reviews=old.get("seen_reviews", []), check_failures=check_failures,
+                            seen_reviews=old.get("seen_reviews", []), visible_bot_reviews=visible_bot_reviews, check_failures=check_failures,
                             head=head, base=base)
     return dict(prs=current, departed=departed, failed=failed,
                 unreadable=unreadable + [f"pr:{key}" for key in sorted(failed + waiting)] + sorted(set(settings_failed)))
@@ -744,11 +748,11 @@ def collect_pulls(command, before, clock=time.monotonic):
 def pull_identities(pr, lines):
     """JSON-stable event identities, independent of display text and pane/session IDs."""
     label = f"{pr['repository']['nameWithOwner']}#{pr['number']} {pr['title']}"
-    identities = {kind: [pr["headRefOid"], line[len(kind) + 1 + len(label):]] for kind, line in lines.items()}
+    identities = {kind: line[len(kind) + 1 + len(label):] for kind, line in lines.items()}
     if "THREADS" in lines:
-        identities["THREADS"] = [pr["headRefOid"], sorted(
+        identities["THREADS"] = sorted(
             thread["id"] for thread in pr["reviewThreads"]["nodes"]
-            if not thread["isResolved"])]
+            if not thread["isResolved"])
     if "APPROVED-OLDHEAD" in lines:
         identities["APPROVED-OLDHEAD"] = [pr["headRefOid"], sorted(
             (review.get("commit") or {}).get("oid") or "" for review in pr["latestOpinionatedReviews"]["nodes"]
@@ -757,6 +761,17 @@ def pull_identities(pr, lines):
     reviews = [row for row in pr["reviews"]["nodes"] if (row.get("author") or {}).get("login") == bot]
     if "COPILOT" in lines:
         identities["COPILOT"] = reviews[-1]["id"]
+    return identities
+
+
+def pull_saved_identities(pr):
+    """Read identities from the previous head-keyed schema without alerting on the format change."""
+    identities = dict(pr.get("identities", {}))
+    for kind, value in identities.items():
+        if kind == "THREADS" and isinstance(value, list) and len(value) == 2 and isinstance(value[1], list):
+            identities[kind] = value[1]
+        elif kind not in ("THREADS", "COPILOT", "APPROVED-OLDHEAD") and isinstance(value, list) and len(value) == 2:
+            identities[kind] = value[1]
     return identities
 
 
@@ -770,25 +785,36 @@ def reduce_pulls(before, raw):
     current = {key: dict(pr) for key, pr in raw["prs"].items()}
     events = [] if before is None else readfail_changes("PULLS", before.get("unreadable", []), raw["unreadable"])
     for key, pr in sorted(current.items()):
-        previous = ((before or {}).get("prs", {})).get(key, {})
+        previous = dict(((before or {}).get("prs", {})).get(key, {}))
+        previous["identities"] = pull_saved_identities(previous)
         old = previous.get("lines", {})
         identities = pr.get("identities", {})
         seen = set(previous.get("seen_reviews", []))
+        visible_reviews = pr.pop("visible_bot_reviews", None)
+        legacy_reviews = key in (before or {}).get("prs", {}) and "seen_reviews" not in previous
+        if before is None or legacy_reviews:
+            seen.update(visible_reviews or [])
         rerouted = pr["owner"] and pr["owner"] != previous.get("owner")
         for kind, line in sorted(pr["lines"].items()):
             identity = identities.get(kind)
             changed = kind not in old or (kind in previous.get("identities", {}) and
                                          identity != previous["identities"][kind])
+            if kind == "THREADS" and kind in previous["identities"] and identity is not None:
+                changed = bool(set(identity) - set(previous["identities"][kind]))
             if kind == "COPILOT" and identity is not None:
                 # Seed legacy active state silently on its first identity-aware read.
-                changed = identity not in seen and not (kind in old and kind not in previous.get("identities", {}))
+                changed = identity not in seen and not legacy_reviews
                 seen.add(identity)
             if before is not None and (changed or rerouted):
                 # End the previous identity before starting its replacement, including in the feed policy.
                 if kind in old and changed and not rerouted:
                     events.append(f"{kind} {key} cleared")
                 events.append(pull_line(line, key, pr["owner"]))
-        pr["seen_reviews"] = sorted(seen)
+        seen.update(visible_reviews or [])
+        if legacy_reviews and visible_reviews is None:
+            pr.pop("seen_reviews", None)  # Defer migration until the reviews are readable.
+        else:
+            pr["seen_reviews"] = sorted(seen)
         if before is not None:
             events += [f"{kind} {key} cleared" for kind in sorted(set(old) - set(pr["lines"]))]
     if before is None:
@@ -799,6 +825,9 @@ def reduce_pulls(before, raw):
         if key in current:
             continue
         state = raw["departed"].get(key)
+        if state == "UNWATCHED":
+            events += [f"{kind} {key} cleared" for kind in sorted(old["lines"])]
+            continue
         if state not in ("MERGED", "CLOSED"):
             after[key] = dict(old)
             if state is not None or key in raw.get("failed", []):

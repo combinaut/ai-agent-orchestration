@@ -34,7 +34,7 @@ class PullsTest(IsolatedTestCase):
         env = patch.dict(os.environ, {"ORCH_PR_AUTHOR": "author"})
         env.start()
         self.addCleanup(env.stop)
-        work = open_work(PR["repository"]["nameWithOwner"])
+        work = open_work(PR["repository"]["nameWithOwner"] + " o/r")
         work.start()
         self.addCleanup(work.stop)
         self.calls = []
@@ -598,6 +598,7 @@ class PullsTest(IsolatedTestCase):
         state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
         for name, page in (("reviews", "hasPreviousPage"), ("reviewThreads", "hasNextPage")):
             row[name] = {"nodes": [], "pageInfo": {page: True}}
+        row["recentReviews"] = None  # A failed body connection is unknown; a readable six-review window is authoritative.
         state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
         self.assertEqual(set(state["prs"]["owner/product#7"]["lines"]), {"COPILOT", "THREADS"})
         self.assertFalse(any("cleared" in event for event in events))
@@ -721,13 +722,13 @@ class PullsTest(IsolatedTestCase):
         row["reviewThreads"]["nodes"] = [{"id": "T2", "isResolved": False}]
         state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
         self.assertTrue(any(event.startswith("THREADS owner/product#7 owner=") for event in events))
-        self.assertEqual(state["prs"]["owner/product#7"]["identities"]["THREADS"], ["head-2", ["T1", "T2"]])
+        self.assertEqual(state["prs"]["owner/product#7"]["identities"]["THREADS"], ["T1", "T2"])
         state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
         self.assertEqual(events, [])
         row["reviewThreads"]["nodes"] = [{"id": "T1", "isResolved": True}]
         state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
-        self.assertEqual(state["prs"]["owner/product#7"]["identities"]["THREADS"], ["head-2", ["T2"]])
-        self.assertTrue(any(event.startswith("THREADS owner/product#7 owner=") for event in events))
+        self.assertEqual(state["prs"]["owner/product#7"]["identities"]["THREADS"], ["T2"])
+        self.assertEqual(events, [])
         row["reviewThreads"] = {"nodes": [], "pageInfo": {"hasNextPage": False}}
         _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
         self.assertIn("THREADS owner/product#7 cleared", events)
@@ -742,7 +743,7 @@ class PullsTest(IsolatedTestCase):
         contexts["pageInfo"]["hasNextPage"] = True
         state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
         self.assertTrue(any(event.startswith("RED owner/product#7 owner=") for event in events))
-        self.assertEqual(state["prs"]["owner/product#7"]["identities"]["RED"][0], "head-2")
+        self.assertEqual(state["prs"]["owner/product#7"]["identities"]["RED"], " [lint,unit]")
         self.assertIn("lint", state["prs"]["owner/product#7"]["lines"]["RED"])
         state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
         self.assertEqual(events, [])
@@ -825,6 +826,100 @@ class PullsTest(IsolatedTestCase):
                 state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
                 self.assertIn("full CI unknown", state["prs"]["owner/product#7"]["lines"]["APPROVED-STACKED"])
                 self.assertTrue(any(event.startswith("APPROVED-STACKED owner/product#7 owner=") for event in events))
+
+    def test_push_while_conditions_active_is_silent(self):
+        for kind in ("CHANGES", "THREADS", "RED", "COPILOT", "APPROVED-STACKED"):
+            with self.subTest(kind=kind), patch.object(w.audit, "repo_settings", return_value={}):
+                row = pr(7, decision="CHANGES_REQUESTED" if kind == "CHANGES" else "REVIEW_REQUIRED")
+                if kind == "THREADS":
+                    row["reviewThreads"]["nodes"] = [{"id": "T1", "isResolved": False}]
+                elif kind == "RED":
+                    row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0]["conclusion"] = "FAILURE"
+                elif kind == "COPILOT":
+                    row["reviews"]["nodes"] = [{"id": "R1", "author": {"login": "copilot-pull-request-reviewer"},
+                                                 "body": "Needs a closer look\nCheck it"}]
+                elif kind == "APPROVED-STACKED":
+                    row["reviewDecision"] = "APPROVED"
+                    row["baseRefName"] = "stack"
+                state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+                self.assertIn(kind, state["prs"]["owner/product#7"]["lines"])
+                row["headRefOid"] = "head-2"
+                row["latestOpinionatedReviews"]["nodes"][0]["commit"]["oid"] = "head-2"
+                _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+                self.assertEqual(events, [])
+
+    def test_resolving_one_of_several_threads_is_silent_until_last_resolution(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        row["reviewThreads"]["nodes"] = [{"id": "T1", "isResolved": False}, {"id": "T2", "isResolved": False}]
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        row["reviewThreads"]["nodes"][0]["isResolved"] = True
+        state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, [])
+        self.assertEqual(state["prs"]["owner/product#7"]["identities"]["THREADS"], ["T2"])
+        row["reviewThreads"]["nodes"][1]["isResolved"] = True
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, ["THREADS owner/product#7 cleared"])
+
+    def test_unwatched_open_departure_drops_then_rewatched_repo_alerts_once(self):
+        row = pr(7, decision="CHANGES_REQUESTED")
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        departed = {"repos/owner/product/pulls/7": {"state": "open", "merged": False}}
+        self.calls.clear()
+        with patch.object(w.discovery, "repos", return_value={"repos": [], "clones": []}):
+            state, events = w.reduce_pulls(state, w.collect_pulls(self.command([], departed), state))
+        self.assertEqual(state["prs"], {})
+        self.assertEqual(events, ["CHANGES owner/product#7 cleared"])
+        self.assertFalse(any(argv[:2] == ("gh", "api") and argv[2].startswith("repos/") for argv in self.calls))
+        state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, [f"CHANGES owner/product#7 owner=wArch {PR['title']}"])
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, [])
+
+    def test_legacy_snapshot_seeds_all_visible_bot_ids_without_stale_copilot_start(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        state["prs"]["owner/product#7"].pop("seen_reviews")
+        row["reviews"]["nodes"] = [
+            {"id": "R-old-1", "author": {"login": "copilot-pull-request-reviewer"}, "body": "Needs a closer look\nOld"},
+            {"id": "R-old-2", "author": {"login": "copilot-pull-request-reviewer"}, "body": "Needs a closer look\nOld"},
+        ] + [{"id": f"H{n}", "author": {"login": "human"}, "body": "Reply"} for n in range(6)]
+        state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, [])
+        self.assertEqual(state["prs"]["owner/product#7"]["seen_reviews"], ["R-old-1", "R-old-2"])
+        row["reviews"]["nodes"].append({"id": "R-new", "author": {"login": "copilot-pull-request-reviewer"},
+                                         "body": "Needs a closer look\nNew"})
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertTrue(any(event.startswith("COPILOT owner/product#7 owner=") for event in events))
+
+    def test_head_keyed_snapshot_migrates_without_alerts(self):
+        row = pr(7, decision="CHANGES_REQUESTED")
+        row["reviewThreads"]["nodes"] = [{"id": "T1", "isResolved": False}]
+        row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0]["conclusion"] = "FAILURE"
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        identities = state["prs"]["owner/product#7"]["identities"]
+        for kind, value in list(identities.items()):
+            identities[kind] = ["head", value]
+        row["headRefOid"] = "head-2"
+        state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, [])
+        self.assertEqual(state["prs"]["owner/product#7"]["identities"]["THREADS"], ["T1"])
+
+    def test_review_metadata_dedupes_without_fetching_old_bodies(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        row["reviews"] = {"nodes": [{"id": "old-bot", "author": {"login": "copilot-pull-request-reviewer"}}],
+                          "pageInfo": {"hasPreviousPage": True}}
+        row["recentReviews"] = {"nodes": [{"id": "human", "author": {"login": "human"}, "body": "Reply"}]}
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        self.assertNotIn("COPILOT", state["prs"]["owner/product#7"]["lines"])
+        self.assertEqual(state["prs"]["owner/product#7"]["seen_reviews"], ["old-bot"])
+        row["reviews"]["nodes"].append({"id": "new-bot", "author": {"login": "copilot-pull-request-reviewer"}})
+        row["recentReviews"]["nodes"].append({"id": "new-bot", "author": {"login": "copilot-pull-request-reviewer"},
+                                               "body": "Needs a closer look\nNew finding"})
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, [f"COPILOT owner/product#7 owner=wArch {PR['title']} [New finding]"])
+        self.assertIn("reviews(last:100){pageInfo{hasPreviousPage} nodes{id author{login}}}", w.PULLS_SELECTION)
+        self.assertIn("recentReviews:reviews(last:6){nodes{id author{login} body}}", w.PULLS_SELECTION)
+        self.assertEqual(w.PULLS_SELECTION.count(" body"), 1)
 
     def test_one_search_call_per_poll(self):
         w.collect_pulls(self.command([pr(n) for n in range(20)]), None)
