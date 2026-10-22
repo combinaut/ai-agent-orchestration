@@ -7,11 +7,13 @@
   prs.py mark-dispatched --url U --sha S [--state pending|done] [--agent N] [--pane P]
   prs.py claim-dispatched --url U --sha S [--agent N]   marks S pending; exit 3 when S is already pending or done
   prs.py release-dispatched --url U --sha S       drops S while it is pending
+  prs.py remote --cwd C --repo R                  the remote of clone C (origin or upstream) that is the GitHub repo R
   prs.py review-ids --login L                     stdin: gh api --paginate --slurp .../reviews; ids of L's submitted reviews
   prs.py last-review --login L --sha S --seen IDS stdin: the same; L's newest submitted review of S not in IDS
 
 Scope: --repo owner/name | --org ORG | --all. Default: cwd's GitHub repo, else watchers.pr_scope, else --all.
 """
+
 import argparse
 import fcntl
 import hashlib
@@ -58,7 +60,9 @@ def setting(name):
     """An ORCH_* global setting: the environment, else ~/.claude/orchestration.toml (or $ORCH_CONFIG)."""
     if name in os.environ:
         return os.environ[name]
-    config = os.environ.get("ORCH_CONFIG") or str(Path.home() / ".claude" / "orchestration.toml")
+    config = os.environ.get("ORCH_CONFIG") or str(
+        Path.home() / ".claude" / "orchestration.toml"
+    )
     try:
         return orch_settings.load_global(config).get(name, "")
     except orch_settings.ConfigError as error:
@@ -68,13 +72,17 @@ def setting(name):
 def worker_model():
     model = setting("ORCH_CODEX_WORKER_MODEL")
     if not model or model.startswith("<"):
-        sys.exit("set models.codex_worker (ORCH_CODEX_WORKER_MODEL) in ~/.claude/orchestration.toml")
+        sys.exit(
+            "set models.codex_worker (ORCH_CODEX_WORKER_MODEL) in ~/.claude/orchestration.toml"
+        )
     return model
 
 
 def gh(*args):
     try:
-        result = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT_S)
+        result = subprocess.run(
+            ["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT_S
+        )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"gh timed out after {GH_TIMEOUT_S}s") from None
     if result.returncode != 0:
@@ -83,8 +91,14 @@ def gh(*args):
 
 
 def viewer_login():
-    return gh("api", "graphql", "-f", "query={ viewer { login } }",
-              "--jq", ".data.viewer.login").strip()
+    return gh(
+        "api",
+        "graphql",
+        "-f",
+        "query={ viewer { login } }",
+        "--jq",
+        ".data.viewer.login",
+    ).strip()
 
 
 def resolve_scope(args):
@@ -99,7 +113,9 @@ def resolve_scope(args):
         repo = f"{args.org}/{repo}"
     if not repo:
         try:
-            repo = gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip()
+            repo = gh(
+                "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"
+            ).strip()
         except RuntimeError:
             scope = setting("ORCH_WATCHERS_PR_SCOPE")
             return scope, scope or "all repos"
@@ -107,9 +123,20 @@ def resolve_scope(args):
 
 
 def search(q, me):
-    raw = gh("api", "graphql", "--paginate", "--slurp",
-             "-H", "Accept: application/vnd.github.merge-info-preview+json",
-             "-f", f"query={QUERY}", "-f", f"q={q}", "-f", f"me={me}")
+    raw = gh(
+        "api",
+        "graphql",
+        "--paginate",
+        "--slurp",
+        "-H",
+        "Accept: application/vnd.github.merge-info-preview+json",
+        "-f",
+        f"query={QUERY}",
+        "-f",
+        f"q={q}",
+        "-f",
+        f"me={me}",
+    )
     return [n for page in json.loads(raw) for n in page["data"]["search"]["nodes"] if n]
 
 
@@ -121,11 +148,19 @@ def my_review_sha(pr):
 def fetch(scope):
     login = viewer_login()
     me = login.lower()
-    requested = search(f"is:pr is:open review-requested:@me archived:false {scope}".strip(), login)
+    requested = search(
+        f"is:pr is:open review-requested:@me archived:false {scope}".strip(), login
+    )
     # PRs I reviewed whose head moved since, with no new review request.
-    reviewed = search(f"is:pr is:open reviewed-by:@me -review-requested:@me archived:false {scope}".strip(), login)
-    moved = [n for n in reviewed
-             if my_review_sha(n) and my_review_sha(n) != n.get("headRefOid")]
+    reviewed = search(
+        f"is:pr is:open reviewed-by:@me -review-requested:@me archived:false {scope}".strip(),
+        login,
+    )
+    moved = [
+        n
+        for n in reviewed
+        if my_review_sha(n) and my_review_sha(n) != n.get("headRefOid")
+    ]
     seen = set()
     nodes = []
     for n in requested + moved:
@@ -133,8 +168,11 @@ def fetch(scope):
             seen.add(n["url"])
             nodes.append(n)
     nodes = [n for n in nodes if not n["title"].startswith(BOT_TITLES)]
-    nodes = [n for n in nodes
-             if not (n.get("author") and (n["author"].get("login") or "").lower() == me)]
+    nodes = [
+        n
+        for n in nodes
+        if not (n.get("author") and (n["author"].get("login") or "").lower() == me)
+    ]
     return sorted(nodes, key=lambda p: (p["repository"]["nameWithOwner"], -p["number"]))
 
 
@@ -143,7 +181,9 @@ def is_bot(typename, login):
 
 
 def ci_state(pr):
-    ci = (pr["commits"]["nodes"] or [{}])[0].get("commit", {}).get("statusCheckRollup") or {}
+    ci = (pr["commits"]["nodes"] or [{}])[0].get("commit", {}).get(
+        "statusCheckRollup"
+    ) or {}
     return ci.get("state")
 
 
@@ -208,18 +248,25 @@ def bucket(pr):
 
 
 def snapshot(nodes):
-    return {p["url"]: {
-        "title": p["title"],
-        "draft": p["isDraft"],
-        "author": author_name(p),
-        "ci": ci_state(p),
-        "conflict": None if p["mergeable"] == "UNKNOWN" else p["mergeable"] == "CONFLICTING",
-        "sha": p.get("headRefOid") or "",
-    } for p in nodes}
+    return {
+        p["url"]: {
+            "title": p["title"],
+            "draft": p["isDraft"],
+            "author": author_name(p),
+            "ci": ci_state(p),
+            "conflict": None
+            if p["mergeable"] == "UNKNOWN"
+            else p["mergeable"] == "CONFLICTING",
+            "sha": p.get("headRefOid") or "",
+        }
+        for p in nodes
+    }
 
 
 def state_file(scope):
-    return STATE_DIR / (hashlib.sha1(f"review:{scope}".encode()).hexdigest()[:12] + ".json")
+    return STATE_DIR / (
+        hashlib.sha1(f"review:{scope}".encode()).hexdigest()[:12] + ".json"
+    )
 
 
 def load_state(scope):
@@ -262,27 +309,57 @@ def open_work_clones():
 
 def current_repo_root():
     try:
-        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=5)
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
     except (OSError, subprocess.SubprocessError):
         return []
-    return [Path(out.stdout.strip())] if out.returncode == 0 and out.stdout.strip() else []
+    return (
+        [Path(out.stdout.strip())] if out.returncode == 0 and out.stdout.strip() else []
+    )
 
 
 def resolve_cwd(name_with_owner):
     owner, name = name_with_owner.split("/", 1)
-    candidates = [*open_work_clones(), PROJECTS / owner / name, PROJECTS / name, *current_repo_root()]
-    for clone in candidates:
-        try:
-            if (clone / ".git").exists() and orch_settings.origin_matches(clone, name_with_owner):
-                return str(clone)
-        except (OSError, subprocess.SubprocessError):
-            continue
+    candidates = [
+        *open_work_clones(),
+        PROJECTS / owner / name,
+        PROJECTS / name,
+        *current_repo_root(),
+    ]
+    for remote in ("origin", "upstream"):
+        for clone in candidates:
+            try:
+                if (clone / ".git").exists() and orch_settings.remote_matches(
+                    clone, name_with_owner, remote
+                ):
+                    return str(clone)
+            except (OSError, subprocess.SubprocessError):
+                continue
     return None
+
+
+def cmd_remote(args, scope, label):
+    """The remote of --cwd that is the GitHub repo --repo; exit 1 when there is none."""
+    try:
+        remote = orch_settings.matching_remote(args.cwd, args.repo)
+    except (OSError, subprocess.SubprocessError):
+        remote = None
+    if not remote:
+        sys.exit(f"no remote of {args.cwd} is {args.repo}")
+    print(remote)
 
 
 def agent_name(repo, number, sha):
     """Unique per repo, PR and head: rev<number>-<sha7>-<repo hash>."""
-    return f"rev{number}-{sha[:7]}-{hashlib.sha1(repo.lower().encode()).hexdigest()[:6]}"[:32]
+    return (
+        f"rev{number}-{sha[:7]}-{hashlib.sha1(repo.lower().encode()).hexdigest()[:6]}"[
+            :32
+        ]
+    )
 
 
 def needs_dispatch(pr, dispatched):
@@ -362,10 +439,15 @@ def changes(before, after):
             parts.append("merge state unknown")
         if parts:
             became_ready = (
-                not now["draft"] and now["conflict"] is False
+                not now["draft"]
+                and now["conflict"] is False
                 and now["ci"] in (None, "SUCCESS")
-                and (was["draft"] or was["conflict"] is not False or was["ci"] not in (None, "SUCCESS")
-                     or (was.get("sha") != now.get("sha")))
+                and (
+                    was["draft"]
+                    or was["conflict"] is not False
+                    or was["ci"] not in (None, "SUCCESS")
+                    or (was.get("sha") != now.get("sha"))
+                )
             )
             prefix = "ready" if became_ready else "changed"
             lines.append(f"{prefix}: {url} — {now['title']}: {', '.join(parts)}")
@@ -386,12 +468,16 @@ TITLE_MAX = 60
 def table(title, prs):
     if not prs:
         return []
-    lines = [f"**{title} ({len(prs)})**", "",
-             "| PR | Title | Author · status |", "|---|---|---|"]
+    lines = [
+        f"**{title} ({len(prs)})**",
+        "",
+        "| PR | Title | Author · status |",
+        "|---|---|---|",
+    ]
     for p in prs:
         name = p["title"].replace("|", "/")
         if len(name) > TITLE_MAX:
-            name = name[:TITLE_MAX - 1].rstrip() + "…"
+            name = name[: TITLE_MAX - 1].rstrip() + "…"
         lines.append(f"| {p['url']} | {name} | {status(p)} |")
     return lines + [""]
 
@@ -417,7 +503,10 @@ def cmd_list(args, scope, label):
         "draft": "📝 Drafts",
     }
     groups = {b: [p for p in nodes if bucket(p) == b] for b in order}
-    out = [f"**{len(nodes)} PRs requesting your review in {label}** — {counts(nodes)}", ""]
+    out = [
+        f"**{len(nodes)} PRs requesting your review in {label}** — {counts(nodes)}",
+        "",
+    ]
     for b in order:
         if args.actionable and b != "ready":
             continue
@@ -461,12 +550,17 @@ def cmd_dispatch_queue(args, scope, label):
         ok, kind = needs_dispatch(pr, dispatched)
         if ok:
             queue.append(dispatch_entry(pr, kind, model))
-    print(json.dumps({
-        "scope": label,
-        "model": model,
-        "queue": queue,
-        "skipped": sum(1 for p in nodes if bucket(p) == "ready") - len(queue),
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "scope": label,
+                "model": model,
+                "queue": queue,
+                "skipped": sum(1 for p in nodes if bucket(p) == "ready") - len(queue),
+            },
+            indent=2,
+        )
+    )
 
 
 HEADS_KEPT = 20
@@ -476,21 +570,38 @@ def heads(entry):
     """sha -> {state, agent, pane, at} for one PR; a mark from before per-head records counts as done."""
     if "heads" in entry:
         return entry["heads"]
-    return {entry["sha"]: {"state": "done", **{k: entry.get(k) for k in ("agent", "pane", "at")}}} if entry.get("sha") else {}
+    return (
+        {
+            entry["sha"]: {
+                "state": "done",
+                **{k: entry.get(k) for k in ("agent", "pane", "at")},
+            }
+        }
+        if entry.get("sha")
+        else {}
+    )
 
 
 def set_head(data, url, sha, record):
     """Stores one head's record; the newest HEADS_KEPT done heads and every pending head stay."""
     known = dict(heads(data.get(url) or {}))
     known[sha] = record
-    done = sorted((s for s, h in known.items() if h.get("state") == "done"), key=lambda s: known[s].get("at") or "")
+    done = sorted(
+        (s for s, h in known.items() if h.get("state") == "done"),
+        key=lambda s: known[s].get("at") or "",
+    )
     for old in done[:-HEADS_KEPT]:
         del known[old]
     data[url] = {"heads": known}
 
 
 def head_record(args, state):
-    return {"state": state, "agent": args.agent, "pane": args.pane, "at": datetime.now(timezone.utc).isoformat()}
+    return {
+        "state": state,
+        "agent": args.agent,
+        "pane": args.pane,
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 def cmd_claim_dispatched(args, _scope, _label):
@@ -536,8 +647,12 @@ def cmd_release_dispatched(args, _scope, _label):
 
 
 def submitted_reviews(login):
-    return [r for page in json.load(sys.stdin) for r in page
-            if (r.get("user") or {}).get("login") == login and r.get("submitted_at")]
+    return [
+        r
+        for page in json.load(sys.stdin)
+        for r in page
+        if (r.get("user") or {}).get("login") == login and r.get("submitted_at")
+    ]
 
 
 def cmd_review_ids(args, _scope, _label):
@@ -547,32 +662,67 @@ def cmd_review_ids(args, _scope, _label):
 def cmd_last_review(args, _scope, _label):
     """Prints LASTREVIEW for the newest submitted review by --login of --sha whose id is not in --seen."""
     seen = set(filter(None, (args.seen or "").split(",")))
-    mine = [r for r in submitted_reviews(args.login) if r.get("commit_id") == args.sha and str(r.get("id")) not in seen]
+    mine = [
+        r
+        for r in submitted_reviews(args.login)
+        if r.get("commit_id") == args.sha and str(r.get("id")) not in seen
+    ]
     if mine:
         r = max(mine, key=lambda r: r["submitted_at"])
         print(f"LASTREVIEW {r['state']} {r['submitted_at']} {r['html_url']}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("mode", choices=["list", "watch", "dispatch-queue", "claim-dispatched", "mark-dispatched", "release-dispatched", "review-ids", "last-review"],
-                        nargs="?", default="list")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "mode",
+        choices=[
+            "list",
+            "watch",
+            "dispatch-queue",
+            "claim-dispatched",
+            "mark-dispatched",
+            "release-dispatched",
+            "remote",
+            "review-ids",
+            "last-review",
+        ],
+        nargs="?",
+        default="list",
+    )
     parser.add_argument("--repo")
+    parser.add_argument("--cwd", help="remote: the clone")
     parser.add_argument("--org")
     parser.add_argument("--all", action="store_true")
-    parser.add_argument("--actionable", action="store_true",
-                        help="list: only Ready-for-review PRs")
-    parser.add_argument("--interval", type=int, default=120, help="watch: seconds between checks")
+    parser.add_argument(
+        "--actionable", action="store_true", help="list: only Ready-for-review PRs"
+    )
+    parser.add_argument(
+        "--interval", type=int, default=120, help="watch: seconds between checks"
+    )
     parser.add_argument("--login", help="last-review: reviewer login")
-    parser.add_argument("--seen", help="last-review: comma-separated review ids from before the dispatch")
+    parser.add_argument(
+        "--seen",
+        help="last-review: comma-separated review ids from before the dispatch",
+    )
     parser.add_argument("--url", help="mark-dispatched: PR URL")
     parser.add_argument("--sha", help="mark-dispatched: head SHA that was dispatched")
-    parser.add_argument("--state", choices=["pending", "done"], default="done",
-                        help="mark-dispatched: pending while the review runs, done once it is posted")
+    parser.add_argument(
+        "--state",
+        choices=["pending", "done"],
+        default="done",
+        help="mark-dispatched: pending while the review runs, done once it is posted",
+    )
     parser.add_argument("--agent", help="mark-dispatched: herdr agent name")
     parser.add_argument("--pane", help="mark-dispatched: herdr pane id")
     args = parser.parse_args()
-    scope, label = resolve_scope(args) if args.mode in ("list", "watch", "dispatch-queue") else ("", "")
+    scope, label = (
+        resolve_scope(args)
+        if args.mode in ("list", "watch", "dispatch-queue")
+        else ("", "")
+    )
     {
         "list": cmd_list,
         "watch": cmd_watch,
@@ -580,6 +730,7 @@ def main():
         "claim-dispatched": cmd_claim_dispatched,
         "mark-dispatched": cmd_mark_dispatched,
         "release-dispatched": cmd_release_dispatched,
+        "remote": cmd_remote,
         "review-ids": cmd_review_ids,
         "last-review": cmd_last_review,
     }[args.mode](args, scope, label)

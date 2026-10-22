@@ -22,7 +22,7 @@ Run a team of Claude Code and Codex agents you can watch: one **Coordinator**, *
 
 The installer puts the skills, watchers, hooks and status line into `~/.claude`. It starts no agent; you open those sessions yourself. The panes come from an env adapter ([`env/README.md`](env/README.md) shows how to add one). [Herdr](https://herdr.dev) is the one shipped, so the installer also sets up Herdr and Radar.
 
-## 1. Install
+## 📦 1. Install
 
 You need macOS or Linux, [Claude Code](https://claude.com/claude-code) with the `ListAgents`, `SendMessage` and `Monitor` tools, `git`, `jq`, Python 3.11 or newer and `curl`. `gh` (logged in with `gh auth login`) is needed for the PR watchers. Codex CLI is optional.
 
@@ -34,7 +34,7 @@ It clones this repo to `~/.claude/ai-agent-orchestration`, links the files into 
 
 The installer adds a marked orchestration block to `~/.claude/CLAUDE.md`. Later runs replace the text between those markers. If you already pasted the older unmarked sections, it leaves them alone and tells you how to wrap them once with the markers from [`snippets/CLAUDE.md.snippet`](snippets/CLAUDE.md.snippet); any custom text inside the markers will be replaced on the next run.
 
-## 2. Set it up
+## 🔩 2. Set it up
 
 The first run copies [`config/orchestration.toml.example`](config/orchestration.toml.example) to `~/.claude/orchestration.toml`, or converts an existing `~/.claude/orchestration.env`. On a terminal it asks for the keys below while they are empty or a `<…>` placeholder, offering a default it found; Enter takes it, `-` leaves the key empty. Without a terminal it lists the keys to fill. Set at least:
 
@@ -48,9 +48,9 @@ Settings for one repo (big-repo guard, legacy scan and its rules, focus) go in t
 
 To update, run the install command again. At session start a hook prints `ai-agent-orchestration setup out of date, run install.sh` when you are behind. Nothing updates on its own. The clone is never updated over local work: with uncommitted edits or commits that are not on origin the installer prints `REFUSED: … has local changes` and stops. It never stashes or resets. Put your changes in a PR, then run it again.
 
-## 3. Use it
+## 🚀 3. Use it
 
-### Start the Coordinator
+### 🧭 Start the Coordinator
 
 There is one Coordinator per machine. In a Herdr pane of its own, start Claude Code and run:
 
@@ -60,7 +60,7 @@ There is one Coordinator per machine. In a Herdr pane of its own, start Claude C
 
 It lists the `Architect::<area>` sessions, introduces itself, tags its pane `role=coordinator`, binds itself as the inbox target (`bind-self.py`, again after every recycle) and arms one Monitor on `~/.claude/coordinator/watchers/feed-monitor.sh`. You talk to the Coordinator. It relays your orders to architects and gives you one overview. It never merges, undrafts, assigns reviewers, deploys or pushes. Details: [`skills/coordinate/SKILL.md`](skills/coordinate/SKILL.md).
 
-### Start an architect
+### 📐 Start an architect
 
 Open a session named `Architect::<area>`, run `/architect`, and give it the initiative:
 
@@ -72,45 +72,19 @@ The architect splits the work into tasks. It does not edit code. For each task i
 
 Workers, recycles and handoffs: [`docs/workers.md`](docs/workers.md).
 
-### The to-do pane
+### 📝 The to-do pane
 
-Architects keep a `## Waits on the user` list in `~/.claude/coordinator/status/<architect>.md`. The user-todo watcher merges those lists into `~/.claude/coordinator/user-todo.md`. To show it in a pane:
+The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list as a popup (on by default; `todo_popup = false` turns the popup off). Details, keys and settings: [docs/todo.md](docs/todo.md).
 
-```bash
-python3 ~/.claude/coordinator/user-todo.py --follow
-```
-
-`user-todo.py` without `--follow` writes the file once. In the pane, press a number then Enter (or click) to jump to the item. `n` and `p` change page. A jump removes the item from the list. An empty list reads `Nothing waits on you.`
-
-For buttons instead, run `python3 ~/.claude/coordinator/user-todo-view.py` (`--demo` shows sample items). Each item has Open, Ignore and Reminder buttons (click, or `o` `i` `r` on the selected item; `↑↓` or a number selects). Open jumps to the target. Ignore removes the item for good: it returns only when the architect writes a new or changed item, and one `todo: TODO IGNORED <architect>: <text> (start)` line goes to the feed so the Coordinator can tell that architect. Reminder asks when (`1`-`5` for 15m, 1h, 2h, 4h, tomorrow 9:00; `t` types `30m` or `3h`) and hides the item until then; reminders are listed under `s` and come back marked `reminder:`; on a reminder item the button reads Cancel reminder. The top line reads `<n> open · <m> on reminder`. The `[s]` toggle and the `s show reminders` footer hint appear only while at least one reminder exists; the list closes when the last one goes. State is in `~/.claude/coordinator/user-todo-state.json` (not the generator's `user-todo.state.json`).
-
-To open it as a Herdr popup on `prefix+t`, pass `--popup` so `Esc` or `q` closes it (the footer then shows `Esc/q close`; Herdr sets no popup marker). Without the flag nothing closes it, so the Coordinator's to-do pane stays up. `Esc` while the reminder choices show only cancels them, and `q` is typed as text in the `t` entry.
-
-```toml
-[[keys.command]]
-key = "prefix+t"
-type = "popup"
-command = "python3 ~/.claude/coordinator/user-todo-view.py --popup"
-description = "to-do list"
-width = "80%"
-height = "80%"
-```
-
-The same view runs full-time in the Coordinator's to-do pane (no `--popup`, so nothing closes it).
-
-![The to-do view in the popup, with demo items](docs/todo-view.png)
-
-To open the buttons view as a popup titled "Your to-do" on `prefix+t`, set `todo_popup = true` under `[herdr]` in `~/.claude/orchestration.toml` (off by default) and run `install.sh`. It links the Herdr plugin in `env/herdr/todo-plugin` and adds a marked `[[keys.command]]` block to Herdr's `config.toml`; `false` removes both. See [docs/settings.md](docs/settings.md).
-
-### User questions
+### ❓ User questions
 
 Every question for you gets its own pane under the to-do pane, with keys to answer, dismiss it, or be reminded later. Details, keys and the feed lines: [`docs/questions.md`](docs/questions.md).
 
-### Review PRs
+### 🔍 Review PRs
 
 `/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`) in a Herdr pane for every PR that is ready; Codex posts the review and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
 
-### Heavy jobs
+### 🐘 Heavy jobs
 
 Many sessions share one machine. `heavy-slot` caps how many test runs, browsers or builds run at once (`ORCH_HEAVY_SLOTS_MAX`):
 
@@ -122,13 +96,14 @@ heavy-slot list                          # names, pids, ages, stale records
 
 If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`](docs/heavy-slot.md).
 
-## Docs
+## 📚 Docs
 
 - [`docs/architecture.md`](docs/architecture.md): how the Coordinator, architects, workers and watchers fit together.
 - [`docs/installer.md`](docs/installer.md): every installer step, the file table and a troubleshooting table.
 - [`docs/settings.md`](docs/settings.md): every setting in `~/.claude/orchestration.toml` and in the repo files.
 - [`docs/questions.md`](docs/questions.md): the question pane, its keys, Dismiss and Remind.
 - [`docs/watchers.md`](docs/watchers.md): the watchers, running them with or without services, and the host-pressure response.
+- [`docs/todo.md`](docs/todo.md): the to-do pane and the `prefix+t` popup.
 - [`docs/workers.md`](docs/workers.md): workers, recycles, handoffs and owner tags.
 - [`docs/heavy-slot.md`](docs/heavy-slot.md): the shared cap on heavy jobs and how slots work.
 - [`docs/bash-guard.md`](docs/bash-guard.md): what the Bash guard denies and where it logs.

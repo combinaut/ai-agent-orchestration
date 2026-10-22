@@ -1,4 +1,5 @@
 """Serialize question cancellation with answer publication."""
+
 import fcntl
 import os
 import signal
@@ -9,7 +10,10 @@ from pathlib import Path
 
 
 def questions_directory():
-    return Path(os.environ.get("ORCH_USER_QUESTIONS_DIR") or Path.home() / ".claude/coordinator/questions")
+    return Path(
+        os.environ.get("ORCH_USER_QUESTIONS_DIR")
+        or Path.home() / ".claude/coordinator/questions"
+    )
 
 
 HELD = "ORCH_ANSWERS_LOCK_HELD"
@@ -62,7 +66,13 @@ def close_question(slug, helper, pane):
         if pane:
             run_group([helper, pane], CLOSE_TIMEOUT)
         directory = questions_directory()
-        for name in (f"{slug}.md", f"{slug}.remind", f"{slug}.answer", f"{slug}.answer.seen", f"{slug}.answer.processing"):
+        for name in (
+            f"{slug}.md",
+            f"{slug}.remind",
+            f"{slug}.answer",
+            f"{slug}.answer.seen",
+            f"{slug}.answer.processing",
+        ):
             (directory / name).unlink(missing_ok=True)
         for pattern in (f"{slug}.*.answer.processing", f"{slug}.*.answer.seen"):
             for path in directory.glob(pattern):

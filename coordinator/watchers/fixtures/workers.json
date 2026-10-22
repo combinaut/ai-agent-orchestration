@@ -13,6 +13,16 @@
         "workspace_id": "workspace-demo"
       },
       {
+        "agent": "pi",
+        "agent_status": "working",
+        "cwd": "/home/dev/Projects/example-app/worktrees/fixture-pi-task",
+        "name": "fixture-pi-worker",
+        "pane_id": "workspace-demo:p4",
+        "terminal_title_stripped": "fixture-pi-worker",
+        "tokens": {},
+        "workspace_id": "workspace-demo"
+      },
+      {
         "agent": "claude",
         "agent_session": {"value": "session-coordinator-001"},
         "agent_status": "working",

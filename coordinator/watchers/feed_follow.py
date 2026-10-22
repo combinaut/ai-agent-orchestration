@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Prints the action lines appended to the feed, as an agent may see them, following rotation like tail -F.
 The feed is opened at its end before the heartbeat is touched, so no line between the two is missed."""
+
 import os
 import sys
 import time
-import watcher_runtime as runtime
 from pathlib import Path
 
+import watcher_runtime as runtime
 from feed_actions import action_patterns, is_action, native
 from feed_attach import locked, write_record
 
@@ -26,7 +27,9 @@ def attach(feed, beat):
     with locked(feed):
         stream = feed.open("rb")
         stream.seek(0, os.SEEK_END)
-        write_record(beat, os.fstat(stream.fileno()).st_ino, stream.tell(), stream.tell())
+        write_record(
+            beat, os.fstat(stream.fileno()).st_ino, stream.tell(), stream.tell()
+        )
     return stream
 
 
@@ -41,8 +44,18 @@ def follow(feed, beat, out=sys.stdout.buffer):
             try:
                 os.utime(beat)
             except FileNotFoundError:
-                print("feed follower: heartbeat missing, recreated", file=sys.stderr, flush=True)
-                write_record(beat, os.fstat(stream.fileno()).st_ino, attached, stream.tell(), previous)
+                print(
+                    "feed follower: heartbeat missing, recreated",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                write_record(
+                    beat,
+                    os.fstat(stream.fileno()).st_ino,
+                    attached,
+                    stream.tell(),
+                    previous,
+                )
             beat_at = time.monotonic()
         line = stream.readline()
         if line.endswith(b"\n"):
@@ -50,7 +63,13 @@ def follow(feed, beat, out=sys.stdout.buffer):
             if is_action(text, patterns):
                 out.write((native(text) + "\n").encode())
                 out.flush()
-            write_record(beat, os.fstat(stream.fileno()).st_ino, attached, stream.tell(), previous)
+            write_record(
+                beat,
+                os.fstat(stream.fileno()).st_ino,
+                attached,
+                stream.tell(),
+                previous,
+            )
             continue
         stream.seek(-len(line), os.SEEK_CUR)
         if not line and rotated(feed, stream):

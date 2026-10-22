@@ -5,6 +5,11 @@ load test_helper
 
 SKILL_DIR=skills/review-prs
 
+setup() {
+  export PYTHONDONTWRITEBYTECODE=1
+  setup_fixture
+}
+
 # stub_review_tools: a herdr that logs calls and saves the prompt, and a gh that knows one reviewer.
 stub_review_tools() {
   cat >"$BIN/herdr-review" <<'EOF'
@@ -27,6 +32,7 @@ EOF
 #!/usr/bin/env bash
 case "$*" in
   'api user --jq .login') echo reviewer ;;
+  'api repos/acme/app/pulls/7 --jq .base.ref') [ -z "${BASE_READ_FAILS:-}" ] || exit 1; echo main ;;
   *'/reviews'*)
     r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "$2" "$1"; }
     old=""
@@ -51,7 +57,16 @@ EOF
   export SHA
 }
 
+# dispatch: a clone without remotes is the clone of acme/app, and its fetches succeed.
 dispatch() {
+  if ! git -C "$TMP/app" remote get-url origin >/dev/null 2>&1; then
+    git -C "$TMP/app" remote add origin https://github.com/acme/app.git
+    mkdir -p "$TMP/fetch-ok"
+    # shellcheck disable=SC2016 # The stub's own text.
+    printf '#!/usr/bin/env bash\ncase "$*" in *" fetch -q "*) exit 0 ;; esac\nPATH=${PATH#"%s":} exec git "$@"\n' "$TMP/fetch-ok" >"$TMP/fetch-ok/git"
+    chmod +x "$TMP/fetch-ok/git"
+    export PATH="$TMP/fetch-ok:$PATH"
+  fi
   run env ORCH_CONFIG="$TMP/none.toml" bash "$ROOT/$SKILL_DIR/scripts/dispatch.sh" \
     https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" review rev7 "$TMP/app" acme/app
 }
@@ -363,6 +378,131 @@ print(" ".join(s + "=" + h["state"] for s, h in sorted(prs.heads(e).items())))
   # shellcheck disable=SC2016 # Python source.
   run bash -c 'cd "$1/sub/dir" && python3 -c "import sys; sys.path.insert(0, sys.argv[1]); import prs; print(prs.resolve_cwd(\"acme/app\"))" "$2"' _ "$TMP/app" "$ROOT/$SKILL_DIR/scripts"
   [ "$output" = "$(cd "$TMP/app" && pwd -P)" ]
+}
+
+# fork_layout: $TMP/app is a fork (origin me/app) of acme/app (upstream); a git wrapper says the commit is not local
+# and fetches only from the remote named upstream.
+fork_layout() {
+  git -C "$TMP/app" remote add origin https://github.com/me/app.git
+  git -C "$TMP/app" remote add upstream https://github.com/acme/app.git
+  real_git=${REAL_GIT:-$(PATH=${PATH#"$BIN":} command -v git)}
+  cat >"$BIN/git" <<GIT
+#!/usr/bin/env bash
+case "\$*" in
+  *' cat-file -e '*) exit 1 ;;
+  *' fetch -q '*) printf '%s\n' "\$*" >>"$TMP/fetch.calls"; [ "\$5" = upstream ]; exit ;;
+esac
+exec "$real_git" "\$@"
+GIT
+  chmod +x "$BIN/git"
+}
+
+@test "a fork clone fetches the PR from its upstream remote" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_layout
+  dispatch
+  not_contains "$output" 'RELEASED'
+  grep -qF -- "-C $TMP/app fetch -q upstream pull/7/head" "$TMP/fetch.calls"
+}
+
+@test "a fork review reads its instructions from the upstream base, whether or not the head is cached" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_layout
+  dispatch
+  grep -qF -- "-C $TMP/app fetch -q upstream main" "$TMP/fetch.calls"
+  contains "$(cat "$TMP/review.prompt")" 'git show upstream/<base branch>:<path>'
+  not_contains "$(cat "$TMP/review.prompt")" 'origin/<base branch>'
+  rm -f "$TMP/fetch.calls" "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
+  sed -i.bak '/cat-file -e/d' "$BIN/git"
+  dispatch
+  grep -qF -- "-C $TMP/app fetch -q upstream main" "$TMP/fetch.calls"
+  [ "$(grep -c 'pull/7/head' "$TMP/fetch.calls")" = 0 ]
+  contains "$(cat "$TMP/review.prompt")" 'git show upstream/<base branch>:<path>'
+}
+
+@test "a failed fetch of the base branch releases the head before any pane, agent or worktree" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_layout
+  # shellcheck disable=SC2016 # The stub's own text.
+  sed -i.bak 's/= upstream \]/= upstream ] \&\& [ "$6" != main ]/' "$BIN/git"
+  dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'RELEASED'
+  grep -qF -- "-C $TMP/app fetch -q upstream main" "$TMP/fetch.calls"
+  [ ! -e "$TMP/review-herdr.calls" ]
+}
+
+@test "an unreadable base branch of a fork PR releases the head before any pane, agent or worktree" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_layout
+  BASE_READ_FAILS=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'RELEASED'
+  [ ! -e "$TMP/fetch.calls" ]
+  [ ! -e "$TMP/review-herdr.calls" ]
+}
+
+@test "a clone with no remote for the repo releases the head even when the head is cached" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_layout
+  git -C "$TMP/app" remote set-url upstream https://github.com/other/app.git
+  sed -i.bak '/cat-file -e/d' "$BIN/git"
+  dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'BASE FAILED'
+  contains "$output" 'RELEASED'
+  [ ! -e "$TMP/fetch.calls" ]
+  [ ! -e "$TMP/review-herdr.calls" ]
+}
+
+@test "a clone with no remote for the repo fetches nothing and releases the head" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_layout
+  git -C "$TMP/app" remote set-url upstream https://github.com/other/app.git
+  dispatch
+  contains "$output" 'RELEASED'
+  [ ! -e "$TMP/fetch.calls" ]
+}
+
+@test "the remote of a clone that holds the repo is named by its GitHub URL" {
+  stub_review_tools
+  git -C "$TMP/app" remote add origin https://github.com/acme/app.git
+  git -C "$TMP/app" remote add upstream https://github.com/other/app.git
+  [ "$(python3 "$ROOT/$SKILL_DIR/scripts/prs.py" remote --cwd "$TMP/app" --repo acme/app)" = origin ]
+  [ "$(python3 "$ROOT/$SKILL_DIR/scripts/prs.py" remote --cwd "$TMP/app" --repo other/app)" = upstream ]
+  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" remote --cwd "$TMP/app" --repo acme/none
+  [ "$status" -ne 0 ]
+}
+
+@test "a clone whose origin is the repo wins over a fork clone of it" {
+  stub_review_tools
+  fork=$(mkdir -p "$TMP/fork" && cd "$TMP/fork" && pwd -P) direct=$(mkdir -p "$TMP/direct" && cd "$TMP/direct" && pwd -P)
+  git init -q "$fork" && git -C "$fork" remote add origin https://github.com/me/app.git
+  git -C "$fork" remote add upstream https://github.com/acme/app.git
+  git init -q "$direct" && git -C "$direct" remote add origin https://github.com/acme/app.git
+  mkdir -p "$HOME/.claude/coordinator"
+  printf '{"clones": ["%s", "%s"]}' "$fork" "$direct" >"$HOME/.claude/coordinator/open-work.json"
+  # shellcheck disable=SC2016 # Python source.
+  run bash -c 'cd "$1" && python3 -c "import sys; sys.path.insert(0, sys.argv[1]); import prs; print(prs.resolve_cwd(\"acme/app\"))" "$2"' _ "$TMP" "$ROOT/$SKILL_DIR/scripts"
+  [ "$output" = "$direct" ]
+}
+
+@test "a fork clone is found for the upstream repo when the open work holds only it" {
+  stub_review_tools
+  fork=$(mkdir -p "$TMP/fork" && cd "$TMP/fork" && pwd -P)
+  git init -q "$fork" && git -C "$fork" remote add origin https://github.com/me/app.git
+  git -C "$fork" remote add upstream https://github.com/acme/app.git
+  mkdir -p "$HOME/.claude/coordinator"
+  printf '{"clones": ["%s"]}' "$fork" >"$HOME/.claude/coordinator/open-work.json"
+  # shellcheck disable=SC2016 # Python source.
+  run bash -c 'cd "$1" && python3 -c "import sys; sys.path.insert(0, sys.argv[1]); import prs; print(prs.resolve_cwd(\"acme/app\"))" "$2"' _ "$TMP" "$ROOT/$SKILL_DIR/scripts"
+  [ "$output" = "$fork" ]
 }
 
 @test "a reused pane starts Codex in the worktree" {

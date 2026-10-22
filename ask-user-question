@@ -102,6 +102,7 @@ case $action in
       rm -f "$opening"
     fi
     anchor=$(find_pane "Q: " prefix)
+    [ -n "$anchor" ] || anchor=$(find_pane "To-do")
     if [ -z "$anchor" ]; then
       anchor=$(pane_rows | "${ORCH_PYTHON3:-python3}" -c '
 import json, sys

@@ -1,3 +1,4 @@
+import fcntl
 import importlib.util
 import io
 import json
@@ -7,21 +8,24 @@ import re
 import select
 import signal
 import struct
+import subprocess
 import sys
 import tempfile
 import termios
 import threading
 import time
 import unittest
-import fcntl
 from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import feed_actions
 import watchers as w
 
-spec = importlib.util.spec_from_file_location("user_todo_view", w.ROOT.parent / "user-todo-view.py")
+spec = importlib.util.spec_from_file_location(
+    "user_todo_view", w.ROOT.parent / "user-todo-view.py"
+)
 view = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(view)
 
@@ -58,7 +62,9 @@ class ViewCase(IsolatedTestCase):
 
 class StateTest(ViewCase):
     def test_items_drop_the_age_tag_and_keep_the_owner(self):
-        self.assertEqual(self.items[0], ("Architect::Finder", "Merge it -> https://example.com/pr/1"))
+        self.assertEqual(
+            self.items[0], ("Architect::Finder", "Merge it -> https://example.com/pr/1")
+        )
 
     def test_state_is_keyed_by_owner_and_text(self):
         hidden = self.hidden()
@@ -80,15 +86,22 @@ class StateTest(ViewCase):
         rows = hidden.visible(self.items, True)
         index = next(i for i, row in enumerate(rows) if row[3])
         self.assertEqual(view.key_action("remind", rows, index), "cancel")
-        self.assertEqual(view.act(hidden, rows, self.items, "cancel", index), "reminder cancelled")
+        self.assertEqual(
+            view.act(hidden, rows, self.items, "cancel", index), "reminder cancelled"
+        )
         restarted = self.hidden()
         self.assertEqual(len(restarted.visible(self.items)), 3)
         self.assertEqual(restarted.hidden_count(self.items), 0)
-        self.assertEqual([row[2] for row in restarted.visible(self.items)], [False, False, False])
+        self.assertEqual(
+            [row[2] for row in restarted.visible(self.items)], [False, False, False]
+        )
 
     def test_the_r_key_opens_the_picker_on_an_item_without_a_reminder(self):
         rows = [("A", "x", False, ""), ("B", "y", False, "back at 10:00")]
-        self.assertEqual((view.key_action("remind", rows, 0), view.key_action("remind", rows, 1)), ("remind", "cancel"))
+        self.assertEqual(
+            (view.key_action("remind", rows, 0), view.key_action("remind", rows, 1)),
+            ("remind", "cancel"),
+        )
         self.assertEqual(view.key_action("open", rows, 1), "open")
 
     def test_ignore_replaces_a_reminder_in_the_stored_state(self):
@@ -101,7 +114,9 @@ class StateTest(ViewCase):
     def test_ignored_items_never_show_under_the_reminder_toggle(self):
         hidden = self.hidden()
         hidden.ignore(*self.items[0])
-        self.assertNotIn(self.items[0], [row[:2] for row in hidden.visible(self.items, True)])
+        self.assertNotIn(
+            self.items[0], [row[:2] for row in hidden.visible(self.items, True)]
+        )
 
     def test_reminder_hides_until_the_picked_time_then_returns(self):
         hidden = self.hidden()
@@ -115,16 +130,24 @@ class StateTest(ViewCase):
         hidden = self.hidden()
         hidden.remind(*self.items[0], self.clock.now + 60)
         self.clock.now += 60
-        first = next(row for row in hidden.visible(self.items) if row[:2] == self.items[0])
-        again = next(row for row in hidden.visible(self.items) if row[:2] == self.items[0])
-        restarted = next(row for row in self.hidden().visible(self.items) if row[:2] == self.items[0])
+        first = next(
+            row for row in hidden.visible(self.items) if row[:2] == self.items[0]
+        )
+        again = next(
+            row for row in hidden.visible(self.items) if row[:2] == self.items[0]
+        )
+        restarted = next(
+            row for row in self.hidden().visible(self.items) if row[:2] == self.items[0]
+        )
         self.assertEqual((first[2], again[2], restarted[2]), (True, True, False))
 
     def test_counts_cover_open_and_reminder_items_but_never_ignored_ones(self):
         hidden = self.hidden()
         hidden.ignore(*self.items[0])
         hidden.remind(*self.items[1], self.clock.now + 60)
-        self.assertEqual((hidden.open_count(self.items), hidden.hidden_count(self.items)), (2, 1))
+        self.assertEqual(
+            (hidden.open_count(self.items), hidden.hidden_count(self.items)), (2, 1)
+        )
         self.assertEqual([row[3] for row in hidden.visible(self.items)], [""])
         self.assertEqual(len(hidden.visible(self.items, True)), 2)
         self.clock.now += 60
@@ -133,7 +156,9 @@ class StateTest(ViewCase):
     def test_state_file_differs_from_the_generators(self):
         self.assertEqual(view.HIDDEN.name, "user-todo-state.json")
         self.assertNotEqual(view.HIDDEN.name, "user-todo.state.json")
-        self.assertNotEqual(view.HIDDEN.with_suffix(".lock").name, "user-todo.state.json.lock")
+        self.assertNotEqual(
+            view.HIDDEN.with_suffix(".lock").name, "user-todo.state.json.lock"
+        )
 
     def test_state_write_is_atomic_through_a_same_directory_temp_file(self):
         hidden = self.hidden()
@@ -141,35 +166,60 @@ class StateTest(ViewCase):
         before = (self.root / "state.json").read_text()
         moves = []
         real = os.replace
-        with patch.object(view.os, "replace", lambda src, dst: (moves.append((src, dst)), real(src, dst))[1]):
+        with patch.object(
+            view.os,
+            "replace",
+            lambda src, dst: (moves.append((src, dst)), real(src, dst))[1],
+        ):
             hidden.remind(*self.items[1], self.clock.now + 60)
-        (src, dst), = moves
+        ((src, dst),) = moves
         self.assertEqual(Path(src).parent, Path(dst).parent)
         self.assertNotEqual(src, dst)
         with patch.object(view.os, "replace", side_effect=OSError("disk")):
             with self.assertRaises(OSError):
                 hidden.remind(*self.items[0], self.clock.now + 60)
-        self.assertEqual(json.loads((self.root / "state.json").read_text())["ignored"], json.loads(before)["ignored"])
-        self.assertEqual(sorted(path.name for path in self.root.iterdir() if path.name.startswith("state.json.")), [])
+        self.assertEqual(
+            json.loads((self.root / "state.json").read_text())["ignored"],
+            json.loads(before)["ignored"],
+        )
+        self.assertEqual(
+            sorted(
+                path.name
+                for path in self.root.iterdir()
+                if path.name.startswith("state.json.")
+            ),
+            [],
+        )
 
 
 class FeedTest(ViewCase):
     def test_ignore_writes_one_feed_line_the_action_filter_matches(self):
-        self.hidden().ignore("Architect::Finder", "Merge it -> https://example.com/pr/1")
+        self.hidden().ignore(
+            "Architect::Finder", "Merge it -> https://example.com/pr/1"
+        )
         lines = (self.root / "feed.log").read_text().splitlines()
         self.assertEqual(len(lines), 1)
-        self.assertRegex(lines[0], r"^\S+ todo: TODO IGNORED Architect::Finder: Merge it -> https://example.com/pr/1 \(start\)$")
-        self.assertTrue(feed_actions.is_action(lines[0], feed_actions.action_patterns()))
+        self.assertRegex(
+            lines[0],
+            r"^\S+ todo: TODO IGNORED Architect::Finder: Merge it -> https://example.com/pr/1 \(start\)$",
+        )
+        self.assertTrue(
+            feed_actions.is_action(lines[0], feed_actions.action_patterns())
+        )
 
     def test_only_ignore_lines_match_the_new_pattern(self):
         patterns = feed_actions.action_patterns()
-        quiet = ["2026-10-21T10:00:00+0200 todo: TODO IGNORED (start)",
-                 "2026-10-21T10:00:00+0200 todo: TODO IGNORED Architect::Finder: x (clear)",
-                 "2026-10-21T10:00:00+0200 todo: TODO ignored Architect::Finder: x (start)",
-                 "2026-10-21T10:00:00+0200 pulls: TODO IGNORED Architect::Finder: x (start)",
-                 "2026-10-21T10:00:00+0200 todo: TODO IGNORED Two Words: x (start)",
-                 "2026-10-21T10:00:00+0200 todo: TODO 1 fresh: x (start)"]
-        self.assertEqual([line for line in quiet if feed_actions.is_action(line, patterns)], [])
+        quiet = [
+            "2026-10-21T10:00:00+0200 todo: TODO IGNORED (start)",
+            "2026-10-21T10:00:00+0200 todo: TODO IGNORED Architect::Finder: x (clear)",
+            "2026-10-21T10:00:00+0200 todo: TODO ignored Architect::Finder: x (start)",
+            "2026-10-21T10:00:00+0200 pulls: TODO IGNORED Architect::Finder: x (start)",
+            "2026-10-21T10:00:00+0200 todo: TODO IGNORED Two Words: x (start)",
+            "2026-10-21T10:00:00+0200 todo: TODO 1 fresh: x (start)",
+        ]
+        self.assertEqual(
+            [line for line in quiet if feed_actions.is_action(line, patterns)], []
+        )
 
     def test_the_line_is_appended_under_the_shared_feed_lock(self):
         events = []
@@ -182,8 +232,14 @@ class FeedTest(ViewCase):
                 events.append("unlock")
 
         real = os.write
-        with patch.object(view.feed_attach, "locked", lambda feed: Lock()), \
-                patch.object(view.os, "write", lambda fd, data: (events.append("write"), real(fd, data))[1]):
+        with (
+            patch.object(view.feed_attach, "locked", lambda feed: Lock()),
+            patch.object(
+                view.os,
+                "write",
+                lambda fd, data: (events.append("write"), real(fd, data))[1],
+            ),
+        ):
             self.hidden().ignore(*self.items[0])
         self.assertEqual(events, ["lock", "write", "unlock"])
 
@@ -193,9 +249,13 @@ class FeedTest(ViewCase):
         self.assertTrue(line.endswith("(start)\n"))
 
     def test_an_unwritable_feed_keeps_the_ignore_and_says_so(self):
-        hidden = view.Hidden(self.root / "state.json", self.root / "missing" / "feed.log", self.clock)
+        hidden = view.Hidden(
+            self.root / "state.json", self.root / "missing" / "feed.log", self.clock
+        )
         rows = [(*self.items[0], False, "")]
-        self.assertIn("feed not written", view.act(hidden, rows, self.items, "ignore", 0))
+        self.assertIn(
+            "feed not written", view.act(hidden, rows, self.items, "ignore", 0)
+        )
         self.assertEqual(len(self.hidden().visible(self.items)), 2)
 
 
@@ -213,25 +273,38 @@ class ClickTest(ViewCase):
                 for column in range(first, last + 1):
                     self.assertEqual(self.click(hits, line, column), [(action, index)])
                 self.assertEqual(self.click(hits, line, last + 1), [])
-                label = shown[line - 1][first - 1:last].strip().split("] ")[-1]
-                self.assertTrue(label in ("Open", "Ignore", "Reminder") or label.startswith(("show", "hide")), label)
+                label = shown[line - 1][first - 1 : last].strip().split("] ")[-1]
+                self.assertTrue(
+                    label in ("Open", "Ignore", "Reminder")
+                    or label.startswith(("show", "hide")),
+                    label,
+                )
 
     def test_buttons_still_match_after_the_message_wraps(self):
         self.items = view.parse("## A.md\n- " + "word " * 30 + "end\n")
         lines, hits = self.layout(30)
         by_action = {action: line for line, _f, _l, action, _i in hits}
-        self.assertEqual(len(set(by_action[a] for a in ("open", "ignore", "remind"))) >= 1, True)
+        self.assertEqual(
+            len(set(by_action[a] for a in ("open", "ignore", "remind"))) >= 1, True
+        )
         self.assertIn("Open", self.plain(lines)[by_action["open"] - 1])
 
     def test_three_actions_and_the_toggle_are_reachable(self):
         _lines, hits = self.layout(80)
-        self.assertEqual({action for _l, _f, _t, action, _i in hits if _i == 0}, {"open", "ignore", "remind"})
+        self.assertEqual(
+            {action for _l, _f, _t, action, _i in hits if _i == 0},
+            {"open", "ignore", "remind"},
+        )
         self.assertIn("show", [action for _l, _f, _t, action, _i in hits])
 
     def test_only_a_left_press_counts(self):
         _lines, hits = self.layout(80)
         line, first, _last, _action, _index = hits[0]
-        for sequence in (f"\x1b[<0;{first};{line}m", f"\x1b[<2;{first};{line}M", f"\x1b[<64;{first};{line}M"):
+        for sequence in (
+            f"\x1b[<0;{first};{line}m",
+            f"\x1b[<2;{first};{line}M",
+            f"\x1b[<64;{first};{line}M",
+        ):
             self.assertEqual(view.input_events(sequence, hits)[0], [])
 
     def test_a_split_escape_sequence_waits_for_its_rest(self):
@@ -240,12 +313,19 @@ class ClickTest(ViewCase):
         sequence = f"\x1b[<0;{first};{line}M"
         events, pending = view.input_events(sequence[:5], hits)
         self.assertEqual((events, pending), ([], sequence[:5]))
-        self.assertEqual(view.input_events(pending + sequence[5:], hits)[0], [("open", 0)])
+        self.assertEqual(
+            view.input_events(pending + sequence[5:], hits)[0], [("open", 0)]
+        )
 
     def test_keys_map_to_the_selected_item(self):
         _lines, hits = self.layout(80)
-        self.assertEqual(view.input_events("oir", hits)[0], [("open", None), ("ignore", None), ("remind", None)])
-        self.assertEqual(view.input_events("\x1b[B\x1b[A", hits)[0], [("move", 1), ("move", -1)])
+        self.assertEqual(
+            view.input_events("oir", hits)[0],
+            [("open", None), ("ignore", None), ("remind", None)],
+        )
+        self.assertEqual(
+            view.input_events("\x1b[B\x1b[A", hits)[0], [("move", 1), ("move", -1)]
+        )
         self.assertEqual(view.input_events("2", hits)[0], [("digit", "2")])
 
     def test_a_reminder_item_offers_cancel_reminder_in_the_third_button(self):
@@ -255,7 +335,10 @@ class ClickTest(ViewCase):
         index = next(i for i, row in enumerate(rows) if row[3])
         lines, hits = view.layout(rows, 80, 1, index, True, None, 3)
         third = next(h for h in hits if h[4] == index and h[3] == "cancel")
-        self.assertIn("[r] Cancel reminder", self.plain(lines)[third[0] - 1][third[1] - 1:third[2]])
+        self.assertIn(
+            "[r] Cancel reminder",
+            self.plain(lines)[third[0] - 1][third[1] - 1 : third[2]],
+        )
         self.assertEqual(self.click(hits, third[0], third[1]), [("cancel", index)])
         self.assertNotIn("remind", {h[3] for h in hits if h[4] == index})
         other = next(h for h in hits if h[4] != index and h[3] == "remind")
@@ -276,9 +359,17 @@ class ClickTest(ViewCase):
 class PickerTest(ViewCase):
     def test_quick_picks_and_typed_values(self):
         now = self.clock.now
-        self.assertEqual([view.remind_until(p, now) - now for p in ("pick1", "pick2", "pick3", "pick4")],
-                         [900, 3600, 7200, 14400])
-        self.assertEqual((view.remind_until("30m", now) - now, view.remind_until("3H", now) - now), (1800, 10800))
+        self.assertEqual(
+            [
+                view.remind_until(p, now) - now
+                for p in ("pick1", "pick2", "pick3", "pick4")
+            ],
+            [900, 3600, 7200, 14400],
+        )
+        self.assertEqual(
+            (view.remind_until("30m", now) - now, view.remind_until("3H", now) - now),
+            (1800, 10800),
+        )
 
     def test_tomorrow_is_nine_local_time(self):
         when = time.localtime(view.remind_until("pick5", self.clock.now))
@@ -304,20 +395,43 @@ class AutoHideTest(ViewCase):
     def test_counts_line_and_toggle_labels_add_up(self):
         hidden = self.hidden()
         hidden.remind(*self.items[0], self.clock.now + 60)
-        lines = self.plain(view.layout(hidden.visible(self.items), 80, hidden.hidden_count(self.items), 0, False, None,
-                                       hidden.open_count(self.items))[0])
+        lines = self.plain(
+            view.layout(
+                hidden.visible(self.items),
+                80,
+                hidden.hidden_count(self.items),
+                0,
+                False,
+                None,
+                hidden.open_count(self.items),
+            )[0]
+        )
         self.assertEqual(lines[0], "3 open · 1 on reminder")
         self.assertTrue(any("show reminders (1)" in line for line in lines))
-        shown = self.plain(view.layout(hidden.visible(self.items, True), 80, 1, 0, True, None, 3)[0])
+        shown = self.plain(
+            view.layout(hidden.visible(self.items, True), 80, 1, 0, True, None, 3)[0]
+        )
         self.assertTrue(any("hide reminders (1)" in line for line in shown))
 
     def test_the_toggle_and_the_s_hint_need_a_reminder(self):
         for count, expected in ((0, False), (1, True)):
-            lines = self.plain(view.layout(self.hidden().visible(self.items), 80, count, 0, False, None, 3)[0])
+            lines = self.plain(
+                view.layout(
+                    self.hidden().visible(self.items), 80, count, 0, False, None, 3
+                )[0]
+            )
             text = "\n".join(lines)
             self.assertEqual("show reminders" in text, expected)
             self.assertEqual("s show reminders" in text, expected)
-            self.assertEqual(any("show" in h[3] for h in view.layout(self.hidden().visible(self.items), 80, count, 0, False, None, 3)[1]), expected)
+            self.assertEqual(
+                any(
+                    "show" in h[3]
+                    for h in view.layout(
+                        self.hidden().visible(self.items), 80, count, 0, False, None, 3
+                    )[1]
+                ),
+                expected,
+            )
         self.assertNotIn(view.SHOW_HINT, " ".join(view.footer_rows(200, True, False)))
 
     def test_the_view_starts_with_reminders_hidden(self):
@@ -355,15 +469,19 @@ class StateWriteTest(ViewCase):
         self.assertIn(view.key(*self.items[0]), self.stored()["later"])
 
     def test_each_write_starts_from_the_file_not_from_the_loaded_copy(self):
-        for name, write in (("ignore", lambda h: h.ignore(*self.items[1])),
-                            ("remind", lambda h: h.remind(*self.items[1], self.clock.now + 60)),
-                            ("cancel", lambda h: h.cancel(*self.items[1]))):
+        for name, write in (
+            ("ignore", lambda h: h.ignore(*self.items[1])),
+            ("remind", lambda h: h.remind(*self.items[1], self.clock.now + 60)),
+            ("cancel", lambda h: h.cancel(*self.items[1])),
+        ):
             with self.subTest(name):
                 (self.root / "state.json").unlink(missing_ok=True)
                 stale = self.hidden()
                 self.hidden().ignore(*self.items[2])
                 write(stale)
-                self.assertEqual(self.stored()["ignored"].count(view.key(*self.items[2])), 1, name)
+                self.assertEqual(
+                    self.stored()["ignored"].count(view.key(*self.items[2])), 1, name
+                )
 
     def test_writers_in_parallel_lose_nothing(self):
         names = [("Owner", f"item {n}") for n in range(12)]
@@ -374,7 +492,10 @@ class StateWriteTest(ViewCase):
             real(hidden)
 
         with patch.object(view.Hidden, "save", slow_save):
-            threads = [threading.Thread(target=lambda n=n: self.hidden().ignore(*n)) for n in names]
+            threads = [
+                threading.Thread(target=lambda n=n: self.hidden().ignore(*n))
+                for n in names
+            ]
             for thread in threads:
                 thread.start()
             for thread in threads:
@@ -420,12 +541,23 @@ class AppCase(ViewCase):
         self.mono = Clock(100.0)
         self.loads = []
         self.current = list(self.items)
-        patcher = patch.object(view, "load_items", lambda demo: (self.loads.append(1), list(self.current))[1])
+        patcher = patch.object(
+            view,
+            "load_items",
+            lambda demo: (self.loads.append(1), list(self.current))[1],
+        )
         patcher.start()
         self.addCleanup(patcher.stop)
 
     def app(self, **kwargs):
-        app = view.App(self.hidden(), False, self.screen.out, self.screen.size, self.mono, kwargs.get("jump", lambda text: "jumped"))
+        app = view.App(
+            self.hidden(),
+            False,
+            self.screen.out,
+            self.screen.size,
+            self.mono,
+            kwargs.get("jump", lambda text: "jumped"),
+        )
         app.tick()
         return app
 
@@ -433,31 +565,56 @@ class AppCase(ViewCase):
 class PaneTokenTest(AppCase):
     def calls(self):
         log = Path(os.environ["TEST_TOOL_LOG"])
-        return [line for line in log.read_text().splitlines() if "report-metadata" in line] if log.exists() else []
+        return (
+            [line for line in log.read_text().splitlines() if "report-metadata" in line]
+            if log.exists()
+            else []
+        )
 
-    def test_the_view_reports_the_todo_token_on_its_own_pane_at_start_and_on_change(self):
+    def test_the_view_reports_the_todo_token_on_its_own_pane_at_start_and_on_change(
+        self,
+    ):
         Path(os.environ["TEST_TOOL_LOG"]).write_text("")
         with patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p7"}):
-            app = view.App(self.hidden(), False, self.screen.out, self.screen.size, self.mono)
+            app = view.App(
+                self.hidden(), False, self.screen.out, self.screen.size, self.mono
+            )
             app.tick()
             app.tick()
-            self.assertEqual(self.calls(), ["pane report-metadata w1:p7 --source orchestrate --token todo=3 --token tabbar=To-do 3"])
+            self.assertEqual(
+                self.calls(),
+                [
+                    "pane report-metadata w1:p7 --source orchestrate --token todo=3 --token tabbar=To-do 3"
+                ],
+            )
             app.feed("i")
-        self.assertEqual(self.calls()[-1], "pane report-metadata w1:p7 --source orchestrate --token todo=2 --token tabbar=To-do 2")
+        self.assertEqual(
+            self.calls()[-1],
+            "pane report-metadata w1:p7 --source orchestrate --token todo=2 --token tabbar=To-do 2",
+        )
         self.assertEqual(len(self.calls()), 2)
 
     def test_reminders_still_count_as_open_in_the_token(self):
         Path(os.environ["TEST_TOOL_LOG"]).write_text("")
         with patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p7"}):
-            app = view.App(self.hidden(), False, self.screen.out, self.screen.size, self.mono)
+            app = view.App(
+                self.hidden(), False, self.screen.out, self.screen.size, self.mono
+            )
             app.hidden.remind(*self.items[0], self.clock.now + 600)
             app.tick()
-        self.assertEqual(self.calls(), ["pane report-metadata w1:p7 --source orchestrate --token todo=3 --token tabbar=To-do 3"])
+        self.assertEqual(
+            self.calls(),
+            [
+                "pane report-metadata w1:p7 --source orchestrate --token todo=3 --token tabbar=To-do 3"
+            ],
+        )
 
     def test_without_a_pane_nothing_is_reported(self):
         Path(os.environ["TEST_TOOL_LOG"]).write_text("")
         with patch.dict(os.environ, {"HERDR_PANE_ID": ""}):
-            view.App(self.hidden(), False, self.screen.out, self.screen.size, self.mono).tick()
+            view.App(
+                self.hidden(), False, self.screen.out, self.screen.size, self.mono
+            ).tick()
         self.assertEqual(self.calls(), [])
 
 
@@ -481,7 +638,10 @@ class PickerIdentityTest(AppCase):
         self.mono.now += 4
         app.tick()
         app.feed("30m\r")
-        self.assertEqual(list(json.loads((self.root / "state.json").read_text())["later"]), [view.key(*self.items[0])])
+        self.assertEqual(
+            list(json.loads((self.root / "state.json").read_text())["later"]),
+            [view.key(*self.items[0])],
+        )
 
     def test_the_picker_closes_when_its_item_disappears(self):
         app = self.app()
@@ -526,7 +686,14 @@ class KeyboardTest(AppCase):
         self.assertEqual(app.buf, "")
 
     def popup_app(self, popup=True):
-        app = view.App(self.hidden(), False, self.screen.out, self.screen.size, self.mono, popup=popup)
+        app = view.App(
+            self.hidden(),
+            False,
+            self.screen.out,
+            self.screen.size,
+            self.mono,
+            popup=popup,
+        )
         app.tick()
         return app
 
@@ -605,11 +772,16 @@ class KeyboardTest(AppCase):
     def test_keys_apply_in_the_order_typed(self):
         app = self.app()
         app.feed("i\x1b[B")
-        self.assertEqual(json.loads((self.root / "state.json").read_text())["ignored"], [view.key(*self.items[0])])
+        self.assertEqual(
+            json.loads((self.root / "state.json").read_text())["ignored"],
+            [view.key(*self.items[0])],
+        )
         self.assertEqual(app.selected, 1)
         app.feed("i")
-        self.assertEqual(json.loads((self.root / "state.json").read_text())["ignored"],
-                         sorted([view.key(*self.items[0]), view.key(*self.items[2])]))
+        self.assertEqual(
+            json.loads((self.root / "state.json").read_text())["ignored"],
+            sorted([view.key(*self.items[0]), view.key(*self.items[2])]),
+        )
 
     def test_an_invalid_typed_time_keeps_the_picker_open_with_a_hint(self):
         app = self.app()
@@ -628,7 +800,10 @@ class KeyboardTest(AppCase):
         column = lines[row - 1].index("Ignore") + 2
         app.feed(f"\x1b[<0;{column};{row}Mo")
         self.assertEqual(app.status, "jumped")
-        self.assertEqual(json.loads((self.root / "state.json").read_text())["ignored"], [view.key(*self.items[0])])
+        self.assertEqual(
+            json.loads((self.root / "state.json").read_text())["ignored"],
+            [view.key(*self.items[0])],
+        )
 
 
 class ClockTest(AppCase):
@@ -670,10 +845,15 @@ class ClockTest(AppCase):
         self.assertEqual(list(later.values()), [self.clock.now + 3600])
 
     def test_default_clocks_are_the_monotonic_and_the_wall_clock(self):
-        with patch.object(view.time, "monotonic", lambda: 5.0), patch.object(view.time, "time", lambda: 7.0):
+        with (
+            patch.object(view.time, "monotonic", lambda: 5.0),
+            patch.object(view.time, "time", lambda: 7.0),
+        ):
             app = view.App(self.hidden(), False, self.screen.out, self.screen.size)
             self.assertEqual(app.clock(), 5.0)
-            self.assertEqual(view.Hidden(self.root / "x.json", self.root / "f.log").clock(), 7.0)
+            self.assertEqual(
+                view.Hidden(self.root / "x.json", self.root / "f.log").clock(), 7.0
+            )
 
     def test_the_list_is_read_again_after_a_resize_and_after_three_seconds(self):
         app = self.app()
@@ -700,16 +880,21 @@ class ClockTest(AppCase):
 
 class ViewportTest(AppCase):
     def many(self, count):
-        self.current = [("Architect::Long::Owner::Name", f"message number {n}") for n in range(count)]
+        self.current = [
+            ("Architect::Long::Owner::Name", f"message number {n}")
+            for n in range(count)
+        ]
         return self.app()
 
     def hits_ok(self, app):
         rows = self.screen.last_frame().split("\r\n")
         for line, first, last, action, index in app.hits:
             self.assertLessEqual(line, self.screen.lines - 1)
-            label = {"open": "Open", "ignore": "Ignore", "remind": "Reminder"}.get(action)
+            label = {"open": "Open", "ignore": "Ignore", "remind": "Reminder"}.get(
+                action
+            )
             if label:
-                self.assertIn(label, rows[line - 1][first - 1:last])
+                self.assertIn(label, rows[line - 1][first - 1 : last])
 
     def test_nothing_taller_than_the_pane_is_drawn(self):
         app = self.many(12)
@@ -726,30 +911,74 @@ class ViewportTest(AppCase):
         self.hits_ok(app)
         hit = next(h for h in app.hits if h[3] == "ignore" and h[4] == 9)
         app.feed(f"\x1b[<0;{hit[1]};{hit[0]}M")
-        self.assertEqual(json.loads((self.root / "state.json").read_text())["ignored"], [view.key(*self.current[9])])
+        self.assertEqual(
+            json.loads((self.root / "state.json").read_text())["ignored"],
+            [view.key(*self.current[9])],
+        )
 
     def test_every_line_fits_the_terminal_width_at_any_width(self):
-        self.current = [("Architect::Frontend::Migration", "a long message with several words -> Architect::Frontend::Migration")] * 2
+        self.current = [
+            (
+                "Architect::Frontend::Migration",
+                "a long message with several words -> Architect::Frontend::Migration",
+            )
+        ] * 2
         for width in range(1, 70):
-            lines, hits = view.layout(self.hidden().visible(self.current), width, 0, 0, False, None, 2)
+            lines, hits = view.layout(
+                self.hidden().visible(self.current), width, 0, 0, False, None, 2
+            )
             for line in lines:
-                self.assertLessEqual(view.cells(ANSI.sub("", line)), width, (width, line))
+                self.assertLessEqual(
+                    view.cells(ANSI.sub("", line)), width, (width, line)
+                )
 
     def test_every_button_stays_whole_and_clickable_at_narrow_widths(self):
         for width in (30, 40, 60):
-            lines, hits = view.layout(self.hidden().visible(self.items), width, 0, 0, False, None, 3)
+            lines, hits = view.layout(
+                self.hidden().visible(self.items), width, 0, 0, False, None, 3
+            )
             plain = self.plain(lines)
             for line, first, last, action, index in hits:
                 if action in ("open", "ignore", "remind"):
-                    label = {"open": "Open", "ignore": "Ignore", "remind": "Reminder"}[action]
-                    self.assertIn(label, plain[line - 1][first - 1:last], (width, action))
+                    label = {"open": "Open", "ignore": "Ignore", "remind": "Reminder"}[
+                        action
+                    ]
+                    self.assertIn(
+                        label, plain[line - 1][first - 1 : last], (width, action)
+                    )
 
-    def test_a_long_item_with_an_open_picker_keeps_its_controls_visible_and_clickable(self):
-        self.current = [("Architect::Frontend::Migration", "very long message " * 120 + "-> Architect::Frontend::Migration"),
-                        ("Architect::Other", "short")]
-        wanted = {"open", "ignore", "remind", "pick1", "pick2", "pick3", "pick4", "pick5", "type"}
-        labels = {"open": "Open", "ignore": "Ignore", "remind": "Reminder", "pick1": "15m", "pick2": "1h", "pick3": "2h",
-                  "pick4": "4h", "pick5": "tomorrow 9:00", "type": "type"}
+    def test_a_long_item_with_an_open_picker_keeps_its_controls_visible_and_clickable(
+        self,
+    ):
+        self.current = [
+            (
+                "Architect::Frontend::Migration",
+                "very long message " * 120 + "-> Architect::Frontend::Migration",
+            ),
+            ("Architect::Other", "short"),
+        ]
+        wanted = {
+            "open",
+            "ignore",
+            "remind",
+            "pick1",
+            "pick2",
+            "pick3",
+            "pick4",
+            "pick5",
+            "type",
+        }
+        labels = {
+            "open": "Open",
+            "ignore": "Ignore",
+            "remind": "Reminder",
+            "pick1": "15m",
+            "pick2": "1h",
+            "pick3": "2h",
+            "pick4": "4h",
+            "pick5": "tomorrow 9:00",
+            "type": "type",
+        }
         for columns, lines in ((80, 24), (50, 12), (40, 9), (40, 7), (40, 6), (40, 5)):
             with self.subTest(size=(columns, lines)):
                 self.screen.columns, self.screen.lines = columns, lines
@@ -763,7 +992,11 @@ class ViewportTest(AppCase):
                 self.assertEqual(wanted - set(mine), set())
                 for action in wanted:
                     row, first, last, _action, _index = mine[action]
-                    self.assertIn(labels[action], frame[row - 1][first - 1:last], (action, frame))
+                    self.assertIn(
+                        labels[action],
+                        frame[row - 1][first - 1 : last],
+                        (action, frame),
+                    )
                     self.assertEqual(self.click(app.hits, row, first), [(action, 0)])
                 self.assertEqual(any("…" in line for line in frame), lines >= 9, frame)
 
@@ -858,6 +1091,7 @@ class PtyTest(IsolatedTestCase):
     def test_q_and_a_lone_escape_close_a_popup_and_restore_the_terminal(self):
         for name, keys in (("q", b"q"), ("escape", b"\x1b")):
             with self.subTest(name):
+
                 def act(pid, fd, read):
                     read(until="Esc/q close")
                     os.write(fd, keys)
@@ -892,6 +1126,7 @@ class PtyTest(IsolatedTestCase):
     def test_sigterm_and_sighup_restore_the_terminal(self):
         for name in (signal.SIGTERM, signal.SIGHUP):
             with self.subTest(name):
+
                 def act(pid, fd, read):
                     read(until="3 open")
                     os.kill(pid, name)
@@ -904,6 +1139,55 @@ class PtyTest(IsolatedTestCase):
         out = run_in_pty({"VIEW_FAIL": "1"}, lambda pid, fd, read: read(until="RESULT"))
         self.assertRegex(out, r"RESULT oserror True True")
         self.assertIn("\x1b[?1000l", out)
+
+
+class ConfiguredOutputTest(ViewCase):
+    """The popup and the pane both start the view without a settings loader in front of it."""
+
+    def launch(self, config=None, **env):
+        home = self.root / "home"
+        link = home / ".claude/coordinator/user-todo-view.py"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        if not link.exists():
+            link.symlink_to(w.ROOT.parent / "user-todo-view.py")
+        if config is not None:
+            (home / ".claude/orchestration.toml").write_text(config)
+        program = (
+            "import importlib.util, sys; spec = importlib.util.spec_from_file_location('v', sys.argv[1]); "
+            "v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v); print(v.TODO)"
+        )
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("ORCH_")}
+        result = subprocess.run(
+            [sys.executable, "-c", program, str(link)],
+            env={**clean, "HOME": str(home), **env},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return Path(result.stdout.strip()), home
+
+    def test_the_output_set_only_in_the_settings_file_is_read(self):
+        todo, _ = self.launch('[user_todo]\noutput = "/data/todo out.md"\n')
+        self.assertEqual(todo, Path("/data/todo out.md"))
+
+    def test_a_home_relative_output_in_the_settings_file_expands(self):
+        todo, home = self.launch('[user_todo]\noutput = "~/lists/todo.md"\n')
+        self.assertEqual(todo, home / "lists/todo.md")
+
+    def test_the_exported_variable_wins_over_the_settings_file(self):
+        todo, _ = self.launch(
+            '[user_todo]\noutput = "/data/file.md"\n',
+            ORCH_USER_TODO_OUTPUT="/data/env.md",
+        )
+        self.assertEqual(todo, Path("/data/env.md"))
+
+    def test_no_setting_reads_the_default_list(self):
+        todo, home = self.launch("")
+        self.assertEqual(todo, home / ".claude/coordinator/user-todo.md")
+
+    def test_an_unreadable_settings_file_reads_the_default_list(self):
+        todo, home = self.launch("[user_todo\n")
+        self.assertEqual(todo, home / ".claude/coordinator/user-todo.md")
 
 
 if __name__ == "__main__":

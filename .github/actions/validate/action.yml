@@ -1,11 +1,14 @@
 name: Validate
-description: ShellCheck and the test suites
+description: ShellCheck, Ruff and the test suites
 runs:
   using: composite
   steps:
     - name: ShellCheck
       shell: bash
       run: scripts/ci/shellcheck.sh
+    - name: Ruff
+      shell: bash
+      run: scripts/ci/ruff.sh
     - name: Prove Linux runner systemctl tripwire
       if: runner.os == 'Linux'
       shell: bash

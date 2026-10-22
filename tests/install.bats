@@ -273,6 +273,150 @@ raise SystemExit(result.returncode)
   jq -e '.statusLine.command == "mine" and .hooks.Stop[0].hooks[0].command == "stop" and ([.hooks.SessionStart[]?.hooks[]?.command] | index("bash ~/.claude/hooks/orch-update-check.sh"))' "$HOME/.claude/settings.json" >/dev/null
 }
 
+# bind_rules <claude dir>: the two bind-self.py allow rules for that install, one per line.
+bind_rules() {
+  printf '%s\n' \
+    'Bash(python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/*)' \
+    "Bash(python3 $1/coordinator/watchers/bind-self.py --output $1/coordinator/watchers/bindings/*)"
+}
+
+@test "bind-self allow rules are added to a missing settings file" {
+  fresh_install
+  rm "$HOME/.claude/settings.json"
+  install_ok
+  [ "$(jq -c '.permissions.allow' "$HOME/.claude/settings.json")" = "$(bind_rules "$HOME/.claude" | jq -Rsc 'split("\n")[:-1]')" ]
+}
+
+@test "bind-self allow rules are added to an empty settings object" {
+  fresh_install
+  printf '{}\n' >"$HOME/.claude/settings.json"
+  install_ok
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 2 ]
+}
+
+@test "bind-self allow rules keep existing allow entries in order" {
+  fresh_install
+  printf '%s\n' '{"permissions":{"allow":["Bash(ls *)","Read(~/x)"],"deny":["Bash(rm *)"]}}' >"$HOME/.claude/settings.json"
+  install_ok
+  [ "$(jq -c '.permissions.allow[:2]' "$HOME/.claude/settings.json")" = '["Bash(ls *)","Read(~/x)"]' ]
+  [ "$(jq -c '.permissions.deny' "$HOME/.claude/settings.json")" = '["Bash(rm *)"]' ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 4 ]
+}
+
+@test "a second run adds no bind-self allow rule" {
+  fresh_install
+  install_ok
+  before=$(cat "$HOME/.claude/settings.json")
+  install_ok
+  [ "$(cat "$HOME/.claude/settings.json")" = "$before" ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 2 ]
+}
+
+@test "hand-added bind-self allow rules are recognized" {
+  fresh_install
+  jq -n --arg abs "$HOME/.claude" '{permissions: {allow: [
+    "Bash(python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/*)",
+    "Bash(python3 \($abs)/coordinator/watchers/bind-self.py --output \($abs)/coordinator/watchers/bindings/*)"]}}' >"$HOME/.claude/settings.json"
+  before=$(jq -S . "$HOME/.claude/settings.json")
+  install_ok
+  [ "$(jq -S '.permissions' "$HOME/.claude/settings.json")" = "$(jq -S '.permissions' <<<"$before")" ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 2 ]
+}
+
+@test "only the missing bind-self allow rule is added" {
+  fresh_install
+  jq -n '{permissions: {allow: ["Bash(python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/*)"]}}' >"$HOME/.claude/settings.json"
+  install_ok
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 2 ]
+  [ "$(jq -r '.permissions.allow[1]' "$HOME/.claude/settings.json")" = "$(bind_rules "$HOME/.claude" | tail -n 1)" ]
+}
+
+@test "bind-self absolute allow rule follows the installed HOME" {
+  other="$TMP/other-home"
+  mkdir -p "$other"
+  use_home "$other"
+  fresh_install
+  [ "$(jq -r '.permissions.allow[1]' "$other/.claude/settings.json")" = "$(bind_rules "$other/.claude" | tail -n 1)" ]
+  [ "$(jq -r '.permissions.allow[]' "$other/.claude/settings.json" | grep -cF "$TMP/home/")" -eq 0 ]
+}
+
+@test "bind-self allow rules and hooks share one settings backup" {
+  fresh_install
+  printf '%s\n' '{"theme":"dark"}' >"$HOME/.claude/settings.json"
+  install_ok
+  [ "$(find "$HOME/.claude/backups" -name 'settings.json*' | wc -l)" -eq 1 ]
+  [ "$(jq -c . "$(find "$HOME/.claude/backups" -name 'settings.json*')")" = '{"theme":"dark"}' ]
+}
+
+@test "bind-self allow rules alone back up settings once" {
+  fresh_install
+  jq '.permissions = {allow: ["Bash(ls *)"]}' "$HOME/.claude/settings.json" >"$TMP/s.json"
+  cp "$TMP/s.json" "$HOME/.claude/settings.json"
+  install_ok
+  [ "$(find "$HOME/.claude/backups" -name 'settings.json*' | wc -l)" -eq 1 ]
+}
+
+@test "settings with an unsupported hooks object get no bind-self allow rules" {
+  fresh_install
+  printf '%s\n' '{"hooks":{"PreToolUse":{}}}' >"$HOME/.claude/settings.json"
+  install_ok
+  [ "$(jq -c . "$HOME/.claude/settings.json")" = '{"hooks":{"PreToolUse":{}}}' ]
+}
+
+@test "a failed write of the bind-self allow rules leaves settings.json byte for byte intact" {
+  fresh_install
+  jq '.permissions = {allow: ["Bash(ls *)"], deny: ["Bash(rm *)"]}' "$HOME/.claude/settings.json" >"$TMP/settings.before"
+  cp "$TMP/settings.before" "$HOME/.claude/settings.json"
+  # The replacement step fails after a partial write: cat (a copy over the live file) and mv (an atomic replace).
+  real_cat=$(command -v cat)
+  real_mv=$(command -v mv)
+  cat >"$BIN/cat" <<EOF
+#!/bin/bash
+case "\$1" in
+  */tmp.*) printf '{"permiss'; exit 1 ;;
+esac
+exec "$real_cat" "\$@"
+EOF
+  cat >"$BIN/mv" <<EOF
+#!/bin/bash
+case "\$1" in
+  */settings.json.tmp.*) exit 1 ;;
+esac
+exec "$real_mv" "\$@"
+EOF
+  chmod +x "$BIN/cat" "$BIN/mv"
+  install_fails
+  cmp "$HOME/.claude/settings.json" "$TMP/settings.before"
+  [ -z "$(find "$HOME/.claude" -maxdepth 1 -name 'settings.json.tmp.*')" ]
+}
+
+@test "bind-self allow rules keep the settings.json mode" {
+  fresh_install
+  printf '%s\n' '{"permissions":{"allow":["Bash(ls *)"]}}' >"$HOME/.claude/settings.json"
+  chmod 640 "$HOME/.claude/settings.json"
+  install_ok
+  mode=$(python3 -c 'import os, sys; print(format(os.stat(sys.argv[1]).st_mode & 0o777, "o"))' "$HOME/.claude/settings.json")
+  [ "$mode" = 640 ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
+}
+
+@test "bind-self allow rules are written through a symlinked settings.json" {
+  fresh_install
+  printf '%s\n' '{"permissions":{"allow":["Bash(ls *)"]}}' >"$TMP/real-settings.json"
+  rm "$HOME/.claude/settings.json"
+  ln -s "$TMP/real-settings.json" "$HOME/.claude/settings.json"
+  install_ok
+  [ -L "$HOME/.claude/settings.json" ]
+  [ "$(jq '.permissions.allow | length' "$TMP/real-settings.json")" -eq 3 ]
+}
+
+@test "settings with a non-list permissions.allow are left alone" {
+  fresh_install
+  printf '%s\n' '{"permissions":{"allow":"nope"}}' >"$HOME/.claude/settings.json"
+  install_ok
+  [ "$(jq -c '.permissions' "$HOME/.claude/settings.json")" = '{"allow":"nope"}' ]
+}
+
 @test "Bash guard matcher variants retain custom config" {
   fresh_install
   custom="$TMP/selected-orchestration.toml"
@@ -807,6 +951,15 @@ CASES
   fresh_install
   install_ok --env herdr
   contains "$output" 'open a new shell'
+}
+
+@test "the installer links the startup helpers into the managed bin" {
+  fresh_install
+  install_ok --env herdr
+  for helper in orch-agents orch-settings; do
+    [ -L "$HOME/.local/bin/$helper" ]
+    [ "$HOME/.local/bin/$helper" -ef "$CLONE/$helper" ]
+  done
 }
 
 @test "equivalent fork origins preserve their authentication transport" {

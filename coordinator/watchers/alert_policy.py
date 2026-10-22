@@ -1,4 +1,5 @@
 """Feed policy for watcher alerts: one start line and one clear line per condition; alert and state files keep every event."""
+
 import math
 import os
 import re
@@ -13,23 +14,43 @@ KEY_RETAIN_SECONDS = 86400
 MAX_KEYS = 1000
 DANGER_STEP = 2
 STATE_VERSION = 3
+WORKER_WAIT_NOTE = " (may be waiting on its own job)"
 MODE_KEY_PREFIXES = {
     "host": ("host:",),
     "balance": ("balance:",),
     "hog": ("hog:", "gitbig:", "gitlong:"),
 }
-HELD_PREFIXES = tuple(prefix for prefixes in MODE_KEY_PREFIXES.values() for prefix in prefixes)
+HELD_PREFIXES = tuple(
+    prefix for prefixes in MODE_KEY_PREFIXES.values() for prefix in prefixes
+)
 
-HOST_METRICS = {"PRESSURE": ("free", "ORCH_HOST_PRESSURE_MIN_PCT", 20, True),
-                "SWAP": ("swap", "ORCH_HOST_SWAP_MAX_MB", 1024, False),
-                "PROCS": ("procs", "ORCH_HOST_PROCS_MAX", 1300, False),
-                "FILES": ("files", "ORCH_HOST_FILES_MAX", 150000, False),
-                "LOAD": ("load", "ORCH_HOST_LOAD_MAX", 40, False)}
-BALANCE_METRICS = {"LOAD5": ("load5", None, 20, False), "SLOTS": ("slots", "ORCH_HEAVY_SLOTS_MAX", 4, False),
-                   "HEAVYWT": ("heavy", None, 4, False), "MEMFREE": ("free", None, 30, True)}
-HOG_KINDS = {"HOG": ("rss", "ORCH_HOG_GB", 6), "GITBIG": ("rss", "ORCH_HOG_GIT_GB", 2),
-             "GITLONG": ("age", "ORCH_HOG_GIT_AGE_S", 180)}
-PULL_KINDS = ("APPROVED", "APPROVED-OLDHEAD", "APPROVED-STACKED", "RED", "CHANGES", "THREADS", "COPILOT")
+HOST_METRICS = {
+    "PRESSURE": ("free", "ORCH_HOST_PRESSURE_MIN_PCT", 20, True),
+    "SWAP": ("swap", "ORCH_HOST_SWAP_MAX_MB", 1024, False),
+    "PROCS": ("procs", "ORCH_HOST_PROCS_MAX", 1300, False),
+    "FILES": ("files", "ORCH_HOST_FILES_MAX", 150000, False),
+    "LOAD": ("load", "ORCH_HOST_LOAD_MAX", 40, False),
+}
+BALANCE_METRICS = {
+    "LOAD5": ("load5", None, 20, False),
+    "SLOTS": ("slots", "ORCH_HEAVY_SLOTS_MAX", 4, False),
+    "HEAVYWT": ("heavy", None, 4, False),
+    "MEMFREE": ("free", None, 30, True),
+}
+HOG_KINDS = {
+    "HOG": ("rss", "ORCH_HOG_GB", 6),
+    "GITBIG": ("rss", "ORCH_HOG_GIT_GB", 2),
+    "GITLONG": ("age", "ORCH_HOG_GIT_AGE_S", 180),
+}
+PULL_KINDS = (
+    "APPROVED",
+    "APPROVED-OLDHEAD",
+    "APPROVED-STACKED",
+    "RED",
+    "CHANGES",
+    "THREADS",
+    "COPILOT",
+)
 YOUNG_MARK = ",new)"
 READFAIL_LABELS = {"workers": "WORKER"}
 NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
@@ -43,14 +64,18 @@ def setting(name, default):
 def ratio():
     value = setting("ORCH_ALERT_ESCALATE_RATIO", ESCALATE_RATIO)
     if not value > 1:
-        raise ValueError(f"ORCH_ALERT_ESCALATE_RATIO must be greater than 1, not {value:g}")
+        raise ValueError(
+            f"ORCH_ALERT_ESCALATE_RATIO must be greater than 1, not {value:g}"
+        )
     return value
 
 
 def limits():
-    return dict(ratio=ratio(),
-                digest=setting("ORCH_ALERT_DIGEST_S", DIGEST_SECONDS),
-                hold=setting("ORCH_ALERT_QUIET_S", CLEAR_HOLD_SECONDS))
+    return dict(
+        ratio=ratio(),
+        digest=setting("ORCH_ALERT_DIGEST_S", DIGEST_SECONDS),
+        hold=setting("ORCH_ALERT_QUIET_S", CLEAR_HOLD_SECONDS),
+    )
 
 
 def number(text):
@@ -60,12 +85,30 @@ def number(text):
 
 def short(text):
     text = " ".join(text.split())
-    return text if len(text) <= LINE_LIMIT else text[:LINE_LIMIT - 1] + "…"
+    return text if len(text) <= LINE_LIMIT else text[: LINE_LIMIT - 1] + "…"
 
 
-def fact(key, text, value=None, limit=None, lower=False, clearable=False, terminal=False, danger=False):
-    return dict(kind="alert", key=key, text=short(text), value=value, limit=limit, lower=lower,
-                clearable=clearable, terminal=terminal, danger=danger)
+def fact(
+    key,
+    text,
+    value=None,
+    limit=None,
+    lower=False,
+    clearable=False,
+    terminal=False,
+    danger=False,
+):
+    return dict(
+        kind="alert",
+        key=key,
+        text=short(text),
+        value=value,
+        limit=limit,
+        lower=lower,
+        clearable=clearable,
+        terminal=terminal,
+        danger=danger,
+    )
 
 
 def clear(prefix, exclude=(), exact=False):
@@ -84,11 +127,26 @@ def metric_facts(mode, line, table):
             continue
         name, env, default, lower = table[label]
         limit = setting(env, default) if env else float(default)
-        out.append(fact(f"{mode}:{name}", f"{mode.upper()} {label} {detail}", number(detail), limit, lower,
-                        clearable=True, danger=mode == "host"))
+        out.append(
+            fact(
+                f"{mode}:{name}",
+                f"{mode.upper()} {label} {detail}",
+                number(detail),
+                limit,
+                lower,
+                clearable=True,
+                danger=mode == "host",
+            )
+        )
     if out:
-        out.append(dict(kind="snapshot", prefix=f"{mode}:", exclude=(f"{mode}:readfail:", f"{mode}:health:"),
-                        keep={item["key"] for item in out}))
+        out.append(
+            dict(
+                kind="snapshot",
+                prefix=f"{mode}:",
+                exclude=(f"{mode}:readfail:", f"{mode}:health:"),
+                keep={item["key"] for item in out},
+            )
+        )
     return out
 
 
@@ -112,16 +170,26 @@ def readfail_facts(mode, line):
             if source.endswith(YOUNG_MARK):
                 out.append(fold(f"{prefix} READFAIL {source}"))
             else:
-                out.append(fact(f"{mode}:readfail:{source}", f"{prefix} READFAIL {source}", clearable=True))
+                out.append(
+                    fact(
+                        f"{mode}:readfail:{source}",
+                        f"{prefix} READFAIL {source}",
+                        clearable=True,
+                    )
+                )
         keep = {item["key"] for item in out if item["kind"] == "alert"}
-        return out + [dict(kind="snapshot", prefix=f"{mode}:readfail:", exclude=(), keep=keep)]
+        return out + [
+            dict(kind="snapshot", prefix=f"{mode}:readfail:", exclude=(), keep=keep)
+        ]
     return None
 
 
 def state_reset_facts(mode, line):
     if line.startswith(f"STATE RESET {mode}: "):
-        return [dict(kind="reset", prefixes=MODE_KEY_PREFIXES.get(mode, (f"{mode}:",))),
-                fact(f"{mode}:state-reset:{line}", line, terminal=True)]
+        return [
+            dict(kind="reset", prefixes=MODE_KEY_PREFIXES.get(mode, (f"{mode}:",))),
+            fact(f"{mode}:state-reset:{line}", line, terminal=True),
+        ]
     return None
 
 
@@ -134,58 +202,126 @@ def hog_facts(line):
         return [fact("hog:log", line, clearable=True)]
     if line == "hog LOG WRITE RECOVERED":
         return [clear("hog:log", exact=True)]
-    match = (re.match(r"(HOG|GITBIG|GITLONG) pid=(\d+) rss=([\d.]+)GB age=(\d+)s comm=\[([^\]]*)\]", line)
-             or re.match(r"(HOG|GITBIG|GITLONG) pid=(\d+) rss=([\d.]+)GB age=(\d+)s cmd=\[(?:[^\] ]*/)?([^\] /]+)", line))
+    match = re.match(
+        r"(HOG|GITBIG|GITLONG) pid=(\d+) rss=([\d.]+)GB age=(\d+)s comm=\[([^\]]*)\]",
+        line,
+    ) or re.match(
+        r"(HOG|GITBIG|GITLONG) pid=(\d+) rss=([\d.]+)GB age=(\d+)s cmd=\[(?:[^\] ]*/)?([^\] /]+)",
+        line,
+    )
     if not match:
         return None
     kind, pid, rss, age, process = match.groups()
     field, env, default = HOG_KINDS[kind]
     value = float(rss) if field == "rss" else float(age)
     shown = f"{rss}GB" if field == "rss" else f"{age}s"
-    return [fact(f"{kind.lower()}:{pid}/{process}", f"{kind} {pid}/{process} {shown}", value, setting(env, default),
-                 clearable=True)]
+    return [
+        fact(
+            f"{kind.lower()}:{pid}/{process}",
+            f"{kind} {pid}/{process} {shown}",
+            value,
+            setting(env, default),
+            clearable=True,
+        )
+    ]
 
 
 def context_facts(line):
-    gone = re.match(r"RECYCLE (.+) cleared$", line)
+    gone = re.match(r"RECYCLE(?:-WORKER)? (.+) cleared$", line)
     if gone:
         return [clear(f"context:{gone.group(1)}", exact=True)]
     if line.startswith("NOSENSOR "):
         if line.startswith("NOSENSOR CLEARED "):
             return [clear("context:nosensor:" + line.split(" ")[2], exact=True)]
         return [fact("context:nosensor:" + line.split(" ")[1], line, clearable=True)]
-    match = re.match(r"RECYCLE (.+) (\d+)(k|%)$", line)
+    match = re.match(r"RECYCLE(?:-WORKER)? (.+) (\d+)(k|%)$", line)
     if not match:
-        return [fact(f"context:{line[8:]}", line, clearable=True)] if line.startswith("RECYCLE ") else None
+        return (
+            [fact(f"context:{line[8:]}", line, clearable=True)]
+            if line.startswith("RECYCLE ")
+            else None
+        )
     subject, amount, unit = match.groups()
-    limit = (setting("ORCH_RECYCLE_TOKENS", 300000) / 1000 if unit == "k" else setting("ORCH_RECYCLE_PCT", 55))
+    limit = (
+        setting("ORCH_RECYCLE_TOKENS", 300000) / 1000
+        if unit == "k"
+        else setting("ORCH_RECYCLE_PCT", 55)
+    )
     return [fact(f"context:{subject}", line, float(amount), limit, clearable=True)]
 
 
 def worker_facts(line):
+    waiting = re.fullmatch(
+        r"WORKER WAITING .+ pane=\S+ owner=\S+ \d+m session=(\S+?)(?: (REPEAT|ESCALATE|cleared))?",
+        line.removesuffix(WORKER_WAIT_NOTE),
+    )
+    if waiting:
+        session, stage = waiting.groups()
+        key = f"workers:waiting:{session}:"
+        if stage == "cleared":
+            return [clear(key)]
+        item = fact(key + (stage or "start"), line, clearable=True)
+        # Session, owner, stage and background caveat are protocol fields, even beyond the display limit.
+        item["text"] = line
+        return [item]
+    idle = re.match(r"WORKER IDLE (\S+) owner=\S+( cleared)?$", line)
+    if idle:
+        key = f"workers:idle:{idle.group(1)}"
+        return (
+            [clear(key, exact=True)]
+            if idle.group(2)
+            else [fact(key, line, clearable=True)]
+        )
     match = re.match(r"WORKER (\S+) (RECOVERED )?(.+)$", line)
     if not match:
         return None
     pane, recovered, state = match.groups()
     if state.startswith("MOVED "):
-        return [dict(kind="move", key=f"workers:{pane}", target=f"workers:{state.split(' ', 1)[1]}")]
+        return [
+            dict(
+                kind="move",
+                key=f"workers:{pane}",
+                target=f"workers:{state.split(' ', 1)[1]}",
+            )
+        ]
     if state == "closed":
         return [clear(f"workers:{pane}", exact=True), fold(line)]
     if recovered:
         return [clear(f"workers:{pane}", exact=True)]
-    return [fact(f"workers:{pane}", line, clearable=True, terminal=state == "dead/disappeared")]
+    return [
+        fact(
+            f"workers:{pane}",
+            line,
+            clearable=True,
+            terminal=state == "dead/disappeared",
+        )
+    ]
 
 
 def audit_facts(line):
     if line.startswith("AUDIT BASELINE "):
-        return [fact("audit:baseline:" + re.sub(r" \[[^\]]*\]$", "", line[len("AUDIT BASELINE "):]), line)]
+        return [
+            fact(
+                "audit:baseline:"
+                + re.sub(r" \[[^\]]*\]$", "", line[len("AUDIT BASELINE ") :]),
+                line,
+            )
+        ]
     if line.startswith("READFAIL "):
-        return [fact("audit:readfail:" + line.split(" ", 1)[1].split(": ", 1)[0], line, clearable=True)]
-    cleared = re.fullmatch(r"(github|herdr|slots|(?:slot|git):.+) READFAIL cleared", line)
+        return [
+            fact(
+                "audit:readfail:" + line.split(" ", 1)[1].split(": ", 1)[0],
+                line,
+                clearable=True,
+            )
+        ]
+    cleared = re.fullmatch(
+        r"(github|herdr|slots|(?:slot|git):.+) READFAIL cleared", line
+    )
     if cleared:
         return [clear("audit:readfail:" + cleared.group(1), exact=True)]
     if line.startswith("CLEARED "):
-        return [clear(audit_facts(line[len("CLEARED "):])[0]["key"], exact=True)]
+        return [clear(audit_facts(line[len("CLEARED ") :])[0]["key"], exact=True)]
     match = re.match(r"(PACKS|WORKTREES) (.+?) has over (\d+)", line)
     if match:
         kind, repo, count = match.groups()
@@ -203,18 +339,31 @@ def pull_facts(line):
     kind, pr, rest = match.groups()
     if rest == "cleared":
         return [clear(f"pulls:{kind} {pr}", exact=True)]
-    item = fact(f"pulls:{kind} {pr}", line, clearable=True, terminal=kind in ("MERGED", "CLOSED"))
+    item = fact(
+        f"pulls:{kind} {pr}",
+        line,
+        clearable=True,
+        terminal=kind in ("MERGED", "CLOSED"),
+    )
     head = PULL_OWNER.match(line)
     if head and not item["text"].startswith(head.group(0)):
-        item["text"] = head.group(0) + " " + short(line[head.end():])[:max(1, LINE_LIMIT - head.end() - 1)]
+        item["text"] = (
+            head.group(0)
+            + " "
+            + short(line[head.end() :])[: max(1, LINE_LIMIT - head.end() - 1)]
+        )
     return [item]
 
 
 def todo_facts(line):
     if line.startswith("TODO READFAIL "):
-        return [fact("todo:readfail:" + line[len("TODO READFAIL "):], line, clearable=True)]
+        return [
+            fact("todo:readfail:" + line[len("TODO READFAIL ") :], line, clearable=True)
+        ]
     if line.startswith("TODO READ RECOVERED "):
-        return [clear("todo:readfail:" + line[len("TODO READ RECOVERED "):], exact=True)]
+        return [
+            clear("todo:readfail:" + line[len("TODO READ RECOVERED ") :], exact=True)
+        ]
     if line.startswith("TODO ") and " new: " in line:
         return [fact("todo:" + line, line, terminal=True)]
     return None
@@ -222,12 +371,33 @@ def todo_facts(line):
 
 def answer_facts(line):
     if line.startswith("ANSWER ") and ": " in line:
-        return [dict(kind="alert", key="answers:" + line, text=line, value=None, limit=None,
-                     lower=False, clearable=False, terminal=True, danger=False)]
+        return [
+            dict(
+                kind="alert",
+                key="answers:" + line,
+                text=line,
+                value=None,
+                limit=None,
+                lower=False,
+                clearable=False,
+                terminal=True,
+                danger=False,
+            )
+        ]
     if line.startswith("ANSWERS READ RECOVERED "):
-        return [clear("answers:readfail:" + line[len("ANSWERS READ RECOVERED "):], exact=True)]
+        return [
+            clear(
+                "answers:readfail:" + line[len("ANSWERS READ RECOVERED ") :], exact=True
+            )
+        ]
     if line.startswith("ANSWERS READFAIL "):
-        return [fact("answers:readfail:" + line[len("ANSWERS READFAIL "):], line, clearable=True)]
+        return [
+            fact(
+                "answers:readfail:" + line[len("ANSWERS READFAIL ") :],
+                line,
+                clearable=True,
+            )
+        ]
     return None
 
 
@@ -238,7 +408,14 @@ def facts(alert):
     if alert.get("snapshot"):
         listed = facts(dict(alert, snapshot=False))
         keep = {item["key"] for item in listed if item["kind"] == "alert"}
-        return listed + [dict(kind="snapshot", prefix=f"{mode}:", exclude=(f"{mode}:health:", f"{mode}:baseline"), keep=keep)]
+        return listed + [
+            dict(
+                kind="snapshot",
+                prefix=f"{mode}:",
+                exclude=(f"{mode}:health:", f"{mode}:baseline"),
+                keep=keep,
+            )
+        ]
     for line in alert.get("events", []):
         if line == "HEARTBEAT STALE":
             out.append(fact(f"heartbeat:{mode}", f"{mode} {line}", clearable=True))
@@ -247,10 +424,20 @@ def facts(alert):
             out.append(clear(f"heartbeat:{mode}", exact=True))
             continue
         if line == f"{mode.upper()} RECOVERED":
-            out.append(clear(f"{mode}:", exclude=(f"{mode}:readfail:", f"{mode}:health:")))
+            out.append(
+                clear(f"{mode}:", exclude=(f"{mode}:readfail:", f"{mode}:health:"))
+            )
             continue
         health = health_line(mode, line)
-        parsed = todo_facts(line) if mode == "todo" else answer_facts(line) if mode == "answers" else readfail_facts(mode, line) if mode != "audit" or health else None
+        parsed = (
+            todo_facts(line)
+            if mode == "todo"
+            else answer_facts(line)
+            if mode == "answers"
+            else readfail_facts(mode, line)
+            if mode != "audit" or health
+            else None
+        )
         if parsed is None and mode in ("todo", "answers"):
             parsed = readfail_facts(mode, line)
         if parsed is None:
@@ -269,7 +456,15 @@ def facts(alert):
             parsed = audit_facts(line)
         if parsed is None and mode == "pulls":
             parsed = pull_facts(line)
-        out.extend(parsed or [dict(fact(f"{mode}:unparsed:" + unparsed_format(line), line), unparsed=True)])
+        out.extend(
+            parsed
+            or [
+                dict(
+                    fact(f"{mode}:unparsed:" + unparsed_format(line), line),
+                    unparsed=True,
+                )
+            ]
+        )
     return out
 
 
@@ -300,19 +495,29 @@ def held(key):
 def matches(key, item):
     if item["exact"]:
         return key == item["prefix"]
-    return key.startswith(item["prefix"]) and not (item["exclude"] and key.startswith(item["exclude"]))
+    return key.startswith(item["prefix"]) and not (
+        item["exclude"] and key.startswith(item["exclude"])
+    )
 
 
 def last_activity(entry):
-    return max(entry.get("seen_at", 0), entry.get("cleared_at", 0), entry.get("started_at", 0))
+    return max(
+        entry.get("seen_at", 0), entry.get("cleared_at", 0), entry.get("started_at", 0)
+    )
 
 
 def prune(keys, now):
     """Drops inactive or never-clearing keys idle for KEY_RETAIN_SECONDS, then the least recently active beyond MAX_KEYS."""
-    for key in [key for key, entry in keys.items()
-                if (not entry["active"] or not entry["clearable"]) and now - last_activity(entry) > KEY_RETAIN_SECONDS]:
+    for key in [
+        key
+        for key, entry in keys.items()
+        if (not entry["active"] or not entry["clearable"])
+        and now - last_activity(entry) > KEY_RETAIN_SECONDS
+    ]:
         del keys[key]
-    for key in sorted(keys, key=lambda key: last_activity(keys[key]))[:max(0, len(keys) - MAX_KEYS)]:
+    for key in sorted(keys, key=lambda key: last_activity(keys[key]))[
+        : max(0, len(keys) - MAX_KEYS)
+    ]:
         del keys[key]
 
 
@@ -359,7 +564,11 @@ def apply(state, alerts, now, cfg=None, trace=None):
             finish(key, at)
 
     def finish_expired(at):
-        for key in [key for key, entry in keys.items() if "clearing_at" in entry and at - entry["clearing_at"] >= cfg["hold"]]:
+        for key in [
+            key
+            for key, entry in keys.items()
+            if "clearing_at" in entry and at - entry["clearing_at"] >= cfg["hold"]
+        ]:
             finish(key, at)
 
     for alert in sorted(alerts, key=lambda alert: min(alert.get("at", now), now)):
@@ -368,7 +577,13 @@ def apply(state, alerts, now, cfg=None, trace=None):
         mode = alert.get("mode", "?")
         items = facts(alert)
         moves = [item for item in items if item["kind"] == "move"]
-        keys.update({item["target"]: keys.pop(item["key"]) for item in moves if item["key"] in keys})
+        keys.update(
+            {
+                item["target"]: keys.pop(item["key"])
+                for item in moves
+                if item["key"] in keys
+            }
+        )
         for item in items:
             if item["kind"] == "move":
                 continue
@@ -379,8 +594,13 @@ def apply(state, alerts, now, cfg=None, trace=None):
                     state["folded_extra"] = state.get("folded_extra", 0) + 1
                 continue
             if item["kind"] == "snapshot":
-                for key in [key for key in keys if key.startswith(item["prefix"])
-                            and not (item["exclude"] and key.startswith(item["exclude"])) and key not in item["keep"]]:
+                for key in [
+                    key
+                    for key in keys
+                    if key.startswith(item["prefix"])
+                    and not (item["exclude"] and key.startswith(item["exclude"]))
+                    and key not in item["keep"]
+                ]:
                     release(key, observed)
                 continue
             if item["kind"] == "clear":
@@ -399,23 +619,45 @@ def apply(state, alerts, now, cfg=None, trace=None):
                     counts[shape] += 1
                 elif len(counts) < MAX_KEYS:
                     counts[shape] = 1
-                    lines.append(feed_line("watchers", f"unparsed {mode} line format: {shape}", "unparsed"))
-            danger = item["danger"] and band(item["value"], item["limit"], item["lower"], cfg["ratio"]) >= DANGER_STEP
+                    lines.append(
+                        feed_line(
+                            "watchers",
+                            f"unparsed {mode} line format: {shape}",
+                            "unparsed",
+                        )
+                    )
+            danger = (
+                item["danger"]
+                and band(item["value"], item["limit"], item["lower"], cfg["ratio"])
+                >= DANGER_STEP
+            )
             entry = keys.get(item["key"])
             if entry and entry["active"] and item["terminal"]:
                 finish(item["key"], observed)
             if entry and entry["active"] and not item["terminal"]:
                 entry.pop("clearing_at", None)
                 entry.update(seen_at=now, value=item["value"])
-                if mode == "pulls" and pull_owner(item["text"]) not in (None, "?", pull_owner(entry["text"])):
+                if mode == "pulls" and pull_owner(item["text"]) not in (
+                    None,
+                    "?",
+                    pull_owner(entry["text"]),
+                ):
                     entry["text"] = item["text"]
                     emit(item["key"], mode, item["text"], "owner")
                 if danger and not entry["danger"]:
                     entry.update(danger=True, text=item["text"])
                     emit(item["key"], mode, item["text"], "danger")
                 continue
-            keys[item["key"]] = dict(mode=mode, text=item["text"], value=item["value"], clearable=item["clearable"],
-                                     active=not item["terminal"], danger=danger, started_at=now, seen_at=now)
+            keys[item["key"]] = dict(
+                mode=mode,
+                text=item["text"],
+                value=item["value"],
+                clearable=item["clearable"],
+                active=not item["terminal"],
+                danger=danger,
+                started_at=now,
+                seen_at=now,
+            )
             if item["terminal"]:
                 keys[item["key"]]["cleared_at"] = now
             emit(item["key"], mode, item["text"], "danger" if danger else "start")
@@ -423,8 +665,14 @@ def apply(state, alerts, now, cfg=None, trace=None):
     prune(keys, now)
     if folded and now - state["digest_at"] >= cfg["digest"]:
         total = len(folded) + state.pop("folded_extra", 0)
-        shown = "; ".join(folded[:DIGEST_KEYS]) + (f"; +{total - DIGEST_KEYS} more" if total > DIGEST_KEYS else "")
-        lines.append(feed_line("watchers", short(f"Watcher digest, {total} folded: {shown}"), "digest"))
+        shown = "; ".join(folded[:DIGEST_KEYS]) + (
+            f"; +{total - DIGEST_KEYS} more" if total > DIGEST_KEYS else ""
+        )
+        lines.append(
+            feed_line(
+                "watchers", short(f"Watcher digest, {total} folded: {shown}"), "digest"
+            )
+        )
         folded.clear()
         state["digest_at"] = now
     return lines
@@ -436,19 +684,32 @@ def rebuild(alerts, now, cfg=None, current=None):
     line, and a given text replaces the historical one."""
     state, cfg, notes = {}, dict(cfg or limits(), hold=0, digest=math.inf), []
     for alert in alerts:
-        notes += [line for line in apply(state, [alert], now, cfg)
-                  if line.endswith("(unparsed)") or (alert.get("notify_reset") and " STATE RESET " in line)]
+        notes += [
+            line
+            for line in apply(state, [alert], now, cfg)
+            if line.endswith("(unparsed)")
+            or (alert.get("notify_reset") and " STATE RESET " in line)
+        ]
     apply(state, [], now, cfg)
     for key, entry in state["keys"].items():
-        if entry["mode"] in (current or {}) and key not in current[entry["mode"]] \
-                and not key.startswith("heartbeat:") and ":health:" not in key:
+        if (
+            entry["mode"] in (current or {})
+            and key not in current[entry["mode"]]
+            and not key.startswith("heartbeat:")
+            and ":health:" not in key
+        ):
             entry.update(active=False, cleared_at=now)
         elif entry["active"] and (current or {}).get(entry["mode"], {}).get(key):
             entry["text"] = current[entry["mode"]][key]
     state.update(folded=[], digest_at=now)
     state.pop("folded_extra", None)
-    lines = [feed_line(entry["mode"], entry["text"], "danger" if entry["danger"] else "start")
-             for entry in state["keys"].values() if entry["active"]]
+    lines = [
+        feed_line(
+            entry["mode"], entry["text"], "danger" if entry["danger"] else "start"
+        )
+        for entry in state["keys"].values()
+        if entry["active"]
+    ]
     return state, notes + lines
 
 
@@ -458,8 +719,12 @@ def repair_owners(state, current):
     lines = []
     for key, entry in state.get("keys", {}).items():
         text = current.get(key)
-        if entry["mode"] == "pulls" and entry["active"] and text \
-                and pull_owner(text) not in (None, "?", pull_owner(entry["text"])):
+        if (
+            entry["mode"] == "pulls"
+            and entry["active"]
+            and text
+            and pull_owner(text) not in (None, "?", pull_owner(entry["text"]))
+        ):
             entry["text"] = text
             lines.append(feed_line("pulls", text, "owner"))
     state["version"] = STATE_VERSION

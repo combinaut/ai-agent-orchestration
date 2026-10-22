@@ -47,6 +47,10 @@ architect = "claude-opus-5-5"
 codex_worker = "<codex-worker-model>"
 # Codex model for hard work; replace the placeholder
 codex_smart = "<codex-smart-model>"
+# pi model for routine work as provider/model-id; empty means pi is not used on this machine
+pi_worker = ""
+# pi model for hard work as provider/model-id; empty means pi is not used on this machine
+pi_smart = ""
 
 [recycle]
 # Tokens used at which RECYCLE fires
@@ -94,7 +98,7 @@ bin = ""
 # Absolute path of the Herdr socket
 socket = ""
 # install.sh links a Herdr plugin that opens the to-do view in a popup titled "Your to-do" on prefix+t, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env
-todo_popup = false
+todo_popup = true
 
 [user_todo]
 # To-do status directory; empty means ~/.claude/coordinator/status
@@ -135,6 +139,14 @@ gb = 6
 git_gb = 2
 # Hog watcher: git process age in seconds
 git_age_s = 180
+
+[workers]
+# Seconds idle or done before WORKER WAITING
+wait_s = 600
+# Seconds between waiting alerts (minimum 60)
+wait_repeat_s = 1800
+# Seconds idle or done before WORKER IDLE (no open PR)
+idle_s = 7200
 
 [pr_tabs]
 # Organization the PR tabs extension manages; empty turns org actions off

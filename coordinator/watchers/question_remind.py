@@ -1,4 +1,5 @@
 """A question hidden until a time: the `<slug>.remind` file next to the question, and reopening what is due."""
+
 import os
 import subprocess
 import tempfile

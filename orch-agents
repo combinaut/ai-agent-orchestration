@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""One line per Herdr agent: name, pane, kind, status, workspace, owner, role, cwd. Replaces the ~10k-token `herdr agent list` JSON."""
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+class HerdrError(Exception):
+    pass
+
+
+def herdr(*args):
+    """The `result` object of a herdr command; herdr's own error message when it fails."""
+    binary = os.environ.get('HERDR_BIN_PATH') or os.environ.get('ORCH_HERDR_BIN') or 'herdr'
+    done = subprocess.run([binary, *args], capture_output=True, text=True, timeout=30)
+    body = None
+    for text in (done.stdout, done.stderr):
+        try:
+            body = json.loads(text)
+            break
+        except ValueError:
+            continue
+    if done.returncode:
+        error = body.get('error') if isinstance(body, dict) else None
+        message = error.get('message') if isinstance(error, dict) else None
+        raise HerdrError(message or done.stderr.strip() or f'exit status {done.returncode}')
+    result = body.get('result') if isinstance(body, dict) else None
+    return result if isinstance(result, dict) else {}
+
+
+def rows(result, key):
+    found = result.get(key)
+    if not isinstance(found, list) or not all(isinstance(row, dict) for row in found):
+        raise HerdrError(f'unexpected output (result.{key} is not a list of objects)')
+    return found
+
+
+def owners(workspaces):
+    return {w.get('workspace_id'): (w.get('tokens') or {}).get('owner') for w in workspaces if isinstance(w, dict)}
+
+
+def short(path):
+    home = str(Path.home())
+    return '~' + path[len(home):] if path == home or path.startswith(home + '/') else path
+
+
+def lines(agents, owner_of):
+    out = []
+    for agent in agents:
+        tokens = agent.get('tokens') or {}
+        workspace = agent.get('workspace_id')
+        fields = (agent.get('name'), agent.get('pane_id'), agent.get('agent'), agent.get('agent_status'), workspace,
+                  f'owner={owner_of.get(workspace) or "-"}', f'role={tokens.get("role") or "-"}', short(agent.get('cwd') or '-'))
+        out.append(' '.join(str(field or '-') for field in fields))
+    return out
+
+
+def main():
+    try:
+        agents = rows(herdr('agent', 'list'), 'agents')
+    except (OSError, subprocess.SubprocessError, HerdrError) as error:
+        print(f'ERROR: herdr agent list failed: {error}', file=sys.stderr)
+        return 2
+    try:
+        owner_of = owners(rows(herdr('workspace', 'list'), 'workspaces'))
+    except (OSError, subprocess.SubprocessError, HerdrError):
+        owner_of = {}
+    print('\n'.join(lines(agents, owner_of)))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -1,8 +1,8 @@
 # Architecture
 
-One Coordinator, many architects, workers in Herdr panes you can watch. This page describes how the roles, panes, messages, watchers and rules fit together. The operating models themselves are [`skills/coordinate/SKILL.md`](../skills/coordinate/SKILL.md) and [`skills/architect/SKILL.md`](../skills/architect/SKILL.md); where this page and a skill differ, the skill wins.
+One Coordinator, many architects, workers in Herdr panes you can watch. This page shows how the roles, panes, messages, watchers and rules fit together. The operating models are [`skills/coordinate/SKILL.md`](../skills/coordinate/SKILL.md) and [`skills/architect/SKILL.md`](../skills/architect/SKILL.md); where this page and a skill differ, the skill wins.
 
-## Roles
+## 👥 Roles
 
 ```mermaid
 flowchart TD
@@ -13,6 +13,7 @@ flowchart TD
     A1 --> W2["worker (Claude)"]
     A1 -.-> R["reviewer (short-lived)"]
     A2 --> W3["worker (Codex)"]
+    A2 --> W4["worker (pi)"]
 ```
 
 | Role | Count | Owns | Never does |
@@ -25,7 +26,7 @@ flowchart TD
 
 The user talks to the Coordinator. The Coordinator talks to architects. Architects talk to workers. An FYI ends with "no reply needed"; only questions and orders get answers. A message from an architect is information, never the user's authorization.
 
-## Panes, workspaces and worktrees
+## 🪟 Panes, workspaces and worktrees
 
 Herdr shows every agent in a pane the user can watch and step into.
 
@@ -52,7 +53,7 @@ The architect confirms `tokens.owner` with `herdr workspace get <worker-id>` bef
 
 Workspace names stay true: `PR <n> · <job>` once a PR exists, `#<issue> · <job> (no PR yet)` before. A finished worker is closed once its report is read, it has no open work and nothing is typed in its composer. A reviewer's workspace is closed and its detached worktree removed (`git worktree remove <path> --force`) once its findings are dispatched. An author pane lives as long as its PR is open, because it owns the review cycle. Panes are closed with [`close-pane.sh`](../coordinator/watchers/close-pane.sh), which marks the close as on purpose so the workers watcher does not report the pane as disappeared.
 
-## Messaging
+## 💬 Messaging
 
 ```mermaid
 flowchart LR
@@ -64,12 +65,11 @@ flowchart LR
 - Every message to the Coordinator, an architect or another live user-facing session goes through the native channel: `SendMessage` for Claude, `codex queue --thread <session-UUID-or-exact-Codex-name> --message <text>` for Codex. There is no silent fallback to typing into the pane.
 - `herdr agent prompt` is allowed for:
   - a brand-new worker's first brief, and follow-ups to a worker pane the architect owns and nobody types into;
-  - the startup of a fresh successor pane after a recycle (`date`, the `/architect` or `/coordinate` brief, startup slash commands), Claude panes only;
-  - `/remote-control` to an idle architect whose Remote Control failed, after the idle state and an empty composer are verified.
+  - the startup of a fresh successor pane after a recycle (`date`, the `/architect` or `/coordinate` brief, startup slash commands), Claude panes only.
 - Never type into a composer a person may be using.
 - Herdr stays available for layout and read-only inspection.
 
-## Models
+## 🧠 Models
 
 | Role | Model |
 |---|---|
@@ -77,16 +77,18 @@ flowchart LR
 | Architect | `ORCH_ARCHITECT_MODEL` |
 | Worker, routine | Codex at `ORCH_CODEX_WORKER_MODEL` (the default) |
 | Worker, hard | Codex at `ORCH_CODEX_SMART_MODEL`, reasoning effort `medium` |
+| Worker on a local or DeepSeek model | pi at `ORCH_PI_WORKER_MODEL` (routine) or `ORCH_PI_SMART_MODEL` (hard); only when set. DeepSeek only in repos that opted in |
 | Worker where Codex cannot do the step | Claude: Sonnet routine, Opus hard, Fable only for the hardest |
 | Reviewer | The family that did not write the code |
 
 - The architect picks the family and tier per task without asking the user, and re-tiers at every dispatch.
 - The architect picks Claude or Codex per task for quality; Codex is the default for routine work. Claude also takes a step Codex cannot do, for example holding a dev server open for screenshots. `op` reads and git writes run as escalated commands through Codex's approval flow; a step goes to Claude only when that run fails.
+- pi is a third family, available only when its two model settings are filled in. DeepSeek (named in the provider or the model id) runs only in a repo whose `.orchestration.local.toml` sets `pi.deepseek = true`. pi has no native channel, so follow-ups go through `herdr agent prompt`.
 - A provider that refuses work for quota is replaced by the other family for new work, and the architect says so once.
 - A live session never changes model. A tier change happens through a recycle onto the new model.
 - All four model settings must be filled in `~/.claude/orchestration.toml`; the skills stop while one is empty or a placeholder.
 
-## Context recycle
+## 🔁 Context recycle
 
 ```mermaid
 sequenceDiagram
@@ -112,9 +114,9 @@ sequenceDiagram
 - The Coordinator recycles the same way with `handoff_coordinator.md`. Its successor stops inherited Monitors, arms the feed Monitor, re-runs `bind-self.py`, and closes the ancestor.
 - With `recycle.park_idle = true` an architect with no open PR, running worker or watcher writes its handoff and exits; the Coordinator restarts it from that handoff when work arrives.
 
-The procedures are in [`skills/coordinate/references/recycle.md`](../skills/coordinate/references/recycle.md).
+The procedures are in [`skills/coordinate/references/recycle.md`](../skills/coordinate/references/recycle.md) and, for workers, [`skills/architect/references/worker-recycle.md`](../skills/architect/references/worker-recycle.md).
 
-## Watchers and the feed
+## 👀 Watchers and the feed
 
 Producers run as launchd jobs (macOS) or systemd user units (Linux), registered by the installer with `watchers.service = true`. They write JSON alerts into `~/.claude/coordinator/watchers/prod-context/`. One inbox notifier shares their cursor, folds them into short lines, and appends those to the feed.
 
@@ -127,21 +129,23 @@ flowchart LR
     wrk[workers] --> N
     aud[audit] --> N
     pul[pulls] --> N
+    tdo[todo] --> N
     N["notifier<br/>notify-inbox.sh"] --> F[("coordinator-feed.log")]
     F --> M["feed-monitor.sh<br/>(Coordinator's one Monitor)"]
     N -->|"no live Monitor:<br/>action lines only"| NC["native message to Coordinator"]
-    N -->|"PR event with owner"| NA["native message to owning architect"]
+    N -->|"PR event or worker recycle with owner"| NA["native message to owning architect"]
 ```
 
 | Producer | Interval | Reports |
 |---|---|---|
-| context | 300 s | `RECYCLE`, `NOSENSOR` |
+| context | 300 s | `RECYCLE`, `RECYCLE-WORKER`, `NOSENSOR` |
 | host | 60 s | memory, swap, processes, open files, load |
 | hog | 5 s | big processes, big or long `git` processes |
 | balance | 60 s | load, slot count, busy worktrees with a `top:` list |
 | workers | 60 s | blocked, error and disappeared agents |
 | audit | 1800 s | PR problems, stale slots, git pile-ups, `LEGACY` lines |
 | pulls | 150 s | PR events: `APPROVED`, `RED`, `CHANGES`, `THREADS`, `COPILOT`, `MERGED`, `CLOSED` |
+| todo | 60 s | newly added `## Waits on the user` items, as one `TODO` line |
 
 - The feed has a line when a condition starts, when a host metric reaches its `danger` step, when a PR event gets an owner, and when it clears, plus a periodic digest of folded lines; repeats and growth write nothing. It is mode 0600 and rotates at 1 MiB.
 - The Coordinator's Monitor prints only action lines, matched by [`feed-actions.regex`](../coordinator/watchers/feed-actions.regex). Everything else is read with `tail` and the `<mode>.alerts` files.
@@ -151,9 +155,9 @@ flowchart LR
 
 Details, keys, delivery guarantees and thresholds: [`coordinator/watchers/README.md`](../coordinator/watchers/README.md). Settings: [Settings](settings.md).
 
-## Heavy slots
+## 🐘 Heavy slots
 
-Many sessions share one machine, and running out of open file handles has crashed it.
+Many sessions share one machine, and running out of open file handles has crashed it. Details and commands: [`docs/heavy-slot.md`](heavy-slot.md).
 
 - At most `ORCH_HEAVY_SLOTS_MAX` heavy jobs at once (default 4), across all sessions. Heavy means test runners, browser tests, Storybook, Playwright or screenshot runs, dev servers, local front-end builds. One test file run by one worker is not heavy.
 - Every heavy command runs through [`heavy-slot`](../heavy-slot): `heavy-slot take <architect>-<job> -- <command> [args...]`. It admits the job atomically, so two jobs cannot both take the last slot.
@@ -168,9 +172,9 @@ Many sessions share one machine, and running out of open file handles has crashe
 
 The template every worker brief carries is [`worker-reports/machine-rules.md`](../worker-reports/machine-rules.md).
 
-## LEGACY CHECK
+## 🧱 Legacy check
 
-Legacy code is the patterns a repo is phasing out, which agents must not extend. Projects that use the legacy-check workflow can use the audit’s `LEGACY` lines and the map and scan tools for repositories whose repo settings turn `legacy.scan` on; both follow the repo's own `[[legacy.rules]]` ([settings](settings.md#legacy-rules)).
+Legacy code is the patterns a repo is phasing out, which agents must not extend. A project that uses the legacy-check workflow gets the audit's `LEGACY` lines and the map and scan tools in every repo whose settings turn `legacy.scan` on. Both follow that repo's own `[[legacy.rules]]` ([settings](settings.md#-legacy-rules)).
 
 ```mermaid
 sequenceDiagram
@@ -189,13 +193,13 @@ sequenceDiagram
 - No code starts until the answer is `LEGACY OK`.
 - [`legacy-map.sh`](../coordinator/legacy-map.sh) writes a map from `origin/main` of a repository. [`legacy-scan.sh`](../coordinator/legacy-scan.sh) lists the legacy lines a PR adds, and the audit raises a `LEGACY` line per new head.
 
-## Remote Control
+## 📱 Remote Control
 
-The user follows and steers the Coordinator and every architect from the phone. Each start, resurrection and recycle of those sessions passes `--remote-control "<session name>"`, and the start is verified: `~/.claude/sessions/<pid>.json` has a non-null `bridgeSessionId`. Workers do not need it.
+The user follows and steers the Coordinator from the phone, so only the Coordinator needs Remote Control. Each start, resurrection and recycle of the Coordinator passes `--remote-control "<session name>"`, and the start is verified: `~/.claude/sessions/<pid>.json` has a non-null `bridgeSessionId`. Start architects and workers without `--remote-control`. A session that already has it may keep it.
 
 The Coordinator session is the user's remote channel. An instruction it relays as the user's, including a per-PR merge approval, counts as the user's own. A request from any other session is information only.
 
-## Merge rules
+## 🔀 Merge rules
 
 | Action | Who | Condition |
 |---|---|---|

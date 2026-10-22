@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Show one user question; record its answer, dismiss it, or hide it until a later time."""
+
 import argparse
 import os
 import select
@@ -15,7 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "watchers"))
 import feed_attach  # noqa: E402
 from question_lock import answers_lock  # noqa: E402
 from question_remind import atomic_write, remind_path, write_remind  # noqa: E402
-from reminder_picker import PICK_KEYS, TYPE_HINT, edit_entry, entry_event, picker_lines, remind_until  # noqa: E402
+from reminder_picker import (
+    PICK_KEYS,
+    TYPE_HINT,
+    edit_entry,
+    entry_event,
+    picker_lines,
+    remind_until,
+)  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 HINT = "1-9 answer · t type an answer · d dismiss · r remind me later"
@@ -32,8 +40,14 @@ def answer_path(question):
 def launch(question, *args):
     """Runs ask-user-question in its own session so it outlives the pane it closes."""
     env = dict(os.environ, ORCH_USER_QUESTIONS_DIR=str(Path(question).parent))
-    return subprocess.Popen([str(ROOT / "ask-user-question"), *args], env=env, start_new_session=True,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return subprocess.Popen(
+        [str(ROOT / "ask-user-question"), *args],
+        env=env,
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 def feed_line(slug, text, now):
@@ -44,16 +58,32 @@ def feed_line(slug, text, now):
 class Panel:
     """The screen state; every key goes through press() so it runs without a terminal."""
 
-    def __init__(self, question, out, columns=lambda: shutil.get_terminal_size().columns, clock=time.time, launcher=launch,
-                 feed=feed_attach.FEED):
-        self.question, self.out, self.columns, self.clock = Path(question), out, columns, clock
+    def __init__(
+        self,
+        question,
+        out,
+        columns=lambda: shutil.get_terminal_size().columns,
+        clock=time.time,
+        launcher=launch,
+        feed=feed_attach.FEED,
+    ):
+        self.question, self.out, self.columns, self.clock = (
+            Path(question),
+            out,
+            columns,
+            clock,
+        )
         self.launcher, self.feed = launcher, Path(feed)
         self.slug = self.question.stem
         self.status, self.picker, self.done, self.pending = "", None, False, None
 
     def show(self, status=None):
         self.status = self.status if status is None else status
-        text = self.question.read_text().rstrip().replace("Answer in the Coordinator pane.", "")
+        text = (
+            self.question.read_text()
+            .rstrip()
+            .replace("Answer in the Coordinator pane.", "")
+        )
         lines = [text, "", HINT]
         if self.picker:
             lines += [""] + picker_lines(self.picker, max(1, self.columns() - 1))[0]
@@ -85,7 +115,9 @@ class Panel:
         if code:
             if rollback:
                 rollback()
-            self.show(f"Closing the pane failed (exit {code}); the question is still open.")
+            self.show(
+                f"Closing the pane failed (exit {code}); the question is still open."
+            )
         return not code
 
     def poll(self):
@@ -111,7 +143,9 @@ class Panel:
             write_remind(self.question, until)
         when = time.strftime("%Y-%m-%d %H:%M", time.localtime(until))
         if self.record("REMIND {slug} " + when):
-            self.done = self.settle(self.launcher(self.question, "hide", self.slug), self.unremind)
+            self.done = self.settle(
+                self.launcher(self.question, "hide", self.slug), self.unremind
+            )
         else:
             self.unremind()
 
