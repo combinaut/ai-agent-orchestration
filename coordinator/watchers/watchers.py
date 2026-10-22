@@ -470,7 +470,10 @@ def reduce_waiting(previous, raw):
             if entry and owners is not None and owner != entry["owner"]:
                 continue
             if entry:
-                current[key] = dict(entry, row=dict(entry["row"], pane_id=row["pane_id"]))
+                saved_row = dict(entry["row"], pane_id=row["pane_id"])
+                if seq is not None:
+                    saved_row["state_change_seq"] = seq
+                current[key] = dict(entry, row=saved_row)
             continue
         if row.get("agent_status") not in IDLE_STATUSES:
             continue

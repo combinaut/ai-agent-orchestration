@@ -364,6 +364,34 @@ class WaitingTests(IsolatedTestCase):
         self.assertEqual(self.scan(800), [])
         self.assertEqual(self.state["waiting"]["s1"]["since"], 800)
 
+    def test_first_sequence_during_outage_becomes_reset_baseline(self):
+        for outage in ("ownership", "status"):
+            with self.subTest(outage=outage):
+                self.state = None
+                self.row.pop("state_change_seq", None)
+                self.row["agent_status"] = "done"
+                self.start()
+                self.row.update(
+                    state_change_seq=10,
+                    agent_status="unknown" if outage == "status" else "done",
+                )
+                self.assertEqual(
+                    self.scan(700, owners=None if outage == "ownership" else True), []
+                )
+                self.assertEqual(self.state["waiting"]["s1"]["since"], 0)
+                self.assertEqual(self.state["waiting"]["s1"]["stage"], 1)
+                self.row.pop("state_change_seq")
+                self.assertEqual(
+                    self.scan(750, owners=None if outage == "ownership" else True), []
+                )
+                self.row.update(state_change_seq=12, agent_status="done")
+                events = self.scan(800)
+                self.assertEqual(len(events), 1)
+                self.assertIn("cleared", events[0])
+                self.assertEqual(self.state["waiting"]["s1"]["since"], 800)
+                self.assertEqual(self.scan(1400), [])
+                self.assertIn("session=s1", self.scan(1401)[0])
+
     def test_missing_sequence_preserves_baseline_for_later_transition(self):
         for missing in ("absent", "null"):
             with self.subTest(missing=missing):
