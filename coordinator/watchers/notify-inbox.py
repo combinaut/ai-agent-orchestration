@@ -175,7 +175,7 @@ def native_messages(args, stamped, fallback, patterns):
     """One native message per architect with a binding file, and one for the Coordinator, as (binding path, text)."""
     by_owner = {}
     for line in stamped:
-        body = line.split(" ", 1)[1]
+        body = line.split(" ", 1)[1].replace(alert_policy.WORKER_WAIT_NOTE, "")
         waiting = WAIT_OWNER.match(body)
         if waiting and (" ESCALATE (start)" in body or line.endswith("(clear)")):
             continue
@@ -186,7 +186,7 @@ def native_messages(args, stamped, fallback, patterns):
     out = [(str(args.bindings_dir / f"architect-{owner}.json"), "\n".join(texts)) for owner, texts in sorted(by_owner.items())]
     actions = [line for line in stamped if is_action(line, patterns)] if args.binding and fallback else []
     escalations = [line for line in stamped if WAIT_OWNER.match(line.split(" ", 1)[1])
-                   and line.endswith(" ESCALATE (start)")] if args.binding else []
+                   and line.replace(alert_policy.WORKER_WAIT_NOTE, "").endswith(" ESCALATE (start)")] if args.binding else []
     for batch in (actions, escalations):
         if batch:
             out.append((str(args.binding), "\n".join(native(line) + ". No reply needed." for line in batch)))
@@ -284,7 +284,7 @@ def finish(args, cursor, now, patterns):
     for target, text in native_messages(args, in_feed, coordinator != "none", patterns):
         entry = dict(binding=target, text=text, at=now)
         # WAITING escalation is native even with a Monitor: that feed line is deliberately not an action.
-        escalation = all("workers: WORKER WAITING " in line and " ESCALATE (start)" in line
+        escalation = all("workers: WORKER WAITING " in line and " ESCALATE (start)" in line.replace(alert_policy.WORKER_WAIT_NOTE, "")
                          for line in text.splitlines())
         if target == str(args.binding) and coordinator == "watch" and not escalation:
             entry["watch"] = dict(inode=pending["inode"], end=pending["offset"] + len(data))

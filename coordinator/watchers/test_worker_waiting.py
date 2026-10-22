@@ -56,6 +56,20 @@ class WaitingTests(IsolatedTestCase):
         self.assertIn("session=s1", events[0])
         return events[0]
 
+    def test_own_background_jobs_are_explicitly_uncertain_without_a_reliable_sensor(
+        self,
+    ):
+        line = self.start()
+        self.assertTrue(line.endswith("(may be waiting on its own job)"))
+        self.row["name"] = "long-worker-name-" * 20
+        self.scan(2401)
+        line = self.scan(4201)[0]
+        self.assertLessEqual(len(line), alert_policy.LINE_LIMIT)
+        self.assertTrue(line.endswith("(may be waiting on its own job)"))
+        fact = alert_policy.worker_facts(line)[0]
+        self.assertTrue(fact["key"].endswith(":ESCALATE"))
+        self.assertTrue(fact["text"].endswith("(may be waiting on its own job)"))
+
     def test_threshold_and_no_extra_repeats(self):
         self.start()
         self.assertEqual(self.scan(2400), [])
@@ -77,13 +91,17 @@ class WaitingTests(IsolatedTestCase):
                     rows=[] if cause == "closed" else None,
                     owners=cause != "untagged",
                 )
-                self.assertTrue(events[0].endswith("cleared"))
+                self.assertTrue(
+                    events[0].endswith("cleared" + alert_policy.WORKER_WAIT_NOTE)
+                )
                 self.assertEqual(self.state["waiting"], {})
 
     def test_successor_in_same_pane_and_name_starts_fresh(self):
         self.start()
         self.row["agent_session"] = {"value": "s2"}
-        self.assertTrue(self.scan(700)[0].endswith("cleared"))
+        self.assertTrue(
+            self.scan(700)[0].endswith("cleared" + alert_policy.WORKER_WAIT_NOTE)
+        )
         self.assertEqual(set(self.state["waiting"]), {"s2"})
         self.assertEqual(self.scan(1300), [])
         self.assertIn("session=s2", self.scan(1301)[0])
@@ -108,7 +126,9 @@ class WaitingTests(IsolatedTestCase):
         self.assertEqual(self.scan(1000), [])
         self.assertEqual(self.state["waiting"], saved)
         self.row["agent_status"] = "working"
-        self.assertTrue(self.scan(1100)[0].endswith("cleared"))
+        self.assertTrue(
+            self.scan(1100)[0].endswith("cleared" + alert_policy.WORKER_WAIT_NOTE)
+        )
 
     def test_session_metadata_gap_preserves_state_until_real_successor(self):
         self.start()
@@ -117,7 +137,9 @@ class WaitingTests(IsolatedTestCase):
         self.assertEqual(self.scan(700), [])
         self.assertEqual(self.state["waiting"], saved)
         self.row["agent_session"] = {"value": "s2"}
-        self.assertTrue(self.scan(800)[0].endswith("cleared"))
+        self.assertTrue(
+            self.scan(800)[0].endswith("cleared" + alert_policy.WORKER_WAIT_NOTE)
+        )
         self.assertEqual(self.scan(1400), [])
         self.assertIn("session=s2", self.scan(1401)[0])
 
@@ -129,7 +151,7 @@ class WaitingTests(IsolatedTestCase):
             workspaces=[dict(workspace_id="w1", tokens={"owner": "new-owner"})],
         )
         self.state, events = w.reduce_workers(self.state, raw)
-        self.assertTrue(events[0].endswith("cleared"))
+        self.assertTrue(events[0].endswith("cleared" + alert_policy.WORKER_WAIT_NOTE))
         self.assertEqual(self.state["waiting"]["s1"]["since"], 700)
         self.assertEqual(self.state["waiting"]["s1"]["owner"], "new-owner")
 

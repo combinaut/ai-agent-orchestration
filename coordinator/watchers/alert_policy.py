@@ -13,6 +13,7 @@ KEY_RETAIN_SECONDS = 86400
 MAX_KEYS = 1000
 DANGER_STEP = 2
 STATE_VERSION = 3
+WORKER_WAIT_NOTE = " (may be waiting on its own job)"
 MODE_KEY_PREFIXES = {
     "host": ("host:",),
     "balance": ("balance:",),
@@ -163,7 +164,7 @@ def context_facts(line):
 
 
 def worker_facts(line):
-    waiting = re.fullmatch(r"WORKER WAITING .+ pane=\S+ owner=\S+ \d+m session=(\S+?)(?: (REPEAT|ESCALATE|cleared))?", line)
+    waiting = re.fullmatch(r"WORKER WAITING .+ pane=\S+ owner=\S+ \d+m session=(\S+?)(?: (REPEAT|ESCALATE|cleared))?", line.removesuffix(WORKER_WAIT_NOTE))
     if waiting:
         session, stage = waiting.groups()
         key = f"workers:waiting:{session}:"

@@ -76,3 +76,11 @@ so a successor using the same pane and name starts fresh. Herdr's snapshot has n
 prompt timestamp: work that begins and finishes entirely between polls cannot
 be distinguished from uninterrupted waiting. The timer starts at the first
 observed done/idle snapshot and survives watcher restarts.
+
+The installed Herdr agent/pane fields and tokens expose no authoritative running
+background-job count for Claude Code and Codex. `agent explain` has screen-derived
+rules for background agents and MCP tasks, but no general monitor/command signal;
+a missing match does not prove that no job is running. Status-line text is not a
+stable cross-runtime sensor. Accordingly every waiting line appends
+`(may be waiting on its own job)`, including native alerts and escalation. This
+avoids suppressing a real stalled worker based on incomplete terminal evidence.

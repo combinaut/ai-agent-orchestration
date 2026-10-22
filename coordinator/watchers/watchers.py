@@ -330,9 +330,12 @@ def worker_alerts(previous):
 
 def waiting_line(key, entry, now, suffix=""):
     row = entry["row"]
-    name = " ".join((row.get("name") or row.get("terminal_title_stripped") or "worker").split())[:24]
-    return (f"WORKER WAITING {name} pane={row['pane_id']} owner={entry['owner']} "
-            f"{int((now - entry['since']) // 60)}m session={key}" + (f" {suffix}" if suffix else ""))
+    tail = (f" pane={row['pane_id']} owner={entry['owner']} "
+            f"{int((now - entry['since']) // 60)}m session={key}" + (f" {suffix}" if suffix else "")
+            + alert_policy.WORKER_WAIT_NOTE)
+    budget = max(1, alert_policy.LINE_LIMIT - len("WORKER WAITING ") - len(tail))
+    name = " ".join((row.get("name") or row.get("terminal_title_stripped") or "worker").split())[:min(24, budget)]
+    return f"WORKER WAITING {name}" + tail
 
 
 def reduce_waiting(previous, raw):
