@@ -360,6 +360,8 @@ def reduce_waiting(previous, raw):
         role = (row.get("tokens") or {}).get("role")
         if role in ("architect", "coordinator"):
             continue
+        if row.get("agent_status") == "working" and key not in gaps:
+            continue
         owner = owners.get(row.get("workspace_id")) if owners is not None else None
         if owners is not None and not owner:
             continue

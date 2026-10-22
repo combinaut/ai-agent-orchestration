@@ -170,7 +170,10 @@ def worker_facts(line):
         key = f"workers:waiting:{session}:"
         if stage == "cleared":
             return [clear(key)]
-        return [fact(key + (stage or "start"), line, clearable=True)]
+        item = fact(key + (stage or "start"), line, clearable=True)
+        # Session, owner, stage and background caveat are protocol fields, even beyond the display limit.
+        item["text"] = line
+        return [item]
     match = re.match(r"WORKER (\S+) (RECOVERED )?(.+)$", line)
     if not match:
         return None

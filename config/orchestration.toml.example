@@ -48,9 +48,10 @@ codex_worker = "<codex-worker-model>"
 # Codex model for hard work; replace the placeholder
 codex_smart = "<codex-smart-model>"
 
-# Thresholds are seconds despite the historical MIN suffix
 [workers]
+# Seconds idle or done before WORKER WAITING
 wait_min = 600
+# Waiting age for the single repeat; then seconds until escalation
 wait_repeat_min = 1800
 
 [recycle]

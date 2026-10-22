@@ -70,6 +70,50 @@ class WaitingTests(IsolatedTestCase):
         self.assertTrue(fact["key"].endswith(":ESCALATE"))
         self.assertTrue(fact["text"].endswith("(may be waiting on its own job)"))
 
+    def test_long_ids_survive_policy_and_route_escalation_to_coordinator(self):
+        self.row.update(
+            pane_id="p" * 36, name="worker-name" * 30, agent_session={"value": "s" * 36}
+        )
+        state, policy = None, {}
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            owner = base / ("architect-" + "a" * 36 + ".json")
+            owner.touch()
+            args = argparse.Namespace(
+                bindings_dir=base, binding=base / "coordinator.json"
+            )
+            for now in (0, 601, 1800, 3600):
+                raw = dict(
+                    result={"agents": [self.row]},
+                    observed_at=now,
+                    workspaces=[dict(workspace_id="w1", tokens={"owner": "a" * 36})],
+                )
+                state, events = w.reduce_workers(state, raw)
+                lines = alert_policy.apply(
+                    policy, [dict(mode="workers", at=now, events=events)], now
+                )
+                if now == 0:
+                    continue
+                self.assertEqual(len(lines), 1)
+                self.assertIn("(may be waiting on its own job)", lines[0])
+                messages = inbox.native_messages(
+                    args, ["time " + lines[0]], False, inbox.action_patterns()
+                )
+                self.assertEqual(
+                    [path for path, _ in messages],
+                    [str(args.binding if now == 3600 else owner)],
+                )
+
+    def test_known_working_status_resets_during_ownership_outage(self):
+        self.start()
+        self.row["agent_status"] = "working"
+        self.assertIn("cleared", self.scan(700, owners=None)[0])
+        self.assertEqual(self.state["waiting"], {})
+        self.row["agent_status"] = "done"
+        self.assertEqual(self.scan(800), [])
+        self.assertEqual(self.scan(1400), [])
+        self.assertIn("session=s1", self.scan(1401)[0])
+
     def test_threshold_and_no_extra_repeats(self):
         self.start()
         self.assertEqual(self.scan(1799), [])
