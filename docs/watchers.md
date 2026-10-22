@@ -60,27 +60,24 @@ through the intentional-close helper, leaving the question file available to ret
 ## Workers waiting
 
 A session in an owner-tagged workspace that stays `done` or `idle` for more than
-`workers.wait_min` seconds (default 600) emits
+`workers.wait_s` seconds (default 600) emits
 `WORKER WAITING <name> pane=<pane> owner=<workspace> <minutes>m session=<id>`.
-Architect and Coordinator role panes are excluded. The owning architect gets a
-native message through its binding and the existing bounded retry outbox. There
-is one repeat at `workers.wait_repeat_min` seconds of waiting (default 1800), then one
-native Coordinator escalation after another such interval. No further repeats.
-The feed records every stage; the user's to-do list is unchanged.
+Architect and Coordinator role panes, and panes with an `Architect::` name or
+title, are excluded. The owning architect gets a native message through its
+binding and the existing bounded retry outbox. There is one repeat at
+`workers.wait_repeat_s` seconds of waiting (default 1800), then one native
+Coordinator escalation after another such interval. No further repeats. The feed
+records every stage; the user's to-do list is unchanged.
 
 An observed `working` status resets the timer. Closing the session, removing its
 owner tag, or changing its owner clears its old alert immediately. An unreadable
 workspace or agent snapshot preserves state; a successful empty ownership read
-clears it. Timers are keyed by session ID and removed when that session vanishes,
-so a successor using the same pane and name starts fresh. Herdr's snapshot has no
-prompt timestamp: work that begins and finishes entirely between polls cannot
-be distinguished from uninterrupted waiting. The timer starts at the first
-observed done/idle snapshot and survives watcher restarts.
+clears it. Timers are keyed by session ID (or pane ID when no session is available)
+and removed when that identity vanishes, so a successor using the same pane and
+name starts fresh. A change in Herdr's per-agent `state_change_seq` also resets
+the timer, catching state transitions between polls even when both snapshots are
+done/idle. The timer starts at the first observed done/idle snapshot and survives
+watcher restarts.
 
-The installed Herdr agent/pane fields and tokens expose no authoritative running
-background-job count for Claude Code and Codex. `agent explain` has screen-derived
-rules for background agents and MCP tasks, but no general monitor/command signal;
-a missing match does not prove that no job is running. Status-line text is not a
-stable cross-runtime sensor. Accordingly every waiting line appends
-`(may be waiting on its own job)`, including native alerts and escalation. This
-avoids suppressing a real stalled worker based on incomplete terminal evidence.
+Herdr has no reliable background-job signal, so every waiting line ends with
+`(may be waiting on its own job)`, including native alerts and escalation.

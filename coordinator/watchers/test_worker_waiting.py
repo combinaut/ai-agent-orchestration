@@ -122,11 +122,11 @@ class WaitingTests(IsolatedTestCase):
         self.assertEqual(self.scan(1400), [])
         self.assertIn("session=s1", self.scan(1401)[0])
 
-    def test_empty_session_id_is_missing_and_cannot_create_a_timer(self):
+    def test_empty_session_id_uses_pane_and_preserves_later_metadata_gaps(self):
         self.row["agent_session"] = {"value": ""}
         self.scan(0)
-        self.assertEqual(self.scan(99999), [])
-        self.assertEqual(self.state["waiting"], {})
+        self.assertIn("session=p1", self.scan(601)[0])
+        self.assertEqual(set(self.state["waiting"]), {"p1"})
         self.state = None
         self.row["agent_session"] = {"value": "s1"}
         self.start()
@@ -251,16 +251,60 @@ class WaitingTests(IsolatedTestCase):
         self.assertEqual(self.scan(1300), [])
         self.assertIn("session=s2", self.scan(1301)[0])
 
-    def test_role_panes_and_missing_sessions_never_alert(self):
+    def test_role_panes_never_alert(self):
         for role in ("architect", "coordinator"):
             self.state = None
             self.row["tokens"] = {"role": role}
             self.scan(0)
             self.assertEqual(self.scan(9999), [])
-        self.row.update(tokens={}, agent_session=None)
-        self.state = None
+
+    def test_sessionless_codex_worker_alerts_repeats_escalates_and_resets(self):
+        self.row.update(agent="codex", agent_session=None)
+        self.assertEqual(self.scan(0), [])
+        self.assertIn("session=p1", self.scan(601)[0])
+        self.assertIn("REPEAT", self.scan(1800)[0])
+        self.assertIn("ESCALATE", self.scan(3600)[0])
+        self.row["agent_status"] = "working"
+        self.assertIn("cleared", self.scan(3700, owners=None)[0])
+        self.assertEqual(self.state["waiting"], {})
+
+    def test_session_appearing_after_pane_timer_starts_fresh(self):
+        self.row["agent_session"] = None
         self.scan(0)
-        self.assertEqual(self.scan(9999), [])
+        self.scan(601)
+        self.row["agent_session"] = {"value": "s1"}
+        self.assertIn("cleared", self.scan(700)[0])
+        self.assertEqual(set(self.state["waiting"]), {"s1"})
+        self.assertEqual(self.scan(1300), [])
+        self.assertIn("session=s1", self.scan(1301)[0])
+
+    def test_architect_names_and_titles_never_alert(self):
+        for fields in (
+            dict(name="Architect::Tooling"),
+            dict(name="worker", terminal_title_stripped="busy Architect::Tooling"),
+            dict(name=None, terminal_title_stripped="Architect::Tooling"),
+        ):
+            with self.subTest(fields=fields):
+                self.state = None
+                self.row.update(fields)
+                self.scan(0)
+                self.assertEqual(self.scan(9999), [])
+                self.assertEqual(self.state["waiting"], {})
+
+    def test_whitespace_label_falls_back_and_routes_with_own_policy_key(self):
+        for fields in (
+            dict(name="   "),
+            dict(name=None, terminal_title_stripped=" \t"),
+        ):
+            with self.subTest(fields=fields):
+                self.state = None
+                self.row.update(fields)
+                self.scan(0)
+                line = self.scan(601)[0]
+                self.assertTrue(line.startswith("WORKER WAITING worker pane="))
+                fact = alert_policy.worker_facts(line)[0]
+                self.assertEqual(fact["key"], "workers:waiting:s1:start")
+                self.assertIsNotNone(inbox.WAIT_OWNER.search("workers: " + line))
 
     def test_unreadable_ownership_or_status_keeps_state(self):
         self.start()
@@ -299,6 +343,37 @@ class WaitingTests(IsolatedTestCase):
         self.assertTrue(events[0].endswith("cleared" + alert_policy.WORKER_WAIT_NOTE))
         self.assertEqual(self.state["waiting"]["s1"]["since"], 700)
         self.assertEqual(self.state["waiting"]["s1"]["owner"], "new-owner")
+
+    def test_state_change_between_polls_clears_and_restarts_timer(self):
+        self.row["state_change_seq"] = 10
+        self.start()
+        self.row["state_change_seq"] = 12
+        self.assertIn("cleared", self.scan(700)[0])
+        self.assertEqual(self.state["waiting"]["s1"]["since"], 700)
+        self.assertEqual(self.scan(1300), [])
+        self.assertIn("session=s1", self.scan(1301)[0])
+
+    def test_state_change_resets_during_ownership_outage(self):
+        self.row["state_change_seq"] = 10
+        self.start()
+        self.row["state_change_seq"] = 12
+        events = self.scan(700, owners=None)
+        self.assertEqual(len(events), 1)
+        self.assertIn("cleared", events[0])
+        self.assertEqual(self.state["waiting"], {})
+        self.assertEqual(self.scan(800), [])
+        self.assertEqual(self.state["waiting"]["s1"]["since"], 800)
+
+    def test_unchanged_sequence_or_missing_sequence_does_not_reset(self):
+        for seq in (10, None):
+            with self.subTest(seq=seq):
+                self.state = None
+                self.row["state_change_seq"] = seq
+                self.start()
+                self.row.update(agent_status="idle", revision=99)
+                self.assertEqual(self.scan(700), [])
+                self.assertEqual(self.state["waiting"]["s1"]["since"], 0)
+                self.assertIn("REPEAT", self.scan(1800)[0])
 
     def test_new_work_resets_timer_even_with_same_session(self):
         self.start()
@@ -360,7 +435,7 @@ class WaitingTests(IsolatedTestCase):
             self.assertNotIn(inbox.OUTBOX_KEY, cursor)
 
     def test_threshold_settings_are_used(self):
-        with patch.dict(os.environ, ORCH_WAIT_MIN="2", ORCH_WAIT_REPEAT_MIN="5"):
+        with patch.dict(os.environ, ORCH_WAIT_S="2", ORCH_WAIT_REPEAT_S="5"):
             self.scan(0)
             self.assertEqual(self.scan(2), [])
             self.assertEqual(len(self.scan(3)), 1)

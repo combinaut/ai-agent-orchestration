@@ -92,6 +92,23 @@ class WaitingCompatibilityTests(IsolatedTestCase):
                     any(line.startswith("WORKER WAITING ") for line in events)
                 )
 
+    def test_collection_leaves_envelope_validation_to_waiting_owners(self):
+        listing = {"result": {"workspaces": [None]}}
+        with (
+            patch.dict(os.environ, HERDR_ENV="1"),
+            patch.object(
+                w,
+                "command",
+                side_effect=[
+                    json.dumps({"result": {"agents": []}}),
+                    json.dumps(listing),
+                ],
+            ),
+        ):
+            raw = w.collect("workers", None)
+        self.assertEqual(raw["workspaces"], listing)
+        self.assertIsNone(w.waiting_owners(raw))
+
     def test_waiting_settings_and_idle_close_setting_share_one_workers_table(self):
         path = w.ROOT.parents[1] / "lib/orch_settings.py"
         spec = importlib.util.spec_from_file_location("compat_settings", path)
@@ -117,5 +134,5 @@ class WaitingCompatibilityTests(IsolatedTestCase):
         parsed = tomllib.loads(example)
         self.assertEqual(example.count("[workers]"), 1)
         self.assertEqual(
-            parsed["workers"], dict(wait_min=600, wait_repeat_min=1800, idle_s=7200)
+            parsed["workers"], dict(wait_s=600, wait_repeat_s=1800, idle_s=7200)
         )
