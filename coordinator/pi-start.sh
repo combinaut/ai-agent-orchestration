@@ -30,8 +30,14 @@ orch_load_config
 setting=ORCH_PI_WORKER_MODEL
 [ "$tier" = worker ] || setting=ORCH_PI_SMART_MODEL
 model=${!setting:-}
-case "$model" in "" | "<"*">") echo "pi-start.sh: pi is not configured; set models.pi_$tier ($setting) in $(orch_config_path)" >&2; exit 1 ;; esac
-orch_provider_enabled pi || { echo "pi-start.sh: pi is off; add \"pi\" to providers.enabled (ORCH_PROVIDERS) in $(orch_config_path)" >&2; exit 1; }
+not_configured="pi-start.sh: pi is not configured; set models.pi_$tier ($setting) in $(orch_config_path)"
+if ! orch_provider_enabled pi; then
+  # An empty providers.enabled turns pi on only when a pi model is set.
+  [ -z "${ORCH_PROVIDERS:-}" ] || { echo "pi-start.sh: pi is off; add \"pi\" to providers.enabled (ORCH_PROVIDERS) in $(orch_config_path)" >&2; exit 1; }
+  echo "$not_configured" >&2
+  exit 1
+fi
+case "$model" in "" | "<"*">") echo "$not_configured" >&2; exit 1 ;; esac
 case "$model" in ?*/?*) ;; *) echo "pi-start.sh: $setting must be provider/model-id, for example lmstudio/qwen/qwen3.6-35b-a3b" >&2; exit 1 ;; esac
 provider=${model%%/*}
 pi_model=${model#*/}
