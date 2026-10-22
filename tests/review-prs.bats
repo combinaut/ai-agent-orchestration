@@ -200,6 +200,32 @@ assert lines and lines[0].startswith("ready:"), lines
   [ "$status" -eq 0 ]
 }
 
+@test "a partial search does not flap a still-requested PR" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
+calls = []
+def fake_gh(*args):
+    calls.append(args)
+    assert args == ("pr", "view", url, "--json", "state,reviewRequests"), args
+    return json.dumps({"state": "OPEN", "reviewRequests": [{"login": "reviewer"}]})
+prs.gh = fake_gh
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [], lines
+assert retained == present, retained
+lines, retained = prs.changes(retained, present, "reviewer")
+assert lines == [], lines
+assert retained == {}, retained
+assert len(calls) == 1, calls
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
 @test "dispatch leaves the pane open when the turn ends without a review of the head" {
   stub_review_tools
   : >"$TMP/none.toml"

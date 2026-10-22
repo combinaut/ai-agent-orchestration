@@ -340,8 +340,22 @@ def blocker(snap):
     return None
 
 
-def changes(before, after):
+def departure(url, login):
+    """Returns a confirmed departure state, or None while this reviewer is still requested."""
+    pr = json.loads(gh("pr", "view", url, "--json", "state,reviewRequests"))
+    state = pr.get("state")
+    if state != "OPEN":
+        return state.lower() if state else None
+    for request in pr.get("reviewRequests") or []:
+        if (request.get("login") or "").lower() == login.lower():
+            return None
+    return "cleared"
+
+
+def changes(before, after, login=None):
     lines = []
+    still_open = {}
+    departure_login = login
     for url, now in after.items():
         was = before.get(url)
         if was is None:
@@ -385,12 +399,21 @@ def changes(before, after):
     for url, was in before.items():
         if url in after:
             continue
-        st = gh("pr", "view", url, "--json", "state", "--jq", ".state").strip()
-        if st == "OPEN":
+        try:
+            departure_login = departure_login or viewer_login()
+            st = departure(url, departure_login)
+        except (RuntimeError, json.JSONDecodeError):
+            # A missing result is only a hint. Keep it until a later per-PR read can confirm departure.
+            still_open[url] = was
+            continue
+        if st is None:
+            still_open[url] = was
+            continue
+        if st == "cleared":
             lines.append(f"cleared: {url} — {was['title']} (no longer requesting you)")
             continue
         lines.append(f"{st.lower()}: {url} — {was['title']}")
-    return lines, {}
+    return lines, still_open
 
 
 TITLE_MAX = 60
