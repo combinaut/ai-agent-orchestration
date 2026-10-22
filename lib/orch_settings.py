@@ -20,9 +20,10 @@ SNIPPET_DIR = '~/.claude/orchestration-repo-snippets'
 
 
 class Setting:
-    def __init__(self, key, env, kind, default, scope, doc, sep=' ', paths=False):
+    def __init__(self, key, env, kind, default, scope, doc, sep=' ', paths=False, local_only=False):
         self.key, self.env, self.kind, self.default = key, env, kind, default
         self.scope, self.doc, self.sep, self.paths = scope, doc, sep, paths
+        self.local_only = local_only
 
     @property
     def table(self):
@@ -61,6 +62,8 @@ SETTINGS = [
     _g('models.architect', 'ORCH_ARCHITECT_MODEL', 'str', 'claude-opus-5-5', 'Model of the architects'),
     _g('models.codex_worker', 'ORCH_CODEX_WORKER_MODEL', 'str', '<codex-worker-model>', 'Codex model for routine work; replace the placeholder'),
     _g('models.codex_smart', 'ORCH_CODEX_SMART_MODEL', 'str', '<codex-smart-model>', 'Codex model for hard work; replace the placeholder'),
+    _g('models.pi_worker', 'ORCH_PI_WORKER_MODEL', 'str', '', 'pi model for routine work as provider/model-id; empty means pi is not used on this machine'),
+    _g('models.pi_smart', 'ORCH_PI_SMART_MODEL', 'str', '', 'pi model for hard work as provider/model-id; empty means pi is not used on this machine'),
     _g('recycle.tokens', 'ORCH_RECYCLE_TOKENS', 'int', 300000, 'Tokens used at which RECYCLE fires'),
     _g('recycle.pct', 'ORCH_RECYCLE_PCT', 'number', 55, 'Context percentage used when the token sensor is absent'),
     _g('recycle.park_idle', 'ORCH_PARK_IDLE', 'bool', False, 'Park architects that have no open PR, worker or watcher'),
@@ -76,7 +79,7 @@ SETTINGS = [
     _g('watchers.closed_dir', 'ORCH_CLOSED_DIR', 'str', '', 'Where close-pane.sh marks a pane as closed on purpose; empty means ~/.claude/coordinator/watchers/prod-context/closed. The workers watcher reads <state-dir>/closed, so a custom folder needs that --state-dir', paths=True),
     _g('herdr.bin', 'ORCH_HERDR_BIN', 'str', '', 'Absolute path of the Herdr executable', paths=True),
     _g('herdr.socket', 'ORCH_HERDR_SOCKET', 'str', '', 'Absolute path of the Herdr socket', paths=True),
-    _g('herdr.todo_popup', 'ORCH_HERDR_TODO_POPUP', 'bool', False, "install.sh links a Herdr plugin that opens the to-do view in a popup titled \"Your to-do\" on prefix+t, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env"),
+    _g('herdr.todo_popup', 'ORCH_HERDR_TODO_POPUP', 'bool', True, "install.sh links a Herdr plugin that opens the to-do view in a popup titled \"Your to-do\" on prefix+t, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env"),
     _g('user_todo.status_dir', 'ORCH_USER_TODO_STATUS_DIR', 'str', '', 'To-do status directory; empty means ~/.claude/coordinator/status', paths=True),
     _g('user_todo.output', 'ORCH_USER_TODO_OUTPUT', 'str', '', 'To-do output file; empty means ~/.claude/coordinator/user-todo.md', paths=True),
     _g('user_todo.state', 'ORCH_USER_TODO_STATE', 'str', '', 'To-do state file; empty means ~/.claude/coordinator/user-todo.state.json', paths=True),
@@ -105,6 +108,7 @@ SETTINGS = [
     _r('legacy.exempt', 'ORCH_LEGACY_EXEMPT', 'list', [], 'Path globs no legacy rule counts'),
     _r('focus.pattern', 'ORCH_FOCUS_PATTERN', 'str', '', 'Case-insensitive regex matched against the labels of the workers of an architect working in this repo; empty turns the focus check off'),
     _r('focus.architect', 'ORCH_FOCUS_ARCHITECT', 'str', '', 'Architect name never listed as lacking a focus worker'),
+    _r('pi.deepseek', 'ORCH_PI_DEEPSEEK', 'bool', False, 'pi workers may run on the DeepSeek API in this repo; off unless set to true in the personal .orchestration.local.toml (a committed .orchestration.toml cannot turn it on); the pi start step refuses DeepSeek otherwise', local_only=True),
 ]
 
 REMOVED_KEYS = {'legacy.extra_pattern': '[[legacy.rules]]', 'legacy.exempt_paths': 'legacy.exempt'}
@@ -283,12 +287,13 @@ def repo_root(start):
 
 
 def local_tracked(root):
+    """True when git tracks the personal file, False when it does not (exit 1), None when git cannot tell."""
     try:
         result = subprocess.run(['git', '-C', str(root), 'ls-files', '--error-unmatch', '--', LOCAL_FILE],
                                 capture_output=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+        return None
+    return {0: True, 1: False}.get(result.returncode)
 
 
 def warn(message):
@@ -296,14 +301,19 @@ def warn(message):
 
 
 def local_values(root):
-    """Settings of a clone's personal file; warns when git tracks it."""
+    """Settings of a clone's personal file; warns when git tracks it, and then drops the personal-only settings."""
     local = Path(root) / LOCAL_FILE
     if not local.is_file():
         return {}
-    if local_tracked(root):
+    tracked = local_tracked(root)
+    if tracked is False:
+        return read_file(local, 'repo')
+    if tracked:
         warn(f'{local} is tracked by git; it is personal. Run: git -C {shlex.quote(str(root))} rm --cached {LOCAL_FILE} '
              f'and add {LOCAL_FILE} to .gitignore')
-    return read_file(local, 'repo')
+    else:
+        warn(f'{local}: git could not say whether it is tracked; it is treated as tracked')
+    return committed_layer(read_file(local, 'repo'), os.fspath(local))
 
 
 def main_checkout(root):
@@ -315,6 +325,14 @@ def main_checkout(root):
         return None
     main = Path(common).parent if common and Path(common).name == '.git' else None
     return main if main is not None and main.resolve() != Path(root).resolve() else None
+
+
+def committed_layer(values, label):
+    """A committed file's values without the personal-only settings; a committed file would opt in every clone."""
+    for setting in [setting for setting in values if setting.local_only]:
+        warn(f'{label}: {setting.key}: not read from a committed file; set it in {LOCAL_FILE}')
+        del values[setting]
+    return values
 
 
 def merged(layers, environ):
@@ -336,7 +354,7 @@ def load_repo(start, environ=None):
     if root is not None:
         committed = root / REPO_FILE
         if committed.is_file():
-            layers.append(read_file(committed, 'repo'))
+            layers.append(committed_layer(read_file(committed, 'repo'), os.fspath(committed)))
         main = main_checkout(root)
         if main is not None:
             layers.append(local_values(main))
@@ -350,7 +368,7 @@ def load_remote(repo, ref, committed_text, clone=None, environ=None):
     layers = []
     if committed_text:
         label = f'{repo}@{ref}:{REPO_FILE}'
-        layers.append(validate(parse(committed_text, label), label, 'repo'))
+        layers.append(committed_layer(validate(parse(committed_text, label), label, 'repo'), label))
     if clone:
         main = main_checkout(clone)
         if main is not None:
@@ -432,7 +450,7 @@ def render(values, comments=None, header=''):
 def example(scope):
     """The generated part of a config example; array-of-tables settings are left to the example's own comments."""
     lines = {s: [s.doc] for s in scoped(scope)}
-    values = {s: s.default for s in scoped(scope) if s.kind != 'tables'}
+    values = {s: s.default for s in scoped(scope) if s.kind != 'tables' and not s.local_only}
     if scope == 'global':
         header = ('# Global settings for the Coordinator / architect setup. install.sh copies this file to\n'
                   f'# {GLOBAL_FILE} on the first run only and never overwrites it.\n'

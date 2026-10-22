@@ -489,6 +489,20 @@ class WatcherTests(IsolatedTestCase):
         a["agent_status"] = "idle"
         raw["result"]["agents"] = [a]
         self.assertIsNone(self.cycle("workers", raw))
+    def test_pi_worker_leaving_working_is_reported(self):
+        raw = healthy("workers")
+        pi = [a for a in w.agents(raw) if a.get("agent") == "pi"]
+        self.assertEqual(len(pi), 1)
+        raw["result"]["agents"] = pi
+        self.cycle("workers", raw)
+        pi[0]["agent_status"] = "blocked"
+        self.one("workers", raw, "blocked")
+        pi[0]["agent_status"] = "idle"
+        self.one("workers", raw, "RECOVERED blocked")
+        pi[0]["agent_status"] = "working"
+        self.assertIsNone(self.cycle("workers", raw))
+        raw["result"]["agents"] = []
+        self.one("workers", raw, "dead/disappeared")
     def test_hog_thresholds_pid_reuse(self):
         raw = [{"pid": "42", "rss": 1000, "age": 1, "start": "one", "comm": "node"}]
         self.cycle("hog", raw)

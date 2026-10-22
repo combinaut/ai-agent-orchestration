@@ -7,6 +7,7 @@ import re
 import select
 import signal
 import struct
+import subprocess
 import sys
 import tempfile
 import termios
@@ -904,6 +905,45 @@ class PtyTest(IsolatedTestCase):
         out = run_in_pty({"VIEW_FAIL": "1"}, lambda pid, fd, read: read(until="RESULT"))
         self.assertRegex(out, r"RESULT oserror True True")
         self.assertIn("\x1b[?1000l", out)
+
+
+class ConfiguredOutputTest(ViewCase):
+    """The popup and the pane both start the view without a settings loader in front of it."""
+
+    def launch(self, config=None, **env):
+        home = self.root / "home"
+        link = home / ".claude/coordinator/user-todo-view.py"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        if not link.exists():
+            link.symlink_to(w.ROOT.parent / "user-todo-view.py")
+        if config is not None:
+            (home / ".claude/orchestration.toml").write_text(config)
+        program = ("import importlib.util, sys; spec = importlib.util.spec_from_file_location('v', sys.argv[1]); "
+                   "v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v); print(v.TODO)")
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("ORCH_")}
+        result = subprocess.run([sys.executable, "-c", program, str(link)], env={**clean, "HOME": str(home), **env},
+                                capture_output=True, text=True, check=True)
+        return Path(result.stdout.strip()), home
+
+    def test_the_output_set_only_in_the_settings_file_is_read(self):
+        todo, _ = self.launch('[user_todo]\noutput = "/data/todo out.md"\n')
+        self.assertEqual(todo, Path("/data/todo out.md"))
+
+    def test_a_home_relative_output_in_the_settings_file_expands(self):
+        todo, home = self.launch('[user_todo]\noutput = "~/lists/todo.md"\n')
+        self.assertEqual(todo, home / "lists/todo.md")
+
+    def test_the_exported_variable_wins_over_the_settings_file(self):
+        todo, _ = self.launch('[user_todo]\noutput = "/data/file.md"\n', ORCH_USER_TODO_OUTPUT="/data/env.md")
+        self.assertEqual(todo, Path("/data/env.md"))
+
+    def test_no_setting_reads_the_default_list(self):
+        todo, home = self.launch("")
+        self.assertEqual(todo, home / ".claude/coordinator/user-todo.md")
+
+    def test_an_unreadable_settings_file_reads_the_default_list(self):
+        todo, home = self.launch("[user_todo\n")
+        self.assertEqual(todo, home / ".claude/coordinator/user-todo.md")
 
 
 if __name__ == "__main__":

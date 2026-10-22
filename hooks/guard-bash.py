@@ -24,6 +24,8 @@ BIG_REPO_REASON = (
     "No git grep in a configured big repo. Use rg scoped to the directories you need."
 )
 BIG_REPO_BATCH_REASON = "No whole-tree cat-file batch read in a configured big repo. Use rg scoped to the directories you need."
+PI_REASON = "pi starts only through ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart>; DeepSeek is off unless the repo opted in, and a live pi never switches model."
+MODEL_COMMAND = re.compile(r'\s*/(?:model|models|scoped-models|settings)\b', re.I)
 BAD_ATTR = re.compile(r"co-authored-by:\s*(?:Claude|Codex|ChatGPT|OpenAI|Copilot|Gemini)|co-authored-by:[^\n]*(?:anthropic\.com|openai\.com|chatgpt\.com)|generated-by:\s*(?:Claude|Codex|ChatGPT|OpenAI|Copilot|Gemini)|Generated (?:with|using) (?:\[?(?:Claude Code|Codex|ChatGPT|OpenAI|Copilot|Gemini)\]?)|🤖\s*Generated|claude\.ai/code/session_", re.I)
 
 
@@ -806,7 +808,85 @@ def raw_fallback(command):
     return None
 
 
-GUARDED_EXECUTABLES = {'git', 'gh', 'pkill', 'pgrep', 'killall', 'ps', 'grep', 'awk', 'xargs'}
+HERDR_PAIRS = (('agent', 'start'), ('agent', 'prompt'), ('pane', 'run'), ('pane', 'send-text'))
+PI_INFO_FLAGS = {'--list-models', '--help', '-h', '--version', '-v'}
+
+
+def pi_info(args):
+    """True when pi exits at once on an informational flag: the flag is its first argument, so it is no prompt text or option value."""
+    return bool(args) and args[0] in PI_INFO_FLAGS
+
+
+def herdr_subcommand(args):
+    """The (group, verb) pair of a herdr call and the arguments after it."""
+    for index in range(len(args)-1):
+        if (args[index], args[index+1]) in HERDR_PAIRS:
+            return (args[index], args[index+1]), args[index+2:]
+    return None, []
+
+
+def pi_kind(args):
+    """The --kind values of a herdr agent start, trimmed and lowercased as herdr reads them."""
+    kinds = [args[i+1] for i, a in enumerate(args[:-1]) if a == '--kind'] + [a[len('--kind='):] for a in args if a.startswith('--kind=')]
+    return [kind.strip().lower() for kind in kinds]
+
+
+def guard_pi(executable, args, where='.', disabled=()):
+    """A pi start outside the start step (which runs herdr outside this hook), or DeepSeek named in a pi or herdr start."""
+    if executable == 'herdr':
+        pair, rest = herdr_subcommand(args)
+        text = ' '.join(rest[1:][1 if rest[1:2] == ['--'] else 0:])
+        if pair == ('agent', 'start'):
+            kinds = pi_kind(args)
+            agent_args = rest[rest.index('--')+1:] if '--' in rest else []
+            agent_args = [a for i, a in enumerate(agent_args) if agent_args[i-1:i] not in (['--cd'], ['-C']) and not a.startswith('--cd=')]
+            if ('pi' in kinds or any(re.search(r'[$`]', kind) for kind in kinds)
+                    or any('deepseek' in word.lower() for word in kinds + agent_args)):
+                return PI_REASON
+        elif pair in (('pane', 'run'), ('pane', 'send-text')):
+            if MODEL_COMMAND.match(text):
+                return PI_REASON
+            return evaluate(text, where, disabled) or guard_pi_text(text, where, disabled, 0, strict=True)
+        elif pair == ('agent', 'prompt') and MODEL_COMMAND.match(text):
+            return PI_REASON
+    elif not pi_info(args):
+        names_model = any(a in ('--provider', '--model') or a.startswith(('--provider=', '--model=')) for a in args)
+        if any('deepseek' in a.lower() for a in args) or not names_model:
+            return PI_REASON
+    return None
+
+
+def pi_candidates(words, wrapped):
+    """The herdr and pi calls of a stage, also behind a wrapper with unparsed options."""
+    found = [words] + ([words[i:] for i, word in enumerate(words) if i and os.path.basename(word) in ('herdr', 'pi')] if wrapped else [])
+    return [candidate for candidate in found if candidate and os.path.basename(candidate[0]) in ('herdr', 'pi')]
+
+
+def guard_pi_text(text, where, disabled, depth, direct=True, strict=False):
+    """guard_pi on the stages of a text and, from the masked words, on its $(...) and backtick bodies and on shell -c programs.
+    Strict mode (text typed into a pane) also denies every pi run that is not an info flag."""
+    if depth >= 3 or 'guard_pi' in disabled:
+        return None
+    try:
+        units = [segment for _, unit, _ in flow_units(text) for segment in unit]
+    except ValueError:
+        return None
+    for segment in units:
+        cleaned, _ = split_redirections(segment)
+        words, wrapped = unwrap([unmask(word) for word in cleaned])
+        if direct:
+            for candidate in pi_candidates(words, wrapped):
+                reason = guard_pi(os.path.basename(candidate[0]), candidate[1:], where, disabled)
+                if reason or (strict and os.path.basename(candidate[0]) == 'pi' and not pi_info(candidate[1:])):
+                    return PI_REASON
+        for nested in [body for word in segment for body in word_substitutions(word)] + shell_programs(words):
+            reason = guard_pi_text(nested, where, disabled, depth+1, strict=strict)
+            if reason:
+                return reason
+    return None
+
+
+GUARDED_EXECUTABLES = {'herdr', 'pi', 'git', 'gh', 'pkill', 'pgrep', 'killall', 'ps', 'grep', 'awk', 'xargs'}
 
 
 def evaluate_words(words, where, command, disabled, pipeline):
@@ -833,6 +913,8 @@ def evaluate_words(words, where, command, disabled, pipeline):
     elif executable == 'gh':
         args = unwrap_gh(args)
         guards = (guard_attribution,)
+    elif executable in ('herdr', 'pi'):
+        return None if 'guard_pi' in disabled else guard_pi(executable, args, where, disabled)
     elif executable in ('pkill', 'pgrep', 'killall', 'ps', 'grep', 'awk', 'xargs'):
         args = [executable, *args]
         guards = (guard_memory,)
@@ -867,9 +949,9 @@ def evaluate(command, cwd, disabled=()):
             reason = evaluate_words(candidate, where, normalized_command, disabled, pipeline)
             if reason:
                 return reason
+      return guard_pi_text(normalized_command, cwd, disabled, 0, direct=False)
     except ValueError:
         return raw_fallback(normalized_command)
-    return None
 
 
 def main():

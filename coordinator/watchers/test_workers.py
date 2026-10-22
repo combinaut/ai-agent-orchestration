@@ -71,6 +71,13 @@ class WorkersTests(IsolatedTestCase):
                                  status in ("working", "waiting", "blocked", "error"))
                 self.scan(agent("idle"))
 
+    def test_a_pi_worker_without_a_session_is_tracked_by_its_pane(self):
+        pi = dict(pane_id="pane-pi", agent="pi", agent_status="working", tokens={})
+        self.assertEqual(self.scan(pi), [])
+        self.assertEqual(self.scan(dict(pi, agent_status="error")), ["WORKER pane-pi error"])
+        self.assertEqual(self.scan(dict(pi, agent_status="working")), ["WORKER pane-pi RECOVERED error"])
+        self.assertEqual(self.scan(), ["WORKER pane-pi dead/disappeared"])
+
     def test_unknown_preserves_alert_until_readable(self):
         self.scan(agent("blocked"))
         self.assertEqual(self.scan(agent("unknown")), ["WORKER READFAIL pane-one(unknown)"])

@@ -3,6 +3,7 @@ import subprocess
 import sys
 import time
 import os
+import signal
 import tempfile
 import importlib.util
 from pathlib import Path
@@ -129,11 +130,12 @@ class AnswersTest(IsolatedTestCase):
                 def reduce(before, raw):
                     if failure == 'error':
                         raise ValueError('bad reduction')
-                    time.sleep(.3)
+                    signal.setitimer(signal.ITIMER_REAL, .05)
+                    time.sleep(10)
                     return original(before, raw)
                 with patch.dict(os.environ, ORCH_USER_QUESTIONS_DIR=str(questions)):
                     with patch.object(w, 'reduce_answers', side_effect=reduce):
-                        w.cycle(base, 'answers', w.collect_answers, budget=.2)
+                        w.cycle(base, 'answers', w.collect_answers, budget=5)
                     self.assertEqual(len(list(questions.glob('*.processing'))), 1)
                     self.assertEqual(list(questions.glob('*.seen')), [])
                     self.assertIn('ANSWER ship: yes', w.cycle(base, 'answers', w.collect_answers))

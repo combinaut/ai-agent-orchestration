@@ -546,6 +546,85 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
         ('number before spaced redirect is a target', 'kill -TERM 12345 >/dev/null'),
     ]:
         case(name, command)
+    for name, command in [
+        ('herdr pi start on DeepSeek', 'herdr agent start w --kind pi --pane w1:p2 -- --provider deepseek --model x'),
+        ('herdr pi start with equals kind', 'herdr agent start w --kind=pi --pane w1:p2 -- --model deepseek/x'),
+        ('herdr pi start on a local provider', 'herdr agent start w --kind pi --pane w1:p2 -- --provider lmstudio --model qwen/q'),
+        ('herdr pi start without a provider', 'herdr agent start w --kind pi --pane w1:p2'),
+        ('env wrapped herdr pi start', 'env FOO=1 herdr agent start w --kind pi --pane w1:p2 -- --provider deepseek'),
+        ('pi with provider flag', 'pi --provider deepseek --model x'),
+        ('pi with qualified model', 'pi -p --model DeepSeek/x "hi"'),
+        ('absolute pi path on DeepSeek', '/opt/bin/pi --provider deepseek'),
+        ('herdr pi start with an upper-case kind', 'herdr agent start w --kind PI --pane w1:p2 -- --provider lmstudio --model q'),
+        ('herdr pi start with a mixed-case equals kind', 'herdr agent start w --kind=Pi --pane w1:p2'),
+        ('herdr pi start with a variable kind', 'K=pi; herdr agent start w --kind "$K" --pane w1:p2'),
+        ('herdr pi start with an ANSI-C kind', "herdr agent start w --kind $'pi' --pane w1:p2"),
+        ('herdr pane run typing pi', "herdr pane run w1:p2 'pi --provider lmstudio --model q'"),
+        ('herdr pane run typing pi as words', 'herdr pane run w1:p2 pi --provider deepseek --model x'),
+        ('herdr pane run typing pi after cd', "herdr pane run w1:p2 'cd /tmp && pi'"),
+        ('herdr pane run typing pi after an assignment', "herdr pane run w1:p2 'FOO=1 pi'"),
+        ('herdr pane send-text typing pi', "herdr pane send-text w1:p2 'pi --model q'"),
+        ('herdr prompt switching a live model', "herdr agent prompt piw '/model lmstudio/qwen'"),
+        ('herdr prompt switching a live model in upper case', "herdr agent prompt piw '/MODEL deepseek/x' --wait"),
+        ('herdr pane send-text switching a live model', "herdr pane send-text w1:p2 '/model deepseek/x'"),
+        ('herdr start of another kind on DeepSeek', 'herdr agent start w --kind opencode --pane w1:p2 -- --model DeepSeek/x'),
+        ('herdr pi start after a global option', 'herdr --socket /tmp/s agent start w --kind pi --pane w1:p2'),
+        ('bash -c herdr pi start', "bash -c 'herdr agent start w --kind pi --pane w1:p2'"),
+        ('sh -c pi on DeepSeek', 'sh -c "pi --provider deepseek --model x"'),
+        ('zsh -c pi on DeepSeek', "zsh -c 'pi --provider deepseek'"),
+        ('eval herdr pi start', "eval 'herdr agent start w --kind pi --pane w1:p2'"),
+        ('quoted substitution running pi on DeepSeek', 'echo "$(pi --provider deepseek --model x -p hi)"'),
+        ('pane text starting a herdr pi start', "herdr pane run w1:p2 'herdr agent start w --kind pi --pane w1:p3 -- --provider deepseek --model x'"),
+        ('pane text running pi in bash -c', """herdr pane run w1:p2 'bash -c "pi --provider deepseek --model x"'"""),
+        ('pane text running pi under timeout', "herdr pane run w1:p2 'timeout 600 pi --provider deepseek --model x'"),
+        ('pane text running pi under nice', "herdr pane run w1:p2 'nice -n 5 pi'"),
+        ('pane text after a double dash', "herdr pane run w1:p2 -- 'pi --provider lmstudio --model q'"),
+        ('send-text after a double dash', 'herdr pane send-text w1:p2 -- pi --model q'),
+        ('prompt opening the scoped-models selector', "herdr agent prompt piw '/scoped-models'"),
+        ('prompt opening the settings selector', "herdr agent prompt piw '/settings'"),
+        ('kind with a trailing space', "herdr agent start w --kind 'pi ' --pane w1:p2"),
+        ('kind with a leading space', "herdr agent start w --kind ' pi' --pane w1:p2"),
+        ('equals kind with an escaped space', 'herdr agent start w --kind=pi\\  --pane w1:p2'),
+        ('bare pi', 'pi'),
+        ('pi on DeepSeek with help after a double dash', 'pi --provider deepseek --model x -- --help'),
+        ('pi with help as an option value', 'pi --append-system-prompt --help'),
+        ('pi with a version flag after a model', 'pi --provider deepseek --model x --version'),
+        ('pane text running pi with help after a double dash', "herdr pane run w1:p2 'pi --provider deepseek --model x -- --help'"),
+        ('pane text running pi with help as an option value', "herdr pane run w1:p2 'pi --append-system-prompt --help'"),
+        ('pi with a prompt and no provider', "pi -p 'summarize this repo'"),
+        ('pi with a model only on DeepSeek', 'pi --model deepseek-v4-pro'),
+        ('double-quoted substitution in a commit message', 'git commit -m "docs: $(pi --provider deepseek) is denied"'),
+        ('double-quoted backticks running pi', 'echo "`pi --provider deepseek`"'),
+        ('nested shell running herdr pi start', "bash -c \"sh -c 'herdr agent start w --kind pi --pane w1:p2'\""),
+    ]:
+        case(name, command, True)
+    for name, command in [
+        ('pi start step', '~/.claude/coordinator/pi-start.sh w w1:p2 worker'),
+        ('herdr claude start', 'herdr agent start w --kind claude --pane w1:p2'),
+        ('herdr codex start', 'herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --model m'),
+        ('herdr agent list', 'herdr agent list'),
+        ('herdr prompt to a pi worker', 'herdr agent prompt aao-pi "use deepseek notes" --wait'),
+        ('pi on a local provider', 'pi --provider lmstudio --model qwen/qwen3.6-35b-a3b'),
+        ('pi listing models', 'pi --list-models'),
+        ('pi listing DeepSeek models', 'pi --list-models deepseek'),
+        ('pi help', 'pi --help'),
+        ('pi version', 'pi --version'),
+        ('pi on a local provider with a prompt', "pi --provider lmstudio --model q -p 'hi'"),
+        ('commit message with a single-quoted substitution', "git commit -m 'docs: $(pi --provider deepseek) is denied'"),
+        ('PR comment with single-quoted backticks', "gh pr comment 38 --body 'run `pi --provider deepseek` only after opt-in'"),
+        ('herdr start of an agent named after DeepSeek', 'herdr agent start deepseek-review --kind claude --pane w1:p2 -- --model claude-sonnet-5-5'),
+        ('herdr start with a DeepSeek path for --cd', 'herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --cd ~/work/deepseek-eval'),
+        ('herdr pane run of a test command', "herdr pane run w1:p2 'npm test && echo done'"),
+        ('herdr pane send-text naming a pi log', "herdr pane send-text w1:p2 'cat pi.log'"),
+        ('herdr pane run of another command', 'herdr pane run w1:p2 "ls pi-docs"'),
+        ('herdr pane run mentioning pi in prose', "herdr pane run w1:p2 'echo pi'"),
+        ('herdr pane send-text without a model switch', "herdr pane send-text w1:p2 'model list'"),
+        ('herdr prompt mentioning /model in prose', "herdr agent prompt piw 'do not use /model'"),
+        ('bash -c of an unrelated command', "bash -c 'ls -la'"),
+        ('quoted substitution of an unrelated command', 'echo "$(date)"'),
+        ('grep for deepseek', 'grep -r deepseek docs/'),
+    ]:
+        case(name, command)
     footer = '*(Generated using Claude Code)*'
     for name, command in [
         ('multi-line comment footer', f'gh pr comment 36 --body "Addressed in fb655d7.\n\n{footer}" && gh pr edit 36 --add-label ready'),
@@ -595,7 +674,7 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
     if failed:
         sys.exit(1)
     assert 'removeprefix' not in HOOK.read_text() and 'removesuffix' not in HOOK.read_text()
-    for disabled, witness in [('guard_push', 'push main'), ('guard_attribution', 'Codex trailer'), ('guard_memory', 'shared deepen fetch'), ('guard_broad_kill', 'substitution pgrep kill'), ('guard_big_repo_reads', 'webapp batch all objects')]:
+    for disabled, witness in [('guard_push', 'push main'), ('guard_attribution', 'Codex trailer'), ('guard_memory', 'shared deepen fetch'), ('guard_broad_kill', 'substitution pgrep kill'), ('guard_big_repo_reads', 'webapp batch all objects'), ('guard_pi', 'herdr pi start on DeepSeek')]:
         caught = [name for name, command, deny, cwd in cases if bool(guard.evaluate(command, cwd, disabled=(disabled,))) != deny]
         assert witness in caught, (disabled, caught)
         print(f'Mutation: disable {disabled} -> {len(caught)} test failures; witness: {witness}')

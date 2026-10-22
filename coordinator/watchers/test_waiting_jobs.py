@@ -47,6 +47,7 @@ class WaitingJobTests(IsolatedTestCase):
             "⏵⏵ auto mode on · PR #46 · 1 shell",
             "✻ Cooked · done 4:50 PM · 1 shell, 2 monitors still running",
             "· 1 shell, 2 monitors",
+            "· 1 shell, 0 monitors",
             "✻ Cooked · done 4:50 PM · 0 shells, 2 monitors still running",
             "  1 monitor still running",
             "  2 monitors still running",

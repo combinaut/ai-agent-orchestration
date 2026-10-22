@@ -44,6 +44,8 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `models.architect` | `ORCH_ARCHITECT_MODEL` | `"claude-opus-5-5"` | Model of the architects |
 | `models.codex_worker` | `ORCH_CODEX_WORKER_MODEL` | `"<codex-worker-model>"` | Codex model for routine work; replace the placeholder |
 | `models.codex_smart` | `ORCH_CODEX_SMART_MODEL` | `"<codex-smart-model>"` | Codex model for hard work; replace the placeholder |
+| `models.pi_worker` | `ORCH_PI_WORKER_MODEL` | empty | pi model for routine work as provider/model-id; empty means pi is not used on this machine |
+| `models.pi_smart` | `ORCH_PI_SMART_MODEL` | empty | pi model for hard work as provider/model-id; empty means pi is not used on this machine |
 | `recycle.tokens` | `ORCH_RECYCLE_TOKENS` | `300000` | Tokens used at which RECYCLE fires |
 | `recycle.pct` | `ORCH_RECYCLE_PCT` | `55` | Context percentage used when the token sensor is absent |
 | `recycle.park_idle` | `ORCH_PARK_IDLE` | `false` | Park architects that have no open PR, worker or watcher |
@@ -59,7 +61,7 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `watchers.closed_dir` | `ORCH_CLOSED_DIR` | empty | Where close-pane.sh marks a pane as closed on purpose; empty means ~/.claude/coordinator/watchers/prod-context/closed. The workers watcher reads <state-dir>/closed, so a custom folder needs that --state-dir |
 | `herdr.bin` | `ORCH_HERDR_BIN` | empty | Absolute path of the Herdr executable |
 | `herdr.socket` | `ORCH_HERDR_SOCKET` | empty | Absolute path of the Herdr socket |
-| `herdr.todo_popup` | `ORCH_HERDR_TODO_POPUP` | `false` | install.sh links a Herdr plugin that opens the to-do view in a popup titled "Your to-do" on prefix+t, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env |
+| `herdr.todo_popup` | `ORCH_HERDR_TODO_POPUP` | `true` | install.sh links a Herdr plugin that opens the to-do view in a popup titled "Your to-do" on prefix+t, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env |
 | `user_todo.status_dir` | `ORCH_USER_TODO_STATUS_DIR` | empty | To-do status directory; empty means ~/.claude/coordinator/status |
 | `user_todo.output` | `ORCH_USER_TODO_OUTPUT` | empty | To-do output file; empty means ~/.claude/coordinator/user-todo.md |
 | `user_todo.state` | `ORCH_USER_TODO_STATE` | empty | To-do state file; empty means ~/.claude/coordinator/user-todo.state.json |
@@ -93,6 +95,13 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `legacy.exempt` | `ORCH_LEGACY_EXEMPT` | empty | Path globs no legacy rule counts |
 | `focus.pattern` | `ORCH_FOCUS_PATTERN` | empty | Case-insensitive regex matched against the labels of the workers of an architect working in this repo; empty turns the focus check off |
 | `focus.architect` | `ORCH_FOCUS_ARCHITECT` | empty | Architect name never listed as lacking a focus worker |
+| `pi.deepseek` | `ORCH_PI_DEEPSEEK` | `false` | pi workers may run on the DeepSeek API in this repo; off unless set to true in the personal .orchestration.local.toml (a committed .orchestration.toml cannot turn it on); the pi start step refuses DeepSeek otherwise |
+
+### pi workers
+
+`models.pi_worker` and `models.pi_smart` are `provider/model-id`, for example `lmstudio/qwen/qwen3.6-35b-a3b`; pi's `--model` accepts that form (`provider/id`, the model id may itself contain slashes). Check ids with `pi --list-models <provider>`. Both default to empty, and empty means pi is not used on this machine; `install.sh` does not ask for them and the architect does not stop on them.
+
+DeepSeek sends the code to a remote API, so it is off for every repo. A repo opts in with `[pi] deepseek = true` in its personal `.orchestration.local.toml` (the main checkout's file also applies to its linked worktrees). The key in a committed `.orchestration.toml` is ignored with a warning, because a committed file would opt in every clone. The same key in a git-tracked `.orchestration.local.toml` is ignored too, and so is it when git cannot say whether the file is tracked (a broken index or a timeout), with a warning. DeepSeek counts as named when `deepseek` appears, in any case, in the provider or in the model id (`openrouter/deepseek/…`); every other provider, LM Studio included, needs no opt-in. `coordinator/pi-start.sh` enforces this when it starts a pi worker: it refuses an empty provider, ignores an exported `ORCH_PI_DEEPSEEK` and `GIT_*` variables, and its refusal tells the session to ask the user rather than edit the file. The Bash guard denies the ways around it; `docs/bash-guard.md` lists what stays open.
 
 ## Legacy rules
 

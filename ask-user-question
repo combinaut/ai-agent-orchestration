@@ -53,6 +53,7 @@ case ${1:-} in
     canonical="$questions/$slug.md"
     [ "$(cd "$(dirname "$file")" && pwd)/$(basename "$file")" = "$canonical" ] || { echo "question file must be $canonical" >&2; exit 66; }
     anchor=$(find_pane "Q: " prefix)
+    [ -n "$anchor" ] || anchor=$(find_pane "To-do")
     if [ -z "$anchor" ]; then
       anchor=$(pane_rows | "${ORCH_PYTHON3:-python3}" -c '
 import json, sys

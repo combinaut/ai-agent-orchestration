@@ -202,6 +202,65 @@ class RepoFileTest(SettingsTest):
                          ('mine', 'A', 'c'))
         self.assertEqual(s.load_repo(root, {'ORCH_FOCUS_PATTERN': 'env'})['ORCH_FOCUS_PATTERN'], 'env')
 
+    def test_pi_deepseek_is_off_unless_the_local_file_turns_it_on(self):
+        root = self.repo()
+        self.assertEqual(s.load_repo(root, {})['ORCH_PI_DEEPSEEK'], '0')
+        (root / s.LOCAL_FILE).write_text('[pi]\ndeepseek = true\n')
+        self.assertEqual(s.load_repo(root, {})['ORCH_PI_DEEPSEEK'], '1')
+        (root / s.LOCAL_FILE).write_text('[pi]\ndeepseek = false\n')
+        self.assertEqual(s.load_repo(root, {})['ORCH_PI_DEEPSEEK'], '0')
+
+    def test_pi_deepseek_in_the_committed_file_does_not_opt_in(self):
+        root = self.repo()
+        (root / s.REPO_FILE).write_text('[pi]\ndeepseek = true\n[guard]\nbig_repo = true\n')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            values = s.load_repo(root, {})
+        self.assertEqual((values['ORCH_PI_DEEPSEEK'], values['ORCH_BIG_REPO']), ('0', '1'))
+        self.assertIn('not read from a committed file', err.getvalue())
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(s.load_remote('acme/webapp', 'main', '[pi]\ndeepseek = true\n')['ORCH_PI_DEEPSEEK'], '0')
+        (root / s.LOCAL_FILE).write_text('[pi]\ndeepseek = true\n')
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(s.load_repo(root, {})['ORCH_PI_DEEPSEEK'], '1')
+
+    def test_pi_deepseek_in_a_tracked_local_file_does_not_opt_in(self):
+        root = self.repo()
+        (root / s.LOCAL_FILE).write_text('[pi]\ndeepseek = true\n[guard]\nbig_repo = true\n')
+        git(root, 'add', '-f', s.LOCAL_FILE)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            values = s.load_repo(root, {})
+        self.assertEqual((values['ORCH_PI_DEEPSEEK'], values['ORCH_BIG_REPO']), ('0', '1'))
+        self.assertIn('is tracked by git', err.getvalue())
+        self.assertIn('not read from a committed file', err.getvalue())
+
+    def test_pi_deepseek_does_not_opt_in_when_git_cannot_say_whether_the_file_is_tracked(self):
+        root = self.repo()
+        (root / s.LOCAL_FILE).write_text('[pi]\ndeepseek = true\n[guard]\nbig_repo = true\n')
+        self.assertEqual(s.load_repo(root, {})['ORCH_PI_DEEPSEEK'], '1')
+        (root / '.git' / 'index').write_bytes(b'not an index')
+        self.assertIsNone(s.local_tracked(root))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            values = s.load_repo(root, {})
+        self.assertEqual((values['ORCH_PI_DEEPSEEK'], values['ORCH_BIG_REPO']), ('0', '1'))
+        self.assertIn('could not say whether it is tracked', err.getvalue())
+
+    def test_pi_deepseek_does_not_opt_in_when_the_tracking_probe_fails_to_run(self):
+        root = self.repo()
+        (root / s.LOCAL_FILE).write_text('[pi]\ndeepseek = true\n')
+        with patch.object(s.subprocess, 'run', side_effect=subprocess.TimeoutExpired('git', 5)), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(s.load_repo(root, {})['ORCH_PI_DEEPSEEK'], '0')
+
+    def test_a_linked_worktree_reads_pi_deepseek_from_its_main_checkout(self):
+        main = self.repo('main')
+        git(main, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init')
+        git(main, 'worktree', 'add', '-q', '-b', 'side', str(self.base / 'side'))
+        (main / s.LOCAL_FILE).write_text('[pi]\ndeepseek = true\n')
+        self.assertEqual(s.load_repo(self.base / 'side', {})['ORCH_PI_DEEPSEEK'], '1')
+
     def test_an_exported_variable_wins_for_every_repo_setting(self):
         root = self.repo()
         (root / s.REPO_FILE).write_text(s.render({setting: example_value(setting) for setting in s.scoped('repo')}))

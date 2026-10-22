@@ -11,7 +11,7 @@ The watchers write alerts to files, and one notifier turns them into a feed at `
 | hog | Big processes and long or big `git` processes |
 | balance | Worktree CPU and memory against the heavy-slot cap |
 | workers | Blocked, errored or vanished agents; finished workers waiting on their architect |
-| user-todo | What waits on you (see [The to-do pane](../README.md#the-to-do-pane)) |
+| user-todo | What waits on you (see [The to-do pane](todo.md)) |
 
 **With services**: set `[watchers] service = true` (with `[herdr] bin` and `socket`) and run the installer again. It registers the watchers (audit and pulls only when `pr.author` is set in the config file, not just exported) with launchd (macOS) or `systemd --user` (Linux) to run now and at login. Back to `false` removes them. Off by default.
 

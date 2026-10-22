@@ -47,6 +47,10 @@ architect = "claude-opus-5-5"
 codex_worker = "<codex-worker-model>"
 # Codex model for hard work; replace the placeholder
 codex_smart = "<codex-smart-model>"
+# pi model for routine work as provider/model-id; empty means pi is not used on this machine
+pi_worker = ""
+# pi model for hard work as provider/model-id; empty means pi is not used on this machine
+pi_smart = ""
 
 [recycle]
 # Tokens used at which RECYCLE fires
@@ -94,7 +98,7 @@ bin = ""
 # Absolute path of the Herdr socket
 socket = ""
 # install.sh links a Herdr plugin that opens the to-do view in a popup titled "Your to-do" on prefix+t, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env
-todo_popup = false
+todo_popup = true
 
 [user_todo]
 # To-do status directory; empty means ~/.claude/coordinator/status

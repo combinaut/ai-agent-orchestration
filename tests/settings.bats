@@ -24,14 +24,14 @@ load_settings() {
     for name in $ORCH_SETTINGS; do [ -z "${!name+x}" ] || printf "%s=%s\n" "$name" "${!name}"; done' _ "$ROOT" "$1"
 }
 
-# every_value <global|repo>: a TOML file setting each setting of the scope to a value unlike its default.
+# every_value <global|repo>: a TOML file setting each setting of the scope to a value unlike its default; a committed file cannot hold the local-only ones.
 every_value() {
   python3 - "$ROOT/lib" "$1" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import orch_settings as s
 values = {'str': 'from-file', 'int': 7, 'number': 7.5, 'bool': True, 'list': ['a', 'b'], 'json': [{'name': 'file'}], 'tables': [{'name': 'file'}]}
-print(s.render({setting: values[setting.kind] for setting in s.scoped(sys.argv[2])}), end='')
+print(s.render({setting: values[setting.kind] for setting in s.scoped(sys.argv[2]) if not setting.local_only}), end='')
 PY
 }
 
@@ -84,7 +84,7 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
   printf '%s\n' "$output" | grep -qxF "ORCH_FOCUS_PATTERN=local"
   printf '%s\n' "$output" | grep -qxF "ORCH_BIG_REPO=1"
   names=$(printf '%s\n' "$output" | sed 's/=.*//')
-  [ "$(printf '%s\n' "$names" | wc -l)" -eq 8 ]
+  [ "$(printf '%s\n' "$names" | wc -l)" -eq 9 ]
   for name in $names; do export "$name=env-$name"; done
 
   run load_settings "$TMP/repo/sub"
@@ -243,7 +243,8 @@ ORCH_LEGACY_SCAN=1
 ORCH_LEGACY_RULES=[{\"kind\":\"LEGACY\",\"pattern\":\"old-widget\",\"paths\":[\"**\"]}]
 ORCH_LEGACY_EXEMPT=a.js b.js
 ORCH_FOCUS_PATTERN=billing
-ORCH_FOCUS_ARCHITECT=Billing" ]
+ORCH_FOCUS_ARCHITECT=Billing
+ORCH_PI_DEEPSEEK=0" ]
   [ "$(cat "$TMP/snippets/acme/tools.toml")" = '# Repo settings for acme/tools, converted from orchestration.env.
 
 [audit]

@@ -881,7 +881,7 @@ os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/inst
   fresh_install
   foreign_config
   printf upstream >"$HERDR_PLUGIN"
-  run env HERDR_RADAR_BLOCK=1 /bin/bash "$CLONE/install.sh" --env herdr
+  run env ORCH_HERDR_TODO_POPUP=0 HERDR_RADAR_BLOCK=1 /bin/bash "$CLONE/install.sh" --env herdr
   [ "$status" -eq 0 ]
   contains "$output" 'already installed (0.9.1'
   [ ! -e "$CURL_CALLS" ] || not_contains "$(cat "$CURL_CALLS")" https://herdr.dev/install.sh

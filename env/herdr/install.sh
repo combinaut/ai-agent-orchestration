@@ -330,11 +330,11 @@ todo_config_sync() {
   die "$target keeps changing; run install.sh again (the file is unchanged)"
 }
 
-# install_todo_popup: herdr.todo_popup links the to-do plugin and writes the prefix+t block; off removes both.
+# install_todo_popup: the to-do plugin and the prefix+t block are installed unless herdr.todo_popup is false, which removes both.
 install_todo_popup() {
   local enabled plugin source changed=0
   enabled=$(config_value ORCH_HERDR_TODO_POPUP)
-  [ "$enabled" = 1 ] || enabled=0
+  [ "$enabled" = 0 ] || enabled=1
   todo_config_check
   plugin="$ORCH_REPO/env/herdr/todo-plugin"
   source=$("$HERDR_EXE" plugin list | sed -n "s/^- $TODO_ID .*\[\(.*\)\]\$/\1/p")
