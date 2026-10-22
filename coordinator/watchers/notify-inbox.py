@@ -30,6 +30,7 @@ OUTBOX_KEEP_SECONDS = 3600
 MONITOR_ACK_SECONDS = 20
 FEED_NAME = "coordinator-feed.log"
 FEED_BYTES = 1024 * 1024
+WAIT_OWNER = re.compile(r"^workers: WORKER WAITING .+ pane=\S+ owner=([A-Za-z0-9_-]+) \d+m session=\S+")
 OWNER = re.compile(r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER \S+) owner=([A-Za-z0-9_-]+) ")
 
 spec = importlib.util.spec_from_file_location("reader", w.ROOT / "read-alerts.py")
@@ -175,14 +176,21 @@ def native_messages(args, stamped, fallback, patterns):
     waits in the outbox), and one for the Coordinator, as (binding path, text)."""
     by_owner = {}
     for line in stamped:
-        owner = OWNER.match(line.split(" ", 1)[1])
+        body = line.split(" ", 1)[1].replace(alert_policy.WORKER_WAIT_NOTE, "")
+        waiting = WAIT_OWNER.match(body)
+        if waiting and (body.endswith(" ESCALATE (start)") or line.endswith("(clear)")):
+            continue
+        owner = OWNER.match(body) or waiting
         if owner and not line.endswith("(clear)") and args.bindings_dir \
-                and (" RECYCLE-WORKER " in line or (args.bindings_dir / f"architect-{owner.group(1)}.json").exists()):
+                and (waiting or " RECYCLE-WORKER " in line or (args.bindings_dir / f"architect-{owner.group(1)}.json").exists()):
             by_owner.setdefault(owner.group(1), []).append(native(line.split(" ", 1)[1]) + ". No reply needed.")
     out = [(str(args.bindings_dir / f"architect-{owner}.json"), "\n".join(texts)) for owner, texts in sorted(by_owner.items())]
     actions = [line for line in stamped if is_action(line, patterns)] if args.binding and fallback else []
-    if actions:
-        out.append((str(args.binding), "\n".join(native(line) + ". No reply needed." for line in actions)))
+    escalations = [line for line in stamped if WAIT_OWNER.match(line.split(" ", 1)[1])
+                   and line.replace(alert_policy.WORKER_WAIT_NOTE, "").endswith(" ESCALATE (start)")] if args.binding else []
+    for batch in (actions, escalations):
+        if batch:
+            out.append((str(args.binding), "\n".join(native(line) + ". No reply needed." for line in batch)))
     return out
 
 
@@ -250,6 +258,31 @@ def flush_outbox(args, cursor, now):
     return changed
 
 
+WAIT_ID = re.compile(r"(?:^| )workers: WORKER WAITING .+ pane=\S+ owner=(\S+) \d+m session=(\S+)")
+
+
+def waiting_identity(line):
+    found = WAIT_ID.search(line)
+    return found.groups() if found else None
+
+
+def cancel_waiting(cursor, lines):
+    """A clear removes every queued stage of that owner/identity, preserving other lines and later restarts."""
+    cleared = {waiting_identity(line): index for index, line in enumerate(lines)
+               if line.endswith("(clear)") and waiting_identity(line) is not None}
+    if cleared:
+        kept = []
+        for entry in cursor.get(OUTBOX_KEY, []):
+            text = "\n".join(line for line in entry["text"].splitlines() if waiting_identity(line) not in cleared)
+            if text:
+                kept.append(dict(entry, text=text))
+        if kept:
+            cursor[OUTBOX_KEY] = kept
+        else:
+            cursor.pop(OUTBOX_KEY, None)
+    return {index for index, line in enumerate(lines) if index > cleared.get(waiting_identity(line), -1)}
+
+
 def finish(args, cursor, now, patterns):
     """Completes the pending batch. Under the feed lock its place is committed, it is written once, and the Monitor's
     record decides the Coordinator copy: none when the Monitor will read it (kept waiting until the Monitor has read it),
@@ -272,11 +305,16 @@ def finish(args, cursor, now, patterns):
             pending.update(fed=True, coordinator="watch" if will_read(record, pending["inode"], pending["offset"]) else "native")
             commit(args, cursor)
     coordinator = pending.get("coordinator", "native" if pending.get("fallback") else "none")
+    active = cancel_waiting(cursor, pending["lines"])
     dropped = dropped_lines(pending["lines"])
-    in_feed = pending["lines"][len(dropped):]
+    in_feed = [line for index, line in enumerate(pending["lines"]) if index >= len(dropped) and index in active]
+    dropped = [line for index, line in enumerate(dropped) if index in active]
     for target, text in native_messages(args, in_feed, coordinator != "none", patterns):
         entry = dict(binding=target, text=text, at=now)
-        if target == str(args.binding) and coordinator == "watch":
+        # WAITING escalation is native even with a Monitor: that feed line is deliberately not an action.
+        escalation = all("workers: WORKER WAITING " in line and " ESCALATE (start)" in line.replace(alert_policy.WORKER_WAIT_NOTE, "")
+                         for line in text.splitlines())
+        if target == str(args.binding) and coordinator == "watch" and not escalation:
             entry["watch"] = dict(inode=pending["inode"], end=pending["offset"] + len(data))
         cursor.setdefault(OUTBOX_KEY, []).append(entry)
     for target, text in native_messages(args, dropped, True, patterns):
@@ -331,6 +369,9 @@ def snapshot_lines(mode, before):
         return list(before.values())
     if mode == "workers":
         lines = [f"WORKER {alert['pane']} {alert['state']}" for alert in w.worker_alerts(before).values()]
+        lines += [w.waiting_line(key, entry, entry.get("sent", entry["since"]), suffix)
+                  for key, entry in before.get("waiting", {}).items()
+                  for suffix in ("", "REPEAT", "ESCALATE")[:entry["stage"]]]
         return lines + (["WORKER READFAIL " + " ".join(before["unreadable"])] if before.get("unreadable") else [])
     if mode in w.PRESSURE_SETTINGS:
         labels = w.PRESSURE_SETTINGS[mode]["labels"]

@@ -313,6 +313,54 @@ class RemoteReadTest(SettingsTest):
         self.assertEqual(s.known_clone('acme/webapp', [str(lab), str(hub)]), str(hub))
         self.assertIsNone(s.known_clone('acme/webapp', [str(lab)]))
 
+    def test_a_fork_clone_is_the_known_clone_of_its_upstream_repo(self):
+        fork = self.repo('fork', 'git@github.com:me/webapp.git')
+        git(fork, 'remote', 'add', 'upstream', 'https://github.com/acme/webapp.git')
+        elsewhere = self.repo('elsewhere', 'git@github.com:acme/other.git')
+        self.assertEqual(s.known_clone('acme/webapp', [str(elsewhere), str(fork)]), str(fork))
+        self.assertTrue(s.origin_matches(fork, 'ACME/webapp'))
+        self.assertIsNone(s.known_clone('acme/webapp', [str(elsewhere)]))
+
+    def test_the_matching_remote_names_origin_before_upstream(self):
+        clone = self.repo('clone', 'git@github.com:acme/webapp.git')
+        git(clone, 'remote', 'add', 'upstream', 'git@github.com:acme/webapp.git')
+        self.assertEqual(s.matching_remote(clone, 'acme/webapp'), 'origin')
+        fork = self.repo('fork', 'git@github.com:me/webapp.git')
+        git(fork, 'remote', 'add', 'upstream', 'git@github.com:acme/webapp.git')
+        self.assertEqual(s.matching_remote(fork, 'ACME/webapp'), 'upstream')
+        self.assertIsNone(s.matching_remote(fork, 'acme/other'))
+
+    def test_a_clone_whose_origin_is_the_repo_wins_over_a_fork_clone(self):
+        fork = self.repo('fork', 'git@github.com:me/webapp.git')
+        git(fork, 'remote', 'add', 'upstream', 'https://github.com/acme/webapp.git')
+        direct = self.repo('direct')
+        self.assertEqual(s.known_clone('acme/webapp', [str(fork), str(direct)]), str(direct))
+
+    def test_a_non_github_upstream_is_not_a_match(self):
+        fork = self.repo('fork', 'git@github.com:me/webapp.git')
+        git(fork, 'remote', 'add', 'upstream', 'git@gitlab.com:acme/webapp.git')
+        self.assertIsNone(s.known_clone('acme/webapp', [str(fork)]))
+
+    def test_an_unreadable_clone_upstream_is_a_settings_read_error(self):
+        clone = self.repo('clone', 'git@github.com:me/webapp.git')
+        real = subprocess.run
+
+        def run(args, *rest, **kwargs):
+            if args[:4] == ['git', '-C', str(clone), 'remote'] and args[-1] == 'upstream':
+                return subprocess.CompletedProcess(args, 128, '', 'fatal: detected dubious ownership in repository')
+            return real(args, *rest, **kwargs)
+        with patch.object(s.subprocess, 'run', run), self.assertRaises(subprocess.CalledProcessError):
+            s.known_clone('acme/webapp', [str(clone)])
+
+    def test_the_local_file_of_a_fork_clone_applies_to_a_pr_on_its_upstream_repo(self):
+        fork = self.repo('fork', 'git@github.com:me/webapp.git')
+        git(fork, 'remote', 'add', 'upstream', 'git@github.com:acme/webapp.git')
+        (fork / s.LOCAL_FILE).write_text('[legacy]\nexempt = ["mine"]\n')
+        run, _ = self.command('[legacy]\nscan = true\nexempt = ["shared"]\n')
+        with open_work('', str(fork)):
+            values = audit.repo_settings(run, 'acme/webapp', 'main', {})
+        self.assertEqual((values['ORCH_LEGACY_SCAN'], values['ORCH_LEGACY_EXEMPT']), ('1', 'mine'))
+
     def test_an_unreadable_clone_origin_is_a_settings_read_error(self):
         clone = self.repo('clone')
         real = subprocess.run

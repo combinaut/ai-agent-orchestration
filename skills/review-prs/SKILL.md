@@ -99,7 +99,7 @@ Requires `HERDR_ENV=1`. If not inside Herdr, say so and stop dispatch (list/watc
 
 JSON fields per item: `url`, `number`, `title`, `author`, `repo`, `sha`, `kind` (`review` | `re-review`), `agent` (`rev<number>-<sha7>-<repo hash>`, unique per repo and head), `cwd` (local clone or `null`), `model`.
 
-`cwd` comes from the clones of the open work, the current directory, or `~/Projects/<owner>/<name>`. Skip entries with `cwd: null` and tell the user no local clone was found.
+`cwd` comes from the clones of the open work, the current directory, or `~/Projects/<owner>/<name>`; a clone matches when its `origin` is the repo, or else its `upstream` (a fork of it), and a clone whose `origin` is the repo wins. Skip entries with `cwd: null` and tell the user no local clone was found.
 
 Skip entries already marked for the same `sha`, pending or done (script does this). Concurrency: **up to 3 Codex reviews at once**. Queue the rest; when any in-flight review finishes, start the next queued item until 3 are running again (or the queue is empty).
 

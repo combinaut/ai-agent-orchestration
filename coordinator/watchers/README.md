@@ -61,9 +61,12 @@ wait
 Operational steps:
 
 1. From the Coordinator's own Bash environment on a fresh install, run
-   `python3 bind-self.py --output ~/.claude/coordinator/watchers/bindings/coordinator.json`.
-   Each architect runs it with `--output ~/.claude/coordinator/watchers/bindings/architect-$HERDR_WORKSPACE_ID.json`.
+   `python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/coordinator.json`.
+   Each architect runs it with `--output ~/.claude/coordinator/watchers/bindings/architect-<id>.json`, its own workspace id written out (read it once with `echo $HERDR_WORKSPACE_ID`, for example `architect-w2M.json`; Claude Code blocks a command that holds `$HERDR_WORKSPACE_ID`).
    Run it again after every recycle; the notifier reads a binding at each send.
+   Use this exact full-path form, as one Bash call on its own: never chain it with `&&`, `;` or a pipe, because auto mode denies a chained call.
+   `install.sh` adds the matching allow rule to `~/.claude/settings.json`, so the session runs it itself and does not ask the user. If auto mode still blocks it, tell the user once.
+   `bind-self.py` writes only `coordinator.json` or `architect-<id>.json` in `~/.claude/coordinator/watchers/bindings` (the resolved path must be there); any other `--output` exits with an error and writes nothing.
 2. Laptop sleep suspends watcher execution; heartbeats can be stale after wake.
    A stale heartbeat alone does not identify a blocked syscall. Inspect stderr
    for `watcher deadline exceeded` before attributing a gap to a hang.
@@ -155,9 +158,9 @@ The Monitor's follower writes `<inode> <attached> <consumed>` into its heartbeat
 
 ### PR events
 
-`orch.coord-watcher-pulls` runs `coord-pulls-watch.sh` every 150 seconds with the audit's settings (`ORCH_PR_AUTHOR`, the repos of the open work, `ORCH_PR_SINCE`, `ORCH_BOT_REVIEWER_LOGIN`, `ORCH_AUDIT_PAGE_PRS`, `ORCH_AUDIT_PAGE_NODES`, and each repo's `audit.merge_gate_checks`, read only for approved PRs on a non-default base). Each poll makes one GraphQL search per page of `ORCH_AUDIT_PAGE_PRS` open PRs, at most 10 `gh api repos/<repo>/pulls/<n>` reads for PRs that left the open list, right after the search in their own 60-second window, fewest departed-PR reads first (the rest wait for the next poll), then the open work from the env adapter (one `herdr workspace list` and one `herdr pane list`, shared with the repo discovery), one `git remote get-url origin` per repository root, and one `git worktree list` for each root whose remote is a watched repository; a root that fails is skipped and named by `PULLS READFAIL owners`, while positive matches from readable roots still update ownership. A failed read is `PULLS READFAIL pr:<repo>#<n>` and does not stop the others; a PR that left the search but is still open keeps its saved events and owner until it is readable in search again or confirmed closed; each command times out after 45 seconds. Its first read emits only `PULLS BASELINE [<n> active lines]` and saves active lines and read failures silently; a read failure that persists to the next poll then emits once. Later polls emit `<kind> <repo>#<n> owner=<workspace or ?> <title> [<detail>]` when an `APPROVED`, `APPROVED-OLDHEAD`, `APPROVED-STACKED`, `RED`, `CHANGES`, `THREADS` or `COPILOT` line appears, `<kind> <repo>#<n> cleared` when it goes, and `MERGED` or `CLOSED` when the PR leaves the open list.
+`orch.coord-watcher-pulls` runs `coord-pulls-watch.sh` every 150 seconds with the audit's settings (`ORCH_PR_AUTHOR`, the repos of the open work, `ORCH_PR_SINCE`, `ORCH_BOT_REVIEWER_LOGIN`, `ORCH_AUDIT_PAGE_PRS`, `ORCH_AUDIT_PAGE_NODES`, and each repo's `audit.merge_gate_checks`, read only for approved PRs on a non-default base). Each poll makes one GraphQL search per page of `ORCH_AUDIT_PAGE_PRS` open PRs, at most 10 `gh api repos/<repo>/pulls/<n>` reads for PRs that left the open list, right after the search in their own 60-second window, fewest departed-PR reads first (the rest wait for the next poll), then the open work from the env adapter (one `herdr workspace list` and one `herdr pane list`, shared with the repo discovery), one `git remote get-url origin` per repository root and one `git remote get-url upstream` per root whose origin is a GitHub repo (a root without `upstream` is normal; the repo discovery reads it too, so it is read twice per poll), and one `git worktree list` for each root whose origin or upstream is a watched repository; a root that fails is skipped and named by `PULLS READFAIL owners`, while positive matches from readable roots still update ownership. A root whose `upstream` alone cannot be read is not skipped: its `origin` is handled as usual (a direct clone keeps its owners), `PULLS READFAIL owners` is named, and because the base repo it names is unknown, every PR without a fresh owner keeps its last known one until the `upstream` reads again. On any poll where a repository becomes watched (the first poll after install.sh, or a workspace opened in a new fork clone), its PRs send their active lines once. A failed read is `PULLS READFAIL pr:<repo>#<n>` and does not stop the others; a PR that left the search but is still open keeps its saved events and owner until it is readable in search again or confirmed closed; each command times out after 45 seconds. Its first read emits only `PULLS BASELINE [<n> active lines]` and saves active lines and read failures silently; a read failure that persists to the next poll then emits once. Later polls emit `<kind> <repo>#<n> owner=<workspace or ?> <title> [<detail>]` when an `APPROVED`, `APPROVED-OLDHEAD`, `APPROVED-STACKED`, `RED`, `CHANGES`, `THREADS` or `COPILOT` line appears, `<kind> <repo>#<n> cleared` when it goes, and `MERGED` or `CLOSED` when the PR leaves the open list.
 
-The owner is the `owner` tag of the open workspace whose checkout has the PR's head branch, matched by the repository's `owner/name` from its `origin` remote. The owner token always follows `<repo>#<n>`, so a PR title cannot claim one and truncation cannot drop it. The notifier sends each pulls `start` with an owner to `bindings/architect-<owner>.json` through the native channel as `pulls: <kind> <repo>#<n> (start); read the PR on GitHub` — native messages never carry PR titles or details — and writes the full line to the feed; without an owner or a binding the line stays in the feed. A failed owner lookup is `PULLS READFAIL owners`; known owners are kept and events still flow. A missing branch/checkout/tag match is unknown ownership: it also keeps the saved owner, until a positive match routes the PR to another architect or the PR closes. Pane/session recycling does not change that workspace identity.
+The owner is the `owner` tag of the open workspace whose checkout has the PR's head branch, matched by the PR's repository, which is the `origin` or the `upstream` of the checkout's clone, and by the PR's head branch: the owner of the head repository must be the owner of the clone's `origin`, so a branch of the same name from any other owner gets no owner. Not matched: a fork clone's branch pushed straight to `upstream`, a branch pushed to a third remote under another name, and a PR whose head fork was deleted. The owner token always follows `<repo>#<n>`, so a PR title cannot claim one and truncation cannot drop it. The notifier sends each pulls `start` with an owner to `bindings/architect-<owner>.json` through the native channel as `pulls: <kind> <repo>#<n> (start); read the PR on GitHub` — native messages never carry PR titles or details — and writes the full line to the feed; without an owner or a binding the line stays in the feed. A failed owner lookup is `PULLS READFAIL owners`; known owners are kept and events still flow. A missing branch/checkout/tag match is unknown ownership: it also keeps the saved owner, until a positive match routes the PR to another architect or the PR closes. Pane/session recycling does not change that workspace identity.
 
 Pulls persists Copilot review IDs, head SHAs and unresolved thread IDs in `pulls.json`. A Copilot condition starts once per review ID, even when its body changes or that review temporarily leaves the bounded review window. A new head/approval or unresolved-thread identity changes the corresponding event; a confirmed resolution clears it. Existing active state from older installations seeds identities silently. Whole-source and per-PR read failures preserve saved evidence; truncated thread/review/check connections cannot clear unseen conditions. Partial thread/check pages reconcile visible changes with saved unseen evidence. Stacked-approval check details are retained only while readable review/base fields still qualify, and only for the same head and base; otherwise missing full-CI evidence is unknown. Readable sibling PRs continue reporting. Confirmed merged/closed PRs clear their events and release their saved state. Open/missing PR reads rotate through the bounded departed-read queue so they cannot starve later closures.
 
@@ -250,7 +253,7 @@ on both platforms. This gives prompt blocker detection with modest agent-list po
 It shares `prod-context/`, the binding and the single inbox notifier with the other producers.
 Every listed agent is included, regardless of role tags. WORKER lines name the
 pane; agent list does not supply workspace labels. Blocked and error alert once
-per agent session and state; working, idle, done and waiting are silent.
+per agent session and state; working, idle, done and waiting do not raise blocker alerts.
 An active agent (working, waiting, blocked or error) that leaves the list raises
 dead/disappeared once, or `WORKER <pane> closed` when `<state-dir>/closed/<pane id>` exists.
 `close-pane.sh <pane id>` writes that marker, closes the pane, and removes the marker when the close fails; the watcher deletes a marker once neither its scan nor its saved state lists the pane. Its key is then dropped, so persisted worker state is
@@ -267,7 +270,7 @@ session key.
 `WORKER <pane> RECOVERED <state>` clears a live agent's previous blocked/error
 state when it changes. A blocked-to-error transition clears blocked and raises
 error. Disappearance emits no RECOVERED line. Working/idle changes produce no
-alerts. Dedupe survives service restarts.
+blocker alerts. Dedupe survives service restarts.
 
 Unknown or missing statuses skip only that agent. WORKER READFAIL names the
 unreadable panes and statuses once whenever the sorted set changes; a pane the watcher first saw
@@ -280,6 +283,22 @@ The Coordinator responses are in `skills/coordinate/SKILL.md`: inspect panes,
 route blockers and errors to owners, verify disappeared sessions and arrange
 recovery, clear recovered warnings, and restore unreadable agents or producers.
 The audit reports workspace-level blocked lines.
+
+Owner-tagged workers emit `WORKER WAITING` after 600 seconds done or idle. The
+owning architect receives one native alert, then one repeat 1800 seconds after
+that alert; another 1800 seconds after the repeat escalates once to the
+Coordinator. Repeat/escalation gaps are at least 60 seconds. Architect/coordinator
+role tags and `Architect::` names or titles are excluded. State and policy keys
+use the session ID, falling back to the pane ID when no session is available
+(`workers:waiting:<identity>:<stage>`). Working, closing, a sequence change, or a
+successful loss/change of owner clears the alert and its queued native retries;
+unreadable snapshots preserve
+it. Before a due alert, the last 16 pane lines are checked for Claude monitor/shell
+or Codex background-terminal indicators. A busy pane preserves its timer and stage
+without sending. A failed pane read allows the alert and logs once until a
+successful read. Pane reads take at most five seconds each and ten seconds total,
+reserving five seconds of the pass for reduction; budget-skipped panes count as
+not busy. See [waiting settings and snapshot limits](../../docs/watchers.md#workers-waiting).
 
 ## Audit alerts
 

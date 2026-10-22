@@ -7,6 +7,7 @@
   prs.py mark-dispatched --url U --sha S [--state pending|done] [--agent N] [--pane P]
   prs.py claim-dispatched --url U --sha S [--agent N]   marks S pending; exit 3 when S is already pending or done
   prs.py release-dispatched --url U --sha S       drops S while it is pending
+  prs.py remote --cwd C --repo R                  the remote of clone C (origin or upstream) that is the GitHub repo R
   prs.py review-ids --login L                     stdin: gh api --paginate --slurp .../reviews; ids of L's submitted reviews
   prs.py last-review --login L --sha S --seen IDS stdin: the same; L's newest submitted review of S not in IDS
 
@@ -271,13 +272,25 @@ def current_repo_root():
 def resolve_cwd(name_with_owner):
     owner, name = name_with_owner.split("/", 1)
     candidates = [*open_work_clones(), PROJECTS / owner / name, PROJECTS / name, *current_repo_root()]
-    for clone in candidates:
-        try:
-            if (clone / ".git").exists() and orch_settings.origin_matches(clone, name_with_owner):
-                return str(clone)
-        except (OSError, subprocess.SubprocessError):
-            continue
+    for remote in ("origin", "upstream"):
+        for clone in candidates:
+            try:
+                if (clone / ".git").exists() and orch_settings.remote_matches(clone, name_with_owner, remote):
+                    return str(clone)
+            except (OSError, subprocess.SubprocessError):
+                continue
     return None
+
+
+def cmd_remote(args, scope, label):
+    """The remote of --cwd that is the GitHub repo --repo; exit 1 when there is none."""
+    try:
+        remote = orch_settings.matching_remote(args.cwd, args.repo)
+    except (OSError, subprocess.SubprocessError):
+        remote = None
+    if not remote:
+        sys.exit(f"no remote of {args.cwd} is {args.repo}")
+    print(remote)
 
 
 def agent_name(repo, number, sha):
@@ -555,9 +568,10 @@ def cmd_last_review(args, _scope, _label):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("mode", choices=["list", "watch", "dispatch-queue", "claim-dispatched", "mark-dispatched", "release-dispatched", "review-ids", "last-review"],
+    parser.add_argument("mode", choices=["list", "watch", "dispatch-queue", "claim-dispatched", "mark-dispatched", "release-dispatched", "remote", "review-ids", "last-review"],
                         nargs="?", default="list")
     parser.add_argument("--repo")
+    parser.add_argument("--cwd", help="remote: the clone")
     parser.add_argument("--org")
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--actionable", action="store_true",
@@ -580,6 +594,7 @@ def main():
         "claim-dispatched": cmd_claim_dispatched,
         "mark-dispatched": cmd_mark_dispatched,
         "release-dispatched": cmd_release_dispatched,
+        "remote": cmd_remote,
         "review-ids": cmd_review_ids,
         "last-review": cmd_last_review,
     }[args.mode](args, scope, label)

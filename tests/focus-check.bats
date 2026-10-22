@@ -293,31 +293,83 @@ SH
 #!/bin/sh
 printf '%s\n' "$*" >>"$TMP/gh-calls"
 [ -z "${GH_FAIL:-}" ] || exit 1
+[ "$4" != combinaut/web ] || { printf '%s\n' "${GH_PRS_UP:-[]}"; exit; }
 printf '%s\n' "${GH_PRS:-[]}"
 SH
+  real_git=$(command -v git)
+  cat >"$TMP/bin/git" <<SH
+#!/bin/sh
+if [ -n "\${GIT_UPSTREAM_FAIL:-}" ] && [ "\$3" = remote ] && [ "\$5" = upstream ]; then echo 'fatal: unreadable' >&2; exit 128; fi
+exec "$real_git" "\$@"
+SH
+  chmod +x "$TMP/bin/git"
   chmod +x "$TMP/bin/herdr" "$TMP/bin/gh"
   export TMP
 }
 
 @test "an open PR on a branch of an owned workspace is open work" {
   open_work_fixture
-  export GH_PRS='[{"headRefName":"other"},{"headRefName":"feature"}]'
+  export GH_PRS='[{"headRefName":"other","headRepositoryOwner":{"login":"acme"}},{"headRefName":"feature","headRepositoryOwner":{"login":"acme"}}]'
 
   run focus_line
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
-  [ "$(cat "$TMP/gh-calls")" = "pr list -R acme/web --state open --json headRefName,isCrossRepository --limit 200" ]
+  [ "$(cat "$TMP/gh-calls")" = "pr list -R acme/web --state open --json headRefName,headRepositoryOwner --limit 200" ]
 }
 
 @test "a fork PR with the same branch name is not open work" {
   open_work_fixture
-  export GH_PRS='[{"headRefName":"feature","isCrossRepository":true}]'
+  export GH_PRS='[{"headRefName":"feature","headRepositoryOwner":{"login":"someone"}}]'
 
   run focus_line
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"idle_no_worker=none"* ]]
+}
+
+@test "an open PR on the upstream repo from the origin owner's branch is open work" {
+  open_work_fixture
+  git -C "$WORK_REPO" remote add upstream git@github.com:combinaut/web.git
+  export GH_PRS_UP='[{"headRefName":"feature","headRepositoryOwner":{"login":"Acme"}}]'
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+}
+
+@test "a PR on the upstream repo from another fork's same-named branch is not open work" {
+  open_work_fixture
+  git -C "$WORK_REPO" remote add upstream git@github.com:combinaut/web.git
+  export GH_PRS_UP='[{"headRefName":"feature","headRepositoryOwner":{"login":"someone"}},{"headRefName":"feature","headRepositoryOwner":null}]'
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=none"* ]]
+}
+
+@test "an unreadable upstream remote counts as open work" {
+  open_work_fixture
+  git -C "$WORK_REPO" remote add upstream git@github.com:combinaut/web.git
+  export GIT_UPSTREAM_FAIL=1
+
+  run focus_line
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+}
+
+@test "an origin PR needs no upstream lookup" {
+  open_work_fixture
+  git -C "$WORK_REPO" remote add upstream git@github.com:combinaut/web.git
+  export GH_PRS='[{"headRefName":"feature","headRepositoryOwner":{"login":"acme"}}]'
+
+  run focus_line
+
+  [[ "$output" == *"idle_no_worker=Agent::Tooling"* ]]
+  [ "$(wc -l <"$TMP/gh-calls")" -eq 1 ]
 }
 
 @test "clones of one repo in different case share one PR lookup" {

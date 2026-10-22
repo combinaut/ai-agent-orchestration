@@ -30,6 +30,7 @@ PANES = [dict(workspace_id='w4', pane_id='w4:p1', cwd='/wt/tools/x/sub', agent='
          dict(workspace_id='w9', pane_id='w9:p1', cwd='/mnt/data/notes')]
 REMOTES = {'/r/web': 'git@github.com:acme/web.git', '/r/WEB2': 'https://github.com/ACME/Web', '/r/lab': 'git@gitlab.com:acme/lab.git',
            '/r/tools': 'https://github.com/acme/tools.git'}
+UPSTREAMS = {}
 
 
 def open_work_command(*argv):
@@ -45,6 +46,10 @@ def open_work_command(*argv):
         return json.dumps(dict(result=dict(panes=PANES)))
     if argv[0] == 'git' and argv[3:] == ('remote', 'get-url', 'origin'):
         return REMOTES[argv[2]] + '\n'
+    if argv[0] == 'git' and argv[3:] == ('remote', 'get-url', 'upstream'):
+        if argv[2] in UPSTREAMS:
+            return UPSTREAMS[argv[2]] + '\n'
+        raise subprocess.CalledProcessError(2, argv, stderr="error: No such remote 'upstream'\n")
     if argv[0] == 'git' and argv[2] == '/wt/tools/x/sub' and argv[3:] == ('rev-parse', '--show-toplevel'):
         return '/wt/tools/x\n'
     if argv[0] == 'git' and argv[2] == '/wt/tools/x/sub' and argv[-1] == '--git-common-dir':
@@ -74,6 +79,54 @@ class DiscoveryTest(IsolatedTestCase):
     def test_repos_and_clones_of_the_open_workspaces_are_deduplicated(self):
         found = discovery.repos(self.command)
         self.assertEqual(found, dict(clones=['/r/WEB2', '/r/lab', '/r/tools', '/r/web'], repos=['acme/tools', 'ACME/Web']))
+
+    def test_the_upstream_of_a_fork_clone_is_a_repo_once_and_after_the_origin(self):
+        ups = {'/r/web': 'git@github.com:combinaut/web.git', '/r/WEB2': 'https://github.com/COMBINAUT/Web', '/r/tools': 'git@github.com:ACME/Tools.git'}
+        with patch.dict(UPSTREAMS, ups):
+            found = discovery.repos(self.command)
+        self.assertEqual(found, {'clones': ['/r/WEB2', '/r/lab', '/r/tools', '/r/web'], 'repos': ['acme/tools', 'ACME/Web', 'COMBINAUT/Web']})
+        self.assertEqual(discovery.saved(), found)
+
+    def test_a_clone_without_an_upstream_remote_is_no_failure(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            found = discovery.repos(self.command)
+        self.assertEqual(found['repos'], ['acme/tools', 'ACME/Web'])
+        self.assertEqual(stderr.getvalue(), '')
+
+    def test_the_upstream_of_a_clone_without_a_github_origin_is_not_read(self):
+        ups = {'/r/lab': 'git@github.com:combinaut/lab.git'}
+        with patch.dict(UPSTREAMS, ups):
+            self.assertEqual(discovery.repos(self.command)['repos'], ['acme/tools', 'ACME/Web'])
+        self.assertNotIn(('git', '-C', '/r/lab', 'remote', 'get-url', 'upstream'), self.calls)
+
+    def test_a_non_github_upstream_is_no_repo(self):
+        with patch.dict(UPSTREAMS, {'/r/web': 'git@gitlab.com:combinaut/web.git'}):
+            self.assertEqual(discovery.repos(self.command)['repos'], ['acme/tools', 'ACME/Web'])
+
+    def test_an_unreadable_upstream_keeps_the_origin_repos_and_the_saved_ones(self):
+        with patch.dict(UPSTREAMS, {'/r/web': 'git@github.com:combinaut/web.git', '/r/tools': 'git@github.com:combinaut/tools.git'}):
+            found = discovery.repos(self.command)
+
+            def timeout(*argv):
+                if argv[0] == 'git' and argv[2] == '/r/web' and argv[3:] == ('remote', 'get-url', 'upstream'):
+                    raise subprocess.TimeoutExpired(argv, 45)
+                return self.command(*argv)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(discovery.repos(timeout), found)
+        self.assertIn('upstream of /r/web unreadable', stderr.getvalue())
+        self.assertEqual(discovery.saved(), found)
+
+    def test_an_unreadable_upstream_saves_nothing_and_keeps_every_origin_repo_without_a_saved_set(self):
+        def timeout(*argv):
+            if argv[0] == 'git' and argv[3:] == ('remote', 'get-url', 'upstream'):
+                raise subprocess.TimeoutExpired(argv, 45)
+            return self.command(*argv)
+        with contextlib.redirect_stderr(io.StringIO()):
+            found = discovery.repos(timeout)
+        self.assertEqual(found, {'clones': ['/r/WEB2', '/r/lab', '/r/tools', '/r/web'], 'repos': ['acme/tools', 'ACME/Web']})
+        self.assertIsNone(discovery.saved())
 
     def test_a_workspace_without_a_worktree_takes_its_pane_checkout(self):
         rows = {row['id']: row for row in discovery.open_work(self.command)['workspaces']}
@@ -204,6 +257,18 @@ class AuditDiscoveryTest(IsolatedTestCase):
             return open_work_command(*argv)
         self.assertEqual(audit.fetch_prs(command), [])
         self.assertEqual(queries, ['q=is:pr is:open author:me repo:acme/tools repo:ACME/Web'])
+
+    def test_the_search_names_the_upstream_repo(self):
+        queries = []
+
+        def command(*argv):
+            if argv[:3] == ('gh', 'api', 'graphql'):
+                queries.append(next(arg for arg in argv if arg.startswith('q=')))
+                return json.dumps({'data': {'search': {'nodes': [], 'pageInfo': {'hasNextPage': False}}}})
+            return open_work_command(*argv)
+        with patch.dict(UPSTREAMS, {'/r/web': 'git@github.com:combinaut/web.git'}):
+            self.assertEqual(audit.fetch_prs(command), [])
+        self.assertEqual(queries, ['q=is:pr is:open author:me repo:acme/tools repo:ACME/Web repo:combinaut/web'])
 
     def test_no_open_repos_means_no_search(self):
         def command(*argv):

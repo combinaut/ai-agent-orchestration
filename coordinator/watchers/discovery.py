@@ -52,20 +52,20 @@ def open_work(command):
         raise Unavailable(str(error)[:200]) from error
 
 
-def github_repo(command, clone):
-    """owner/name of the clone's GitHub origin; None without one, False when the clone's directory is gone.
+def github_repo(command, clone, remote='origin'):
+    """owner/name of the clone's GitHub remote; None without one, False when the clone's directory is gone.
 
-    Raises Unavailable when the origin cannot be read."""
+    Raises Unavailable when the remote cannot be read."""
     try:
-        url = command('git', '-C', clone, 'remote', 'get-url', 'origin').strip()
+        url = command('git', '-C', clone, 'remote', 'get-url', remote).strip()
     except subprocess.CalledProcessError as error:
         if NO_REMOTE.search(str(error.stderr or '')):
             return None
         if GONE.search(str(error.stderr or '')):
             return False
-        raise Unavailable(f'origin of {clone} unreadable: {str(error.stderr or error).strip()[:200]}') from error
+        raise Unavailable(f'{remote} of {clone} unreadable: {str(error.stderr or error).strip()[:200]}') from error
     except READ_ERRORS as error:
-        raise Unavailable(f'origin of {clone} unreadable: {str(error)[:200]}') from error
+        raise Unavailable(f'{remote} of {clone} unreadable: {str(error)[:200]}') from error
     match = GITHUB_REMOTE.search(url)
     return match[1] if match else None
 
@@ -95,15 +95,29 @@ def branch_owners(command, work=None):
     return {key: label for key, label in owners.items() if key not in ambiguous}
 
 
-def discover(command, work):
+def upstream_repo(command, clone, failed):
+    """owner/name of the clone's GitHub upstream, the base repo of a fork; None when it has none or cannot be read.
+
+    An unreadable upstream is added to failed, so that it cannot hide the origin or the other clones."""
+    try:
+        return github_repo(command, clone, 'upstream') or None
+    except Unavailable as error:
+        failed.append(str(error))
+        return None
+
+
+def discover(command, work, failed):
+    """The repos of the open work, each once with its first spelling, origin before upstream (read only for a GitHub origin);
+    failed lists unreadable upstreams."""
     clones, names = [], {}
     for clone in sorted({row['repo_root'] for row in work['workspaces'] if row.get('repo_root')}):
         repo = github_repo(command, clone)
         if repo is False:
             continue
         clones.append(clone)
-        if repo:
-            names.setdefault(repo.lower(), repo)
+        for name in (repo, upstream_repo(command, clone, failed) if repo else None):
+            if name:
+                names.setdefault(name.lower(), name)
     return dict(clones=clones, repos=sorted(names.values(), key=str.lower))
 
 
@@ -133,17 +147,24 @@ def repos(command, work=None):
 
     work is the open work already read, or the Unavailable that reading it raised.
 
-    Raises Unavailable when the adapter or an origin cannot be read and no earlier set is saved."""
+    Raises Unavailable when the adapter or an origin cannot be read and no earlier set is saved.
+    An upstream that cannot be read adds the repos last saved to this pass and saves nothing, so no repo drops out."""
+    failed = []
     try:
         if isinstance(work, Unavailable):
             raise work
-        found = discover(command, open_work(command) if work is None else work)
+        found = discover(command, open_work(command) if work is None else work, failed)
     except Unavailable as error:
         found = saved()
         if found is None:
             raise Unavailable(f'open work unreadable ({error}) and no saved set at {state_path()}') from error
         print(f'open work unreadable ({error}); using the repos last discovered in {state_path()}', file=sys.stderr)
         return found
+    if failed:
+        print(f'{"; ".join(failed)}; adding the repos last discovered in {state_path()}', file=sys.stderr)
+        names = {name.lower(): name for name in (saved() or {}).get('repos', [])}
+        names.update({name.lower(): name for name in found['repos']})
+        return {'clones': found['clones'], 'repos': sorted(names.values(), key=str.lower)}
     try:
         save(found)
     except OSError as error:

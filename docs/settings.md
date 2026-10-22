@@ -17,7 +17,7 @@ A repo key in the global file, a global key in a repo file, an unknown key, a va
 Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestration.local.toml`, an exported variable. A later file replaces a key of an earlier one; a list is replaced, not merged.
 
 - A tool acting in a checkout (the Bash guard, the focus report for the repo an architect works in) reads the two files at the root of that checkout, found from its working directory.
-- A tool acting on a PR (the audit and `legacy-scan.sh`) reads `.orchestration.toml` from the PR's base branch, then `.orchestration.local.toml` from your clone of that repo when an open workspace has one (matched by its GitHub `origin` remote).
+- A tool acting on a PR (the audit and `legacy-scan.sh`) reads `.orchestration.toml` from the PR's base branch, then `.orchestration.local.toml` from your clone of that repo when an open workspace has one (matched by its GitHub `origin` remote, or its `upstream` remote when no clone has the repo as `origin`).
 - A linked worktree also reads the `.orchestration.local.toml` of its main checkout; its own local file wins over it.
 - No file means the built-in defaults: every repo feature is off.
 
@@ -77,6 +77,8 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `hog.gb` | `ORCH_HOG_GB` | `6` | Hog watcher: process size in GB |
 | `hog.git_gb` | `ORCH_HOG_GIT_GB` | `2` | Hog watcher: git process size in GB |
 | `hog.git_age_s` | `ORCH_HOG_GIT_AGE_S` | `180` | Hog watcher: git process age in seconds |
+| `workers.wait_s` | `ORCH_WAIT_S` | `600` | Seconds idle or done before WORKER WAITING |
+| `workers.wait_repeat_s` | `ORCH_WAIT_REPEAT_S` | `1800` | Seconds between waiting alerts (minimum 60) |
 | `pr_tabs.org` | `ORCH_PR_TABS_ORG` | empty | Organization the PR tabs extension manages; empty turns org actions off |
 | `pr_tabs.default_repo` | `ORCH_PR_TABS_DEFAULT_REPO` | empty | Repo name for bare PR numbers; empty turns number jumps off |
 | `pr_tabs.open_all` | `ORCH_PR_TABS_OPEN_ALL` | empty | GitHub search behind the Open all button; empty turns it off |
@@ -153,6 +155,6 @@ The removed `legacy.extra_pattern` and `legacy.exempt_paths` keys are errors. `i
 
 ## Repos and architects from the open work
 
-The audit and pulls watchers watch the open PRs of `pr.author` in the GitHub repos of the open workspaces (the `origin` of each workspace's repo root), and check those clones for PACKS and WORKTREES. The env adapter reports the workspaces (`env/<name>/open_work.py`, see [env/README.md](../env/README.md)). When it cannot, the watchers use the last set saved in `~/.claude/coordinator/open-work.json` and say so in their log.
+The audit and pulls watchers watch the open PRs of `pr.author` in the GitHub repos of the open workspaces (the `origin` and the `upstream` of each workspace's repo root; `upstream` is the base repo of a fork), and check those clones for PACKS and WORKTREES. The env adapter reports the workspaces (`env/<name>/open_work.py`, see [env/README.md](../env/README.md)). When it cannot, the watchers use the last set saved in `~/.claude/coordinator/open-work.json` and say so in their log.
 
 `pr.repos`, `audit.git_watch_repos` and `focus.skip_architects` are not settings. `install.sh` drops them from an existing file and prints one `dropped` line; one it cannot remove in place (an inline table) gets a `warning` line to edit it by hand. Until then the readers skip them with a warning. To leave an architect out of the focus report, see the pause line in [watchers.md](watchers.md#focus-report).

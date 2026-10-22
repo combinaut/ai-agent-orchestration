@@ -140,6 +140,12 @@ git_gb = 2
 # Hog watcher: git process age in seconds
 git_age_s = 180
 
+[workers]
+# Seconds idle or done before WORKER WAITING
+wait_s = 600
+# Seconds between waiting alerts (minimum 60)
+wait_repeat_s = 1800
+
 [pr_tabs]
 # Organization the PR tabs extension manages; empty turns org actions off
 org = ""

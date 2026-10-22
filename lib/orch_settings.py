@@ -95,6 +95,8 @@ SETTINGS = [
     _g('hog.gb', 'ORCH_HOG_GB', 'number', 6, 'Hog watcher: process size in GB'),
     _g('hog.git_gb', 'ORCH_HOG_GIT_GB', 'number', 2, 'Hog watcher: git process size in GB'),
     _g('hog.git_age_s', 'ORCH_HOG_GIT_AGE_S', 'int', 180, 'Hog watcher: git process age in seconds'),
+    _g('workers.wait_s', 'ORCH_WAIT_S', 'number', 600, 'Seconds idle or done before WORKER WAITING'),
+    _g('workers.wait_repeat_s', 'ORCH_WAIT_REPEAT_S', 'number', 1800, 'Seconds between waiting alerts (minimum 60)'),
     _g('pr_tabs.org', 'ORCH_PR_TABS_ORG', 'str', '', 'Organization the PR tabs extension manages; empty turns org actions off'),
     _g('pr_tabs.default_repo', 'ORCH_PR_TABS_DEFAULT_REPO', 'str', '', 'Repo name for bare PR numbers; empty turns number jumps off'),
     _g('pr_tabs.open_all', 'ORCH_PR_TABS_OPEN_ALL', 'str', '', 'GitHub search behind the Open all button; empty turns it off'),
@@ -382,9 +384,9 @@ GITHUB_REMOTE = re.compile(r'^(?:[a-z][a-z0-9+.-]*://(?:[^@/\s]+@)?github\.com(?
 NO_ORIGIN = re.compile(r'No such remote|cannot change to .*: No such file or directory', re.I)
 
 
-def origin_matches(path, repo):
-    """True when the clone's GitHub origin is repo; raises CalledProcessError when the origin cannot be read."""
-    args = ['git', '-C', str(path), 'remote', 'get-url', 'origin']
+def remote_matches(path, repo, remote):
+    """True when the clone's GitHub remote is repo; raises CalledProcessError when the remote cannot be read."""
+    args = ['git', '-C', str(path), 'remote', 'get-url', remote]
     result = subprocess.run(args, capture_output=True, text=True, timeout=5, env=dict(os.environ, LC_ALL='C'))
     if result.returncode:
         if NO_ORIGIN.search(result.stderr):
@@ -394,11 +396,26 @@ def origin_matches(path, repo):
     return match is not None and match[1].lower() == repo.lower()
 
 
+def matching_remote(path, repo):
+    """'origin' or 'upstream' (the base repo of a fork), whichever is the clone's GitHub remote for repo, else None;
+    raises CalledProcessError when a remote cannot be read."""
+    for remote in ('origin', 'upstream'):
+        if remote_matches(path, repo, remote):
+            return remote
+    return None
+
+
+def origin_matches(path, repo):
+    """True when the clone's GitHub origin or upstream is repo; raises CalledProcessError when a remote cannot be read (see matching_remote)."""
+    return matching_remote(path, repo) is not None
+
+
 def known_clone(repo, clones):
-    """The clone among clones whose origin is repo, else None."""
-    for path in clones:
-        if origin_matches(path, repo):
-            return path
+    """The clone among clones whose origin is repo, else the first whose upstream is, else None."""
+    for remote in ('origin', 'upstream'):
+        for path in clones:
+            if remote_matches(path, repo, remote):
+                return path
     return None
 
 

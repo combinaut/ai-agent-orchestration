@@ -89,25 +89,38 @@ class OpenPrs:
                 self.repos[root] = False
         return self.repos[root]
 
-    def has(self, repo, branch):
-        """True, False, or None when the repo's PRs cannot be read. PRs from forks do not count."""
+    def upstream(self, root):
+        """owner/name of the clone's GitHub upstream, the base repo of a fork; None without one, False when it cannot be read."""
+        if (root, 'upstream') not in self.repos:
+            try:
+                self.repos[root, 'upstream'] = discovery.github_repo(command, root, 'upstream') or None
+            except discovery.Unavailable:
+                self.repos[root, 'upstream'] = False
+        return self.repos[root, 'upstream']
+
+    def has(self, repo, branch, owner=None):
+        """True, False, or None when the repo's PRs cannot be read. A PR counts when its head repository belongs to owner,
+        by default the repo's owner, so PRs from other forks do not count."""
+        owner = (owner or repo.split('/')[0]).lower()
         repo = repo.lower()
         if repo not in self.branches:
             if len(self.branches) >= PR_REPOS_MAX:
                 return None
             try:
-                rows = json.loads(command('gh', 'pr', 'list', '-R', repo, '--state', 'open', '--json', 'headRefName,isCrossRepository',
+                rows = json.loads(command('gh', 'pr', 'list', '-R', repo, '--state', 'open', '--json', 'headRefName,headRepositoryOwner',
                                           '--limit', str(PR_LIMIT)))
                 self.branches[repo] = (None if len(rows) >= PR_LIMIT else
-                                       {row['headRefName'] for row in rows if not row.get('isCrossRepository')})
+                                       {(row['headRepositoryOwner']['login'].lower(), row['headRefName'])
+                                        for row in rows if row.get('headRepositoryOwner')})
             except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
                 self.branches[repo] = None
         found = self.branches[repo]
-        return None if found is None else branch in found
+        return None if found is None else (owner, branch) in found
 
 
 def open_pr(workspaces, owner, prs):
-    """True when a workspace the architect owns has a branch with an open PR; a gone clone or an unreadable origin, branch or lookup counts as one."""
+    """True when a workspace the architect owns has a branch with an open PR, on its origin repo or on its upstream repo from
+    the origin's owner; a gone clone or an unreadable origin, upstream, branch or lookup counts as one."""
     for row in workspaces:
         if row.get('owner') != owner:
             continue
@@ -124,7 +137,12 @@ def open_pr(workspaces, owner, prs):
             branch = command('git', '-C', row['checkout'], 'branch', '--show-current').strip()
         except (OSError, subprocess.SubprocessError):
             return True
-        if branch and prs.has(repo, branch) is not False:
+        if not branch:
+            continue
+        if prs.has(repo, branch) is not False:
+            return True
+        base = prs.upstream(row['repo_root'])
+        if base is False or (base and prs.has(base, branch, repo.split('/')[0]) is not False):
             return True
     return False
 

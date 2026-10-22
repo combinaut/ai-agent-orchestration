@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 from pathlib import Path
 
 from test_support import IsolatedTestCase
@@ -543,13 +543,14 @@ class WatcherTests(IsolatedTestCase):
     def test_collect_uses_herdr_bin_path_with_fallback(self):
         response = '{"result": {"agents": []}}'
         with patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_BIN_PATH": "/opt/example/herdr"}, clear=True), \
-             patch.object(w, "command", return_value=response) as command:
+             patch.object(w, "command", side_effect=[response, '{"result": {"workspaces": []}}']) as command:
             self.assertEqual(w.collect("workers", None)["result"]["agents"], [])
-            command.assert_called_once_with("/opt/example/herdr", "agent", "list")
+            self.assertEqual(command.call_args_list, [call("/opt/example/herdr", "agent", "list"),
+                                                     call("/opt/example/herdr", "workspace", "list")])
         with patch.dict(os.environ, {"HERDR_ENV": "1"}, clear=True), \
-             patch.object(w, "command", return_value=response) as command:
+             patch.object(w, "command", side_effect=[response, '{"result": {"workspaces": []}}']) as command:
             w.collect("workers", None)
-            command.assert_called_once_with("herdr", "agent", "list")
+            self.assertEqual(command.call_args_list, [call("herdr", "agent", "list"), call("herdr", "workspace", "list")])
     def test_pr_new_thread_same_count_and_ack(self):
         raw = healthy("prs")[:1]
         self.assertTrue(raw)

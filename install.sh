@@ -31,6 +31,7 @@ n_linked=0
 SERVICES_FAILED=0
 n_ok=0
 n_backup=0
+settings_saved=0
 n_skipped=0
 WATCHER_MIGRATION_PENDING=0
 
@@ -607,9 +608,11 @@ merge_settings() {
     printf '{}\n' >"$settings"
     say "created" "$settings"
     created=1
+    settings_saved=1
   fi
   if ! jq -e 'def hook_entries: type == "array" and all(type == "object" and ((.hooks? // []) | type == "array" and all(type == "object"))); type == "object" and ((.hooks? // {}) | type == "object") and ((.hooks.SessionStart? // []) | hook_entries) and ((.hooks.PreToolUse? // []) | hook_entries and all((.matcher? == null) or (.matcher | type == "string")))' "$settings" >/dev/null 2>&1; then
     skip "$settings is not a supported hooks object; add hooks by hand"
+    settings_saved=-1
     return
   fi
   has_hook=$(jq --arg c "$HOOK_CMD" '[.hooks.SessionStart[]?.hooks[]?.command] | index($c) != null' "$settings")
@@ -647,6 +650,7 @@ merge_settings() {
     cp "$settings" "$backup"
     say "backed up" "$settings -> $backup"
     n_backup=$((n_backup + 1))
+    settings_saved=1
   fi
   tmp=$(mktemp)
   jq --arg hook "$HOOK_CMD" --arg guard "$GUARD_BASH_CMD" --arg status "$STATUSLINE_CMD" --arg managed "$MANAGED_GUARD_RE" "$BASH_MATCHER_JQ $filter" "$settings" >"$tmp"
@@ -655,6 +659,36 @@ merge_settings() {
   [ "$has_hook" = true ] || say "added" "$settings: SessionStart hook ($HOOK_CMD)"
   [ "$has_guard" = true ] || say "added" "$settings: PreToolUse Bash hook ($GUARD_BASH_CMD)"
   [ -n "$current" ] || say "added" "$settings: statusLine ($STATUSLINE_CMD)"
+}
+
+# Lets sessions run bind-self.py themselves in auto mode. Appends the missing rules to permissions.allow and keeps every entry you have.
+allow_bind_self() {
+  local settings="$CLAUDE_DIR/settings.json" script="coordinator/watchers/bind-self.py" bindings="coordinator/watchers/bindings" rules missing tmp backup target mode
+  [ "$settings_saved" != -1 ] || return 0
+  rules=$(jq -nc --arg tilde "Bash(python3 ~/.claude/$script --output ~/.claude/$bindings/*)" --arg abs "Bash(python3 $CLAUDE_DIR/$script --output $CLAUDE_DIR/$bindings/*)" '[$tilde, $abs]')
+  if ! jq -e 'type == "object" and ((.permissions? // {}) | type == "object") and ((.permissions.allow? // []) | type == "array")' "$settings" >/dev/null 2>&1; then
+    skip "$settings has no supported permissions.allow list; add the bind-self.py allow rules by hand"
+    return
+  fi
+  missing=$(jq -c --argjson rules "$rules" '(.permissions.allow // []) as $have | $rules | map(select(. as $r | $have | index($r) | not))' "$settings")
+  if [ "$missing" = "[]" ]; then
+    say "already set" "$settings: bind-self.py allow rules"
+    return
+  fi
+  if [ "$settings_saved" != 1 ]; then
+    backup=$(backup_name "$settings")
+    cp "$settings" "$backup"
+    say "backed up" "$settings -> $backup"
+    n_backup=$((n_backup + 1))
+  fi
+  target=$(resolve_link_path "$settings") || die "$settings is a link loop; settings.json is unchanged"
+  mode=$(claude_md_mode "$target") || die "cannot read the mode of $target; settings.json is unchanged"
+  tmp=$(mktemp "$target.tmp.XXXXXX") || die "cannot write beside $target; settings.json is unchanged"
+  if ! jq --argjson add "$missing" '.permissions.allow = ((.permissions.allow // []) + $add)' "$settings" >"$tmp" || ! jq -e type "$tmp" >/dev/null 2>&1 || ! chmod "$mode" "$tmp" || ! mv "$tmp" "$target"; then
+    rm -f "$tmp"
+    die "could not write the bind-self.py allow rules; $settings is unchanged (backup: ${backup:-none})"
+  fi
+  say "added" "$settings: bind-self.py allow rules ($(jq -r 'join(", ")' <<<"$missing"))"
 }
 
 # The linked guard must deny a forbidden command with exit 2 and the attribution reason on stderr.
@@ -1111,6 +1145,7 @@ link_shared_files
 write_manifest
 personal_config
 merge_settings
+allow_bind_self
 verify_guard
 run_env
 ask_config_keys

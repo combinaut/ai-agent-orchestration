@@ -12,6 +12,7 @@ import json
 import uuid
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -56,8 +57,8 @@ def balance_limits():
     return limits
 
 
-def command(*argv):
-    result = runtime.run(argv)
+def command(*argv, timeout=None):
+    result = runtime.run(argv) if timeout is None else runtime.run(argv, timeout=timeout)
     if result.returncode:
         raise subprocess.CalledProcessError(result.returncode, argv, output=result.stdout, stderr=result.stderr)
     if not result.stdout.strip():
@@ -107,6 +108,35 @@ def identity(agent):
     return (agent.get("agent_session") or {}).get("value") or agent["pane_id"]
 
 
+def workspace_owners(raw):
+    """The `owner` tag of each workspace by id; none when the workspace list was not read."""
+    rows = ((raw.get("workspaces") or {}).get("result") or {}).get("workspaces") or []
+    return {row.get("workspace_id"): row["tokens"].get("owner") for row in rows
+            if isinstance(row, dict) and isinstance(row.get("tokens"), dict)}
+
+
+def architect_like(agent):
+    """An architect or the Coordinator, by role tag or by name; never a worker."""
+    label = agent.get("name") or agent.get("terminal_title_stripped") or ""
+    return (label.startswith("Architect::") or (agent.get("tokens") or {}).get("role") in ("architect", "coordinator")
+            or "Architect::" in (agent.get("terminal_title_stripped") or ""))
+
+
+def waiting_owners(raw):
+    """Validate the workspace envelope before treating missing owners as authoritative."""
+    listing = raw.get("workspaces")
+    if listing is None:
+        return None
+    try:
+        rows = [] if listing == {} else listing["result"]["workspaces"]
+        if not isinstance(rows, list) or not all(isinstance(row, dict) and "workspace_id" in row
+                                               and (row.get("tokens") is None or isinstance(row["tokens"], dict)) for row in rows):
+            return None
+        return workspace_owners(raw)
+    except (KeyError, TypeError):
+        return None
+
+
 def recycle_amount(value):
     """The context used, as `<n>k` or `<n>%`, at or over the recycle threshold; None under it or without a reading."""
     if value.get("tokens") is not None:
@@ -118,13 +148,6 @@ def recycle_amount(value):
     return f"{used:.0f}%" if used >= float(os.environ.get("ORCH_RECYCLE_PCT", 55)) else None
 
 
-def workspace_owners(raw):
-    """The `owner` tag of each workspace by id; none when the workspace list was not read."""
-    rows = ((raw.get("workspaces") or {}).get("result") or {}).get("workspaces") or []
-    return {row.get("workspace_id"): row["tokens"].get("owner") for row in rows
-            if isinstance(row, dict) and isinstance(row.get("tokens"), dict)}
-
-
 def worker_recycle(agent, value, owners):
     """`RECYCLE-WORKER <pane> owner=<workspace> [<name>] <amount>` for a worker over the threshold whose workspace has
     an owner tag. Only the agent name labels it: a terminal title changes while the worker runs."""
@@ -134,6 +157,7 @@ def worker_recycle(agent, value, owners):
         return None
     return " ".join(part for part in ("RECYCLE-WORKER", agent["pane_id"], f"owner={owner}", agent.get("name"), amount)
                     if part)
+
 
 
 def conditions(mode, raw):
@@ -363,6 +387,7 @@ def reduce_context(before, after, raw):
 
 WORKER_STATUSES = ("working", "idle", "done", "blocked", "error", "waiting")
 ACTIVE_WORKER_STATUSES = ("working", "waiting", "blocked", "error")
+IDLE_STATUSES = ("idle", "done")
 
 
 def worker_snapshot(raw, previous, bad):
@@ -407,6 +432,81 @@ def worker_alerts(previous):
     return alerts
 
 
+def waiting_line(key, entry, now, suffix=""):
+    row = entry["row"]
+    tail = (f" pane={row['pane_id']} owner={entry['owner']} "
+            f"{int((now - entry['since']) // 60)}m session={key}" + (f" {suffix}" if suffix else "")
+            + alert_policy.WORKER_WAIT_NOTE)
+    budget = max(1, alert_policy.LINE_LIMIT - len("WORKER WAITING ") - len(tail))
+    name = (" ".join((row.get("name") or row.get("terminal_title_stripped") or "worker").split()) or "worker")[:min(24, budget)]
+    return f"WORKER WAITING {name}" + tail
+
+
+def reduce_waiting(previous, raw):
+    """Timers use session IDs, falling back to panes. Unreadable metadata freezes existing state."""
+    old = previous.get("waiting", {})
+    now = raw.get("observed_at", time.time())
+    rows = {identity(row): row for row in agents(raw)}
+    gaps = {}
+    old_panes = {entry["row"]["pane_id"]: key for key, entry in old.items()}
+    for row in agents(raw):
+        key = old_panes.get(row["pane_id"])
+        if not (row.get("agent_session") or {}).get("value") and key and key != identity(row) and key not in rows:
+            rows.pop(identity(row), None)
+            rows[key] = row
+            gaps[key] = True
+    owners = waiting_owners(raw)
+    current, events = {}, []
+    for key, row in rows.items():
+        entry = old.get(key)
+        if architect_like(row):
+            continue
+        if row.get("agent_status") == "working" and key not in gaps:
+            continue
+        seq = row.get("state_change_seq")
+        old_seq = entry["row"].get("state_change_seq") if entry else None
+        if seq is not None and old_seq is not None and seq != old_seq:
+            if entry["stage"]:
+                events.append(waiting_line(key, entry, now, "cleared"))
+            entry = None
+        owner = owners.get(row.get("workspace_id")) if owners is not None else None
+        if owners is not None and not owner:
+            continue
+        if row.get("agent_status") not in WORKER_STATUSES or owners is None or key in gaps:
+            if entry and owners is not None and owner != entry["owner"]:
+                continue
+            if entry:
+                saved_row = dict(entry["row"], pane_id=row["pane_id"])
+                if seq is not None:
+                    saved_row["state_change_seq"] = seq
+                current[key] = dict(entry, row=saved_row)
+            continue
+        if row.get("agent_status") not in IDLE_STATUSES:
+            continue
+        if entry and entry["owner"] != owner:
+            if entry["stage"]:
+                events.append(waiting_line(key, entry, now, "cleared"))
+            entry = None
+        if seq is None and old_seq is not None:
+            row = dict(row, state_change_seq=old_seq)
+        entry = dict(entry or dict(since=now, stage=0, owner=owner), row=dict(row))
+        stage = entry["stage"]
+        delay = float(os.environ.get("ORCH_WAIT_S", 600)) if stage == 0 else float(os.environ.get("ORCH_WAIT_REPEAT_S", 1800))
+        since = entry["since"] if stage == 0 else entry["sent"]
+        if stage:
+            delay = max(60, delay)
+        if row["pane_id"] not in raw.get("waiting_busy", []) and stage < 3 and (now - since > delay if stage == 0 else now - since >= delay):
+            events.append(waiting_line(key, entry, now, ("", "REPEAT", "ESCALATE")[stage]))
+            entry.update(stage=stage + 1, sent=now)
+        current[key] = entry
+    for key, entry in old.items():
+        if key not in current and entry["stage"]:
+            line = waiting_line(key, entry, now, "cleared")
+            if line not in events:
+                events.append(line)
+    return current, events
+
+
 def reduce_workers(before, raw):
     previous = before or {}
     old_bad = worker_alerts(previous)
@@ -446,16 +546,22 @@ def reduce_workers(before, raw):
             events.append(worker_line(dict(old, pane=present[key]["pane_id"]), recovered=True))
         if new:
             events.append(worker_line(new))
+    waiting, waiting_events = reduce_waiting(previous, raw)
+    events += waiting_events
     return dict(bad={key: value for key, value in bad.items() if key in present},
-                present=present, unreadable=unreadable, seen=seen), events
+                present=present, unreadable=unreadable, seen=seen, waiting=waiting,
+                waiting_read_failures=raw.get("waiting_read_failures", previous.get("waiting_read_failures", []))), events
 
 
 def pull_owners(command, prs, failed=None, work=None):
     """Owner tag of the open workspace whose checkout has each PR's head branch, by <repo>#<n>.
     work is the open work already read (discovery.open_work), or the Unavailable it raised.
-    Each root is identified by its `origin` remote; only roots of watched repositories have their worktrees listed.
-    A root that fails is skipped and listed in `failed` by its `owner/name`, or as `*/<name>` when its remote could not
-    be read."""
+    Each root is identified by its `origin` remote and its `upstream` remote, the base repo of a fork; only roots with
+    a watched repository have their worktrees listed. A PR takes the owner of the checkout of its head branch when the
+    head repository's owner is the owner of the root's origin, so a same-named branch of another fork has none.
+    A root that fails is skipped and listed in `failed` by the `owner/name` of its origin and upstream, or as `*/<name>`
+    when its origin could not be read. An unreadable upstream does not skip the root: its origin is still handled, and
+    `*` is listed, since the base repo it names is unknown."""
     work = discovery.open_work(command) if work is None else work
     if isinstance(work, discovery.Unavailable):
         raise work
@@ -464,29 +570,41 @@ def pull_owners(command, prs, failed=None, work=None):
     watched = {pr["repository"]["nameWithOwner"].lower() for pr in prs}
     branches = {}
     for root in sorted({row["repo_root"] for row in rows if row.get("repo_root")}):
-        identity = "*/" + Path(root).name.lower()
+        identities = ["*/" + Path(root).name.lower()]
         try:
             remote = GITHUB_REMOTE.search(command("git", "-C", root, "remote", "get-url", "origin").strip())
-            if not remote or remote.group(1).lower() not in watched:
+            if not remote:
                 continue
-            identity = remote.group(1).lower()
+            origin = remote.group(1).lower()
+            identities = ["*/" + origin.split("/")[1]]
+            bases = {origin}
+            try:
+                bases.add((discovery.github_repo(command, root, "upstream") or origin).lower())
+            except discovery.Unavailable:
+                if failed is not None:
+                    failed.append("*")
+            identities = sorted(bases)
+            if not bases & watched:
+                continue
             listing = command("git", "-C", root, "worktree", "list", "--porcelain")
-        except audit.READ_ERRORS as error:
+        except (*audit.READ_ERRORS, discovery.Unavailable) as error:
             if isinstance(error, subprocess.CalledProcessError) and audit.orch_settings.NO_ORIGIN.search(str(error.stderr or "")):
                 continue
             if failed is not None:
-                failed.append(identity)
+                failed.extend(identities)
             continue
         path = None
         for line in listing.splitlines():
             if line.startswith("worktree "):
                 path = line[9:]
             elif line.startswith("branch refs/heads/") and path in by_path:
-                branches[(remote.group(1).lower(), line[18:])] = path
+                for base in bases:
+                    branches[(base, origin.split("/")[0], line[18:])] = path
     owners = {}
     for pr in prs:
         repo = pr["repository"]["nameWithOwner"]
-        owner = (by_path.get(branches.get((repo.lower(), pr.get("headRefName")))) or {}).get("owner")
+        head = ((pr.get("headRepository") or {}).get("nameWithOwner") or "/").split("/")[0].lower()
+        owner = (by_path.get(branches.get((repo.lower(), head, pr.get("headRefName")))) or {}).get("owner")
         if owner:
             owners[f"{repo}#{pr['number']}"] = owner
     return owners
@@ -1092,6 +1210,47 @@ def closed_panes(base, present, before):
     return names
 
 
+BACKGROUND_JOB = re.compile(
+    r"^\s*[1-9]\d* (?:monitors?|shells?) still running(?:\s.*)?$"
+    r"|[·,] [1-9]\d* (?:monitors?|shells?)(?=\s|,|$)"
+    r"|^\s*(?:[•*] Working[^\n]* · )?[1-9]\d* background terminals? running · /ps to view · /stop to close\s*$",
+    re.MULTILINE,
+)
+
+
+def collect_waiting_jobs(raw, before):
+    """Read only panes with a due alert. Failed reads allow delivery and log once until a successful read."""
+    previous = before or {}
+    old = previous.get("waiting", {})
+    # Reuse the pure reducer to find due sends without duplicating identity and eligibility rules.
+    due, _ = reduce_waiting(previous, raw)
+    live = {row["pane_id"] for row in agents(raw)}
+    failed = set(previous.get("waiting_read_failures", [])) & live
+    busy = []
+    remaining = signal.getitimer(signal.ITIMER_REAL)[0]
+    budget = min(10, max(0, remaining - 5)) if remaining else 10
+    read_until = time.monotonic() + budget
+    for key, entry in due.items():
+        if entry["stage"] <= old.get(key, {}).get("stage", 0):
+            continue
+        timeout = min(5, read_until - time.monotonic())
+        if timeout <= 0:
+            break
+        pane = entry["row"]["pane_id"]
+        try:
+            text = command(herdr_bin(), "pane", "read", pane, "--source", "recent-unwrapped", "--lines", "16", timeout=timeout)
+        except discovery.READ_ERRORS as error:
+            if pane not in failed:
+                print(f"workers: pane {pane} background-job read failed ({type(error).__name__}); treating as not busy",
+                      file=sys.stderr, flush=True)
+            failed.add(pane)
+            continue
+        failed.discard(pane)
+        if BACKGROUND_JOB.search(text):
+            busy.append(pane)
+    raw.update(waiting_busy=busy, waiting_read_failures=sorted(failed))
+
+
 def collect(mode, before, scope="", base=None):
     if mode == "audit":
         return audit.collect(command, before=before)
@@ -1108,6 +1267,11 @@ def collect(mode, before, scope="", base=None):
         agents(raw)
         if mode == "workers":
             raw["observed_at"] = time.time()
+            try:
+                raw["workspaces"] = json.loads(command(herdr_bin(), "workspace", "list"))
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError, MissingMetric):
+                raw["workspaces"] = None
+            collect_waiting_jobs(raw, before)
             if base is not None:
                 raw["closed"] = closed_panes(base, {row["pane_id"] for row in agents(raw)}, before)
             return raw
