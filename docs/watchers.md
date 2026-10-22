@@ -47,6 +47,7 @@ duplicating committed answers. Closing a question shares the answer-pass lock,
 finds the pane by its exact `Q: <slug>` label and closes it through `close-pane.sh`
 before removing its files and pending claims. A failed pane close preserves the
 files for retry. This prevents late orphan answers from being published.
+A Remind on the panel leaves `<slug>.remind` (epoch seconds) next to the question; each answers pass, under the same lock, reopens the pane of every question whose time has passed and removes the file. A failed open retries on the next pass; a reminder without its question is dropped.
 Claims include a persisted submission order so corrections replay after older
 answers. Unreadable claims do not block other questions; recovery clears the
 corresponding read-failure alert. The panel discards terminal escape sequences.

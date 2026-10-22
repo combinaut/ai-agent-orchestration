@@ -18,7 +18,7 @@ from question_remind import atomic_write, remind_path, write_remind  # noqa: E40
 from reminder_picker import PICK_KEYS, TYPE_HINT, edit_entry, entry_event, picker_lines, remind_until  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-HINT = "Press 1-9 to answer, t to type an answer, d to dismiss, r to be reminded later."
+HINT = "1-9 answer · t type an answer · d dismiss · r remind me later"
 ESCAPE = "ESC"
 ESCAPE_WAIT = 0.05
 

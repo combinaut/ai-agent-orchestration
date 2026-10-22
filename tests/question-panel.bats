@@ -207,8 +207,7 @@ EOF
   printf '%s\n' 1 >"$questions/due.remind"
   printf '%s\n' 99999999999 >"$questions/later.remind"
   local panes='{"result":{"panes":[{"pane_id":"todo","tokens":{"todo":"1"}}]}}'
-  export ORCH_USER_QUESTIONS_DIR="$questions"
-  run env HERDR_PANES="$panes" "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --state-dir "$TMP/state"
+  run env ORCH_USER_QUESTIONS_DIR="$questions" HERDR_PANES="$panes" "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --state-dir "$TMP/state"
   [ "$status" -eq 0 ]
   grep -qx 'pane rename question-pane Q: due' "$TMP/question-herdr.calls"
   run grep -c 'pane rename' "$TMP/question-herdr.calls"
@@ -221,7 +220,6 @@ EOF
   questions="$HOME/.claude/coordinator/questions"
   printf due >"$questions/due.md"
   printf '%s\n' 1 >"$questions/due.remind"
-  export ORCH_USER_QUESTIONS_DIR="$questions"
-  run env HERDR_FAIL=run HERDR_PANES='{"result":{"panes":[{"pane_id":"todo","tokens":{"todo":"1"}}]}}' "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --state-dir "$TMP/state"
+  run env ORCH_USER_QUESTIONS_DIR="$questions" HERDR_FAIL=run HERDR_PANES='{"result":{"panes":[{"pane_id":"todo","tokens":{"todo":"1"}}]}}' "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --state-dir "$TMP/state"
   [ -f "$questions/due.remind" ]
 }

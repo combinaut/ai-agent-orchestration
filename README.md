@@ -106,6 +106,10 @@ To open the buttons view as a popup titled "Your to-do" on `prefix+t`, set `todo
 
 Every user question gets a pane. Create its Markdown file under `~/.claude/coordinator/questions/`, then run `ask-user-question <slug> <file>`; it stacks below the to-do pane without taking focus. Number keys or `t` record an answer, which the shared feed Monitor reports. Run `ask-user-question close <slug>` after handling it to find the pane by its exact `Q: <slug>` label, close it through `close-pane.sh`, then remove its files. A failed close keeps the files for retry.
 
+![The Q panel with the reminder picker open](docs/q-panel.png)
+
+Besides the answer keys, the panel has `d` Dismiss and `r` Remind. Dismiss writes `answers: DISMISSED <slug>` to the feed and closes the pane and the question. Remind opens the to-do view's picker (15m, 1h, 2h, 4h, tomorrow 9:00, or a typed `30m` / `3h`; Esc cancels), writes `answers: REMIND <slug> <date time>`, stores the time in `<slug>.remind` and runs `ask-user-question hide <slug>`, which closes the pane but keeps the question. The answers watcher reopens the pane on its next cycle after that time.
+
 ### Review PRs
 
 `/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`) in a Herdr pane for every PR that is ready; Codex posts the review and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
