@@ -43,6 +43,11 @@ class WaitingJobTests(IsolatedTestCase):
 
     def test_live_background_texts_suppress_all_stages_without_resetting(self):
         for text in (
+            "✻ Brewed for 2m · done 4:50 PM · 1 shell still running",
+            "⏵⏵ auto mode on · PR #46 · 1 shell",
+            "✻ Cooked · done 4:50 PM · 1 shell, 2 monitors still running",
+            "· 1 shell, 2 monitors",
+            "✻ Cooked · done 4:50 PM · 0 shells, 2 monitors still running",
             "  1 monitor still running",
             "  2 monitors still running",
             "  1 shell still running",
@@ -83,6 +88,7 @@ class WaitingJobTests(IsolatedTestCase):
         for text in (
             "Done.",
             "0 monitors still running",
+            "✻ Cooked · done 4:50 PM · 0 shells, 0 monitors still running",
             "0 background terminals running · /ps to view · /stop to close",
         ):
             with self.subTest(text=text):

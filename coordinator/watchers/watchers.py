@@ -1077,7 +1077,7 @@ def closed_panes(base, present, before):
 
 BACKGROUND_JOB = re.compile(
     r"^\s*[1-9]\d* (?:monitors?|shells?) still running(?:\s.*)?$"
-    r"|· [1-9]\d* monitors?(?:\s|$)"
+    r"|[·,] [1-9]\d* (?:monitors?|shells?)(?=\s|,|$)"
     r"|^\s*(?:[•*] Working[^\n]* · )?[1-9]\d* background terminals? running · /ps to view · /stop to close\s*$",
     re.MULTILINE,
 )
