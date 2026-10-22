@@ -543,6 +543,10 @@ def collect_pulls(command, before, clock=time.monotonic):
             incomplete = []
             if pr["reviewThreads"]["pageInfo"]["hasNextPage"]:
                 incomplete.append("THREADS")
+            commits = pr["commits"]["nodes"]
+            rollup = commits[0]["commit"]["statusCheckRollup"] if commits else None
+            if rollup and rollup["contexts"]["pageInfo"]["hasNextPage"]:
+                incomplete += ["RED", "APPROVED-STACKED"]
             if pr["reviews"].get("pageInfo", {}).get("hasPreviousPage") and not any(
                     (review.get("author") or {}).get("login") == os.environ.get(
                         "ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer")

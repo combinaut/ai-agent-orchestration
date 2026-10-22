@@ -511,6 +511,18 @@ class PullsTest(IsolatedTestCase):
         self.assertEqual(events, ["PULLS READFAIL settings:owner/product#7"])
         self.assertEqual(state["prs"]["owner/product#7"]["lines"], old)
 
+    def test_truncated_checks_do_not_clear_saved_red_event(self):
+        row = pr(7)
+        contexts = row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]
+        contexts["nodes"][0]["conclusion"] = "FAILURE"
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        contexts["nodes"] = []
+        contexts["pageInfo"]["hasNextPage"] = True
+        state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertIn("RED", state["prs"]["owner/product#7"]["lines"])
+        self.assertFalse(any("cleared" in event for event in events))
+        self.assertIn("PULLS READFAIL pr:owner/product#7", events)
+
     def test_one_search_call_per_poll(self):
         w.collect_pulls(self.command([pr(n) for n in range(20)]), None)
         self.assertEqual(sum(argv[:3] == ("gh", "api", "graphql") for argv in self.calls), 1)
