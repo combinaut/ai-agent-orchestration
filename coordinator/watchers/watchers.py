@@ -342,8 +342,11 @@ def reduce_waiting(previous, raw):
     """Only real session IDs own timers. Failed ownership/status reads freeze existing state."""
     old = previous.get("waiting", {})
     now = raw.get("observed_at", time.time())
-    rows = {(row.get("agent_session") or {}).get("value"): row for row in agents(raw)}
-    rows.pop(None, None)
+    rows = {}
+    for row in agents(raw):
+        sid = (row.get("agent_session") or {}).get("value")
+        if sid:
+            rows[sid] = row
     gaps = {}
     old_panes = {entry["row"]["pane_id"]: key for key, entry in old.items()}
     for row in agents(raw):

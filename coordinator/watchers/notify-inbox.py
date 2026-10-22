@@ -30,7 +30,7 @@ OUTBOX_KEEP_SECONDS = 3600
 MONITOR_ACK_SECONDS = 20
 FEED_NAME = "coordinator-feed.log"
 FEED_BYTES = 1024 * 1024
-WAIT_OWNER = re.compile(r"^workers: WORKER WAITING .+? pane=\S+ owner=([A-Za-z0-9_-]+) ")
+WAIT_OWNER = re.compile(r"^workers: WORKER WAITING .+ pane=\S+ owner=([A-Za-z0-9_-]+) \d+m session=\S+")
 OWNER = re.compile(r"^pulls: \S+ \S+#\d+ owner=([A-Za-z0-9_-]+) ")
 
 spec = importlib.util.spec_from_file_location("reader", w.ROOT / "read-alerts.py")

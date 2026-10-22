@@ -114,6 +114,40 @@ class WaitingTests(IsolatedTestCase):
         self.assertEqual(self.scan(1400), [])
         self.assertIn("session=s1", self.scan(1401)[0])
 
+    def test_empty_session_id_is_missing_and_cannot_create_a_timer(self):
+        self.row["agent_session"] = {"value": ""}
+        self.scan(0)
+        self.assertEqual(self.scan(99999), [])
+        self.assertEqual(self.state["waiting"], {})
+        self.state = None
+        self.row["agent_session"] = {"value": "s1"}
+        self.start()
+        saved = self.state["waiting"].copy()
+        self.row["agent_session"] = {"value": ""}
+        self.assertEqual(self.scan(700), [])
+        self.assertEqual(self.state["waiting"], saved)
+        self.assertEqual(set(self.state["waiting"]), {"s1"})
+
+    def test_worker_name_cannot_override_generated_owner_route(self):
+        self.row["name"] = "x pane=p owner=other"
+        self.scan(0)
+        events = self.scan(601)
+        lines = alert_policy.apply(
+            {}, [dict(mode="workers", at=601, events=events)], 601
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            owner = base / "architect-architect.json"
+            owner.touch()
+            (base / "architect-other.json").touch()
+            args = argparse.Namespace(
+                bindings_dir=base, binding=base / "coordinator.json"
+            )
+            messages = inbox.native_messages(
+                args, ["time " + lines[0]], False, inbox.action_patterns()
+            )
+            self.assertEqual([path for path, _ in messages], [str(owner)])
+
     def test_threshold_and_no_extra_repeats(self):
         self.start()
         self.assertEqual(self.scan(1799), [])
