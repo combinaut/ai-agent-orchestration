@@ -664,10 +664,16 @@ def collect_pulls(command, before, clock=time.monotonic):
     for pr in prs:
         key = f"{pr['repository']['nameWithOwner']}#{pr['number']}"
 
+        gate_checks = None
+
         def repo_settings(pr=pr, key=key):
+            nonlocal gate_checks
             try:
-                return audit.repo_settings(command, pr["repository"]["nameWithOwner"], pr["baseRefName"], settings)
+                values = audit.repo_settings(command, pr["repository"]["nameWithOwner"], pr["baseRefName"], settings)
+                gate_checks = sorted(set(filter(None, values.get("ORCH_MERGE_GATE_CHECKS", "").split("|"))))
+                return values
             except audit.READ_ERRORS:
+                gate_checks = old.get("gate_checks")
                 settings_failed.append(f"settings:{key}")
                 raise
         old = dict(known.get(key, {}))
@@ -705,8 +711,9 @@ def collect_pulls(command, before, clock=time.monotonic):
             identities = pull_identities(display_pr, lines)
             if pr["reviewThreads"]["pageInfo"]["hasNextPage"]:
                 incomplete.append("THREADS")
+            same_ci_scope = same_scope and gate_checks is not None and gate_checks == old.get("gate_checks")
             for kind in incomplete:
-                if kind == "APPROVED-STACKED" and not same_scope:
+                if kind == "APPROVED-STACKED" and not same_ci_scope:
                     continue
                 if kind == "THREADS" and kind in old.get("identities", {}):
                     # A partial page can prove a visible resolution/new thread, never an unseen resolution.
@@ -735,12 +742,13 @@ def collect_pulls(command, before, clock=time.monotonic):
             lines, identities = old.get("lines", {}), old.get("identities", {})
             check_failures = old.get("check_failures")
             visible_bot_reviews = None
+            gate_checks = old.get("gate_checks")
             head, base = old.get("head"), old.get("base")
             unreadable.append(f"pr:{key}")
         owner = owners[key] if key in owners else old.get("owner")
         current[key] = dict(title=pr["title"], owner=owner, lines=lines, identities=identities,
                             seen_reviews=old.get("seen_reviews", []), visible_bot_reviews=visible_bot_reviews, check_failures=check_failures,
-                            head=head, base=base)
+                            head=head, base=base, gate_checks=gate_checks)
     return dict(prs=current, departed=departed, failed=failed,
                 unreadable=unreadable + [f"pr:{key}" for key in sorted(failed + waiting)] + sorted(set(settings_failed)))
 
@@ -807,7 +815,7 @@ def reduce_pulls(before, raw):
                 seen.add(identity)
             if before is not None and (changed or rerouted):
                 # End the previous identity before starting its replacement, including in the feed policy.
-                if kind in old and changed and not rerouted:
+                if kind in old and changed:
                     events.append(f"{kind} {key} cleared")
                 events.append(pull_line(line, key, pr["owner"]))
         seen.update(visible_reviews or [])

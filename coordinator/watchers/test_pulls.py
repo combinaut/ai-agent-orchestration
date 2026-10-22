@@ -921,6 +921,40 @@ class PullsTest(IsolatedTestCase):
         self.assertIn("recentReviews:reviews(last:6){nodes{id author{login} body}}", w.PULLS_SELECTION)
         self.assertEqual(w.PULLS_SELECTION.count(" body"), 1)
 
+    def test_new_review_and_owner_in_same_poll_reaches_start_feed(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        row["reviews"]["nodes"] = [{"id": "R1", "author": {"login": "copilot-pull-request-reviewer"},
+                                     "body": "Needs a closer look\nCheck it"}]
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        policy = {}
+        line = w.pull_line(state["prs"]["owner/product#7"]["lines"]["COPILOT"], "owner/product#7", "wArch")
+        w.alert_policy.apply(policy, [{"mode": "pulls", "events": [line]}], 1)
+        rows = json.loads(json.dumps(WORKSPACES))
+        rows["result"]["workspaces"][0]["tokens"]["owner"] = "wNew"
+        row["reviews"]["nodes"][0]["id"] = "R2"
+        with patch(__name__ + ".WORKSPACES", rows):
+            state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        feed = w.alert_policy.apply(policy, [{"mode": "pulls", "events": events}], 2)
+        self.assertEqual(sum("COPILOT " in line and "owner=wNew" in line and "(start)" in line for line in feed), 1)
+        rows["result"]["workspaces"][0]["tokens"]["owner"] = "wThird"
+        with patch(__name__ + ".WORKSPACES", rows):
+            _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        feed = w.alert_policy.apply(policy, [{"mode": "pulls", "events": events}], 3)
+        self.assertTrue(any("(owner)" in line for line in feed))
+        self.assertFalse(any("(start)" in line for line in feed))
+
+    def test_changed_merge_gates_do_not_reuse_prior_full_ci_evidence(self):
+        row = pr(7)
+        row["baseRefName"] = "stack"
+        with patch.object(w.audit, "repo_settings", return_value={"ORCH_MERGE_GATE_CHECKS": "unit"}):
+            state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"]["hasNextPage"] = True
+        with patch.object(w.audit, "repo_settings", return_value={"ORCH_MERGE_GATE_CHECKS": "new-required-ci"}):
+            state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        line = state["prs"]["owner/product#7"]["lines"]["APPROVED-STACKED"]
+        self.assertIn("full CI unknown", line)
+        self.assertTrue(any(event.startswith("APPROVED-STACKED owner/product#7 owner=") for event in events))
+
     def test_one_search_call_per_poll(self):
         w.collect_pulls(self.command([pr(n) for n in range(20)]), None)
         self.assertEqual(sum(argv[:3] == ("gh", "api", "graphql") for argv in self.calls), 1)
