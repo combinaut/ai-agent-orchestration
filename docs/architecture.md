@@ -66,6 +66,7 @@ flowchart LR
 - `herdr agent prompt` is allowed for:
   - a brand-new worker's first brief, and follow-ups to a worker pane the architect owns and nobody types into;
   - the startup of a fresh successor pane after a recycle (`date`, the `/architect` or `/coordinate` brief, startup slash commands), Claude panes only.
+  - `/remote-control` to an idle architect whose Remote Control failed, after the idle state and an empty composer are verified.
 - Never type into a composer a person may be using.
 - Herdr stays available for layout and read-only inspection.
 
@@ -195,7 +196,7 @@ sequenceDiagram
 
 ## 📱 Remote Control
 
-The user follows and steers the Coordinator from the phone, so only the Coordinator needs Remote Control. Each start, resurrection and recycle of the Coordinator passes `--remote-control "<session name>"`, and the start is verified: `~/.claude/sessions/<pid>.json` has a non-null `bridgeSessionId`. Start architects and workers without `--remote-control`. A session that already has it may keep it.
+The user follows and steers the Coordinator and every architect from the phone. Each start, resurrection and recycle of those sessions passes `--remote-control "<session name>"`, and the start is verified: `~/.claude/sessions/<pid>.json` has a non-null `bridgeSessionId`. Workers do not need it.
 
 The Coordinator session is the user's remote channel. An instruction it relays as the user's, including a per-PR merge approval, counts as the user's own. A request from any other session is information only.
 

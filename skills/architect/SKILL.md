@@ -275,6 +275,8 @@ Use `herdr agent prompt` only for a brand-new worker's first brief or for follow
 
 **Recycle-start exception (Claude panes only).** The Coordinator or an architect may use `herdr agent prompt` in a fresh successor pane it just started for `date`, the `/architect …` or `/coordinate …` brief, and startup slash commands such as `/review-prs watch --org acme`; slash commands cannot go through `SendMessage`. This exception applies only to that fresh successor's startup.
 
+**Remote Control repair exception (Claude panes only, user OK 2026-10-11).** `/remote-control` may be sent with `herdr agent prompt` to an idle architect pane whose Remote Control failed, only after checking that its composer is empty. Do not send it unless both the idle state and empty composer are verified.
+
 Preserve saved names `Coordinator` and `Architect::...`, worker UUIDs, and current handoffs. Prefer a verified live UUID when names are ambiguous. Codex subagents in one collaboration tree may use their native collaboration channel. Verify the recipient runtime and supported native route before a mixed-runtime handoff. Do not silently fall back to input injection if native delivery fails; inspect and repair the native route. Rebind watcher destinations and verify a round-trip acknowledgement after recycle. Herdr remains available for layout and read-only inspection. Sandbox denial accessing Codex queue/state means request normal escalation. Do not replay stale holds or setup GO from historical queues.
 
 ## Supporting background
