@@ -3,6 +3,9 @@
 import io
 import json
 import os
+import subprocess
+import tempfile
+from pathlib import Path
 from contextlib import redirect_stderr
 from unittest.mock import patch
 
@@ -19,7 +22,7 @@ class WaitingJobTests(IsolatedTestCase):
         self.calls = []
 
     def poll(self, now, text="Done.\n› Ask Codex to do anything", error=None):
-        def command(*args):
+        def command(*args, **kwargs):
             self.calls.append(args)
             if args[-2:] == ("agent", "list"):
                 return json.dumps({"result": {"agents": [self.worker.row]}})
@@ -120,6 +123,83 @@ class WaitingJobTests(IsolatedTestCase):
                 self.assertEqual(
                     output.getvalue().count("background-job read failed"), 2
                 )
+
+    def test_stalled_reads_are_bounded_and_worker_state_is_committed(self):
+        for budget in (120,):
+            with self.subTest(budget=budget), tempfile.TemporaryDirectory() as tmp:
+                rows = [
+                    dict(
+                        self.worker.row,
+                        pane_id=f"p{i}",
+                        agent_session={"value": f"s{i}"},
+                    )
+                    for i in range(4)
+                ]
+                raw = dict(
+                    result={"agents": rows},
+                    observed_at=0,
+                    workspaces=waiting.workspace_snapshot("architect"),
+                )
+                before, _ = w.reduce_workers(None, raw)
+                rows.append(
+                    dict(
+                        self.worker.row,
+                        pane_id="blocker",
+                        agent_status="blocked",
+                        agent_session={"value": "blocked"},
+                    )
+                )
+                base = Path(tmp)
+                (base / "workers.json").write_text(
+                    json.dumps(dict(before=before, fails=0, events=[]))
+                )
+                elapsed, reads = [0.0], []
+
+                def command(*args, **kwargs):
+                    if args[-2:] == ("agent", "list"):
+                        return json.dumps({"result": {"agents": rows}})
+                    if args[-2:] == ("workspace", "list"):
+                        return json.dumps(waiting.workspace_snapshot("architect"))
+                    timeout = kwargs.get("timeout", 45)
+                    reads.append(timeout)
+                    elapsed[0] += timeout
+                    if elapsed[0] >= budget:
+                        w.runtime._SOFT_DEADLINES[-1]["expired"] = True
+                    raise subprocess.TimeoutExpired(args, timeout)
+
+                with (
+                    patch.dict(os.environ, HERDR_ENV="1"),
+                    patch.object(w, "command", side_effect=command),
+                    patch.object(w.time, "time", return_value=4000),
+                    patch.object(w.time, "monotonic", side_effect=lambda: elapsed[0]),
+                    redirect_stderr(io.StringIO()),
+                ):
+                    w.cycle(
+                        base,
+                        "workers",
+                        lambda state: w.collect("workers", state),
+                        budget=budget,
+                    )
+                saved = json.loads((base / "workers.json").read_text())
+                self.assertEqual(saved["before"]["bad"]["blocked"]["state"], "blocked")
+                self.assertEqual(saved["fails"], 0)
+                self.assertTrue(
+                    all(
+                        entry["stage"] == 1
+                        for entry in saved["before"]["waiting"].values()
+                    )
+                )
+                self.assertLessEqual(elapsed[0], 10)
+                self.assertTrue(all(timeout <= 5 for timeout in reads))
+                self.assertEqual(len(reads), 2 if budget == 120 else 0)
+                self.assertEqual(
+                    len(saved["before"]["waiting_read_failures"]), len(reads)
+                )
+
+    def test_low_remaining_pass_budget_skips_reads_and_allows_delivery(self):
+        with patch("signal.getitimer", return_value=(2, 0)):
+            self.assertEqual(len(self.poll(601)), 1)
+        self.assertEqual(len(self.calls), 2)
 
     def test_laptop_sleep_keeps_repeat_a_full_interval_after_first_send(self):
         self.worker.scan(300)

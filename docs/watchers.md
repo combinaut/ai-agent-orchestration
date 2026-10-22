@@ -84,5 +84,8 @@ Before a due alert, the watcher reads the last 16 pane lines. Claude monitor/she
 footers or monitor status-line counts, and Codex's background-terminal running
 line, suppress delivery without resetting the timer or advancing its stage. A
 failed pane read is treated as not busy and logged once until a successful read.
+Reads have a five-second per-pane timeout and a ten-second total budget, reduced
+to reserve five seconds for the rest of the pass. Budget-skipped panes count as
+not busy.
 These text indicators are incomplete, so every waiting line retains the caveat
 `(may be waiting on its own job)`, including native alerts and escalation.

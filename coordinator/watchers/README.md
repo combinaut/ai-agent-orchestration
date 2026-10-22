@@ -290,7 +290,9 @@ successful loss/change of owner clears the alert; unreadable snapshots preserve
 it. Before a due alert, the last 16 pane lines are checked for Claude monitor/shell
 or Codex background-terminal indicators. A busy pane preserves its timer and stage
 without sending. A failed pane read allows the alert and logs once until a
-successful read. See [waiting settings and snapshot limits](../../docs/watchers.md#workers-waiting).
+successful read. Pane reads take at most five seconds each and ten seconds total,
+reserving five seconds of the pass for reduction; budget-skipped panes count as
+not busy. See [waiting settings and snapshot limits](../../docs/watchers.md#workers-waiting).
 
 ## Audit alerts
 

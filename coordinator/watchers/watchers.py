@@ -12,6 +12,7 @@ import json
 import uuid
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -51,8 +52,8 @@ def balance_limits():
     return limits
 
 
-def command(*argv):
-    result = runtime.run(argv)
+def command(*argv, timeout=None):
+    result = runtime.run(argv) if timeout is None else runtime.run(argv, timeout=timeout)
     if result.returncode:
         raise subprocess.CalledProcessError(result.returncode, argv, output=result.stdout, stderr=result.stderr)
     if not result.stdout.strip():
@@ -1091,12 +1092,18 @@ def collect_waiting_jobs(raw, before):
     live = {row["pane_id"] for row in agents(raw)}
     failed = set(previous.get("waiting_read_failures", [])) & live
     busy = []
+    remaining = signal.getitimer(signal.ITIMER_REAL)[0]
+    budget = min(10, max(0, remaining - 5)) if remaining else 10
+    read_until = time.monotonic() + budget
     for key, entry in due.items():
         if entry["stage"] <= old.get(key, {}).get("stage", 0):
             continue
+        timeout = min(5, read_until - time.monotonic())
+        if timeout <= 0:
+            break
         pane = entry["row"]["pane_id"]
         try:
-            text = command(herdr_bin(), "pane", "read", pane, "--source", "recent-unwrapped", "--lines", "16")
+            text = command(herdr_bin(), "pane", "read", pane, "--source", "recent-unwrapped", "--lines", "16", timeout=timeout)
         except discovery.READ_ERRORS as error:
             if pane not in failed:
                 print(f"workers: pane {pane} background-job read failed ({type(error).__name__}); treating as not busy",
