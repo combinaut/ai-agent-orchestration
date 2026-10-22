@@ -35,6 +35,14 @@ print(matches[-1] if matches else "")
 ' "$title" "$prefix"
 }
 
+find_pane_id() {
+  pane_rows | "${ORCH_PYTHON3:-python3}" -c '
+import json, sys
+rows = json.load(sys.stdin).get("result", {}).get("panes", [])
+print(sys.argv[1] if any(isinstance(row, dict) and row.get("pane_id") == sys.argv[1] for row in rows) else "")
+' "$1"
+}
+
 action=${1:-}
 # `hide <path>` opens a question that is itself called hide
 [ "$action" != hide ] || [[ ${2:-} != */* ]] || action=open
@@ -58,10 +66,18 @@ case $action in
     slug=$1 file=$2
     valid_slug "$slug" || { echo "invalid question slug: $slug" >&2; exit 64; }
     [ -f "$file" ] || { echo "question is not a regular file: $file" >&2; exit 66; }
-    existing=$(find_pane "Q: $slug")
-    [ -z "$existing" ] || { echo "question pane already open: $existing" >&2; exit 73; }
     canonical="$questions/$slug.md"
+    opening="$questions/$slug.opening"
+    existing=$(find_pane "Q: $slug")
+    [ -z "$existing" ] || { rm -f "$opening"; echo "question pane already open: $existing" >&2; exit 73; }
     [ "$(cd "$(dirname "$file")" && pwd)/$(basename "$file")" = "$canonical" ] || { echo "question file must be $canonical" >&2; exit 66; }
+    if [ -s "$opening" ]; then
+      stale=$(<"$opening")
+      if [ -n "$(find_pane_id "$stale")" ]; then
+        "$root/coordinator/watchers/close-pane.sh" "$stale" || { echo "cannot close unlabelled pane $stale" >&2; exit 1; }
+      fi
+      rm -f "$opening"
+    fi
     anchor=$(find_pane "Q: " prefix)
     if [ -z "$anchor" ]; then
       anchor=$(pane_rows | "${ORCH_PYTHON3:-python3}" -c '
@@ -76,10 +92,13 @@ for row in json.load(sys.stdin).get("result", {}).get("panes", []):
     [ -n "$anchor" ] || { echo "to-do pane not found" >&2; exit 69; }
     pane=$("$herdr" pane split "$anchor" --direction down --no-focus |
       "${ORCH_PYTHON3:-python3}" -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')
+    printf '%s\n' "$pane" >"$opening"
     printf -v command '%q %q %q' "${ORCH_PYTHON3:-python3}" "$root/coordinator/question-pane.py" "$canonical"
     if ! "$herdr" pane run "$pane" "$command" || ! "$herdr" pane rename "$pane" "Q: $slug"; then
       "$root/coordinator/watchers/close-pane.sh" "$pane"
+      rm -f "$opening"
       exit 1
     fi
+    rm -f "$opening"
     ;;
 esac

@@ -10,6 +10,7 @@ setup() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$TMP/question-herdr.calls"
 [ "${HERDR_FAIL:-}" != "$2" ] || exit 1
+[ "${HERDR_KILL_OPENER:-}" != "$2" ] || kill -KILL "$PPID"
 case "$1 $2" in
   'pane list') printf '%s\n' "${HERDR_PANES:?}" ;;
   'pane close')
@@ -230,4 +231,18 @@ EOF
   run env HERDR_PANES='{"result":{"panes":[{"pane_id":"todo","tokens":{"todo":"1"}}]}}' "$ROOT/ask-user-question" hide "$question"
   [ "$status" -eq 0 ]
   grep -qx 'pane rename question-pane Q: hide' "$TMP/question-herdr.calls"
+}
+
+@test "an opener killed after the split leaves no duplicate pane on the next open" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  todo='{"pane_id":"todo-pane","tokens":{"todo":"1"}}'
+  run env HERDR_KILL_OPENER=rename HERDR_PANES="{\"result\":{\"panes\":[$todo]}}" "$ROOT/ask-user-question" release "$question"
+  [ "$status" -ne 0 ]
+  [ -s "${question%.md}.opening" ]
+  : >"$TMP/question-herdr.calls"
+  run env HERDR_PANES="{\"result\":{\"panes\":[$todo,{\"pane_id\":\"question-pane\"}]}}" "$ROOT/ask-user-question" release "$question"
+  [ "$status" -eq 0 ]
+  [ "$(grep -n -m1 '^pane close question-pane$' "$TMP/question-herdr.calls" | cut -d: -f1)" -lt "$(grep -n -m1 '^pane split ' "$TMP/question-herdr.calls" | cut -d: -f1)" ]
+  [ ! -e "${question%.md}.opening" ]
 }

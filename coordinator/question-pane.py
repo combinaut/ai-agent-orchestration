@@ -22,6 +22,7 @@ HINT = "1-9 answer · t type an answer · d dismiss · r remind me later"
 ESCAPE = "ESC"
 ESCAPE_WAIT = 0.05
 SETTLE_SECONDS = 5
+POLL_SECONDS = 0.2
 
 
 def answer_path(question):
@@ -48,7 +49,7 @@ class Panel:
         self.question, self.out, self.columns, self.clock = Path(question), out, columns, clock
         self.launcher, self.feed = launcher, Path(feed)
         self.slug = self.question.stem
-        self.status, self.picker, self.done = "", None, False
+        self.status, self.picker, self.done, self.pending = "", None, False, None
 
     def show(self, status=None):
         self.status = self.status if status is None else status
@@ -70,15 +71,35 @@ class Panel:
             return False
         return True
 
-    def settle(self, process):
-        """True once the helper ran on; False after showing why it failed. A pane that closes ends this process first."""
+    def settle(self, process, rollback=None):
+        """True once the helper ran on without failing; a helper still running stays observed through poll()."""
         try:
             code = process.wait(timeout=SETTLE_SECONDS)
         except subprocess.TimeoutExpired:
-            return True
+            self.pending = (process, rollback)
+            self.show("Closing the pane...")
+            return False
+        return self.finish(code, rollback)
+
+    def finish(self, code, rollback):
         if code:
+            if rollback:
+                rollback()
             self.show(f"Closing the pane failed (exit {code}); the question is still open.")
         return not code
+
+    def poll(self):
+        """Ends the panel when the pending helper succeeds; reopens it with the reason when it fails."""
+        if not self.pending:
+            return
+        process, rollback = self.pending
+        code = process.poll()
+        if code is not None:
+            self.pending = None
+            self.done = self.finish(code, rollback)
+
+    def unremind(self):
+        remind_path(self.question).unlink(missing_ok=True)
 
     def dismiss(self):
         if self.record("DISMISSED {slug}"):
@@ -90,9 +111,9 @@ class Panel:
             write_remind(self.question, until)
         when = time.strftime("%Y-%m-%d %H:%M", time.localtime(until))
         if self.record("REMIND {slug} " + when):
-            self.done = self.settle(self.launcher(self.question, "hide", self.slug))
-        if not self.done:
-            remind_path(self.question).unlink(missing_ok=True)
+            self.done = self.settle(self.launcher(self.question, "hide", self.slug), self.unremind)
+        else:
+            self.unremind()
 
     def pick(self, token):
         if token == ESCAPE:
@@ -115,6 +136,8 @@ class Panel:
         self.show("" if self.picker is None else None)
 
     def press(self, token):
+        if self.pending:
+            return
         if self.picker:
             return self.pick(token)
         if token in tuple("123456789"):
@@ -135,9 +158,11 @@ class Panel:
             self.show("")
 
 
-def read_key():
-    """One key as a character; ESCAPE for an Esc that no sequence follows."""
+def read_key(wait=None):
+    """One key as a character; ESCAPE for an Esc that no sequence follows; None when `wait` seconds pass without one."""
     fd = sys.stdin.fileno()
+    if wait is not None and not select.select([fd], [], [], wait)[0]:
+        return None
     old = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd, termios.TCSANOW)
@@ -154,7 +179,10 @@ def follow(question):
     panel.show()
     escape = ""
     while not panel.done:
-        key = read_key()
+        key = read_key(POLL_SECONDS if panel.pending else None)
+        if key is None:
+            panel.poll()
+            continue
         if not key:
             return
         if key == ESCAPE:

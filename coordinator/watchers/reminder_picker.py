@@ -106,5 +106,3 @@ def entry_event(char):
 
 def edit_entry(entry, action, char):
     return entry[:-1] if action == "backspace" else entry + char if action == "char" else entry
-
-

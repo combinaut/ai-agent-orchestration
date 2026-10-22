@@ -47,6 +47,15 @@ class PanelCase(IsolatedTestCase):
         for key in keys:
             self.panel.press(key)
 
+    def slow_helper(self, codes):
+        """A helper that outlasts the settle wait, then reports each of `codes` from poll()."""
+        results = iter(codes)
+
+        def slow(timeout):
+            raise pane.subprocess.TimeoutExpired("x", timeout)
+        helper = SimpleNamespace(wait=slow, poll=lambda: next(results))
+        self.panel.launcher = lambda *args: helper
+
     def feed_lines(self):
         return self.feed.read_text().splitlines() if self.feed.exists() else []
 
@@ -75,12 +84,27 @@ class DismissTest(PanelCase):
         self.assertFalse(self.panel.done)
         self.assertIn("exit 3", self.out.getvalue())
 
-    def test_a_helper_still_running_after_the_wait_counts_as_closing(self):
-        def slow(timeout):
-            raise pane.subprocess.TimeoutExpired("x", timeout)
-        self.panel.launcher = lambda *args: SimpleNamespace(wait=slow)
+    def test_a_helper_still_running_after_the_wait_keeps_the_panel_alive(self):
+        self.slow_helper([None, 0])
         self.press("d")
-        self.assertTrue(self.panel.done)
+        self.assertEqual((self.panel.done, bool(self.panel.pending)), (False, True))
+        self.panel.poll()
+        self.assertFalse(self.panel.done)
+        self.panel.poll()
+        self.assertEqual((self.panel.done, self.panel.pending), (True, None))
+
+    def test_a_failure_after_the_wait_reopens_the_panel_with_the_reason(self):
+        self.slow_helper([None, 1])
+        self.press("d")
+        self.panel.poll()
+        self.panel.poll()
+        self.assertEqual((self.panel.done, self.panel.pending), (False, None))
+        self.assertIn("exit 1", self.out.getvalue())
+
+    def test_keys_are_ignored_while_the_helper_is_pending(self):
+        self.slow_helper([None])
+        self.press("d", "1")
+        self.assertFalse(self.question.with_suffix(".answer").exists())
 
     def test_d_is_not_a_dismiss_inside_the_picker(self):
         self.press("r", "d")
@@ -132,6 +156,14 @@ class RemindTest(PanelCase):
         self.press("r", "1")
         self.assertEqual((self.panel.done, self.remind_file().exists()), (False, False))
         self.assertIn("still open", self.out.getvalue())
+
+    def test_a_hide_that_fails_after_the_wait_drops_the_reminder_file(self):
+        self.slow_helper([None, 1])
+        self.press("r", "1")
+        self.assertTrue(self.remind_file().exists())
+        self.panel.poll()
+        self.panel.poll()
+        self.assertEqual((self.panel.done, self.remind_file().exists()), (False, False))
 
     def test_a_feed_that_cannot_be_written_leaves_no_reminder(self):
         with patch.object(pane.feed_attach, "append_line", side_effect=TimeoutError("lock")):
@@ -293,10 +325,19 @@ class KeyReaderTest(IsolatedTestCase):
         panel.picker = {"mode": "pick", "entry": ""}
         keys = iter([pane.ESCAPE, "\x1b", "[", "A", ""])
         pressed = []
-        with patch.object(pane, "Panel", return_value=panel), patch.object(pane, "read_key", lambda: next(keys)), \
+        with patch.object(pane, "Panel", return_value=panel), patch.object(pane, "read_key", lambda *_: next(keys)), \
                 patch.object(panel, "show"), patch.object(panel, "press", pressed.append):
             pane.follow(Path("x.md"))
         self.assertEqual(pressed, [pane.ESCAPE])
+
+    def test_follow_keeps_polling_a_pending_helper_until_it_ends(self):
+        panel = pane.Panel(Path("x.md"), io.StringIO())
+        panel.pending = (SimpleNamespace(poll=iter([None, 0]).__next__), None)
+        waits = []
+        with patch.object(pane, "Panel", return_value=panel), patch.object(panel, "show"), \
+                patch.object(pane, "read_key", lambda wait=None: waits.append(wait)):
+            pane.follow(Path("x.md"))
+        self.assertEqual((waits, panel.done), ([pane.POLL_SECONDS] * 2, True))
 
     def test_columns_default_is_the_terminal_width(self):
         with patch.object(pane.shutil, "get_terminal_size", return_value=SimpleNamespace(columns=33)):
