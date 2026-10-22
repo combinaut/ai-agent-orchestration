@@ -12,8 +12,8 @@ def questions_directory():
 
 
 @contextmanager
-def answers_lock():
-    directory = questions_directory()
+def answers_lock(directory=None):
+    directory = Path(directory) if directory else questions_directory()
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / ".answers.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -25,12 +25,21 @@ def close_question(slug, helper, pane):
         if pane:
             subprocess.run([helper, pane], check=True, timeout=30)
         directory = questions_directory()
-        for name in (f"{slug}.md", f"{slug}.answer", f"{slug}.answer.seen", f"{slug}.answer.processing"):
+        for name in (f"{slug}.md", f"{slug}.remind", f"{slug}.answer", f"{slug}.answer.seen", f"{slug}.answer.processing"):
             (directory / name).unlink(missing_ok=True)
         for pattern in (f"{slug}.*.answer.processing", f"{slug}.*.answer.seen"):
             for path in directory.glob(pattern):
                 path.unlink(missing_ok=True)
 
 
+def hide_question(helper, pane):
+    with answers_lock():
+        if pane:
+            subprocess.run([helper, pane], check=True, timeout=30)
+
+
 if __name__ == "__main__":
-    close_question(*sys.argv[1:])
+    if sys.argv[1] == "--hide":
+        hide_question(*sys.argv[2:])
+    else:
+        close_question(*sys.argv[1:])

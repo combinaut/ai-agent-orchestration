@@ -8,3 +8,5 @@
 ^[^ ]+ todo: TODO READFAIL .* \(start\)$
 ^[^ ]+ answers: ANSWER [^:]+: .* \(start\)$
 ^[^ ]+ todo: TODO IGNORED [^ ]+: .* \(start\)$
+^[^ ]+ answers: DISMISSED [^ ]+ \(start\)$
+^[^ ]+ answers: REMIND [^ ]+ [0-9-]+ [0-9:]+ \(start\)$

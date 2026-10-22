@@ -179,3 +179,49 @@ EOF
     [ -f "$question" ]
   done
 }
+
+@test "hide closes the exact pane and keeps the question files" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf question >"$question"
+  printf '%s\n' 2000000000 >"${question%.md}.remind"
+  local panes='{"result":{"panes":[{"pane_id":"question-pane","label":"Q: release"},{"pane_id":"other","label":"Q: release-notes"}]}}'
+  run env HERDR_PANES="$panes" "$ROOT/ask-user-question" hide release
+  [ "$status" -eq 0 ]
+  grep -qx 'pane close question-pane' "$TMP/question-herdr.calls"
+  run grep -qx 'pane close other' "$TMP/question-herdr.calls"
+  [ "$status" -eq 1 ]
+  [ -f "$ORCH_CLOSED_DIR/question-pane" ]
+  [ -f "$question" ]
+  [ -f "${question%.md}.remind" ]
+}
+
+@test "hide rejects an invalid slug" {
+  run "$ROOT/ask-user-question" hide ../x
+  [ "$status" -eq 64 ]
+}
+
+@test "the answers watcher reopens a due reminder once and leaves a future one hidden" {
+  questions="$HOME/.claude/coordinator/questions"
+  printf due >"$questions/due.md"
+  printf later >"$questions/later.md"
+  printf '%s\n' 1 >"$questions/due.remind"
+  printf '%s\n' 99999999999 >"$questions/later.remind"
+  local panes='{"result":{"panes":[{"pane_id":"todo","tokens":{"todo":"1"}}]}}'
+  export ORCH_USER_QUESTIONS_DIR="$questions"
+  run env HERDR_PANES="$panes" "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --state-dir "$TMP/state"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane rename question-pane Q: due' "$TMP/question-herdr.calls"
+  run grep -c 'pane rename' "$TMP/question-herdr.calls"
+  [ "$output" -eq 1 ]
+  [ ! -e "$questions/due.remind" ]
+  [ -f "$questions/later.remind" ]
+}
+
+@test "a failed reopen keeps the reminder for the next pass" {
+  questions="$HOME/.claude/coordinator/questions"
+  printf due >"$questions/due.md"
+  printf '%s\n' 1 >"$questions/due.remind"
+  export ORCH_USER_QUESTIONS_DIR="$questions"
+  run env HERDR_FAIL=run HERDR_PANES='{"result":{"panes":[{"pane_id":"todo","tokens":{"todo":"1"}}]}}' "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --state-dir "$TMP/state"
+  [ -f "$questions/due.remind" ]
+}

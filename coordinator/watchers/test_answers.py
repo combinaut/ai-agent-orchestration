@@ -67,7 +67,7 @@ class AnswersTest(IsolatedTestCase):
     def test_input_keys_and_blank_typed_answer(self):
         with patch.object(question_pane, 'read_key', side_effect=['x', 't', 't', *'123456789', KeyboardInterrupt]), \
                 patch('builtins.input', side_effect=['  ', ' typed answer ']), \
-                patch.object(question_pane, 'show'), patch.object(question_pane.time, 'sleep'), \
+                patch.object(question_pane.Panel, 'show'), patch.object(question_pane.time, 'sleep'), \
                 patch.object(question_pane, 'atomic_write') as write:
             with self.assertRaises(KeyboardInterrupt):
                 question_pane.follow(Path('ship.md'))
@@ -228,13 +228,13 @@ class AnswersTest(IsolatedTestCase):
     def test_terminal_escape_sequences_never_submit_answers(self):
         keys = list('\x1b[5~\x1b[6~\x1b[3~\x1b[1;5A\x1bOP\x1b2') + ['7', KeyboardInterrupt]
         with patch.object(question_pane, 'read_key', side_effect=keys), \
-                patch.object(question_pane, 'show'), patch.object(question_pane.time, 'sleep'), \
+                patch.object(question_pane.Panel, 'show'), patch.object(question_pane.time, 'sleep'), \
                 patch.object(question_pane, 'atomic_write') as write:
             with self.assertRaises(KeyboardInterrupt):
                 question_pane.follow(Path('ship.md'))
             self.assertEqual([call.args[1] for call in write.call_args_list], ['7'])
         with patch.object(question_pane, 'read_key', side_effect=['', KeyboardInterrupt]), \
-                patch.object(question_pane, 'show'), patch.object(question_pane, 'atomic_write') as write:
+                patch.object(question_pane.Panel, 'show'), patch.object(question_pane, 'atomic_write') as write:
             question_pane.follow(Path('ship.md'))
             write.assert_not_called()
 

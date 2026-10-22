@@ -25,7 +25,7 @@ from reminder_picker import (  # noqa: E402
 COORDINATOR = Path.home() / ".claude/coordinator"
 TODO = Path(os.environ.get("ORCH_USER_TODO_OUTPUT") or COORDINATOR / "user-todo.md")
 HIDDEN = TODO.with_name("user-todo-state.json")
-FEED = COORDINATOR / "watchers/prod-context/coordinator-feed.log"
+FEED = feed_attach.FEED
 HIDE_AFTER = 30
 TARGET = re.compile(r"->\s*(\S.*?)\s*$")
 AGE_PREFIX = re.compile(r"\[(?:now|\d+[mhd])\] ")
@@ -75,15 +75,6 @@ def feed_line(owner, text, now):
     clean = " ".join("".join(c for c in text if c.isprintable() or c == " ").split())
     stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now))
     return f"{stamp} todo: TODO IGNORED {'_'.join(owner.split())}: {clean} (start)\n"
-
-
-def append_feed(path, line):
-    with feed_attach.locked(Path(path)):
-        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-        try:
-            os.write(fd, line.encode())
-        finally:
-            os.close(fd)
 
 
 def key_action(action, rows, index):
@@ -141,7 +132,7 @@ class Hidden:
             self.later.pop(key(owner, text), None)
             self.save()
         try:
-            append_feed(self.feed, feed_line(owner, text, self.clock()))
+            feed_attach.append_line(self.feed, feed_line(owner, text, self.clock()))
         except (OSError, TimeoutError):
             return False
         return True

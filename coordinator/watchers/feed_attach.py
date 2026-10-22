@@ -6,10 +6,12 @@ import fcntl
 import os
 import time
 import watcher_runtime as runtime
+from pathlib import Path
 
 LOCK_NAME = "coordinator-feed.lock"
 MONITOR_NAME = "coordinator-feed.monitor"
 MONITOR_FRESH_SECONDS = 180
+FEED = Path.home() / ".claude/coordinator/watchers/prod-context/coordinator-feed.log"
 
 
 @contextlib.contextmanager
@@ -28,6 +30,16 @@ def locked(feed):
         yield
     finally:
         os.close(fd)
+
+
+def append_line(path, line):
+    path = Path(path)
+    with locked(path):
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, line.encode())
+        finally:
+            os.close(fd)
 
 
 def write_record(beat, inode, attached, consumed, previous=0):

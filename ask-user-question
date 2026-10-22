@@ -11,7 +11,7 @@ root=$(cd "$(dirname "$self")" && pwd)
 . "$root/coordinator/watchers/coord-lib.sh"
 orch_load_config
 
-usage() { echo "usage: ask-user-question <slug> <file> | close <slug>" >&2; exit 64; }
+usage() { echo "usage: ask-user-question <slug> <file> | close <slug> | hide <slug>" >&2; exit 64; }
 valid_slug() { [[ $1 =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; }
 questions=${ORCH_USER_QUESTIONS_DIR:-$HOME/.claude/coordinator/questions}
 questions=$(cd "$(dirname "$questions")" && pwd)/$(basename "$questions")
@@ -42,6 +42,13 @@ case ${1:-} in
     valid_slug "$slug" || { echo "invalid question slug: $slug" >&2; exit 64; }
     pane=$(find_pane "Q: $slug")
     ORCH_USER_QUESTIONS_DIR="$questions" "${ORCH_PYTHON3:-python3}" "$root/coordinator/watchers/question_lock.py" "$slug" "$root/coordinator/watchers/close-pane.sh" "$pane"
+    ;;
+  hide)
+    [ $# -eq 2 ] || usage
+    slug=$2
+    valid_slug "$slug" || { echo "invalid question slug: $slug" >&2; exit 64; }
+    pane=$(find_pane "Q: $slug")
+    ORCH_USER_QUESTIONS_DIR="$questions" "${ORCH_PYTHON3:-python3}" "$root/coordinator/watchers/question_lock.py" --hide "$root/coordinator/watchers/close-pane.sh" "$pane"
     ;;
   *)
     [ $# -eq 2 ] || usage

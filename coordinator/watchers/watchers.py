@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Event reducers. Never sends messages or mutates source state."""
 from question_lock import answers_lock, questions_directory
+import question_remind
 import alert_policy
 import argparse
 import audit
@@ -559,8 +560,19 @@ def answer_order(path):
         return 0, path.name
 
 
+def open_question(slug, question):
+    return subprocess.run([str(ROOT.parents[1] / "ask-user-question"), slug, str(question)],
+                          env=dict(os.environ, ORCH_USER_QUESTIONS_DIR=str(questions_directory())),
+                          capture_output=True, timeout=30).returncode
+
+
 def collect_answers(before, consume=True):
     directory = questions_directory()
+    if consume:
+        try:
+            question_remind.reopen_due(directory, time.time(), open_question)
+        except (OSError, subprocess.SubprocessError):
+            pass
     answers, unreadable, blocked = [], [], set()
     try:
         files = list(directory.iterdir())
