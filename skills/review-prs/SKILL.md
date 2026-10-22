@@ -138,7 +138,7 @@ Close review panes only with `~/.claude/coordinator/watchers/close-pane.sh <pane
 - **Orchestrator never merges, closes, or assigns reviewers.** Codex posts reviews only.
 - **Do not dispatch Draft / CI-failing / CI-running / Conflicting** buckets — only Ready.
 - **At most 3 concurrent Codex reviews** unless the user raises the limit. When one finishes, report → close pane → fill from the queue.
-- **A PR missing from search is not proof it is gone** — watcher confirms `merged`/`closed` via `gh pr view`.
+- **A PR missing from search is not proof it is gone** — watcher checks up to 10 absent PRs per poll with `gh pr view`, keeps direct or team requests, and clears an unconfirmed absence only after five misses.
 - **`merge state unknown` is not a pass** — `list` retries once.
 
 ## Common pitfalls

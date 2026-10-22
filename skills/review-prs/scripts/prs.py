@@ -32,6 +32,8 @@ BOT_LOGINS = {"copilot-pull-request-reviewer", "copilot", "github-actions"}
 STATE_DIR = Path.home() / ".cache" / "review-prs"
 DISPATCH_FILE = STATE_DIR / "dispatched.json"
 GH_TIMEOUT_S = 45
+DEPARTURE_CHECKS_MAX = 10
+DEPARTURE_MISSES_MAX = 5
 PROJECTS = Path.home() / "Projects"
 OPEN_WORK = Path.home() / ".claude" / "coordinator" / "open-work.json"
 
@@ -136,7 +138,7 @@ def fetch(scope):
     nodes = [n for n in nodes if not n["title"].startswith(BOT_TITLES)]
     nodes = [n for n in nodes
              if not (n.get("author") and (n["author"].get("login") or "").lower() == me)]
-    return sorted(nodes, key=lambda p: (p["repository"]["nameWithOwner"], -p["number"]))
+    return sorted(nodes, key=lambda p: (p["repository"]["nameWithOwner"], -p["number"])), login
 
 
 def is_bot(typename, login):
@@ -349,6 +351,8 @@ def departure(url, login):
     for request in pr.get("reviewRequests") or []:
         if (request.get("login") or "").lower() == login.lower():
             return None
+        if request.get("slug") and not request.get("login"):
+            return None
     return "cleared"
 
 
@@ -396,18 +400,26 @@ def changes(before, after, login=None):
             )
             prefix = "ready" if became_ready else "changed"
             lines.append(f"{prefix}: {url} — {now['title']}: {', '.join(parts)}")
-    for url, was in before.items():
-        if url in after:
-            continue
+    missing = sorted(((url, was) for url, was in before.items() if url not in after),
+                     key=lambda entry: (-entry[1].get("misses", 0), entry[0]))
+    for url, was in missing[DEPARTURE_CHECKS_MAX:]:
+        still_open[url] = was
+    for url, was in missing[:DEPARTURE_CHECKS_MAX]:
+        def keep_missed():
+            misses = was.get("misses", 0) + 1
+            if misses >= DEPARTURE_MISSES_MAX:
+                lines.append(f"cleared: {url} — {was['title']} (no longer requesting you)")
+            else:
+                still_open[url] = {**was, "misses": misses}
         try:
             departure_login = departure_login or viewer_login()
             st = departure(url, departure_login)
         except (RuntimeError, json.JSONDecodeError):
-            # A missing result is only a hint. Keep it until a later per-PR read can confirm departure.
-            still_open[url] = was
+            # Kept until a per-PR read confirms departure.
+            keep_missed()
             continue
         if st is None:
-            still_open[url] = was
+            keep_missed()
             continue
         if st == "cleared":
             lines.append(f"cleared: {url} — {was['title']} (no longer requesting you)")
@@ -443,10 +455,10 @@ def snapshot_counts(snap):
 
 
 def cmd_list(args, scope, label):
-    nodes = fetch(scope)
+    nodes, _login = fetch(scope)
     if any(p["mergeable"] == "UNKNOWN" for p in nodes):
         time.sleep(3)
-        nodes = fetch(scope)
+        nodes, _login = fetch(scope)
     save_state(scope, snapshot(nodes))
     order = ("ready", "unknown", "ci_run", "ci_fail", "conflict", "draft")
     titles = {
@@ -471,10 +483,10 @@ def cmd_watch(args, scope, _label):
     before = load_state(scope)
     while True:
         try:
-            nodes = fetch(scope)
+            nodes, login = fetch(scope)
             after = snapshot(nodes)
             if before is not None:
-                lines, still_open = changes(before, after)
+                lines, still_open = changes(before, after, login)
                 after = {**after, **still_open}
                 if lines:
                     print("\n".join([*lines, f"now: {snapshot_counts(after)}"]), flush=True)
@@ -491,10 +503,10 @@ def cmd_watch(args, scope, _label):
 
 
 def cmd_dispatch_queue(args, scope, label):
-    nodes = fetch(scope)
+    nodes, _login = fetch(scope)
     if any(p["mergeable"] == "UNKNOWN" for p in nodes):
         time.sleep(3)
-        nodes = fetch(scope)
+        nodes, _login = fetch(scope)
     model = worker_model()
     dispatched = load_dispatched()
     queue = []

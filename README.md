@@ -82,7 +82,7 @@ Every user question gets a pane. Create its Markdown file under `~/.claude/coord
 
 ### Review PRs
 
-`/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`) in a Herdr pane for every PR that is ready; Codex posts the review and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
+`/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`) in a Herdr pane for every PR that is ready; Codex posts the review and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. A PR absent from one search is checked directly before it is cleared; at most 10 checks run per poll and an unconfirmed absence clears after five misses. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
 
 ### Heavy jobs
 

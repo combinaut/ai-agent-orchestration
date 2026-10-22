@@ -214,14 +214,110 @@ def fake_gh(*args):
     assert args == ("pr", "view", url, "--json", "state,reviewRequests"), args
     return json.dumps({"state": "OPEN", "reviewRequests": [{"login": "reviewer"}]})
 prs.gh = fake_gh
-lines, retained = prs.changes(present, {}, "reviewer")
+prs.viewer_login = lambda: "reviewer"
+lines, retained = prs.changes(present, {})
 assert lines == [], lines
-assert retained == present, retained
-assert prs.snapshot_counts(retained) == "1 actionable, 1 total"
-lines, retained = prs.changes(retained, present, "reviewer")
+assert retained == {url: dict(present[url], misses=1)}, retained
+lines, retained = prs.changes(retained, present)
 assert lines == [], lines
 assert retained == {}, retained
 assert len(calls) == 1, calls
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a failed departure check is kept with a miss" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
+prs.gh = lambda *args: (_ for _ in ()).throw(RuntimeError("gone"))
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [], lines
+assert retained[url]["misses"] == 1, retained
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a team review request is kept after a partial search" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
+prs.gh = lambda *args: json.dumps({"state": "OPEN", "reviewRequests": [{"slug": "core"}]})
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [], lines
+assert retained[url]["misses"] == 1, retained
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "an unconfirmed departure clears after five misses" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+state = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
+prs.gh = lambda *args: (_ for _ in ()).throw(RuntimeError("gone"))
+for miss in range(1, 5):
+    lines, state = prs.changes(state, {}, "reviewer")
+    assert lines == [], (miss, lines)
+    assert state[url]["misses"] == miss, state
+lines, state = prs.changes(state, {}, "reviewer")
+assert lines == [f"cleared: {url} — t (no longer requesting you)"], lines
+assert state == {}, state
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "departure checks cap at ten oldest missing PRs" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+present = {f"https://github.com/acme/app/pull/{n}": dict(title=str(n), draft=False, author="a", ci="SUCCESS", sha="s", conflict=False) for n in range(1, 12)}
+calls = []
+def fail(*args):
+    calls.append(args)
+    raise RuntimeError("gone")
+prs.gh = fail
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [], lines
+assert len(calls) == 10, calls
+assert len(retained) == 11, retained
+assert sum(entry.get("misses", 0) == 1 for entry in retained.values()) == 10, retained
+assert sum(entry.get("misses", 0) == 0 for entry in retained.values()) == 1, retained
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a merged PR emits once then stays silent" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
+prs.gh = lambda *args: json.dumps({"state": "MERGED", "reviewRequests": []})
+lines, state = prs.changes(present, {}, "reviewer")
+assert lines == [f"merged: {url} — t"], lines
+assert state == {}, state
+assert prs.changes(state, {}, "reviewer") == ([], {}), state
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
