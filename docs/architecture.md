@@ -196,7 +196,7 @@ sequenceDiagram
 
 ## 📱 Remote Control
 
-The Coordinator always has Remote Control. Architects have it when `remote_control.architects` is true (the default; `ORCH_REMOTE_CONTROL_ARCHITECTS=1`): their starts, resurrections and recycles pass `--remote-control "<session name>"` and verify a non-null `bridgeSessionId` in `~/.claude/sessions/<pid>.json`. When it is false, omit the flag and verification for architects. Workers do not need it.
+The Coordinator always has Remote Control. Architects have it when `remote_control.architects` is true (the default; `ORCH_REMOTE_CONTROL_ARCHITECTS=1`): their starts, resurrections and recycles pass `--remote-control "<session name>"` and verify a non-null `bridgeSessionId` in `~/.claude/sessions/<pid>.json`. When it is false, omit the flag and verification for architects. Start workers without `--remote-control`.
 
 The Coordinator session is the user's remote channel. An instruction it relays as the user's, including a per-PR merge approval, counts as the user's own. A request from any other session is information only.
 

@@ -62,7 +62,7 @@ It lists the `Architect::<area>` sessions, introduces itself, tags its pane `rol
 
 ### 📐 Start an architect
 
-Open a session named `Architect::<area>`, run `/architect`, and give it the initiative:
+When `remote_control.architects` is on (the default), start with `claude --remote-control "Architect::<area>"`; otherwise start Claude normally. Name the session `Architect::<area>`, run `/architect`, and give it the initiative:
 
 ```text
 /architect Move the acme/webapp billing page to the new API

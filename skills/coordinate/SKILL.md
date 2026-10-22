@@ -24,7 +24,7 @@ The Coordinator runs on `$ORCH_COORDINATOR_MODEL` (default `claude-opus-5-5`, Op
 
 ## Remote Control
 
-The Coordinator always runs with Remote Control. When `ORCH_REMOTE_CONTROL_ARCHITECTS=1` (`remote_control.architects`, default true), architect starts, resurrections and recycles also pass `--remote-control "<session name>"` and verify a non-null `bridgeSessionId` in `~/.claude/sessions/<pid>.json`; when it is `0`, omit both for architects. If required Remote Control fails, use the repair exception below only after verifying that the architect is idle and its composer is empty, or ask the user to turn it on. Workers do not need it.
+The Coordinator always runs with Remote Control. When `ORCH_REMOTE_CONTROL_ARCHITECTS=1` (`remote_control.architects`, default true), architect starts, resurrections and recycles also pass `--remote-control "<session name>"` and verify a non-null `bridgeSessionId` in `~/.claude/sessions/<pid>.json`; when it is `0`, omit both for architects. If required Remote Control fails, use the repair exception below only after verifying that the architect is idle and its composer is empty, or ask the user to turn it on. Start workers without `--remote-control`.
 
 ## Context recycle
 
