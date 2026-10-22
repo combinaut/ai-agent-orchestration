@@ -63,7 +63,7 @@ class PullsTest(IsolatedTestCase):
         env = patch.dict(os.environ, {"ORCH_PR_AUTHOR": "author"})
         env.start()
         self.addCleanup(env.stop)
-        work = open_work(PR["repository"]["nameWithOwner"])
+        work = open_work(PR["repository"]["nameWithOwner"] + " o/r")
         work.start()
         self.addCleanup(work.stop)
         self.calls = []
@@ -605,7 +605,7 @@ class PullsTest(IsolatedTestCase):
         ]
         self.assertTrue(set(later) - set(tried))
 
-    def test_a_departure_still_open_stops_being_tracked(self):
+    def test_a_departure_still_open_keeps_last_known_state(self):
         before = {
             "prs": {"o/r#3": dict(title="t", owner=None, lines={"RED": "RED o/r#3 t"})},
             "unreadable": [],
@@ -614,8 +614,10 @@ class PullsTest(IsolatedTestCase):
         state, events = w.reduce_pulls(
             before, w.collect_pulls(self.command([], departed), before)
         )
-        self.assertEqual(events, ["RED o/r#3 cleared"])
-        self.assertEqual(state["prs"], {})
+        self.assertEqual(events, [])
+        self.assertEqual(
+            state["prs"]["o/r#3"]["lines"], before["prs"]["o/r#3"]["lines"]
+        )
 
     def test_pulls_history_keeps_the_latest_batches(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -810,7 +812,7 @@ class PullsTest(IsolatedTestCase):
         self.assertEqual(owners, {f"{PR['repository']['nameWithOwner']}#7": "wArch"})
         self.assertEqual(failed, ["*/product"])
 
-    def test_a_failed_root_keeps_old_owners_only_for_its_own_repository(self):
+    def test_no_matching_checkout_keeps_old_owners_in_other_repositories_too(self):
         other = pr(9, branch="gone")
         other["repository"] = {
             "nameWithOwner": "owner/tool",
@@ -847,9 +849,9 @@ class PullsTest(IsolatedTestCase):
         ):
             raw = w.collect_pulls(failing, before)
         self.assertEqual(raw["prs"]["owner/product#7"]["owner"], "wOld")
-        self.assertIsNone(raw["prs"]["owner/tool#9"]["owner"])
+        self.assertEqual(raw["prs"]["owner/tool#9"]["owner"], "wOld")
 
-    def test_a_failed_root_keeps_owners_only_for_its_full_repository_name(self):
+    def test_no_matching_checkout_keeps_old_owners_across_organizations(self):
         other = pr(9, branch="gone")
         other["repository"] = {
             "nameWithOwner": "elsewhere/product",
@@ -890,7 +892,7 @@ class PullsTest(IsolatedTestCase):
         ):
             raw = w.collect_pulls(failing, before)
         self.assertEqual(raw["prs"]["owner/product#7"]["owner"], "wOld")
-        self.assertIsNone(raw["prs"]["elsewhere/product#9"]["owner"])
+        self.assertEqual(raw["prs"]["elsewhere/product#9"]["owner"], "wOld")
 
     def test_a_clone_in_a_differently_named_directory_still_maps_its_owners(self):
         rows = {
@@ -923,6 +925,873 @@ class PullsTest(IsolatedTestCase):
             return run(*argv)
 
         self.assertEqual(w.pull_owners(renamed, [pr(7)]), {"owner/product#7": "wArch"})
+
+    def test_logged_search_gap_keeps_seven_events_and_owners_across_restart(self):
+        rows = []
+        for number in (46, 357, 358, 32111, 32198, 32904):
+            row = pr(number, decision="REVIEW_REQUIRED")
+            if number == 46:
+                row["reviewThreads"]["nodes"] = [
+                    {"id": "thread-46", "isResolved": False}
+                ]
+            else:
+                row["reviews"]["nodes"] = [
+                    {
+                        "id": f"review-{number}",
+                        "author": {"login": "copilot-pull-request-reviewer"},
+                        "body": "Needs a closer look\nSame review",
+                    }
+                ]
+            if number == 32111:
+                row["reviewDecision"] = "APPROVED"
+                row["latestOpinionatedReviews"]["nodes"] = [
+                    {"state": "APPROVED", "commit": {"oid": "old"}}
+                ]
+            rows.append(row)
+        repo = PR["repository"]["nameWithOwner"]
+        departed = {
+            f"repos/{repo}/pulls/{row['number']}": {"state": "open", "merged": False}
+            for row in rows
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+
+            def poll(rows, departed=None):
+                result = w.cycle(
+                    base,
+                    "pulls",
+                    lambda before: w.collect_pulls(
+                        self.command(rows, departed), before
+                    ),
+                )
+                return json.loads(result)["events"] if result else []
+
+            self.assertEqual(poll(rows), ["PULLS BASELINE [7 active lines]"])
+            self.assertFalse(any("cleared" in event for event in poll([], departed)))
+            self.assertFalse(any("owner=" in event for event in poll(rows)))
+            state = json.loads((base / "pulls.json").read_text())["before"]
+            self.assertEqual(state["prs"][f"{repo}#32111"]["owner"], "wArch")
+
+    def test_recycled_architect_keeps_owner_when_branch_workspace_is_missing(self):
+        row = pr(32111)
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        # The architect workspace survives a pane recycle, but the matching worker checkout is absent.
+        work = {
+            "workspaces": [
+                {
+                    "id": "wArch",
+                    "checkout": "/repo/product",
+                    "repo_root": "/repo/product",
+                    "owner": None,
+                }
+            ],
+            "panes": [{"pane": "wArch:p25", "workspace": "wArch"}],
+        }
+        with patch.object(w.discovery, "open_work", return_value=work):
+            state, _ = w.reduce_pulls(
+                state, w.collect_pulls(self.command([row]), state)
+            )
+        self.assertEqual(state["prs"]["owner/product#32111"]["owner"], "wArch")
+
+    def test_new_review_id_and_head_and_thread_identity_are_real_changes(self):
+        row = pr(7)
+        row["latestOpinionatedReviews"]["nodes"][0]["commit"]["oid"] = "old"
+        row["reviews"]["nodes"] = [
+            {
+                "id": "review-1",
+                "author": {"login": "copilot-pull-request-reviewer"},
+                "body": "Needs a closer look\nCheck it",
+            }
+        ]
+        row["reviewThreads"]["nodes"] = [{"id": "thread-1", "isResolved": False}]
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        # Restart with unchanged IDs or edited display text is silent.
+        state = json.loads(json.dumps(state))
+        row["reviews"]["nodes"][0]["body"] += " edited"
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+        row["reviews"]["nodes"][0]["id"] = "review-2"
+        row["headRefOid"] = "head-2"
+        row["reviewThreads"]["nodes"][0]["id"] = "thread-2"
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        for kind in ("COPILOT", "APPROVED-OLDHEAD", "THREADS"):
+            self.assertTrue(
+                any(
+                    event.startswith(kind + " owner/product#7 owner=")
+                    for event in events
+                ),
+                (kind, events),
+            )
+        # A short review window temporarily shows no bot, then the same review again.
+        row["reviews"]["nodes"] = []
+        state, _ = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        row["reviews"]["nodes"] = [
+            {
+                "id": "review-2",
+                "author": {"login": "copilot-pull-request-reviewer"},
+                "body": "Needs a closer look\nCheck it",
+            }
+        ]
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertFalse(
+            any(event.startswith("COPILOT ") and "owner=" in event for event in events)
+        )
+
+    def test_partial_pr_read_keeps_evidence_and_readable_sibling_changes(self):
+        row = pr(7)
+        state, _ = w.reduce_pulls(
+            None,
+            w.collect_pulls(
+                self.command([row, pr(8, decision="REVIEW_REQUIRED")]), None
+            ),
+        )
+        row["reviews"] = None
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row, pr(8)]), state)
+        )
+        self.assertIn("PULLS READFAIL pr:owner/product#7", events)
+        self.assertEqual(
+            state["prs"]["owner/product#7"]["lines"],
+            {"APPROVED": f"APPROVED owner/product#7 {PR['title']}"},
+        )
+        self.assertTrue(
+            any(event.startswith("APPROVED owner/product#8 owner=") for event in events)
+        )
+        self.assertFalse(any("#7 cleared" in event for event in events))
+
+    def test_truncated_connections_do_not_clear_known_conditions(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        row["reviews"]["nodes"] = [
+            {
+                "id": "review-1",
+                "author": {"login": "copilot-pull-request-reviewer"},
+                "body": "Needs a closer look\nCheck it",
+            }
+        ]
+        row["reviewThreads"]["nodes"] = [{"id": "thread-1", "isResolved": False}]
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        for name, page in (
+            ("reviews", "hasPreviousPage"),
+            ("reviewThreads", "hasNextPage"),
+        ):
+            row[name] = {"nodes": [], "pageInfo": {page: True}}
+        row["recentReviews"] = (
+            None  # A failed body connection is unknown; a readable six-review window is authoritative.
+        )
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(
+            set(state["prs"]["owner/product#7"]["lines"]), {"COPILOT", "THREADS"}
+        )
+        self.assertFalse(any("cleared" in event for event in events))
+        self.assertEqual(events, ["PULLS READFAIL pr:owner/product#7"])
+
+    def test_positive_owner_reassignment_still_reroutes(self):
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([pr(7)]), None))
+        rows = json.loads(json.dumps(WORKSPACES))
+        rows["result"]["workspaces"][0]["tokens"]["owner"] = "wOther"
+        with patch(__name__ + ".WORKSPACES", rows):
+            state, events = w.reduce_pulls(
+                state, w.collect_pulls(self.command([pr(7)]), state)
+            )
+        self.assertEqual(state["prs"]["owner/product#7"]["owner"], "wOther")
+        self.assertTrue(any("owner=wOther" in event for event in events))
+
+    def test_legacy_active_copilot_state_seeds_identity_without_realert(self):
+        row = pr(7)
+        row["reviews"]["nodes"] = [
+            {
+                "id": "review-1",
+                "author": {"login": "copilot-pull-request-reviewer"},
+                "body": "Needs a closer look\nCheck it",
+            }
+        ]
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        for saved in state["prs"].values():
+            saved.pop("identities")
+            saved.pop("seen_reviews")
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+        self.assertEqual(state["prs"]["owner/product#7"]["seen_reviews"], ["review-1"])
+
+    def test_new_id_reaches_feed_and_partial_reads_do_not_refire_it(self):
+        row = pr(7)
+        row["reviews"]["nodes"] = [
+            {
+                "id": "review-1",
+                "author": {"login": "copilot-pull-request-reviewer"},
+                "body": "Needs a closer look\nCheck it",
+            }
+        ]
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        policy = {}
+        old_line = w.pull_line(
+            state["prs"]["owner/product#7"]["lines"]["COPILOT"],
+            "owner/product#7",
+            "wArch",
+        )
+        w.alert_policy.apply(policy, [{"mode": "pulls", "events": [old_line]}], 1)
+        row["reviews"]["nodes"][0]["id"] = "review-2"
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        feed = w.alert_policy.apply(policy, [{"mode": "pulls", "events": events}], 2)
+        self.assertEqual(
+            sum("COPILOT " in line and "(start)" in line for line in feed), 1
+        )
+        row["reviews"] = None
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        feed = w.alert_policy.apply(policy, [{"mode": "pulls", "events": events}], 3)
+        self.assertFalse(any("COPILOT" in line for line in feed))
+
+    def test_open_departures_rotate_so_later_closed_prs_are_read(self):
+        before = {
+            "prs": {
+                f"o/r#{n:02}": dict(title="t", owner=None, lines={})
+                for n in range(w.PULLS_DEPARTED_MAX + 1)
+            },
+            "unreadable": [],
+        }
+        departed = {
+            f"repos/o/r/pulls/{n:02}": {"state": "open", "merged": False}
+            for n in range(w.PULLS_DEPARTED_MAX)
+        }
+        departed[f"repos/o/r/pulls/{w.PULLS_DEPARTED_MAX:02}"] = {
+            "state": "closed",
+            "merged": True,
+        }
+        state, _ = w.reduce_pulls(
+            before, w.collect_pulls(self.command([], departed), before)
+        )
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([], departed), state)
+        )
+        self.assertTrue(
+            any(
+                event.startswith(f"MERGED o/r#{w.PULLS_DEPARTED_MAX:02}")
+                for event in events
+            )
+        )
+        self.assertFalse(state["unreadable"])
+
+    def test_whole_search_failure_keeps_durable_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            w.cycle(
+                base,
+                "pulls",
+                lambda before: w.collect_pulls(self.command([pr(7)]), before),
+            )
+            saved = json.loads((base / "pulls.json").read_text())["before"]
+
+            def broken(*argv):
+                if argv[:3] == ("gh", "api", "graphql"):
+                    return json.dumps(
+                        {
+                            "data": {
+                                "search": {
+                                    "nodes": [],
+                                    "pageInfo": {"hasNextPage": False},
+                                }
+                            },
+                            "errors": [{"message": "partial search"}],
+                        }
+                    )
+                return self.command([])(*argv)
+
+            for _ in range(3):
+                w.cycle(base, "pulls", lambda before: w.collect_pulls(broken, before))
+            self.assertEqual(
+                json.loads((base / "pulls.json").read_text())["before"], saved
+            )
+
+    def test_partial_thread_identity_keeps_last_known_threads(self):
+        row = pr(7)
+        row["reviewThreads"]["nodes"] = [{"id": "thread-1", "isResolved": False}]
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        del row["reviewThreads"]["nodes"][0]["id"]
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, ["PULLS READFAIL pr:owner/product#7"])
+        self.assertIn("THREADS", state["prs"]["owner/product#7"]["lines"])
+
+    def test_settings_failure_preserves_stacked_approval_evidence(self):
+        row = pr(7)
+        row["baseRefName"] = "stack-base"
+        with patch.object(
+            w.audit, "repo_settings", return_value={"ORCH_MERGE_GATE_CHECKS": "full-ci"}
+        ):
+            state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        old = state["prs"]["owner/product#7"]["lines"]
+        with patch.object(w.audit, "repo_settings", side_effect=OSError("unreadable")):
+            state, events = w.reduce_pulls(
+                state, w.collect_pulls(self.command([row]), state)
+            )
+        self.assertEqual(events, ["PULLS READFAIL settings:owner/product#7"])
+        self.assertEqual(state["prs"]["owner/product#7"]["lines"], old)
+
+    def test_truncated_checks_do_not_clear_saved_red_event(self):
+        row = pr(7)
+        contexts = row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]
+        contexts["nodes"][0]["conclusion"] = "FAILURE"
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        contexts["nodes"] = []
+        contexts["pageInfo"]["hasNextPage"] = True
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertIn("RED", state["prs"]["owner/product#7"]["lines"])
+        self.assertFalse(any("cleared" in event for event in events))
+        self.assertIn("PULLS READFAIL pr:owner/product#7", events)
+
+    def test_title_only_edits_do_not_restart_conditions(self):
+        for decision, base, red in (
+            ("APPROVED", "main", False),
+            ("APPROVED", "stack", False),
+            ("CHANGES_REQUESTED", "main", False),
+            ("REVIEW_REQUIRED", "main", True),
+        ):
+            with self.subTest(decision=decision, base=base, red=red):
+                row = pr(7, decision=decision)
+                row["baseRefName"] = base
+                if red:
+                    row["commits"]["nodes"][0]["commit"]["statusCheckRollup"][
+                        "contexts"
+                    ]["nodes"][0]["conclusion"] = "FAILURE"
+                with patch.object(w.audit, "repo_settings", return_value={}):
+                    state, _ = w.reduce_pulls(
+                        None, w.collect_pulls(self.command([row]), None)
+                    )
+                    row["title"] = "A new display title"
+                    _, events = w.reduce_pulls(
+                        state, w.collect_pulls(self.command([row]), state)
+                    )
+                self.assertEqual(events, [])
+
+    def test_truncated_threads_reconcile_new_resolved_and_unseen_evidence(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        row["reviewThreads"]["nodes"] = [{"id": "T1", "isResolved": False}]
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        row["reviewThreads"]["pageInfo"]["hasNextPage"] = True
+        row["headRefOid"] = "head-2"
+        row["reviewThreads"]["nodes"] = [{"id": "T2", "isResolved": False}]
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertTrue(
+            any(event.startswith("THREADS owner/product#7 owner=") for event in events)
+        )
+        self.assertEqual(
+            state["prs"]["owner/product#7"]["identities"]["THREADS"], ["T1", "T2"]
+        )
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+        row["reviewThreads"]["nodes"] = [{"id": "T1", "isResolved": True}]
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(
+            state["prs"]["owner/product#7"]["identities"]["THREADS"], ["T2"]
+        )
+        self.assertEqual(events, [])
+        row["reviewThreads"] = {"nodes": [], "pageInfo": {"hasNextPage": False}}
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertIn("THREADS owner/product#7 cleared", events)
+
+    def test_truncated_checks_reconcile_visible_failures_and_current_head(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        contexts = row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]
+        contexts["nodes"][0]["conclusion"] = "FAILURE"
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        row["headRefOid"] = "head-2"
+        contexts["nodes"] = [
+            {"name": "lint", "conclusion": "FAILURE", "startedAt": "2"}
+        ]
+        contexts["pageInfo"]["hasNextPage"] = True
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertTrue(
+            any(event.startswith("RED owner/product#7 owner=") for event in events)
+        )
+        self.assertEqual(
+            state["prs"]["owner/product#7"]["identities"]["RED"], " [lint,unit]"
+        )
+        self.assertIn("lint", state["prs"]["owner/product#7"]["lines"]["RED"])
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+        contexts["nodes"] = [
+            {"name": "lint", "conclusion": "SUCCESS", "startedAt": "3"}
+        ]
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertIn("unit", state["prs"]["owner/product#7"]["lines"]["RED"])
+        self.assertNotIn("lint", state["prs"]["owner/product#7"]["lines"]["RED"])
+        contexts["nodes"] = [
+            {"name": "unit", "conclusion": "SUCCESS", "startedAt": "4"}
+        ]
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertIn("RED owner/product#7 cleared", events)
+
+    def test_truncated_checks_do_not_retain_invalidated_stacked_approval(self):
+        for change in ("decision", "base", "head"):
+            with (
+                self.subTest(change=change),
+                patch.object(w.audit, "repo_settings", return_value={}),
+            ):
+                row = pr(7)
+                row["baseRefName"] = "stack"
+                state, _ = w.reduce_pulls(
+                    None, w.collect_pulls(self.command([row]), None)
+                )
+                row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"][
+                    "pageInfo"
+                ]["hasNextPage"] = True
+                if change == "decision":
+                    row["reviewDecision"] = "CHANGES_REQUESTED"
+                elif change == "base":
+                    row["baseRefName"] = "main"
+                else:
+                    row["headRefOid"] = "head-2"
+                state, events = w.reduce_pulls(
+                    state, w.collect_pulls(self.command([row]), state)
+                )
+                self.assertNotIn(
+                    "APPROVED-STACKED", state["prs"]["owner/product#7"]["lines"]
+                )
+                self.assertIn("APPROVED-STACKED owner/product#7 cleared", events)
+
+    def test_partial_stacked_checks_do_not_reuse_evidence_from_another_head_or_base(
+        self,
+    ):
+        for change in ("head", "base"):
+            with (
+                self.subTest(change=change),
+                patch.object(
+                    w.audit,
+                    "repo_settings",
+                    return_value={"ORCH_MERGE_GATE_CHECKS": "unit"},
+                ),
+            ):
+                row = pr(7)
+                row["baseRefName"] = "stack-a"
+                state, _ = w.reduce_pulls(
+                    None, w.collect_pulls(self.command([row]), None)
+                )
+                contexts = row["commits"]["nodes"][0]["commit"]["statusCheckRollup"][
+                    "contexts"
+                ]
+                contexts["nodes"] = []
+                contexts["pageInfo"]["hasNextPage"] = True
+                if change == "head":
+                    row["headRefOid"] = "head-2"
+                    row["latestOpinionatedReviews"]["nodes"][0]["commit"]["oid"] = (
+                        "head-2"
+                    )
+                else:
+                    row["baseRefName"] = "stack-b"
+                state, events = w.reduce_pulls(
+                    state, w.collect_pulls(self.command([row]), state)
+                )
+                line = state["prs"]["owner/product#7"]["lines"]["APPROVED-STACKED"]
+                self.assertIn("base " + row["baseRefName"], line)
+                self.assertIn("full CI unknown", line)
+                self.assertTrue(
+                    any(
+                        event.startswith("APPROVED-STACKED owner/product#7 owner=")
+                        for event in events
+                    )
+                )
+
+    def test_visible_full_ci_evidence_updates_stacked_approval_on_partial_page(self):
+        row = pr(7)
+        row["baseRefName"] = "stack"
+        with patch.object(
+            w.audit, "repo_settings", return_value={"ORCH_MERGE_GATE_CHECKS": "full-ci"}
+        ):
+            state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+            contexts = row["commits"]["nodes"][0]["commit"]["statusCheckRollup"][
+                "contexts"
+            ]
+            contexts["nodes"] = [
+                {"name": "full-ci", "conclusion": "SUCCESS", "startedAt": "2"}
+            ]
+            contexts["pageInfo"]["hasNextPage"] = True
+            state, events = w.reduce_pulls(
+                state, w.collect_pulls(self.command([row]), state)
+            )
+        self.assertIn(
+            "full CI ran", state["prs"]["owner/product#7"]["lines"]["APPROVED-STACKED"]
+        )
+        self.assertTrue(
+            any(
+                event.startswith("APPROVED-STACKED owner/product#7 owner=")
+                for event in events
+            )
+        )
+
+    def test_malformed_read_keeps_scope_with_its_saved_approval_evidence(self):
+        for change in ("head", "base"):
+            with (
+                self.subTest(change=change),
+                patch.object(
+                    w.audit,
+                    "repo_settings",
+                    return_value={"ORCH_MERGE_GATE_CHECKS": "unit"},
+                ),
+            ):
+                row = pr(7)
+                row["baseRefName"] = "stack-a"
+                state, _ = w.reduce_pulls(
+                    None, w.collect_pulls(self.command([row]), None)
+                )
+                if change == "head":
+                    row["headRefOid"] = "head-2"
+                    row["latestOpinionatedReviews"]["nodes"][0]["commit"]["oid"] = (
+                        "head-2"
+                    )
+                else:
+                    row["baseRefName"] = "stack-b"
+                row["reviews"] = None
+                state, _ = w.reduce_pulls(
+                    state, w.collect_pulls(self.command([row]), state)
+                )
+                self.assertEqual(state["prs"]["owner/product#7"]["head"], "head")
+                self.assertEqual(state["prs"]["owner/product#7"]["base"], "stack-a")
+                row["reviews"] = {"nodes": []}
+                contexts = row["commits"]["nodes"][0]["commit"]["statusCheckRollup"][
+                    "contexts"
+                ]
+                contexts["nodes"] = []
+                contexts["pageInfo"]["hasNextPage"] = True
+                state, events = w.reduce_pulls(
+                    state, w.collect_pulls(self.command([row]), state)
+                )
+                self.assertIn(
+                    "full CI unknown",
+                    state["prs"]["owner/product#7"]["lines"]["APPROVED-STACKED"],
+                )
+                self.assertTrue(
+                    any(
+                        event.startswith("APPROVED-STACKED owner/product#7 owner=")
+                        for event in events
+                    )
+                )
+
+    def test_push_while_conditions_active_is_silent(self):
+        for kind in ("CHANGES", "THREADS", "RED", "COPILOT", "APPROVED-STACKED"):
+            with (
+                self.subTest(kind=kind),
+                patch.object(w.audit, "repo_settings", return_value={}),
+            ):
+                row = pr(
+                    7,
+                    decision="CHANGES_REQUESTED"
+                    if kind == "CHANGES"
+                    else "REVIEW_REQUIRED",
+                )
+                if kind == "THREADS":
+                    row["reviewThreads"]["nodes"] = [{"id": "T1", "isResolved": False}]
+                elif kind == "RED":
+                    row["commits"]["nodes"][0]["commit"]["statusCheckRollup"][
+                        "contexts"
+                    ]["nodes"][0]["conclusion"] = "FAILURE"
+                elif kind == "COPILOT":
+                    row["reviews"]["nodes"] = [
+                        {
+                            "id": "R1",
+                            "author": {"login": "copilot-pull-request-reviewer"},
+                            "body": "Needs a closer look\nCheck it",
+                        }
+                    ]
+                elif kind == "APPROVED-STACKED":
+                    row["reviewDecision"] = "APPROVED"
+                    row["baseRefName"] = "stack"
+                state, _ = w.reduce_pulls(
+                    None, w.collect_pulls(self.command([row]), None)
+                )
+                self.assertIn(kind, state["prs"]["owner/product#7"]["lines"])
+                row["headRefOid"] = "head-2"
+                row["latestOpinionatedReviews"]["nodes"][0]["commit"]["oid"] = "head-2"
+                _, events = w.reduce_pulls(
+                    state, w.collect_pulls(self.command([row]), state)
+                )
+                self.assertEqual(events, [])
+
+    def test_resolving_one_of_several_threads_is_silent_until_last_resolution(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        row["reviewThreads"]["nodes"] = [
+            {"id": "T1", "isResolved": False},
+            {"id": "T2", "isResolved": False},
+        ]
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        row["reviewThreads"]["nodes"][0]["isResolved"] = True
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+        self.assertEqual(
+            state["prs"]["owner/product#7"]["identities"]["THREADS"], ["T2"]
+        )
+        row["reviewThreads"]["nodes"][1]["isResolved"] = True
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, ["THREADS owner/product#7 cleared"])
+
+    def test_merged_or_closed_and_unwatched_in_same_poll_reports_departure(self):
+        for merged, kind in ((True, "MERGED"), (False, "CLOSED")):
+            with self.subTest(kind=kind):
+                row = pr(7, decision="CHANGES_REQUESTED")
+                state, _ = w.reduce_pulls(
+                    None, w.collect_pulls(self.command([row]), None)
+                )
+                departed = {
+                    "repos/owner/product/pulls/7": {"state": "closed", "merged": merged}
+                }
+                with patch.object(
+                    w.discovery, "repos", return_value={"repos": [], "clones": []}
+                ):
+                    state, events = w.reduce_pulls(
+                        state, w.collect_pulls(self.command([], departed), state)
+                    )
+                self.assertEqual(
+                    events,
+                    [
+                        "CHANGES owner/product#7 cleared",
+                        f"{kind} owner/product#7 owner=wArch {PR['title']}",
+                    ],
+                )
+                self.assertEqual(state["prs"], {})
+
+    def test_unwatched_open_departure_drops_then_rewatched_repo_alerts_once(self):
+        row = pr(7, decision="CHANGES_REQUESTED")
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        departed = {"repos/owner/product/pulls/7": {"state": "open", "merged": False}}
+        self.calls.clear()
+        with patch.object(
+            w.discovery, "repos", return_value={"repos": [], "clones": []}
+        ):
+            state, events = w.reduce_pulls(
+                state, w.collect_pulls(self.command([], departed), state)
+            )
+        self.assertEqual(state["prs"], {})
+        self.assertEqual(events, ["CHANGES owner/product#7 cleared"])
+        self.assertTrue(
+            any(
+                argv[:2] == ("gh", "api") and argv[2].startswith("repos/")
+                for argv in self.calls
+            )
+        )
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [f"CHANGES owner/product#7 owner=wArch {PR['title']}"])
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, [])
+
+    def test_unwatched_departures_share_budget_and_drop_unreadable_or_unread(self):
+        count = w.PULLS_DEPARTED_MAX + 2
+        rows = [pr(number, decision="CHANGES_REQUESTED") for number in range(count)]
+        before, _ = w.reduce_pulls(None, w.collect_pulls(self.command(rows), None))
+        # An unreadable unwatched departure must not leave a lasting READFAIL,
+        # including when the snapshot already records a previous failed read.
+        for saved in before["prs"].values():
+            saved["misses"] = 1
+        self.calls.clear()
+        with patch.object(
+            w.discovery, "repos", return_value={"repos": [], "clones": []}
+        ):
+            raw = w.collect_pulls(self.command([]), before)
+            state, events = w.reduce_pulls(before, raw)
+        reads = [
+            argv
+            for argv in self.calls
+            if argv[:2] == ("gh", "api") and argv[2].startswith("repos/")
+        ]
+        self.assertEqual(len(reads), w.PULLS_DEPARTED_MAX)
+        self.assertEqual(raw["failed"], [])
+        self.assertEqual(state, {"prs": {}, "unreadable": []})
+        self.assertEqual(len(events), count)
+        self.assertTrue(all(event.endswith(" cleared") for event in events))
+
+    def test_legacy_snapshot_seeds_all_visible_bot_ids_without_stale_copilot_start(
+        self,
+    ):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        state["prs"]["owner/product#7"].pop("seen_reviews")
+        row["reviews"]["nodes"] = [
+            {
+                "id": "R-old-1",
+                "author": {"login": "copilot-pull-request-reviewer"},
+                "body": "Needs a closer look\nOld",
+            },
+            {
+                "id": "R-old-2",
+                "author": {"login": "copilot-pull-request-reviewer"},
+                "body": "Needs a closer look\nOld",
+            },
+        ] + [
+            {"id": f"H{n}", "author": {"login": "human"}, "body": "Reply"}
+            for n in range(6)
+        ]
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+        self.assertEqual(
+            state["prs"]["owner/product#7"]["seen_reviews"], ["R-old-1", "R-old-2"]
+        )
+        row["reviews"]["nodes"].append(
+            {
+                "id": "R-new",
+                "author": {"login": "copilot-pull-request-reviewer"},
+                "body": "Needs a closer look\nNew",
+            }
+        )
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertTrue(
+            any(event.startswith("COPILOT owner/product#7 owner=") for event in events)
+        )
+
+    def test_head_keyed_snapshot_migrates_without_alerts(self):
+        row = pr(7, decision="CHANGES_REQUESTED")
+        row["reviewThreads"]["nodes"] = [{"id": "T1", "isResolved": False}]
+        row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"][
+            0
+        ]["conclusion"] = "FAILURE"
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        identities = state["prs"]["owner/product#7"]["identities"]
+        for kind, value in list(identities.items()):
+            identities[kind] = ["head", value]
+        row["headRefOid"] = "head-2"
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+        self.assertEqual(
+            state["prs"]["owner/product#7"]["identities"]["THREADS"], ["T1"]
+        )
+
+    def test_review_metadata_dedupes_without_fetching_old_bodies(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        row["reviews"] = {
+            "nodes": [
+                {"id": "old-bot", "author": {"login": "copilot-pull-request-reviewer"}}
+            ],
+            "pageInfo": {"hasPreviousPage": True},
+        }
+        row["recentReviews"] = {
+            "nodes": [{"id": "human", "author": {"login": "human"}, "body": "Reply"}]
+        }
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        self.assertNotIn("COPILOT", state["prs"]["owner/product#7"]["lines"])
+        self.assertEqual(state["prs"]["owner/product#7"]["seen_reviews"], ["old-bot"])
+        row["reviews"]["nodes"].append(
+            {"id": "new-bot", "author": {"login": "copilot-pull-request-reviewer"}}
+        )
+        row["recentReviews"]["nodes"].append(
+            {
+                "id": "new-bot",
+                "author": {"login": "copilot-pull-request-reviewer"},
+                "body": "Needs a closer look\nNew finding",
+            }
+        )
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(
+            events, [f"COPILOT owner/product#7 owner=wArch {PR['title']} [New finding]"]
+        )
+        self.assertIn(
+            "reviews(last:100){pageInfo{hasPreviousPage} nodes{id author{login}}}",
+            w.PULLS_SELECTION,
+        )
+        self.assertIn(
+            "recentReviews:reviews(last:6){nodes{id author{login} body}}",
+            w.PULLS_SELECTION,
+        )
+        self.assertEqual(w.PULLS_SELECTION.count(" body"), 1)
+
+    def test_new_review_and_owner_in_same_poll_reaches_start_feed(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        row["reviews"]["nodes"] = [
+            {
+                "id": "R1",
+                "author": {"login": "copilot-pull-request-reviewer"},
+                "body": "Needs a closer look\nCheck it",
+            }
+        ]
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        policy = {}
+        line = w.pull_line(
+            state["prs"]["owner/product#7"]["lines"]["COPILOT"],
+            "owner/product#7",
+            "wArch",
+        )
+        w.alert_policy.apply(policy, [{"mode": "pulls", "events": [line]}], 1)
+        rows = json.loads(json.dumps(WORKSPACES))
+        rows["result"]["workspaces"][0]["tokens"]["owner"] = "wNew"
+        row["reviews"]["nodes"][0]["id"] = "R2"
+        with patch(__name__ + ".WORKSPACES", rows):
+            state, events = w.reduce_pulls(
+                state, w.collect_pulls(self.command([row]), state)
+            )
+        feed = w.alert_policy.apply(policy, [{"mode": "pulls", "events": events}], 2)
+        self.assertEqual(
+            sum(
+                "COPILOT " in line and "owner=wNew" in line and "(start)" in line
+                for line in feed
+            ),
+            1,
+        )
+        rows["result"]["workspaces"][0]["tokens"]["owner"] = "wThird"
+        with patch(__name__ + ".WORKSPACES", rows):
+            _, events = w.reduce_pulls(
+                state, w.collect_pulls(self.command([row]), state)
+            )
+        feed = w.alert_policy.apply(policy, [{"mode": "pulls", "events": events}], 3)
+        self.assertTrue(any("(owner)" in line for line in feed))
+        self.assertFalse(any("(start)" in line for line in feed))
+
+    def test_changed_merge_gates_do_not_reuse_prior_full_ci_evidence(self):
+        row = pr(7)
+        row["baseRefName"] = "stack"
+        with patch.object(
+            w.audit, "repo_settings", return_value={"ORCH_MERGE_GATE_CHECKS": "unit"}
+        ):
+            state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"][
+            "pageInfo"
+        ]["hasNextPage"] = True
+        with patch.object(
+            w.audit,
+            "repo_settings",
+            return_value={"ORCH_MERGE_GATE_CHECKS": "new-required-ci"},
+        ):
+            state, events = w.reduce_pulls(
+                state, w.collect_pulls(self.command([row]), state)
+            )
+        line = state["prs"]["owner/product#7"]["lines"]["APPROVED-STACKED"]
+        self.assertIn("full CI unknown", line)
+        self.assertTrue(
+            any(
+                event.startswith("APPROVED-STACKED owner/product#7 owner=")
+                for event in events
+            )
+        )
 
     def test_one_search_call_per_poll(self):
         w.collect_pulls(self.command([pr(n) for n in range(20)]), None)

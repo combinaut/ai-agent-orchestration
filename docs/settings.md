@@ -59,6 +59,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `models.codex_smart` | `ORCH_CODEX_SMART_MODEL` | `"<codex-smart-model>"` | Codex model for hard work; replace the placeholder |
 | `models.pi_worker` | `ORCH_PI_WORKER_MODEL` | empty | pi model for routine work as provider/model-id; empty means pi is not used on this machine |
 | `models.pi_smart` | `ORCH_PI_SMART_MODEL` | empty | pi model for hard work as provider/model-id; empty means pi is not used on this machine |
+| `remote_control.architects` | `ORCH_REMOTE_CONTROL_ARCHITECTS` | `true` | Give architect sessions Remote Control on start and recycle |
 | `recycle.tokens` | `ORCH_RECYCLE_TOKENS` | `300000` | Tokens used at which RECYCLE fires |
 | `recycle.pct` | `ORCH_RECYCLE_PCT` | `55` | Context percentage used when the token sensor is absent |
 | `recycle.park_idle` | `ORCH_PARK_IDLE` | `false` | Park architects that have no open PR, worker or watcher |

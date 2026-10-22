@@ -62,6 +62,14 @@ CAPPED_HISTORY = ("audit", "pulls")
 READ_FAILURES = 3
 PULLS_DEPARTED_MAX = 10
 PULLS_DEPARTED_SECONDS = 60
+# Pulls needs stable identities; audit retains its existing presentation-only query.
+PULLS_SELECTION = audit.SELECTION.replace(
+    "nodes{isResolved}", "nodes{id isResolved}"
+).replace(
+    "reviews(last:6){nodes{author{login} body}}",
+    "reviews(last:100){pageInfo{hasPreviousPage} nodes{id author{login}}} "
+    "recentReviews:reviews(last:6){nodes{id author{login} body}}",
+)
 GITHUB_REMOTE = discovery.GITHUB_REMOTE
 
 BALANCE_LIMITS = {"free": 30, "slots": 4, "heavy": 4, "load5": 20, "cpu": 80}
@@ -940,6 +948,31 @@ def pull_owners(command, prs, failed=None, work=None):
     return owners
 
 
+def pull_check_evidence(pr):
+    """Visible latest check outcomes; unseen names remain unknown on truncated connections."""
+    commits = pr["commits"]["nodes"]
+    rollup = commits[0]["commit"]["statusCheckRollup"] if commits else None
+    contexts = (
+        rollup["contexts"]
+        if rollup
+        else {"nodes": [], "pageInfo": {"hasNextPage": False}}
+    )
+    checks = {}
+    for check in contexts["nodes"]:
+        name = check.get("name") or check["context"]
+        if name not in checks or (check.get("startedAt") or "") >= (
+            checks[name].get("startedAt") or ""
+        ):
+            checks[name] = check
+    failing = {
+        name
+        for name, check in checks.items()
+        if check.get("conclusion") in ("FAILURE", "TIMED_OUT")
+        or check.get("state") in ("FAILURE", "ERROR")
+    }
+    return set(checks), failing, contexts["pageInfo"]["hasNextPage"]
+
+
 def collect_pulls(command, before, clock=time.monotonic):
     """Departed-PR reads run right after the search with their own reserved window, before the owner lookup."""
     known = (before or {}).get("prs", {})
@@ -949,11 +982,23 @@ def collect_pulls(command, before, clock=time.monotonic):
     except discovery.Unavailable as error:
         work = error
     found = discovery.repos(command, work)
-    prs = audit.fetch_prs(command, page_nodes, found["repos"])
+    prs = audit.fetch_prs(
+        command, page_nodes, found["repos"], selection=PULLS_SELECTION
+    )
     searched = {f"{pr['repository']['nameWithOwner']}#{pr['number']}" for pr in prs}
-    departed, failed, attempted = {}, [], set()
+    watched = {repo.lower() for repo in found["repos"]}
+    departed = {
+        key: "UNWATCHED"
+        for key in set(known) - searched
+        if key.rsplit("#", 1)[0].lower() not in watched
+    }
+    failed, attempted = [], set()
     pending = sorted(
-        set(known) - searched, key=lambda key: (known[key].get("misses", 0), key)
+        set(known) - searched,
+        key=lambda key: (
+            known[key].get("departure_reads", known[key].get("misses", 0)),
+            key,
+        ),
     )
     deadline = clock() + PULLS_DEPARTED_SECONDS
     for key in pending[:PULLS_DEPARTED_MAX]:
@@ -963,50 +1008,171 @@ def collect_pulls(command, before, clock=time.monotonic):
         repo, number = key.rsplit("#", 1)
         try:
             row = json.loads(command("gh", "api", f"repos/{repo}/pulls/{number}"))
-            departed[key] = "MERGED" if row.get("merged") else row["state"].upper()
+            state = "MERGED" if row.get("merged") else row["state"].upper()
+            # Unwatched PRs get one bounded chance to report a terminal event.
+            # Open/unreadable ones retain the drop marker, never saved evidence.
+            if departed.get(key) != "UNWATCHED" or state in ("MERGED", "CLOSED"):
+                departed[key] = state
         except audit.READ_ERRORS:
-            failed.append(key)
+            if departed.get(key) != "UNWATCHED":
+                failed.append(key)
     waiting = [
-        key for key in pending if key not in attempted and known[key].get("misses", 0)
+        key
+        for key in pending
+        if key not in attempted
+        and departed.get(key) != "UNWATCHED"
+        and known[key].get("misses", 0)
     ]
-    unreadable, roots, lookup_failed = [], [], False
+    unreadable, roots = [], []
     try:
         owners = pull_owners(command, prs, roots, work)
     except (*audit.READ_ERRORS, discovery.Unavailable):
-        owners, unreadable, lookup_failed = {}, ["owners"], True
+        owners, unreadable = {}, ["owners"]
     if roots:
         unreadable = ["owners"]
-    unresolved = set(roots)
     current, settings, settings_failed = {}, {"clones": found["clones"]}, []
     for pr in prs:
         key = f"{pr['repository']['nameWithOwner']}#{pr['number']}"
 
+        gate_checks = None
+
         def repo_settings(pr=pr, key=key):
+            nonlocal gate_checks
             try:
-                return audit.repo_settings(
+                values = audit.repo_settings(
                     command,
                     pr["repository"]["nameWithOwner"],
                     pr["baseRefName"],
                     settings,
                 )
+                gate_checks = sorted(
+                    set(
+                        filter(
+                            None, values.get("ORCH_MERGE_GATE_CHECKS", "").split("|")
+                        )
+                    )
+                )
+                return values
             except audit.READ_ERRORS:
+                gate_checks = old.get("gate_checks")
                 settings_failed.append(f"settings:{key}")
                 raise
 
-        lines = {
-            line.split(" ", 1)[0]: line
-            for line in audit.pr_lines(pr, page_nodes, repo_settings)
-            if line.split(" ", 1)[0] in alert_policy.PULL_KINDS
-        }
-        repo = pr["repository"]["nameWithOwner"].lower()
-        kept = (
-            lookup_failed
-            or repo in unresolved
-            or "*/" + repo.split("/")[-1] in unresolved
-            or "*" in unresolved
+        old = dict(known.get(key, {}))
+        old["identities"] = pull_saved_identities(old)
+        head, base = pr.get("headRefOid"), pr.get("baseRefName")
+        same_scope = old.get("head") == head and old.get("base") == base
+        try:
+            # The 100-review connection is metadata for dedupe; bodies/classification keep the six-review window.
+            display_pr = dict(pr, reviews=pr.get("recentReviews", pr["reviews"]))
+            visible_bot_reviews = [
+                review["id"]
+                for review in pr["reviews"]["nodes"]
+                if (review.get("author") or {}).get("login")
+                == os.environ.get(
+                    "ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer"
+                )
+            ]
+            lines = {
+                line.split(" ", 1)[0]: line
+                for line in audit.pr_lines(display_pr, page_nodes, repo_settings)
+                if line.split(" ", 1)[0] in alert_policy.PULL_KINDS
+            }
+            visible, failing, checks_truncated = pull_check_evidence(pr)
+            check_failures = sorted(failing)
+            # A bounded connection is not proof that a previous condition has gone.
+            incomplete = []
+            if checks_truncated:
+                if old.get("check_failures") is not None:
+                    failing |= set(old["check_failures"]) - visible
+                    check_failures = sorted(failing)
+                    if failing:
+                        lines["RED"] = (
+                            f"RED {key} {pr['title']} [{','.join(check_failures)}]"
+                        )
+                    else:
+                        lines.pop("RED", None)
+                elif "RED" in old.get("lines", {}) and not failing:
+                    # Legacy snapshots lack per-check evidence; retain that unknown condition until a full read.
+                    incomplete.append("RED")
+                    check_failures = None
+                stacked = lines.get("APPROVED-STACKED", "")
+                if stacked.endswith(", full CI not run]"):
+                    lines["APPROVED-STACKED"] = (
+                        stacked.removesuffix("full CI not run]") + "full CI unknown]"
+                    )
+                    incomplete.append("APPROVED-STACKED")
+            identities = pull_identities(display_pr, lines)
+            if pr["reviewThreads"]["pageInfo"]["hasNextPage"]:
+                incomplete.append("THREADS")
+            same_ci_scope = (
+                same_scope
+                and gate_checks is not None
+                and gate_checks == old.get("gate_checks")
+            )
+            for kind in incomplete:
+                if kind == "APPROVED-STACKED" and not same_ci_scope:
+                    continue
+                if kind == "THREADS" and kind in old.get("identities", {}):
+                    # A partial page can prove a visible resolution/new thread, never an unseen resolution.
+                    threads = pr["reviewThreads"]["nodes"]
+                    unseen = set(old["identities"][kind]) - {
+                        thread["id"] for thread in threads
+                    }
+                    active = sorted(
+                        unseen
+                        | {
+                            thread["id"]
+                            for thread in threads
+                            if not thread["isResolved"]
+                        }
+                    )
+                    if active:
+                        identities[kind] = active
+                        lines[kind] = (
+                            f"THREADS {key} {pr['title']} [{len(active)} unresolved]"
+                        )
+                    else:
+                        lines.pop(kind, None)
+                        identities.pop(kind, None)
+                    continue
+                if kind in old.get("lines", {}):
+                    lines[kind] = old["lines"][kind]
+                if kind in old.get("identities", {}):
+                    identities[kind] = old["identities"][kind]
+            if (
+                same_scope
+                and f"settings:{key}" in settings_failed
+                and "APPROVED-STACKED" in old.get("lines", {})
+            ):
+                lines["APPROVED-STACKED"] = old["lines"]["APPROVED-STACKED"]
+                if "APPROVED-STACKED" in old.get("identities", {}):
+                    identities["APPROVED-STACKED"] = old["identities"][
+                        "APPROVED-STACKED"
+                    ]
+            if incomplete or checks_truncated:
+                unreadable.append(f"pr:{key}")
+        except audit.READ_ERRORS:
+            # Partial per-PR data must not discard readable siblings or saved evidence.
+            lines, identities = old.get("lines", {}), old.get("identities", {})
+            check_failures = old.get("check_failures")
+            visible_bot_reviews = None
+            gate_checks = old.get("gate_checks")
+            head, base = old.get("head"), old.get("base")
+            unreadable.append(f"pr:{key}")
+        owner = owners[key] if key in owners else old.get("owner")
+        current[key] = dict(
+            title=pr["title"],
+            owner=owner,
+            lines=lines,
+            identities=identities,
+            seen_reviews=old.get("seen_reviews", []),
+            visible_bot_reviews=visible_bot_reviews,
+            check_failures=check_failures,
+            head=head,
+            base=base,
+            gate_checks=gate_checks,
         )
-        owner = owners.get(key) or (known.get(key, {}).get("owner") if kept else None)
-        current[key] = dict(title=pr["title"], owner=owner, lines=lines)
     return dict(
         prs=current,
         departed=departed,
@@ -1017,6 +1183,58 @@ def collect_pulls(command, before, clock=time.monotonic):
     )
 
 
+def pull_identities(pr, lines):
+    """JSON-stable event identities, independent of display text and pane/session IDs."""
+    label = f"{pr['repository']['nameWithOwner']}#{pr['number']} {pr['title']}"
+    identities = {
+        kind: line[len(kind) + 1 + len(label) :] for kind, line in lines.items()
+    }
+    if "THREADS" in lines:
+        identities["THREADS"] = sorted(
+            thread["id"]
+            for thread in pr["reviewThreads"]["nodes"]
+            if not thread["isResolved"]
+        )
+    if "APPROVED-OLDHEAD" in lines:
+        identities["APPROVED-OLDHEAD"] = [
+            pr["headRefOid"],
+            sorted(
+                (review.get("commit") or {}).get("oid") or ""
+                for review in pr["latestOpinionatedReviews"]["nodes"]
+                if review["state"] == "APPROVED"
+            ),
+        ]
+    bot = os.environ.get("ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer")
+    reviews = [
+        row
+        for row in pr["reviews"]["nodes"]
+        if (row.get("author") or {}).get("login") == bot
+    ]
+    if "COPILOT" in lines:
+        identities["COPILOT"] = reviews[-1]["id"]
+    return identities
+
+
+def pull_saved_identities(pr):
+    """Read identities from the previous head-keyed schema without alerting on the format change."""
+    identities = dict(pr.get("identities", {}))
+    for kind, value in identities.items():
+        if (
+            kind == "THREADS"
+            and isinstance(value, list)
+            and len(value) == 2
+            and isinstance(value[1], list)
+        ):
+            identities[kind] = value[1]
+        elif (
+            kind not in ("THREADS", "COPILOT", "APPROVED-OLDHEAD")
+            and isinstance(value, list)
+            and len(value) == 2
+        ):
+            identities[kind] = value[1]
+    return identities
+
+
 def pull_line(line, key, owner):
     """`<kind> <repo>#<n> owner=<workspace or ?> <rest>`: the owner sits before any PR text."""
     kind, _, rest = line.partition(" ")
@@ -1024,43 +1242,82 @@ def pull_line(line, key, owner):
 
 
 def reduce_pulls(before, raw):
-    current = raw["prs"]
+    current = {key: dict(pr) for key, pr in raw["prs"].items()}
+    events = (
+        []
+        if before is None
+        else readfail_changes("PULLS", before.get("unreadable", []), raw["unreadable"])
+    )
+    for key, pr in sorted(current.items()):
+        previous = dict(((before or {}).get("prs", {})).get(key, {}))
+        previous["identities"] = pull_saved_identities(previous)
+        old = previous.get("lines", {})
+        identities = pr.get("identities", {})
+        seen = set(previous.get("seen_reviews", []))
+        visible_reviews = pr.pop("visible_bot_reviews", None)
+        legacy_reviews = (
+            key in (before or {}).get("prs", {}) and "seen_reviews" not in previous
+        )
+        if before is None or legacy_reviews:
+            seen.update(visible_reviews or [])
+        rerouted = pr["owner"] and pr["owner"] != previous.get("owner")
+        for kind, line in sorted(pr["lines"].items()):
+            identity = identities.get(kind)
+            changed = kind not in old or (
+                kind in previous.get("identities", {})
+                and identity != previous["identities"][kind]
+            )
+            if (
+                kind == "THREADS"
+                and kind in previous["identities"]
+                and identity is not None
+            ):
+                changed = bool(set(identity) - set(previous["identities"][kind]))
+            if kind == "COPILOT" and identity is not None:
+                # Seed legacy active state silently on its first identity-aware read.
+                changed = identity not in seen and not legacy_reviews
+                seen.add(identity)
+            if before is not None and (changed or rerouted):
+                # End the previous identity before starting its replacement, including in the feed policy.
+                if kind in old and changed:
+                    events.append(f"{kind} {key} cleared")
+                events.append(pull_line(line, key, pr["owner"]))
+        seen.update(visible_reviews or [])
+        if legacy_reviews and visible_reviews is None:
+            pr.pop(
+                "seen_reviews", None
+            )  # Defer migration until the reviews are readable.
+        else:
+            pr["seen_reviews"] = sorted(seen)
+        if before is not None:
+            events += [
+                f"{kind} {key} cleared" for kind in sorted(set(old) - set(pr["lines"]))
+            ]
     if before is None:
         active = sum(len(pr["lines"]) for pr in current.values())
         return dict(prs=current, unreadable=[]), [
             f"PULLS BASELINE [{active} active lines]"
         ]
-    events = readfail_changes("PULLS", before.get("unreadable", []), raw["unreadable"])
     after = dict(current)
-    for key, pr in sorted(current.items()):
-        old = before["prs"].get(key, {}).get("lines", {})
-        rerouted = pr["owner"] and pr["owner"] != before["prs"].get(key, {}).get(
-            "owner"
-        )
-        events += [
-            pull_line(line, key, pr["owner"])
-            for kind, line in sorted(pr["lines"].items())
-            if kind not in old or rerouted
-        ]
-        events += [
-            f"{kind} {key} cleared" for kind in sorted(set(old) - set(pr["lines"]))
-        ]
     for key, old in sorted(before["prs"].items()):
         if key in current:
             continue
         state = raw["departed"].get(key)
-        if state is None:
-            after[key] = (
-                dict(old, misses=old.get("misses", 0) + 1)
-                if key in raw.get("failed", [])
-                else old
-            )
+        if state == "UNWATCHED":
+            events += [f"{kind} {key} cleared" for kind in sorted(old["lines"])]
+            continue
+        if state not in ("MERGED", "CLOSED"):
+            after[key] = dict(old)
+            if state is not None or key in raw.get("failed", []):
+                after[key]["departure_reads"] = (
+                    old.get("departure_reads", old.get("misses", 0)) + 1
+                )
+                after[key]["misses"] = (
+                    old.get("misses", 0) + 1 if key in raw.get("failed", []) else 0
+                )
             continue
         events += [f"{kind} {key} cleared" for kind in sorted(old["lines"])]
-        if state in ("MERGED", "CLOSED"):
-            events.append(
-                pull_line(f"{state} {key} {old['title']}", key, old.get("owner"))
-            )
+        events.append(pull_line(f"{state} {key} {old['title']}", key, old.get("owner")))
     return dict(prs=after, unreadable=raw["unreadable"]), events
 
 

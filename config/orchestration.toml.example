@@ -56,6 +56,10 @@ pi_worker = ""
 # pi model for hard work as provider/model-id; empty means pi is not used on this machine
 pi_smart = ""
 
+[remote_control]
+# Give architect sessions Remote Control on start and recycle
+architects = true
+
 [recycle]
 # Tokens used at which RECYCLE fires
 tokens = 300000

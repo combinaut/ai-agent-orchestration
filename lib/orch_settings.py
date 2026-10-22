@@ -234,6 +234,13 @@ SETTINGS = [
         "pi model for hard work as provider/model-id; empty means pi is not used on this machine",
     ),
     _g(
+        "remote_control.architects",
+        "ORCH_REMOTE_CONTROL_ARCHITECTS",
+        "bool",
+        True,
+        "Give architect sessions Remote Control on start and recycle",
+    ),
+    _g(
         "recycle.tokens",
         "ORCH_RECYCLE_TOKENS",
         "int",

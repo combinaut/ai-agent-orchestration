@@ -68,6 +68,17 @@ teardown() {
   [[ "$output" == *'providers.enabled: must include "claude"'* ]]
 }
 
+@test "orch-settings defaults architect Remote Control on and accepts it off" {
+  run env -u ORCH_CONFIG "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  has_line ORCH_REMOTE_CONTROL_ARCHITECTS=1
+
+  printf '[remote_control]\narchitects = false\n' >"$ORCH_CONFIG"
+  run "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  has_line ORCH_REMOTE_CONTROL_ARCHITECTS=0
+}
+
 @test "orch-settings prints one ORCH_NAME=value line per setting and no comments" {
   printf '# a comment\n[pr]\nauthor = "me"\n' >"$ORCH_CONFIG"
   run "$ROOT/orch-settings"

@@ -65,7 +65,7 @@ def positive_setting(name, default, maximum=None):
     return value
 
 
-def fetch_prs(command, page_nodes=None, repos=None):
+def fetch_prs(command, page_nodes=None, repos=None, selection=SELECTION):
     """Open PRs of ORCH_PR_AUTHOR in repos, by default the repos of the open work."""
     author = os.environ.get("ORCH_PR_AUTHOR", "")
     if not author:
@@ -84,7 +84,7 @@ def fetch_prs(command, page_nodes=None, repos=None):
         "api",
         "graphql",
         "-f",
-        "query=" + QUERY,
+        "query=" + QUERY.replace(SELECTION, selection),
         "-f",
         "q=" + query,
         "-F",
