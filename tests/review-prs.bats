@@ -217,6 +217,7 @@ prs.gh = fake_gh
 lines, retained = prs.changes(present, {}, "reviewer")
 assert lines == [], lines
 assert retained == present, retained
+assert prs.snapshot_counts(retained) == "1 actionable, 1 total"
 lines, retained = prs.changes(retained, present, "reviewer")
 assert lines == [], lines
 assert retained == {}, retained

@@ -437,6 +437,11 @@ def counts(nodes):
     return f"{actionable} actionable, {len(nodes)} total"
 
 
+def snapshot_counts(snap):
+    actionable = sum(1 for entry in snap.values() if blocker(entry) is None)
+    return f"{actionable} actionable, {len(snap)} total"
+
+
 def cmd_list(args, scope, label):
     nodes = fetch(scope)
     if any(p["mergeable"] == "UNKNOWN" for p in nodes):
@@ -472,7 +477,7 @@ def cmd_watch(args, scope, _label):
                 lines, still_open = changes(before, after)
                 after = {**after, **still_open}
                 if lines:
-                    print("\n".join([*lines, f"now: {counts(nodes)}"]), flush=True)
+                    print("\n".join([*lines, f"now: {snapshot_counts(after)}"]), flush=True)
             before = after
             save_state(scope, after)
             if fails >= 3:
