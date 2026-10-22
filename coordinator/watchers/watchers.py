@@ -974,7 +974,7 @@ def collect(mode, before, scope="", base=None):
                                                           and (row.get("tokens") is None or isinstance(row["tokens"], dict)) for row in spaces):
                     raise ValueError("invalid workspace list")
                 raw["workspaces"] = spaces
-            except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError):
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError, MissingMetric):
                 raw["workspaces"] = None
             if base is not None:
                 raw["closed"] = closed_panes(base, {row["pane_id"] for row in agents(raw)}, before)

@@ -394,6 +394,35 @@ class CollectionTests(IsolatedTestCase):
         self.assertEqual(after["waiting"], test.state["waiting"])
         self.assertFalse(any("cleared" in event for event in events))
 
+    def test_empty_workspace_output_still_resets_working_and_reports_blockers(self):
+        test = WaitingTests()
+        test.setUp()
+        test.start()
+        test.row["agent_status"] = "working"
+        blocked = dict(
+            pane_id="p2",
+            workspace_id="w1",
+            agent_status="blocked",
+            agent_session={"value": "s2"},
+            tokens={},
+        )
+
+        def command(*args):
+            if args[-2:] == ("agent", "list"):
+                return json.dumps({"result": {"agents": [test.row, blocked]}})
+            raise w.MissingMetric("herdr empty response")
+
+        with (
+            patch.dict(os.environ, HERDR_ENV="1"),
+            patch.object(w, "command", side_effect=command),
+        ):
+            raw = w.collect("workers", test.state)
+        self.assertIsNone(raw["workspaces"])
+        after, events = w.reduce_workers(test.state, raw)
+        self.assertEqual(after["waiting"], {})
+        self.assertIn("WORKER p2 blocked", events)
+        self.assertEqual(len([line for line in events if "cleared" in line]), 1)
+
     def test_snapshot_keeps_all_stages_and_policy_keys_session_scoped(self):
         test = WaitingTests()
         test.setUp()
