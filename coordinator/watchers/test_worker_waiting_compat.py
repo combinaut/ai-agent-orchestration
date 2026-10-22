@@ -7,6 +7,7 @@ import tomllib
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import watchers as w
 
 
@@ -47,7 +48,7 @@ class WaitingCompatibilityTests(IsolatedTestCase):
         self.assertEqual(len(events), 1)
         self.assertTrue(events[0].startswith("WORKER WAITING "))
         self.assertEqual(set(state["waiting"]), {"s1"})
-        self.assertNotIn("idle", state)
+        self.assertEqual(set(state["idle"]), {"p1"})
         # #47 uses {} for a successful pass with no idle worker to look up.
         state, events = w.reduce_workers(
             state, dict(raw, observed_at=602, workspaces={})
@@ -114,23 +115,7 @@ class WaitingCompatibilityTests(IsolatedTestCase):
         spec = importlib.util.spec_from_file_location("compat_settings", path)
         settings = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(settings)
-        combined = list(settings.SETTINGS)
-        # #47 adds workers.idle_s immediately before pr_tabs.org in the schema.
-        index = next(
-            i for i, setting in enumerate(combined) if setting.key == "pr_tabs.org"
-        )
-        combined.insert(
-            index,
-            settings._g(
-                "workers.idle_s",
-                "ORCH_WORKER_IDLE_S",
-                "int",
-                7200,
-                "Idle close threshold",
-            ),
-        )
-        with patch.object(settings, "SETTINGS", combined):
-            example = settings.example("global")
+        example = settings.example("global")
         parsed = tomllib.loads(example)
         self.assertEqual(example.count("[workers]"), 1)
         self.assertEqual(

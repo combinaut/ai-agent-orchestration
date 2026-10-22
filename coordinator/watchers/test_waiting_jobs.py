@@ -5,11 +5,12 @@ import json
 import os
 import subprocess
 import tempfile
-from pathlib import Path
 from contextlib import redirect_stderr
+from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import test_worker_waiting as waiting
 import watchers as w
 

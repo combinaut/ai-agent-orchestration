@@ -8,6 +8,7 @@
 
 Scope: --repo owner/name | --org ORG | --all. Default: cwd's GitHub repo, else --all.
 """
+
 import argparse
 import hashlib
 import json
@@ -15,9 +16,10 @@ import os
 import subprocess
 import sys
 import time
-import watcher_runtime as runtime
 from datetime import datetime, timezone
 from pathlib import Path
+
+import watcher_runtime as runtime
 
 BOT_TITLES = ("Automatic Update of README", "Changes by create-pull-request")
 BOT_LOGINS = {"copilot-pull-request-reviewer", "copilot", "github-actions"}
@@ -53,8 +55,14 @@ def gh(*args):
 
 
 def viewer_login():
-    return gh("api", "graphql", "-f", "query={ viewer { login } }",
-              "--jq", ".data.viewer.login").strip()
+    return gh(
+        "api",
+        "graphql",
+        "-f",
+        "query={ viewer { login } }",
+        "--jq",
+        ".data.viewer.login",
+    ).strip()
 
 
 def resolve_scope(args):
@@ -69,16 +77,27 @@ def resolve_scope(args):
         repo = f"{args.org}/{repo}"
     if not repo:
         try:
-            repo = gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip()
+            repo = gh(
+                "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"
+            ).strip()
         except RuntimeError:
             return "", "all repos"
     return f"repo:{repo}", repo
 
 
 def search(q):
-    raw = gh("api", "graphql", "--paginate", "--slurp",
-             "-H", "Accept: application/vnd.github.merge-info-preview+json",
-             "-f", f"query={QUERY}", "-f", f"q={q}")
+    raw = gh(
+        "api",
+        "graphql",
+        "--paginate",
+        "--slurp",
+        "-H",
+        "Accept: application/vnd.github.merge-info-preview+json",
+        "-f",
+        f"query={QUERY}",
+        "-f",
+        f"q={q}",
+    )
     return [n for page in json.loads(raw) for n in page["data"]["search"]["nodes"] if n]
 
 
@@ -91,11 +110,18 @@ def my_review_sha(pr, me):
 
 def fetch(scope):
     me = viewer_login().lower()
-    requested = search(f"is:pr is:open review-requested:@me archived:false {scope}".strip())
+    requested = search(
+        f"is:pr is:open review-requested:@me archived:false {scope}".strip()
+    )
     # PRs I reviewed whose head moved since, with no new review request.
-    reviewed = search(f"is:pr is:open reviewed-by:@me -review-requested:@me archived:false {scope}".strip())
-    moved = [n for n in reviewed
-             if my_review_sha(n, me) and my_review_sha(n, me) != n.get("headRefOid")]
+    reviewed = search(
+        f"is:pr is:open reviewed-by:@me -review-requested:@me archived:false {scope}".strip()
+    )
+    moved = [
+        n
+        for n in reviewed
+        if my_review_sha(n, me) and my_review_sha(n, me) != n.get("headRefOid")
+    ]
     seen = set()
     nodes = []
     for n in requested + moved:
@@ -103,8 +129,11 @@ def fetch(scope):
             seen.add(n["url"])
             nodes.append(n)
     nodes = [n for n in nodes if not n["title"].startswith(BOT_TITLES)]
-    nodes = [n for n in nodes
-             if not (n.get("author") and (n["author"].get("login") or "").lower() == me)]
+    nodes = [
+        n
+        for n in nodes
+        if not (n.get("author") and (n["author"].get("login") or "").lower() == me)
+    ]
     return sorted(nodes, key=lambda p: (p["repository"]["nameWithOwner"], -p["number"]))
 
 
@@ -113,7 +142,9 @@ def is_bot(typename, login):
 
 
 def ci_state(pr):
-    ci = (pr["commits"]["nodes"] or [{}])[0].get("commit", {}).get("statusCheckRollup") or {}
+    ci = (pr["commits"]["nodes"] or [{}])[0].get("commit", {}).get(
+        "statusCheckRollup"
+    ) or {}
     return ci.get("state")
 
 
@@ -173,18 +204,25 @@ def bucket(pr):
 
 
 def snapshot(nodes):
-    return {p["url"]: {
-        "title": p["title"],
-        "draft": p["isDraft"],
-        "author": author_name(p),
-        "ci": ci_state(p),
-        "conflict": None if p["mergeable"] == "UNKNOWN" else p["mergeable"] == "CONFLICTING",
-        "sha": p.get("headRefOid") or "",
-    } for p in nodes}
+    return {
+        p["url"]: {
+            "title": p["title"],
+            "draft": p["isDraft"],
+            "author": author_name(p),
+            "ci": ci_state(p),
+            "conflict": None
+            if p["mergeable"] == "UNKNOWN"
+            else p["mergeable"] == "CONFLICTING",
+            "sha": p.get("headRefOid") or "",
+        }
+        for p in nodes
+    }
 
 
 def state_file(scope):
-    return STATE_DIR / (hashlib.sha1(f"review:{scope}".encode()).hexdigest()[:12] + ".json")
+    return STATE_DIR / (
+        hashlib.sha1(f"review:{scope}".encode()).hexdigest()[:12] + ".json"
+    )
 
 
 def load_state(scope):
@@ -285,10 +323,15 @@ def changes(before, after):
             parts.append("conflicts cleared")
         if parts:
             became_ready = (
-                not now["draft"] and not now["conflict"]
+                not now["draft"]
+                and not now["conflict"]
                 and now["ci"] in (None, "SUCCESS")
-                and (was["draft"] or was["conflict"] or was["ci"] not in (None, "SUCCESS")
-                     or (was.get("sha") != now.get("sha")))
+                and (
+                    was["draft"]
+                    or was["conflict"]
+                    or was["ci"] not in (None, "SUCCESS")
+                    or (was.get("sha") != now.get("sha"))
+                )
             )
             prefix = "ready" if became_ready else "changed"
             lines.append(f"{prefix}: {url} — {now['title']}: {', '.join(parts)}")
@@ -312,18 +355,24 @@ TITLE_MAX = 60
 def table(title, prs):
     if not prs:
         return []
-    lines = [f"**{title} ({len(prs)})**", "",
-             "| PR | Title | Author · status |", "|---|---|---|"]
+    lines = [
+        f"**{title} ({len(prs)})**",
+        "",
+        "| PR | Title | Author · status |",
+        "|---|---|---|",
+    ]
     for p in prs:
         name = p["title"].replace("|", "/")
         if len(name) > TITLE_MAX:
-            name = name[:TITLE_MAX - 1].rstrip() + "…"
+            name = name[: TITLE_MAX - 1].rstrip() + "…"
         lines.append(f"| {p['url']} | {name} | {status(p)} |")
     return lines + [""]
 
 
 def counts(nodes):
-    actionable = sum(1 for p in nodes if bucket(p) == "ready" and p["mergeable"] != "UNKNOWN")
+    actionable = sum(
+        1 for p in nodes if bucket(p) == "ready" and p["mergeable"] != "UNKNOWN"
+    )
     return f"{actionable} actionable, {len(nodes)} total"
 
 
@@ -342,7 +391,10 @@ def cmd_list(args, scope, label):
         "draft": "📝 Drafts",
     }
     groups = {b: [p for p in nodes if bucket(p) == b] for b in order}
-    out = [f"**{len(nodes)} PRs requesting your review in {label}** — {counts(nodes)}", ""]
+    out = [
+        f"**{len(nodes)} PRs requesting your review in {label}** — {counts(nodes)}",
+        "",
+    ]
     for b in order:
         if args.actionable and b != "ready":
             continue
@@ -352,7 +404,7 @@ def cmd_list(args, scope, label):
 
 def cmd_watch(args, scope, _label):
     fails = 0
-    with runtime.deadline(runtime.ITERATION_TIMEOUT, 'PR watch startup'):
+    with runtime.deadline(runtime.ITERATION_TIMEOUT, "PR watch startup"):
         before = load_state(scope)
     for _ in runtime.iterations(args.interval, label="PR watch"):
         try:
@@ -368,7 +420,12 @@ def cmd_watch(args, scope, _label):
             if fails >= 3:
                 print("recovered: PR fetch works again", flush=True)
             fails = 0
-        except (RuntimeError, subprocess.SubprocessError, json.JSONDecodeError, KeyError) as error:
+        except (
+            RuntimeError,
+            subprocess.SubprocessError,
+            json.JSONDecodeError,
+            KeyError,
+        ) as error:
             fails += 1
             if fails == 3:
                 print(f"PR fetch failing 3x in a row: {error}", flush=True)
@@ -385,12 +442,17 @@ def cmd_dispatch_queue(args, scope, label):
         ok, kind = needs_dispatch(pr, dispatched)
         if ok:
             queue.append(dispatch_entry(pr, kind))
-    print(json.dumps({
-        "scope": label,
-        "model": DEFAULT_MODEL,
-        "queue": queue,
-        "skipped": sum(1 for p in nodes if bucket(p) == "ready") - len(queue),
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "scope": label,
+                "model": DEFAULT_MODEL,
+                "queue": queue,
+                "skipped": sum(1 for p in nodes if bucket(p) == "ready") - len(queue),
+            },
+            indent=2,
+        )
+    )
 
 
 def cmd_mark_dispatched(args, _scope, _label):
@@ -408,15 +470,24 @@ def cmd_mark_dispatched(args, _scope, _label):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("mode", choices=["list", "watch", "dispatch-queue", "mark-dispatched"],
-                        nargs="?", default="list")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "mode",
+        choices=["list", "watch", "dispatch-queue", "mark-dispatched"],
+        nargs="?",
+        default="list",
+    )
     parser.add_argument("--repo")
     parser.add_argument("--org")
     parser.add_argument("--all", action="store_true")
-    parser.add_argument("--actionable", action="store_true",
-                        help="list: only Ready-for-review PRs")
-    parser.add_argument("--interval", type=int, default=120, help="watch: seconds between checks")
+    parser.add_argument(
+        "--actionable", action="store_true", help="list: only Ready-for-review PRs"
+    )
+    parser.add_argument(
+        "--interval", type=int, default=120, help="watch: seconds between checks"
+    )
     parser.add_argument("--url", help="mark-dispatched: PR URL")
     parser.add_argument("--sha", help="mark-dispatched: head SHA that was dispatched")
     parser.add_argument("--agent", help="mark-dispatched: herdr agent name")

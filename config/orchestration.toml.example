@@ -145,6 +145,8 @@ git_age_s = 180
 wait_s = 600
 # Seconds between waiting alerts (minimum 60)
 wait_repeat_s = 1800
+# Seconds idle or done before WORKER IDLE (no open PR)
+idle_s = 7200
 
 [pr_tabs]
 # Organization the PR tabs extension manages; empty turns org actions off

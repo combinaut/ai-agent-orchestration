@@ -8,11 +8,11 @@ Settings come from three places. Each setting has one scope and lives in only on
 
 A repo key in the global file, a global key in a repo file, an unknown key, a value of the wrong type, a list entry that is empty or contains its separator (whitespace, `,`, `|` or `:`) and invalid TOML are errors that name the file and the key. A script that lacks a setting or a command prints `ERROR: …` and exits with status 2. Reading TOML needs Python 3.11 or newer: the loader takes `ORCH_PYTHON3` from the environment, then `python3` on `PATH`, then the Homebrew paths.
 
-## Print the resolved settings
+## 📋 Print the resolved settings
 
 `orch-settings` prints every resolved global setting as one `ORCH_NAME=value` line: the built-in default, then the global file (`ORCH_CONFIG` or `~/.claude/orchestration.toml`), then an exported variable. With no argument, a missing default file prints the defaults; a missing `ORCH_CONFIG` file, an explicit file that does not exist, an argument that starts with `-` and a value with a control character are errors (exit 2). Sessions run it at startup instead of reading the commented TOML. `orch-agents` is its companion for Herdr: one line per agent (name, pane, kind, status, workspace, owner, role, cwd), for a session that would otherwise read the `herdr agent list` JSON; it exits 2 with herdr's own message when herdr fails or answers in an unexpected shape. The installer links both into `~/.local/bin`.
 
-## Repo files
+## 📁 Repo files
 
 Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestration.local.toml`, an exported variable. A later file replaces a key of an earlier one; a list is replaced, not merged.
 
@@ -21,7 +21,7 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 - A linked worktree also reads the `.orchestration.local.toml` of its main checkout; its own local file wins over it.
 - No file means the built-in defaults: every repo feature is off.
 
-`.orchestration.local.toml` must not be committed. Add it to the repo's `.gitignore`, or to `.git/info/exclude` of your clone. A tracked local file is still read, with a warning that says how to untrack it.
+> ⚠️ **Do not commit `.orchestration.local.toml`.** Add it to the repo's `.gitignore`, or to `.git/info/exclude` of your clone. A tracked local file is still read, with a warning that says how to untrack it.
 
 ## Global settings
 
@@ -79,6 +79,7 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `hog.git_age_s` | `ORCH_HOG_GIT_AGE_S` | `180` | Hog watcher: git process age in seconds |
 | `workers.wait_s` | `ORCH_WAIT_S` | `600` | Seconds idle or done before WORKER WAITING |
 | `workers.wait_repeat_s` | `ORCH_WAIT_REPEAT_S` | `1800` | Seconds between waiting alerts (minimum 60) |
+| `workers.idle_s` | `ORCH_WORKER_IDLE_S` | `7200` | Seconds idle or done before WORKER IDLE (no open PR) |
 | `pr_tabs.org` | `ORCH_PR_TABS_ORG` | empty | Organization the PR tabs extension manages; empty turns org actions off |
 | `pr_tabs.default_repo` | `ORCH_PR_TABS_DEFAULT_REPO` | empty | Repo name for bare PR numbers; empty turns number jumps off |
 | `pr_tabs.open_all` | `ORCH_PR_TABS_OPEN_ALL` | empty | GitHub search behind the Open all button; empty turns it off |
@@ -97,13 +98,13 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `focus.architect` | `ORCH_FOCUS_ARCHITECT` | empty | Architect name never listed as lacking a focus worker |
 | `pi.deepseek` | `ORCH_PI_DEEPSEEK` | `false` | pi workers may run on the DeepSeek API in this repo; off unless set to true in the personal .orchestration.local.toml (a committed .orchestration.toml cannot turn it on); the pi start step refuses DeepSeek otherwise |
 
-### pi workers
+### 🥧 pi workers
 
 `models.pi_worker` and `models.pi_smart` are `provider/model-id`, for example `lmstudio/qwen/qwen3.6-35b-a3b`; pi's `--model` accepts that form (`provider/id`, the model id may itself contain slashes). Check ids with `pi --list-models <provider>`. Both default to empty, and empty means pi is not used on this machine; `install.sh` does not ask for them and the architect does not stop on them.
 
 DeepSeek sends the code to a remote API, so it is off for every repo. A repo opts in with `[pi] deepseek = true` in its personal `.orchestration.local.toml` (the main checkout's file also applies to its linked worktrees). The key in a committed `.orchestration.toml` is ignored with a warning, because a committed file would opt in every clone. The same key in a git-tracked `.orchestration.local.toml` is ignored too, and so is it when git cannot say whether the file is tracked (a broken index or a timeout), with a warning. DeepSeek counts as named when `deepseek` appears, in any case, in the provider or in the model id (`openrouter/deepseek/…`); every other provider, LM Studio included, needs no opt-in. `coordinator/pi-start.sh` enforces this when it starts a pi worker: it refuses an empty provider, ignores an exported `ORCH_PI_DEEPSEEK` and `GIT_*` variables, and its refusal tells the session to ask the user rather than edit the file. The Bash guard denies the ways around it; `docs/bash-guard.md` lists what stays open.
 
-## Legacy rules
+## 🧱 Legacy rules
 
 Legacy code is the patterns a repo is phasing out, which agents must not extend. The tool ships no rules: each repo lists its own under `[legacy]`, and with none the scan and the map do nothing and say so in one line.
 
@@ -132,7 +133,7 @@ paths = ["**/*.{js,coffee,erb,haml,rb}"]
 exclude = ["spec/**"]
 ```
 
-## Environment only
+## 🌱 Environment only
 
 These are read from the environment and never from a file.
 
@@ -145,7 +146,7 @@ These are read from the environment and never from a file.
 | `ORCH_LAUNCHD_WAIT_TRIES`, `ORCH_LAUNCHD_WAIT_SLEEP` | `40`, `0.5` | macOS: how often and how long (seconds) the installer waits for launchd to unload a job |
 | `ORCH_RADAR_WAIT_TRIES`, `ORCH_RADAR_WAIT_SLEEP` | `40`, `0.5` | How often and how long (seconds) the herdr env waits for the old Radar daemon to exit and the new one to answer |
 
-## Moving from `orchestration.env`
+## 🚚 Moving from `orchestration.env`
 
 When `~/.claude/orchestration.toml` is missing and `~/.claude/orchestration.env` exists, `install.sh` converts the old file once, keeps its comments where they sit above a key, and renames it to `orchestration.env.bak`. When both exist, the TOML file wins and the installer warns. The old `ORCH_V2_*` names are converted to their `ORCH_WATCHERS_*` names.
 
@@ -153,8 +154,8 @@ Repo values in the old file are not written to the global file. `ORCH_BIG_REPO_R
 
 The removed `legacy.extra_pattern` and `legacy.exempt_paths` keys are errors. `install.sh` rewrites them, before it drops `audit.git_watch_repos`, in the `.orchestration.local.toml` of each clone of the open work, of the `legacy.map_repo` clone, of each clone `audit.git_watch_repos` still lists, of their main checkouts, and in the snippets, keeping every other line: `extra_pattern` becomes one `LEGACY` rule over every path, `exempt_paths` becomes `exempt`. The built-in jQuery rules are gone, so add the rules the repo needs.
 
-## Repos and architects from the open work
+## 🔭 Repos and architects from the open work
 
 The audit and pulls watchers watch the open PRs of `pr.author` in the GitHub repos of the open workspaces (the `origin` and the `upstream` of each workspace's repo root; `upstream` is the base repo of a fork), and check those clones for PACKS and WORKTREES. The env adapter reports the workspaces (`env/<name>/open_work.py`, see [env/README.md](../env/README.md)). When it cannot, the watchers use the last set saved in `~/.claude/coordinator/open-work.json` and say so in their log.
 
-`pr.repos`, `audit.git_watch_repos` and `focus.skip_architects` are not settings. `install.sh` drops them from an existing file and prints one `dropped` line; one it cannot remove in place (an inline table) gets a `warning` line to edit it by hand. Until then the readers skip them with a warning. To leave an architect out of the focus report, see the pause line in [watchers.md](watchers.md#focus-report).
+`pr.repos`, `audit.git_watch_repos` and `focus.skip_architects` are not settings. `install.sh` drops them from an existing file and prints one `dropped` line; one it cannot remove in place (an inline table) gets a `warning` line to edit it by hand. Until then the readers skip them with a warning. To leave an architect out of the focus report, see the pause line in [watchers.md](watchers.md#-focus-report).

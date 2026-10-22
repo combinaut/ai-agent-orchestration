@@ -1,10 +1,12 @@
 """The feed lock and the Monitor's read record, shared by the notifier and the Monitor's follower.
 The follower writes `<inode> <attached> <consumed> <previous> <pid>` into its heartbeat: the feed file it reads, the offset it
 started reading that file from, how far it has read, the file it read to its end before this one, and its own pid. The follower attaches and the notifier appends under the feed lock."""
+
 import contextlib
 import fcntl
 import os
 import time
+
 import watcher_runtime as runtime
 
 LOCK_NAME = "coordinator-feed.lock"
@@ -23,7 +25,7 @@ def locked(feed):
                 break
             except BlockingIOError:
                 if time.monotonic() >= end:
-                    raise TimeoutError('feed lock deadline exceeded')
+                    raise TimeoutError("feed lock deadline exceeded")
                 time.sleep(0.05)
         yield
     finally:
@@ -47,14 +49,20 @@ def read_record(beat, now):
     if age > MONITOR_FRESH_SECONDS:
         return None
     try:
-        return tuple(int(field) for field in (fields + ["0"])[:4]) if len(fields) >= 3 else ()
+        return (
+            tuple(int(field) for field in (fields + ["0"])[:4])
+            if len(fields) >= 3
+            else ()
+        )
     except ValueError:
         return ()
 
 
 def will_read(record, inode, offset):
     """A Monitor reading the current feed file `inode` from before `offset`, or an older file it will rotate out of."""
-    return record == () or (record is not None and (record[0] != inode or record[1] <= offset))
+    return record == () or (
+        record is not None and (record[0] != inode or record[1] <= offset)
+    )
 
 
 def has_read(record, inode, end):
