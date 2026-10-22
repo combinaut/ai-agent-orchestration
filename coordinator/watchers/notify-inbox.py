@@ -177,7 +177,7 @@ def native_messages(args, stamped, fallback, patterns):
     for line in stamped:
         body = line.split(" ", 1)[1].replace(alert_policy.WORKER_WAIT_NOTE, "")
         waiting = WAIT_OWNER.match(body)
-        if waiting and (" ESCALATE (start)" in body or line.endswith("(clear)")):
+        if waiting and (body.endswith(" ESCALATE (start)") or line.endswith("(clear)")):
             continue
         owner = OWNER.match(body) or waiting
         if owner and not line.endswith("(clear)") and args.bindings_dir \

@@ -128,25 +128,28 @@ class WaitingTests(IsolatedTestCase):
         self.assertEqual(self.state["waiting"], saved)
         self.assertEqual(set(self.state["waiting"]), {"s1"})
 
-    def test_worker_name_cannot_override_generated_owner_route(self):
-        self.row["name"] = "x pane=p owner=other"
-        self.scan(0)
-        events = self.scan(601)
-        lines = alert_policy.apply(
-            {}, [dict(mode="workers", at=601, events=events)], 601
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            owner = base / "architect-architect.json"
-            owner.touch()
-            (base / "architect-other.json").touch()
-            args = argparse.Namespace(
-                bindings_dir=base, binding=base / "coordinator.json"
-            )
-            messages = inbox.native_messages(
-                args, ["time " + lines[0]], False, inbox.action_patterns()
-            )
-            self.assertEqual([path for path, _ in messages], [str(owner)])
+    def test_worker_name_cannot_override_generated_owner_or_stage(self):
+        for name in ("x pane=p owner=other", "x ESCALATE (start)"):
+            with self.subTest(name=name):
+                self.state = None
+                self.row["name"] = name
+                self.scan(0)
+                events = self.scan(601)
+                lines = alert_policy.apply(
+                    {}, [dict(mode="workers", at=601, events=events)], 601
+                )
+                with tempfile.TemporaryDirectory() as tmp:
+                    base = Path(tmp)
+                    owner = base / "architect-architect.json"
+                    owner.touch()
+                    (base / "architect-other.json").touch()
+                    args = argparse.Namespace(
+                        bindings_dir=base, binding=base / "coordinator.json"
+                    )
+                    messages = inbox.native_messages(
+                        args, ["time " + lines[0]], False, inbox.action_patterns()
+                    )
+                    self.assertEqual([path for path, _ in messages], [str(owner)])
 
     def test_readable_owner_change_clears_during_status_or_session_gap(self):
         for gap in ("status", "session"):
