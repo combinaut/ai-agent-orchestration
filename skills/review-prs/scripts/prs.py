@@ -347,7 +347,7 @@ def departure(url, login):
     pr = json.loads(gh("pr", "view", url, "--json", "state,reviewRequests"))
     state = pr.get("state")
     if state != "OPEN":
-        return state.lower() if state else None
+        return state
     for request in pr.get("reviewRequests") or []:
         if (request.get("login") or "").lower() == login.lower():
             return None
