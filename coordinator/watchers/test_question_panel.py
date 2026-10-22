@@ -302,6 +302,31 @@ class ReopenTest(IsolatedTestCase):
         self.assertEqual(list(self.dir.glob("done.*")), [])
 
 
+class CloseHelperTest(IsolatedTestCase):
+    def test_a_timed_out_helper_is_killed_with_its_children(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            child = Path(tmp) / "child.pid"
+            helper = Path(tmp) / "helper.sh"
+            helper.write_text(f"#!/bin/sh\nsleep 60 &\necho $! > {child}\nwait\n")
+            helper.chmod(0o755)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                question_lock.run_group([str(helper), "pane"], 1)
+            pid = int(child.read_text())
+            time.sleep(0.2)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+
+    def test_a_failing_helper_raises_and_a_passing_one_returns(self):
+        self.assertEqual(question_lock.run_group(["true"], 5), 0)
+        with self.assertRaises(subprocess.CalledProcessError):
+            question_lock.run_group(["false"], 5)
+
+    def test_children_of_the_lock_holder_see_the_held_marker(self):
+        with tempfile.TemporaryDirectory() as tmp, question_lock.answers_lock(tmp):
+            self.assertEqual(os.environ.get(question_lock.HELD), "1")
+        self.assertNotIn(question_lock.HELD, os.environ)
+
+
 class KeyReaderTest(IsolatedTestCase):
     def read(self, data):
         master, slave = pty.openpty()

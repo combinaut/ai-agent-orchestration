@@ -304,3 +304,37 @@ EOF
   [ "$status" -eq 1 ]
   [ ! -e "${question%.md}.opening" ]
 }
+
+hold_lock() {
+  "$python_bin" -c 'import fcntl, sys, time
+lock = open(sys.argv[1], "a")
+fcntl.flock(lock, fcntl.LOCK_EX)
+open(sys.argv[2], "w").close()
+time.sleep(float(sys.argv[3]))' "$HOME/.claude/coordinator/questions/.answers.lock" "$TMP/lock-ready" "$1" &
+  holder=$!
+  until [ -e "$TMP/lock-ready" ]; do sleep 0.05; done
+}
+
+@test "an open waits for the answers lock instead of racing a running open" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  hold_lock 2
+  env HERDR_PANES='{"result":{"panes":[{"pane_id":"todo-pane","tokens":{"todo":"1"}}]}}' "$ROOT/ask-user-question" release "$question" &
+  opener=$!
+  sleep 1
+  run grep -q '^pane split' "$TMP/question-herdr.calls"
+  [ "$status" -ne 0 ]
+  wait "$opener"
+  wait "$holder"
+  grep -q '^pane split' "$TMP/question-herdr.calls"
+}
+
+@test "an open started by the lock holder does not wait on its own lock" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  hold_lock 5
+  run env ORCH_ANSWERS_LOCK_HELD=1 HERDR_PANES='{"result":{"panes":[{"pane_id":"todo-pane","tokens":{"todo":"1"}}]}}' "$ROOT/ask-user-question" release "$question"
+  kill "$holder"
+  [ "$status" -eq 0 ]
+  grep -q '^pane split' "$TMP/question-herdr.calls"
+}
