@@ -478,6 +478,8 @@ def reduce_waiting(previous, raw):
             if entry["stage"]:
                 events.append(waiting_line(key, entry, now, "cleared"))
             entry = None
+        if seq is None and old_seq is not None:
+            row = dict(row, state_change_seq=old_seq)
         entry = dict(entry or dict(since=now, stage=0, owner=owner), row=dict(row))
         stage = entry["stage"]
         delay = float(os.environ.get("ORCH_WAIT_S", 600)) if stage == 0 else float(os.environ.get("ORCH_WAIT_REPEAT_S", 1800))

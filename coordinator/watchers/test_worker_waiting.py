@@ -364,6 +364,26 @@ class WaitingTests(IsolatedTestCase):
         self.assertEqual(self.scan(800), [])
         self.assertEqual(self.state["waiting"]["s1"]["since"], 800)
 
+    def test_missing_sequence_preserves_baseline_for_later_transition(self):
+        for missing in ("absent", "null"):
+            with self.subTest(missing=missing):
+                self.state = None
+                self.row["state_change_seq"] = 10
+                self.start()
+                if missing == "absent":
+                    self.row.pop("state_change_seq")
+                else:
+                    self.row["state_change_seq"] = None
+                self.assertEqual(self.scan(700), [])
+                self.assertEqual(self.state["waiting"]["s1"]["since"], 0)
+                self.row["state_change_seq"] = 12
+                events = self.scan(800)
+                self.assertEqual(len(events), 1)
+                self.assertIn("cleared", events[0])
+                self.assertEqual(self.state["waiting"]["s1"]["since"], 800)
+                self.assertEqual(self.scan(1400), [])
+                self.assertIn("session=s1", self.scan(1401)[0])
+
     def test_unchanged_sequence_or_missing_sequence_does_not_reset(self):
         for seq in (10, None):
             with self.subTest(seq=seq):
