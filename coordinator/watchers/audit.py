@@ -45,7 +45,7 @@ def positive_setting(name, default, maximum=None):
     return value
 
 
-def fetch_prs(command, page_nodes=None, repos=None):
+def fetch_prs(command, page_nodes=None, repos=None, selection=SELECTION):
     """Open PRs of ORCH_PR_AUTHOR in repos, by default the repos of the open work."""
     author = os.environ.get('ORCH_PR_AUTHOR', '')
     if not author:
@@ -57,7 +57,7 @@ def fetch_prs(command, page_nodes=None, repos=None):
     query = 'is:pr is:open author:' + author + ''.join(' repo:' + repo for repo in repos)
     if os.environ.get('ORCH_PR_SINCE'):
         query += ' updated:>=' + os.environ['ORCH_PR_SINCE']
-    args = ['gh', 'api', 'graphql', '-f', 'query=' + QUERY, '-f', 'q=' + query,
+    args = ['gh', 'api', 'graphql', '-f', 'query=' + QUERY.replace(SELECTION, selection), '-f', 'q=' + query,
             '-F', 'np=' + str(positive_setting('ORCH_AUDIT_PAGE_PRS', 80, 100)),
             '-F', 'ni=' + str(page_nodes if page_nodes is not None else positive_setting('ORCH_AUDIT_PAGE_NODES', 100, 100))]
     rows, cursor = [], None

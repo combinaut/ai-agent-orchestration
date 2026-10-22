@@ -40,6 +40,11 @@ CAPPED_HISTORY = ("audit", "pulls")
 READ_FAILURES = 3
 PULLS_DEPARTED_MAX = 10
 PULLS_DEPARTED_SECONDS = 60
+# Pulls needs stable identities; audit retains its existing presentation-only query.
+PULLS_SELECTION = audit.SELECTION.replace(
+    'nodes{isResolved}', 'nodes{id isResolved}').replace(
+    'reviews(last:6){nodes{author{login} body}}',
+    'reviews(last:100){pageInfo{hasPreviousPage} nodes{id author{login} body}}')
 GITHUB_REMOTE = discovery.GITHUB_REMOTE
 
 BALANCE_LIMITS = {"free": 30, "slots": 4, "heavy": 4, "load5": 20, "cpu": 80}
@@ -496,10 +501,10 @@ def collect_pulls(command, before, clock=time.monotonic):
     except discovery.Unavailable as error:
         work = error
     found = discovery.repos(command, work)
-    prs = audit.fetch_prs(command, page_nodes, found["repos"])
+    prs = audit.fetch_prs(command, page_nodes, found["repos"], selection=PULLS_SELECTION)
     searched = {f"{pr['repository']['nameWithOwner']}#{pr['number']}" for pr in prs}
     departed, failed, attempted = {}, [], set()
-    pending = sorted(set(known) - searched, key=lambda key: (known[key].get("misses", 0), key))
+    pending = sorted(set(known) - searched, key=lambda key: (known[key].get("departure_reads", known[key].get("misses", 0)), key))
     deadline = clock() + PULLS_DEPARTED_SECONDS
     for key in pending[:PULLS_DEPARTED_MAX]:
         if clock() >= deadline:
@@ -512,14 +517,13 @@ def collect_pulls(command, before, clock=time.monotonic):
         except audit.READ_ERRORS:
             failed.append(key)
     waiting = [key for key in pending if key not in attempted and known[key].get("misses", 0)]
-    unreadable, roots, lookup_failed = [], [], False
+    unreadable, roots = [], []
     try:
         owners = pull_owners(command, prs, roots, work)
     except (*audit.READ_ERRORS, discovery.Unavailable):
-        owners, unreadable, lookup_failed = {}, ["owners"], True
+        owners, unreadable = {}, ["owners"]
     if roots:
         unreadable = ["owners"]
-    unresolved = set(roots)
     current, settings, settings_failed = {}, {"clones": found["clones"]}, []
     for pr in prs:
         key = f"{pr['repository']['nameWithOwner']}#{pr['number']}"
@@ -530,14 +534,58 @@ def collect_pulls(command, before, clock=time.monotonic):
             except audit.READ_ERRORS:
                 settings_failed.append(f"settings:{key}")
                 raise
-        lines = {line.split(" ", 1)[0]: line for line in audit.pr_lines(pr, page_nodes, repo_settings)
-                 if line.split(" ", 1)[0] in alert_policy.PULL_KINDS}
-        repo = pr["repository"]["nameWithOwner"].lower()
-        kept = lookup_failed or repo in unresolved or "*/" + repo.split("/")[-1] in unresolved
-        owner = owners.get(key) or (known.get(key, {}).get("owner") if kept else None)
-        current[key] = dict(title=pr["title"], owner=owner, lines=lines)
+        old = known.get(key, {})
+        try:
+            lines = {line.split(" ", 1)[0]: line for line in audit.pr_lines(pr, page_nodes, repo_settings)
+                     if line.split(" ", 1)[0] in alert_policy.PULL_KINDS}
+            identities = pull_identities(pr, lines)
+            # A bounded connection is not proof that a previous condition has gone.
+            incomplete = []
+            if pr["reviewThreads"]["pageInfo"]["hasNextPage"]:
+                incomplete.append("THREADS")
+            if pr["reviews"].get("pageInfo", {}).get("hasPreviousPage") and not any(
+                    (review.get("author") or {}).get("login") == os.environ.get(
+                        "ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer")
+                    for review in pr["reviews"]["nodes"]):
+                incomplete.append("COPILOT")
+            for kind in incomplete:
+                if kind in old.get("lines", {}):
+                    lines[kind] = old["lines"][kind]
+                if kind in old.get("identities", {}):
+                    identities[kind] = old["identities"][kind]
+            if f"settings:{key}" in settings_failed and "APPROVED-STACKED" in old.get("lines", {}):
+                lines["APPROVED-STACKED"] = old["lines"]["APPROVED-STACKED"]
+                if "APPROVED-STACKED" in old.get("identities", {}):
+                    identities["APPROVED-STACKED"] = old["identities"]["APPROVED-STACKED"]
+            if incomplete:
+                unreadable.append(f"pr:{key}")
+        except audit.READ_ERRORS:
+            # Partial per-PR data must not discard readable siblings or saved evidence.
+            lines, identities = old.get("lines", {}), old.get("identities", {})
+            unreadable.append(f"pr:{key}")
+        owner = owners[key] if key in owners else old.get("owner")
+        current[key] = dict(title=pr["title"], owner=owner, lines=lines, identities=identities,
+                            seen_reviews=old.get("seen_reviews", []))
     return dict(prs=current, departed=departed, failed=failed,
                 unreadable=unreadable + [f"pr:{key}" for key in sorted(failed + waiting)] + sorted(set(settings_failed)))
+
+
+def pull_identities(pr, lines):
+    """JSON-stable event identities, independent of display text and pane/session IDs."""
+    identities = {kind: [pr["headRefOid"], line] for kind, line in lines.items()}
+    if "THREADS" in lines:
+        identities["THREADS"] = [pr["headRefOid"], sorted(
+            thread["id"] for thread in pr["reviewThreads"]["nodes"]
+            if not thread["isResolved"])]
+    if "APPROVED-OLDHEAD" in lines:
+        identities["APPROVED-OLDHEAD"] = [pr["headRefOid"], sorted(
+            (review.get("commit") or {}).get("oid") or "" for review in pr["latestOpinionatedReviews"]["nodes"]
+            if review["state"] == "APPROVED")]
+    bot = os.environ.get("ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer")
+    reviews = [row for row in pr["reviews"]["nodes"] if (row.get("author") or {}).get("login") == bot]
+    if "COPILOT" in lines:
+        identities["COPILOT"] = reviews[-1]["id"]
+    return identities
 
 
 def pull_line(line, key, owner):
@@ -547,28 +595,46 @@ def pull_line(line, key, owner):
 
 
 def reduce_pulls(before, raw):
-    current = raw["prs"]
+    current = {key: dict(pr) for key, pr in raw["prs"].items()}
+    events = [] if before is None else readfail_changes("PULLS", before.get("unreadable", []), raw["unreadable"])
+    for key, pr in sorted(current.items()):
+        previous = ((before or {}).get("prs", {})).get(key, {})
+        old = previous.get("lines", {})
+        identities = pr.get("identities", {})
+        seen = set(previous.get("seen_reviews", []))
+        rerouted = pr["owner"] and pr["owner"] != previous.get("owner")
+        for kind, line in sorted(pr["lines"].items()):
+            identity = identities.get(kind)
+            changed = kind not in old or (kind in previous.get("identities", {}) and
+                                         identity != previous["identities"][kind])
+            if kind == "COPILOT" and identity is not None:
+                # Seed legacy active state silently on its first identity-aware read.
+                changed = identity not in seen and not (kind in old and kind not in previous.get("identities", {}))
+                seen.add(identity)
+            if before is not None and (changed or rerouted):
+                # End the previous identity before starting its replacement, including in the feed policy.
+                if kind in old and changed and not rerouted:
+                    events.append(f"{kind} {key} cleared")
+                events.append(pull_line(line, key, pr["owner"]))
+        pr["seen_reviews"] = sorted(seen)
+        if before is not None:
+            events += [f"{kind} {key} cleared" for kind in sorted(set(old) - set(pr["lines"]))]
     if before is None:
         active = sum(len(pr["lines"]) for pr in current.values())
         return dict(prs=current, unreadable=[]), [f"PULLS BASELINE [{active} active lines]"]
-    events = readfail_changes("PULLS", before.get("unreadable", []), raw["unreadable"])
     after = dict(current)
-    for key, pr in sorted(current.items()):
-        old = before["prs"].get(key, {}).get("lines", {})
-        rerouted = pr["owner"] and pr["owner"] != before["prs"].get(key, {}).get("owner")
-        events += [pull_line(line, key, pr["owner"]) for kind, line in sorted(pr["lines"].items())
-                   if kind not in old or rerouted]
-        events += [f"{kind} {key} cleared" for kind in sorted(set(old) - set(pr["lines"]))]
     for key, old in sorted(before["prs"].items()):
         if key in current:
             continue
         state = raw["departed"].get(key)
-        if state is None:
-            after[key] = dict(old, misses=old.get("misses", 0) + 1) if key in raw.get("failed", []) else old
+        if state not in ("MERGED", "CLOSED"):
+            after[key] = dict(old)
+            if state is not None or key in raw.get("failed", []):
+                after[key]["departure_reads"] = old.get("departure_reads", old.get("misses", 0)) + 1
+                after[key]["misses"] = old.get("misses", 0) + 1 if key in raw.get("failed", []) else 0
             continue
         events += [f"{kind} {key} cleared" for kind in sorted(old["lines"])]
-        if state in ("MERGED", "CLOSED"):
-            events.append(pull_line(f"{state} {key} {old['title']}", key, old.get("owner")))
+        events.append(pull_line(f"{state} {key} {old['title']}", key, old.get("owner")))
     return dict(prs=after, unreadable=raw["unreadable"]), events
 
 
