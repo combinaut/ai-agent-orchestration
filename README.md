@@ -104,11 +104,7 @@ To open the buttons view as a popup titled "Your to-do" on `prefix+t`, set `todo
 
 ### User questions
 
-Every user question gets a pane. Create its Markdown file under `~/.claude/coordinator/questions/`, then run `ask-user-question <slug> <file>`; it stacks below the to-do pane without taking focus. Number keys or `t` record an answer, which the shared feed Monitor reports. Run `ask-user-question close <slug>` after handling it to find the pane by its exact `Q: <slug>` label, close it through `close-pane.sh`, then remove its files. A failed close keeps the files for retry.
-
-![The Q panel with the reminder picker open](docs/q-panel.png)
-
-Besides the answer keys, the panel has `d` Dismiss and `r` Remind. Dismiss writes `answers: DISMISSED <slug>` to the feed and closes the pane and the question. Remind opens the to-do view's picker (15m, 1h, 2h, 4h, tomorrow 9:00, or a typed `30m` / `3h`; Esc cancels), writes `answers: REMIND <slug> <date time>`, stores the time in `<slug>.remind` and runs `ask-user-question hide <slug>`, which closes the pane but keeps the question. The answers watcher reopens the pane on its next cycle after that time.
+Every question for you gets its own pane under the to-do pane, with keys to answer, dismiss it, or be reminded later. Details, keys and the feed lines: [`docs/questions.md`](docs/questions.md).
 
 ### Review PRs
 
@@ -131,6 +127,7 @@ If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`
 - [`docs/architecture.md`](docs/architecture.md): how the Coordinator, architects, workers and watchers fit together.
 - [`docs/installer.md`](docs/installer.md): every installer step, the file table and a troubleshooting table.
 - [`docs/settings.md`](docs/settings.md): every setting in `~/.claude/orchestration.toml` and in the repo files.
+- [`docs/questions.md`](docs/questions.md): the question pane, its keys, Dismiss and Remind.
 - [`docs/watchers.md`](docs/watchers.md): the watchers, running them with or without services, and the host-pressure response.
 - [`docs/workers.md`](docs/workers.md): workers, recycles, handoffs and owner tags.
 - [`docs/heavy-slot.md`](docs/heavy-slot.md): the shared cap on heavy jobs and how slots work.
