@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """Chrome native messaging host for PR tabs: one request, at most one gh call, one reply, then exit."""
-from contextlib import contextmanager
-from pathlib import Path
-import importlib.util
+
 import hashlib
-import tempfile
+import importlib.util
 import json
 import os
 import re
-import time
 import struct
 import subprocess
 import sys
+import tempfile
+import time
+from contextlib import contextmanager
+from pathlib import Path
 
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_REPLY_BYTES = 1024 * 1024
@@ -36,7 +37,9 @@ def read_request(stream):
         raise RequestError("no request")
     (size,) = struct.unpack("=I", header)
     if size > MAX_REQUEST_BYTES:
-        raise RequestError(f"request too large ({size} bytes, limit {MAX_REQUEST_BYTES})")
+        raise RequestError(
+            f"request too large ({size} bytes, limit {MAX_REQUEST_BYTES})"
+        )
     body = stream.read(size)
     if len(body) != size:
         raise RequestError("truncated request")
@@ -62,7 +65,13 @@ def gh_graphql(query, variables):
     for key, value in variables:
         args += ["-F" if isinstance(value, int) else "-f", f"{key}={value}"]
     try:
-        done = subprocess.run(args, capture_output=True, text=True, timeout=GH_TIMEOUT_SECONDS, check=False)
+        done = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT_SECONDS,
+            check=False,
+        )
     except subprocess.TimeoutExpired:
         raise RequestError(f"gh timed out after {GH_TIMEOUT_SECONDS}s") from None
     except FileNotFoundError:
@@ -71,10 +80,18 @@ def gh_graphql(query, variables):
         payload = json.loads(done.stdout)
     except ValueError:
         payload = None
-    failure = "; ".join(
-        str(error.get("message")) for error in (payload or {}).get("errors") or [] if isinstance(error, dict)
-    ) if isinstance(payload, dict) else ""
-    exit_text = f"gh exited {done.returncode}" if done.returncode else "GitHub returned no data"
+    failure = (
+        "; ".join(
+            str(error.get("message"))
+            for error in (payload or {}).get("errors") or []
+            if isinstance(error, dict)
+        )
+        if isinstance(payload, dict)
+        else ""
+    )
+    exit_text = (
+        f"gh exited {done.returncode}" if done.returncode else "GitHub returned no data"
+    )
     failure = (failure or done.stderr.strip() or exit_text)[:300]
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
         raise RequestError(failure)
@@ -82,7 +99,9 @@ def gh_graphql(query, variables):
 
 
 def is_count(value, limit):
-    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= limit
+    return (
+        isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= limit
+    )
 
 
 def states(request):
@@ -91,16 +110,28 @@ def states(request):
         raise RequestError(f"prs must list 1 to {MAX_STATES} pull requests")
     declarations, fields, variables, keys = [], [], [], []
     for i, pr in enumerate(prs):
-        owner, repo, number = (pr.get(k) if isinstance(pr, dict) else None for k in ("owner", "repo", "number"))
-        if not (isinstance(owner, str) and NAME.match(owner) and isinstance(repo, str) and NAME.match(repo)):
+        owner, repo, number = (
+            pr.get(k) if isinstance(pr, dict) else None
+            for k in ("owner", "repo", "number")
+        )
+        if not (
+            isinstance(owner, str)
+            and NAME.match(owner)
+            and isinstance(repo, str)
+            and NAME.match(repo)
+        ):
             raise RequestError(f"invalid pull request at index {i}")
         if not is_count(number, 10**9):
             raise RequestError(f"invalid pull request number at index {i}")
         declarations.append(f"$o{i}: String!, $r{i}: String!, $n{i}: Int!")
-        fields.append(f"p{i}: repository(owner: $o{i}, name: $r{i}) {{ pullRequest(number: $n{i}) {{ {PR_FIELDS} }} }}")
+        fields.append(
+            f"p{i}: repository(owner: $o{i}, name: $r{i}) {{ pullRequest(number: $n{i}) {{ {PR_FIELDS} }} }}"
+        )
         variables += [(f"o{i}", owner), (f"r{i}", repo), (f"n{i}", number)]
         keys.append(f"{owner}/{repo}#{number}")
-    data, failure = gh_graphql(f"query({', '.join(declarations)}) {{ {' '.join(fields)} }}", variables)
+    data, failure = gh_graphql(
+        f"query({', '.join(declarations)}) {{ {' '.join(fields)} }}", variables
+    )
     result = {}
     for i, key in enumerate(keys):
         node = (data.get(f"p{i}") or {}).get("pullRequest")
@@ -124,7 +155,11 @@ def search(request):
     found = data.get("search")
     if not isinstance(found, dict):
         raise RequestError(failure)
-    prs = [node for node in found.get("nodes") or [] if isinstance(node, dict) and node.get("url")]
+    prs = [
+        node
+        for node in found.get("nodes") or []
+        if isinstance(node, dict) and node.get("url")
+    ]
     page = found.get("pageInfo") or {}
     return {
         "ok": True,
@@ -186,7 +221,9 @@ OWNER_CACHE_SECONDS = 30
 
 
 def is_owner_map(value):
-    return isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
+    return isinstance(value, dict) and all(
+        isinstance(k, str) and isinstance(v, str) for k, v in value.items()
+    )
 
 
 @contextmanager
@@ -216,8 +253,14 @@ def discover_owners(root, values):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise subprocess.TimeoutExpired(args, 5)
-        return subprocess.run(args, capture_output=True, text=True, timeout=remaining, check=True,
-                              env=dict(os.environ, LC_ALL="C")).stdout.strip()
+        return subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=remaining,
+            check=True,
+            env=dict(os.environ, LC_ALL="C"),
+        ).stdout.strip()
 
     with discovery_settings(values):
         return discovery.branch_owners(command)
@@ -227,27 +270,47 @@ def ownership():
     """The optional env adapter owns runtime discovery; cache across one-shot hosts."""
     root = Path(__file__).resolve().parents[3]
     try:
-        spec = importlib.util.spec_from_file_location("orch_settings", root / "lib/orch_settings.py")
+        spec = importlib.util.spec_from_file_location(
+            "orch_settings", root / "lib/orch_settings.py"
+        )
         config = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = config
         spec.loader.exec_module(config)
-        values = config.load_global(os.environ.get("ORCH_CONFIG", str(Path.home() / ".claude/orchestration.toml")))
-        values.update({key: value for key, value in os.environ.items() if key.startswith("ORCH_")})
+        values = config.load_global(
+            os.environ.get(
+                "ORCH_CONFIG", str(Path.home() / ".claude/orchestration.toml")
+            )
+        )
+        values.update(
+            {key: value for key, value in os.environ.items() if key.startswith("ORCH_")}
+        )
         adapter = values.get("ORCH_ENV") or "herdr"
         if not NAME.fullmatch(adapter):
             return {}
         path = root / "env" / adapter / "open_work.py"
         if not path.is_file():
             return {}
-        identity = json.dumps([str(root), str(path.stat().st_mtime_ns),
-                               str((root / "coordinator/watchers/discovery.py").stat().st_mtime_ns), values,
-                               os.environ.get("HERDR_SOCKET_PATH"), os.environ.get("HERDR_BIN_PATH")], sort_keys=True)
+        identity = json.dumps(
+            [
+                str(root),
+                str(path.stat().st_mtime_ns),
+                str((root / "coordinator/watchers/discovery.py").stat().st_mtime_ns),
+                values,
+                os.environ.get("HERDR_SOCKET_PATH"),
+                os.environ.get("HERDR_BIN_PATH"),
+            ],
+            sort_keys=True,
+        )
         key = hashlib.sha256(identity.encode()).hexdigest()[:20]
         cache = Path(log_path()).parent / "owners.json"
         try:
             saved = json.loads(cache.read_text())
             age = time.time() - saved["time"]
-            if saved["key"] == key and 0 <= age < OWNER_CACHE_SECONDS and (saved["owners"] is None or is_owner_map(saved["owners"])):
+            if (
+                saved["key"] == key
+                and 0 <= age < OWNER_CACHE_SECONDS
+                and (saved["owners"] is None or is_owner_map(saved["owners"]))
+            ):
                 return saved["owners"]
         except (OSError, ValueError, KeyError, TypeError):
             pass
@@ -255,12 +318,16 @@ def ownership():
             owners = discover_owners(root, values)
             if not is_owner_map(owners):
                 owners = None
-        except Exception:  # Cache failed scans without replacing Chrome's last good map.
+        except (
+            Exception
+        ):  # Cache failed scans without replacing Chrome's last good map.
             owners = None
         temporary = None
         try:
             cache.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(mode="w", dir=cache.parent, delete=False) as out:
+            with tempfile.NamedTemporaryFile(
+                mode="w", dir=cache.parent, delete=False
+            ) as out:
                 temporary = Path(out.name)
                 json.dump({"key": key, "time": time.time(), "owners": owners}, out)
             os.replace(out.name, cache)
@@ -286,14 +353,21 @@ LOG_BYTES = 256 * 1024
 
 
 def log_path():
-    return os.environ.get("PR_TABS_LOG") or os.path.expanduser("~/.claude/chrome-pr-tabs/host.log")
+    return os.environ.get("PR_TABS_LOG") or os.path.expanduser(
+        "~/.claude/chrome-pr-tabs/host.log"
+    )
 
 
 def log(request, reply):
     """Appends one line per request; a line that would pass LOG_BYTES first moves the file to <log>.1."""
-    summary = {"time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "type": request.get("type") if request else None}
+    summary = {
+        "time": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "type": request.get("type") if request else None,
+    }
     if reply.get("ok") and "prs" in reply and isinstance(reply["prs"], dict):
-        summary["states"] = {key: (node or {}).get("state") for key, node in reply["prs"].items()}
+        summary["states"] = {
+            key: (node or {}).get("state") for key, node in reply["prs"].items()
+        }
     elif reply.get("ok"):
         summary["hits"] = len(reply.get("prs") or [])
     else:

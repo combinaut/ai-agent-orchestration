@@ -1,4 +1,5 @@
 """Runs a command on a pseudo-terminal, typing PTY_ANSWERS lines (then Enter) at each "]: " prompt."""
+
 import os
 import pty
 import select
@@ -10,7 +11,11 @@ TIMED_OUT = 124
 
 
 def main():
-    answers = [line + "\n" for line in os.environ.get("PTY_ANSWERS", "").split("\n") if os.environ.get("PTY_ANSWERS")]
+    answers = [
+        line + "\n"
+        for line in os.environ.get("PTY_ANSWERS", "").split("\n")
+        if os.environ.get("PTY_ANSWERS")
+    ]
     pid, fd = pty.fork()
     if pid == 0:
         os.execvp(sys.argv[1], sys.argv[1:])

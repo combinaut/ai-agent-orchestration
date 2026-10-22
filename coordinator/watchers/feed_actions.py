@@ -1,4 +1,5 @@
 """The action filter over feed lines and the text an agent may be shown; feed-actions.regex holds the pattern."""
+
 import re
 from pathlib import Path
 

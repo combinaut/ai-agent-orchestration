@@ -7,6 +7,7 @@ import tomllib
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import watchers as w
 
 

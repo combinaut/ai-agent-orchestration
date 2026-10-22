@@ -2,14 +2,15 @@
 
 import argparse
 import importlib.util
-import tempfile
 import json
 import os
 import subprocess
-from unittest.mock import patch
+import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import alert_policy
 import watchers as w
 

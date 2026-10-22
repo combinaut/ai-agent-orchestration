@@ -1,4 +1,5 @@
 """Render Radar commands with the absolute mise Node executable."""
+
 import json
 import pathlib
 import re

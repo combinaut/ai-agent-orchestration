@@ -10,8 +10,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import watchers as w
 from test_support import IsolatedTestCase
+
+import watchers as w
 
 DEFAULT_TIMEOUT = w.runtime.COMMAND_TIMEOUT
 PANE = "wT:p1"
