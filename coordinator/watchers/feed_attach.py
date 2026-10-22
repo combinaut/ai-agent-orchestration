@@ -37,7 +37,12 @@ def append_line(path, line):
     with locked(path):
         fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         try:
-            os.write(fd, line.encode())
+            data = memoryview(line.encode())
+            while data:
+                written = os.write(fd, data)
+                if not written:
+                    raise OSError('feed write made no progress')
+                data = data[written:]
         finally:
             os.close(fd)
 

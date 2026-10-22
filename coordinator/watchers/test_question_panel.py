@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from test_support import IsolatedTestCase
 import feed_actions
+import feed_attach
 import question_lock
 import question_remind
 import reminder_picker
@@ -303,6 +304,21 @@ class ReopenTest(IsolatedTestCase):
         self.assertEqual(list(self.dir.glob("done.*")), [])
 
 
+class FeedWriteTest(IsolatedTestCase):
+    def test_a_short_write_is_continued_until_the_whole_record_is_written(self):
+        real = os.write
+        with tempfile.TemporaryDirectory() as tmp:
+            feed = Path(tmp) / "feed.log"
+            with patch.object(feed_attach.os, "write", lambda fd, data: real(fd, bytes(data[:3]))):
+                feed_attach.append_line(feed, "abcdefghij\n")
+            self.assertEqual(feed.read_text(), "abcdefghij\n")
+
+    def test_a_write_that_makes_no_progress_fails(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(feed_attach.os, "write", lambda fd, data: 0):
+            with self.assertRaises(OSError):
+                feed_attach.append_line(Path(tmp) / "feed.log", "x\n")
+
+
 class CloseHelperTest(IsolatedTestCase):
     def test_a_timed_out_helper_is_killed_with_its_children(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -316,6 +332,29 @@ class CloseHelperTest(IsolatedTestCase):
             time.sleep(0.2)
             with self.assertRaises(ProcessLookupError):
                 os.kill(pid, 0)
+
+    def test_an_action_that_stalls_under_the_lock_is_killed_and_the_lock_released(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"ORCH_USER_QUESTIONS_DIR": tmp}), \
+                patch.object(question_lock, "ACTION_TIMEOUT", 1):
+            child = Path(tmp) / "child.pid"
+            helper = Path(tmp) / "helper.sh"
+            helper.write_text(f"#!/bin/sh\nsleep 60 &\necho $! > {child}\nwait\n")
+            helper.chmod(0o755)
+            argv = [str(helper)]
+            self.assertEqual(question_lock.run_locked(argv), question_lock.TIMED_OUT)
+            pid = int(child.read_text())
+            time.sleep(0.2)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+            with question_lock.answers_lock(tmp):
+                pass
+
+    def test_an_action_that_finishes_returns_its_status(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"ORCH_USER_QUESTIONS_DIR": tmp}):
+            helper = Path(tmp) / "helper.sh"
+            helper.write_text("#!/bin/sh\nexit 7\n")
+            helper.chmod(0o755)
+            self.assertEqual(question_lock.run_locked([str(helper)]), 7)
 
     def test_a_failing_helper_raises_and_a_passing_one_returns(self):
         self.assertEqual(question_lock.run_group(["true"], 5), 0)

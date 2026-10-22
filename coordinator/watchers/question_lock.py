@@ -14,6 +14,8 @@ def questions_directory():
 
 HELD = "ORCH_ANSWERS_LOCK_HELD"
 CLOSE_TIMEOUT = 30
+ACTION_TIMEOUT = 60
+TIMED_OUT = 124
 
 
 @contextmanager
@@ -29,27 +31,30 @@ def answers_lock(directory=None):
         yield
 
 
-def run_group(argv, timeout):
+def run_group(argv, timeout, env=None, check=True):
     """Runs argv in its own process group and kills the whole group when it outlives the timeout."""
-    process = subprocess.Popen(argv, start_new_session=True)
+    process = subprocess.Popen(argv, start_new_session=True, env=env)
     try:
         code = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGKILL)
         process.wait()
         raise
-    if code:
+    if code and check:
         raise subprocess.CalledProcessError(code, argv)
     return code
 
 
 def run_locked(argv):
-    """Runs argv under the answers lock unless the caller already holds it; returns its exit status."""
+    """Runs argv under the answers lock unless the caller already holds it, and bounds it there; returns its exit status."""
     held = dict(os.environ, **{HELD: "1"})
     if os.environ.get(HELD):
         return subprocess.run(argv, env=held).returncode
     with answers_lock():
-        return subprocess.run(argv, env=held).returncode
+        try:
+            return run_group(argv, ACTION_TIMEOUT, env=held, check=False)
+        except subprocess.TimeoutExpired:
+            return TIMED_OUT
 
 
 def close_question(slug, helper, pane):
