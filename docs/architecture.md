@@ -86,7 +86,7 @@ flowchart LR
 - pi is a third family, available only when its two model settings are filled in. DeepSeek (named in the provider or the model id) runs only in a repo whose `.orchestration.local.toml` sets `pi.deepseek = true`. pi has no native channel, so follow-ups go through `herdr agent prompt`.
 - A provider that refuses work for quota is replaced by the other family for new work, and the architect says so once.
 - A live session never changes model. A tier change happens through a recycle onto the new model.
-- All four model settings must be filled in `~/.claude/orchestration.toml`; the skills stop while one is empty or a placeholder.
+- The model settings of each enabled family (`providers.enabled`: the claude and codex models) must be filled in `~/.claude/orchestration.toml`; the skills stop while one is empty or a placeholder. A family left out of the list needs none.
 
 ## 🔁 Context recycle
 

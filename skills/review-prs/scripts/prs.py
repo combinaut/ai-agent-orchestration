@@ -81,11 +81,12 @@ def codex_enabled():
         sys.exit(str(error))
 
 
+CODEX_OFF = "codex is off in providers.enabled (ORCH_PROVIDERS); Codex reviews are not dispatched"
+
+
 def worker_model():
     if not codex_enabled():
-        sys.exit(
-            "codex is off in providers.enabled (ORCH_PROVIDERS); Codex reviews are not dispatched"
-        )
+        sys.exit(CODEX_OFF)
     model = setting("ORCH_CODEX_WORKER_MODEL")
     if not model or model.startswith("<"):
         sys.exit(
@@ -555,6 +556,20 @@ def cmd_watch(args, scope, _label):
 
 
 def cmd_dispatch_queue(args, scope, label):
+    if not codex_enabled():
+        print(
+            json.dumps(
+                {
+                    "scope": label,
+                    "model": "",
+                    "queue": [],
+                    "skipped": 0,
+                    "note": CODEX_OFF,
+                },
+                indent=2,
+            )
+        )
+        return
     model = worker_model()
     nodes = fetch(scope)
     if any(p["mergeable"] == "UNKNOWN" for p in nodes):

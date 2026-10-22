@@ -53,6 +53,21 @@ teardown() {
   [ "$(printf '%s\n' "$output" | grep -c 'file-coord')" -eq 0 ]
 }
 
+@test "orch-settings prints the enabled providers and stops on a list without claude" {
+  : >"$ORCH_CONFIG"
+  run env -u ORCH_PROVIDERS -u ORCH_PI_WORKER_MODEL -u ORCH_PI_SMART_MODEL "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  has_line 'ORCH_PROVIDERS=claude,codex'
+  printf '[providers]\nenabled = ["claude"]\n[models]\ncodex_worker = ""\ncodex_smart = ""\n' >"$ORCH_CONFIG"
+  run env -u ORCH_PROVIDERS "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  has_line 'ORCH_PROVIDERS=claude'
+  printf '[providers]\nenabled = ["codex"]\n' >"$ORCH_CONFIG"
+  run env -u ORCH_PROVIDERS "$ROOT/orch-settings"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'providers.enabled: must include "claude"'* ]]
+}
+
 @test "orch-settings prints one ORCH_NAME=value line per setting and no comments" {
   printf '# a comment\n[pr]\nauthor = "me"\n' >"$ORCH_CONFIG"
   run "$ROOT/orch-settings"

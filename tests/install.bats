@@ -1273,6 +1273,8 @@ PY
   install_ok
   contains "$output" "cannot drop pr.repos in place; edit it by hand"
   [ "$(cat "$cfg")" = 'pr = { repos = ["acme/web"], author = "me" }' ]
+  run grep 'fill in.*WARNING' <<<"$output"
+  [ "$status" -eq 1 ]
 }
 
 @test "PR watchers are not registered until their settings are filled" {

@@ -480,7 +480,7 @@ settings_cli() { "$INSTALL_PYTHON" -I "$ORCH_REPO/lib/orch_settings.py" "$@"; }
 # fill_keys: the keys a working setup needs filled; the models of a provider providers.enabled leaves out are not among them.
 fill_keys() {
   local models
-  models=$(settings_cli fill-models "$CONFIG" 2>&1) || die "${models#ERROR: }"
+  models=$(settings_cli fill-models "$CONFIG") || die "cannot read the providers in $CONFIG (see above)"
   # shellcheck disable=SC2086 # One name per word.
   printf '%s\n' ORCH_PR_AUTHOR $models ORCH_HERDR_BIN ORCH_HERDR_SOCKET
 }
