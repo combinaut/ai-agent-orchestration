@@ -557,6 +557,65 @@ class PullsTest(IsolatedTestCase):
         _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
         self.assertIn("THREADS owner/product#7 cleared", events)
 
+    def test_truncated_checks_reconcile_visible_failures_and_current_head(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        contexts = row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]
+        contexts["nodes"][0]["conclusion"] = "FAILURE"
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        row["headRefOid"] = "head-2"
+        contexts["nodes"] = [{"name": "lint", "conclusion": "FAILURE", "startedAt": "2"}]
+        contexts["pageInfo"]["hasNextPage"] = True
+        state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertTrue(any(event.startswith("RED owner/product#7 owner=") for event in events))
+        self.assertEqual(state["prs"]["owner/product#7"]["identities"]["RED"][0], "head-2")
+        self.assertIn("lint", state["prs"]["owner/product#7"]["lines"]["RED"])
+        state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, [])
+        contexts["nodes"] = [{"name": "lint", "conclusion": "SUCCESS", "startedAt": "3"}]
+        state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertIn("unit", state["prs"]["owner/product#7"]["lines"]["RED"])
+        self.assertNotIn("lint", state["prs"]["owner/product#7"]["lines"]["RED"])
+        contexts["nodes"] = [{"name": "unit", "conclusion": "SUCCESS", "startedAt": "4"}]
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertIn("RED owner/product#7 cleared", events)
+
+    def test_truncated_checks_do_not_retain_invalidated_stacked_approval(self):
+        for change in ("decision", "base", "head"):
+            with self.subTest(change=change), patch.object(w.audit, "repo_settings", return_value={}):
+                row = pr(7)
+                row["baseRefName"] = "stack"
+                state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+                row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"]["hasNextPage"] = True
+                if change == "decision":
+                    row["reviewDecision"] = "CHANGES_REQUESTED"
+                elif change == "base":
+                    row["baseRefName"] = "main"
+                else:
+                    row["headRefOid"] = "head-2"
+                state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+                self.assertNotIn("APPROVED-STACKED", state["prs"]["owner/product#7"]["lines"])
+                self.assertIn("APPROVED-STACKED owner/product#7 cleared", events)
+
+    def test_partial_stacked_checks_do_not_reuse_evidence_from_another_head_or_base(self):
+        for change in ("head", "base"):
+            with self.subTest(change=change), patch.object(w.audit, "repo_settings", return_value={"ORCH_MERGE_GATE_CHECKS": "unit"}):
+                row = pr(7)
+                row["baseRefName"] = "stack-a"
+                state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+                contexts = row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]
+                contexts["nodes"] = []
+                contexts["pageInfo"]["hasNextPage"] = True
+                if change == "head":
+                    row["headRefOid"] = "head-2"
+                    row["latestOpinionatedReviews"]["nodes"][0]["commit"]["oid"] = "head-2"
+                else:
+                    row["baseRefName"] = "stack-b"
+                state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+                line = state["prs"]["owner/product#7"]["lines"]["APPROVED-STACKED"]
+                self.assertIn("base " + row["baseRefName"], line)
+                self.assertIn("full CI unknown", line)
+                self.assertTrue(any(event.startswith("APPROVED-STACKED owner/product#7 owner=") for event in events))
+
     def test_one_search_call_per_poll(self):
         w.collect_pulls(self.command([pr(n) for n in range(20)]), None)
         self.assertEqual(sum(argv[:3] == ("gh", "api", "graphql") for argv in self.calls), 1)

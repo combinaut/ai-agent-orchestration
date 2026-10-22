@@ -492,6 +492,21 @@ def pull_owners(command, prs, failed=None, work=None):
     return owners
 
 
+def pull_check_evidence(pr):
+    """Visible latest check outcomes; unseen names remain unknown on truncated connections."""
+    commits = pr["commits"]["nodes"]
+    rollup = commits[0]["commit"]["statusCheckRollup"] if commits else None
+    contexts = rollup["contexts"] if rollup else {"nodes": [], "pageInfo": {"hasNextPage": False}}
+    checks = {}
+    for check in contexts["nodes"]:
+        name = check.get("name") or check["context"]
+        if name not in checks or (check.get("startedAt") or "") >= (checks[name].get("startedAt") or ""):
+            checks[name] = check
+    failing = {name for name, check in checks.items()
+               if check.get("conclusion") in ("FAILURE", "TIMED_OUT") or check.get("state") in ("FAILURE", "ERROR")}
+    return set(checks), failing, contexts["pageInfo"]["hasNextPage"]
+
+
 def collect_pulls(command, before, clock=time.monotonic):
     """Departed-PR reads run right after the search with their own reserved window, before the owner lookup."""
     known = (before or {}).get("prs", {})
@@ -535,24 +550,40 @@ def collect_pulls(command, before, clock=time.monotonic):
                 settings_failed.append(f"settings:{key}")
                 raise
         old = known.get(key, {})
+        same_scope = old.get("head") == pr.get("headRefOid") and old.get("base") == pr.get("baseRefName")
         try:
             lines = {line.split(" ", 1)[0]: line for line in audit.pr_lines(pr, page_nodes, repo_settings)
                      if line.split(" ", 1)[0] in alert_policy.PULL_KINDS}
-            identities = pull_identities(pr, lines)
+            visible, failing, checks_truncated = pull_check_evidence(pr)
+            check_failures = sorted(failing)
             # A bounded connection is not proof that a previous condition has gone.
             incomplete = []
+            if checks_truncated:
+                if old.get("check_failures") is not None:
+                    failing |= set(old["check_failures"]) - visible
+                    check_failures = sorted(failing)
+                    if failing:
+                        lines["RED"] = f"RED {key} {pr['title']} [{','.join(check_failures)}]"
+                    else:
+                        lines.pop("RED", None)
+                elif "RED" in old.get("lines", {}) and not failing:
+                    # Legacy snapshots lack per-check evidence; retain that unknown condition until a full read.
+                    incomplete.append("RED")
+                    check_failures = None
+                if "APPROVED-STACKED" in lines:
+                    lines["APPROVED-STACKED"] = lines["APPROVED-STACKED"].replace("full CI not run", "full CI unknown")
+                    incomplete.append("APPROVED-STACKED")
+            identities = pull_identities(pr, lines)
             if pr["reviewThreads"]["pageInfo"]["hasNextPage"]:
                 incomplete.append("THREADS")
-            commits = pr["commits"]["nodes"]
-            rollup = commits[0]["commit"]["statusCheckRollup"] if commits else None
-            if rollup and rollup["contexts"]["pageInfo"]["hasNextPage"]:
-                incomplete += ["RED", "APPROVED-STACKED"]
             if pr["reviews"].get("pageInfo", {}).get("hasPreviousPage") and not any(
                     (review.get("author") or {}).get("login") == os.environ.get(
                         "ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer")
                     for review in pr["reviews"]["nodes"]):
                 incomplete.append("COPILOT")
             for kind in incomplete:
+                if kind == "APPROVED-STACKED" and not same_scope:
+                    continue
                 if kind == "THREADS" and kind in old.get("identities", {}):
                     # A partial page can prove a visible resolution/new thread, never an unseen resolution.
                     threads = pr["reviewThreads"]["nodes"]
@@ -568,20 +599,23 @@ def collect_pulls(command, before, clock=time.monotonic):
                 if kind in old.get("lines", {}):
                     lines[kind] = old["lines"][kind]
                 if kind in old.get("identities", {}):
-                    identities[kind] = old["identities"][kind]
-            if f"settings:{key}" in settings_failed and "APPROVED-STACKED" in old.get("lines", {}):
+                    identities[kind] = ([pr["headRefOid"], old["identities"][kind][1]] if kind == "APPROVED-STACKED"
+                                        else old["identities"][kind])
+            if same_scope and f"settings:{key}" in settings_failed and "APPROVED-STACKED" in old.get("lines", {}):
                 lines["APPROVED-STACKED"] = old["lines"]["APPROVED-STACKED"]
                 if "APPROVED-STACKED" in old.get("identities", {}):
-                    identities["APPROVED-STACKED"] = old["identities"]["APPROVED-STACKED"]
-            if incomplete:
+                    identities["APPROVED-STACKED"] = [pr["headRefOid"], old["identities"]["APPROVED-STACKED"][1]]
+            if incomplete or checks_truncated:
                 unreadable.append(f"pr:{key}")
         except audit.READ_ERRORS:
             # Partial per-PR data must not discard readable siblings or saved evidence.
             lines, identities = old.get("lines", {}), old.get("identities", {})
+            check_failures = old.get("check_failures")
             unreadable.append(f"pr:{key}")
         owner = owners[key] if key in owners else old.get("owner")
         current[key] = dict(title=pr["title"], owner=owner, lines=lines, identities=identities,
-                            seen_reviews=old.get("seen_reviews", []))
+                            seen_reviews=old.get("seen_reviews", []), check_failures=check_failures,
+                            head=pr.get("headRefOid", old.get("head")), base=pr.get("baseRefName", old.get("base")))
     return dict(prs=current, departed=departed, failed=failed,
                 unreadable=unreadable + [f"pr:{key}" for key in sorted(failed + waiting)] + sorted(set(settings_failed)))
 
