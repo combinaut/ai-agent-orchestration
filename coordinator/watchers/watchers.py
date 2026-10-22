@@ -328,6 +328,62 @@ def worker_alerts(previous):
     return alerts
 
 
+def waiting_line(key, entry, now, suffix=""):
+    row = entry["row"]
+    name = " ".join((row.get("name") or row.get("terminal_title_stripped") or "worker").split())[:24]
+    return (f"WORKER WAITING {name} pane={row['pane_id']} owner={entry['owner']} "
+            f"{int((now - entry['since']) // 60)}m session={key}" + (f" {suffix}" if suffix else ""))
+
+
+def reduce_waiting(previous, raw):
+    """Only real session IDs own timers. Failed ownership/status reads freeze existing state."""
+    old = previous.get("waiting", {})
+    now = raw.get("observed_at", time.time())
+    rows = {(row.get("agent_session") or {}).get("value"): row for row in agents(raw)}
+    rows.pop(None, None)
+    gaps = {}
+    old_panes = {entry["row"]["pane_id"]: key for key, entry in old.items()}
+    for row in agents(raw):
+        key = old_panes.get(row["pane_id"])
+        if not (row.get("agent_session") or {}).get("value") and key and key not in rows:
+            rows[key] = row
+            gaps[key] = True
+    spaces = raw.get("workspaces")
+    owners = None if spaces is None else {row["workspace_id"]: (row.get("tokens") or {}).get("owner")
+                                         for row in spaces}
+    current, events = {}, []
+    for key, row in rows.items():
+        entry = old.get(key)
+        role = (row.get("tokens") or {}).get("role")
+        if role in ("architect", "coordinator"):
+            continue
+        owner = owners.get(row.get("workspace_id")) if owners is not None else None
+        if owners is not None and not owner:
+            continue
+        if row.get("agent_status") not in WORKER_STATUSES or owners is None or key in gaps:
+            if entry:
+                current[key] = entry
+            continue
+        if row.get("agent_status") not in ("done", "idle"):
+            continue
+        if entry and entry["owner"] != owner:
+            if entry["stage"]:
+                events.append(waiting_line(key, entry, now, "cleared"))
+            entry = None
+        entry = dict(entry or dict(since=now, stage=0, owner=owner), row=dict(row))
+        stage = entry["stage"]
+        delay = float(os.environ.get("ORCH_WAIT_MIN", 600)) if stage == 0 else float(os.environ.get("ORCH_WAIT_REPEAT_MIN", 1800))
+        since = entry["since"] if stage == 0 else entry["sent"]
+        if stage < 3 and (now - since > delay if stage == 0 else now - since >= delay):
+            events.append(waiting_line(key, entry, now, ("", "REPEAT", "ESCALATE")[stage]))
+            entry.update(stage=stage + 1, sent=now)
+        current[key] = entry
+    for key, entry in old.items():
+        if key not in current and entry["stage"]:
+            events.append(waiting_line(key, entry, now, "cleared"))
+    return current, events
+
+
 def reduce_workers(before, raw):
     previous = before or {}
     old_bad = worker_alerts(previous)
@@ -367,8 +423,10 @@ def reduce_workers(before, raw):
             events.append(worker_line(dict(old, pane=present[key]["pane_id"]), recovered=True))
         if new:
             events.append(worker_line(new))
+    waiting, waiting_events = reduce_waiting(previous, raw)
+    events += waiting_events
     return dict(bad={key: value for key, value in bad.items() if key in present},
-                present=present, unreadable=unreadable, seen=seen), events
+                present=present, unreadable=unreadable, seen=seen, waiting=waiting), events
 
 
 def pull_owners(command, prs, failed=None, work=None):
@@ -900,6 +958,14 @@ def collect(mode, before, scope="", base=None):
         agents(raw)
         if mode == "workers":
             raw["observed_at"] = time.time()
+            try:
+                spaces = json.loads(command(herdr_bin(), "workspace", "list"))["result"]["workspaces"]
+                if not isinstance(spaces, list) or not all(isinstance(row, dict) and "workspace_id" in row
+                                                          and (row.get("tokens") is None or isinstance(row["tokens"], dict)) for row in spaces):
+                    raise ValueError("invalid workspace list")
+                raw["workspaces"] = spaces
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError):
+                raw["workspaces"] = None
             if base is not None:
                 raw["closed"] = closed_panes(base, {row["pane_id"] for row in agents(raw)}, before)
             return raw

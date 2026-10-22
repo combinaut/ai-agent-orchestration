@@ -30,6 +30,7 @@ OUTBOX_KEEP_SECONDS = 3600
 MONITOR_ACK_SECONDS = 20
 FEED_NAME = "coordinator-feed.log"
 FEED_BYTES = 1024 * 1024
+WAIT_OWNER = re.compile(r"^workers: WORKER WAITING .+? pane=\S+ owner=([A-Za-z0-9_-]+) ")
 OWNER = re.compile(r"^pulls: \S+ \S+#\d+ owner=([A-Za-z0-9_-]+) ")
 
 spec = importlib.util.spec_from_file_location("reader", w.ROOT / "read-alerts.py")
@@ -174,14 +175,21 @@ def native_messages(args, stamped, fallback, patterns):
     """One native message per architect with a binding file, and one for the Coordinator, as (binding path, text)."""
     by_owner = {}
     for line in stamped:
-        owner = OWNER.match(line.split(" ", 1)[1])
+        body = line.split(" ", 1)[1]
+        waiting = WAIT_OWNER.match(body)
+        if waiting and (" ESCALATE (start)" in body or line.endswith("(clear)")):
+            continue
+        owner = OWNER.match(body) or waiting
         if owner and not line.endswith("(clear)") and args.bindings_dir \
                 and (args.bindings_dir / f"architect-{owner.group(1)}.json").exists():
             by_owner.setdefault(owner.group(1), []).append(native(line.split(" ", 1)[1]) + ". No reply needed.")
     out = [(str(args.bindings_dir / f"architect-{owner}.json"), "\n".join(texts)) for owner, texts in sorted(by_owner.items())]
     actions = [line for line in stamped if is_action(line, patterns)] if args.binding and fallback else []
-    if actions:
-        out.append((str(args.binding), "\n".join(native(line) + ". No reply needed." for line in actions)))
+    escalations = [line for line in stamped if WAIT_OWNER.match(line.split(" ", 1)[1])
+                   and line.endswith(" ESCALATE (start)")] if args.binding else []
+    for batch in (actions, escalations):
+        if batch:
+            out.append((str(args.binding), "\n".join(native(line) + ". No reply needed." for line in batch)))
     return out
 
 
@@ -275,7 +283,10 @@ def finish(args, cursor, now, patterns):
     in_feed = pending["lines"][len(dropped):]
     for target, text in native_messages(args, in_feed, coordinator != "none", patterns):
         entry = dict(binding=target, text=text, at=now)
-        if target == str(args.binding) and coordinator == "watch":
+        # WAITING escalation is native even with a Monitor: that feed line is deliberately not an action.
+        escalation = all("workers: WORKER WAITING " in line and " ESCALATE (start)" in line
+                         for line in text.splitlines())
+        if target == str(args.binding) and coordinator == "watch" and not escalation:
             entry["watch"] = dict(inode=pending["inode"], end=pending["offset"] + len(data))
         cursor.setdefault(OUTBOX_KEY, []).append(entry)
     for target, text in native_messages(args, dropped, True, patterns):
@@ -330,6 +341,9 @@ def snapshot_lines(mode, before):
         return list(before.values())
     if mode == "workers":
         lines = [f"WORKER {alert['pane']} {alert['state']}" for alert in w.worker_alerts(before).values()]
+        lines += [w.waiting_line(key, entry, entry.get("sent", entry["since"]), suffix)
+                  for key, entry in before.get("waiting", {}).items()
+                  for suffix in ("", "REPEAT", "ESCALATE")[:entry["stage"]]]
         return lines + (["WORKER READFAIL " + " ".join(before["unreadable"])] if before.get("unreadable") else [])
     if mode in w.PRESSURE_SETTINGS:
         labels = w.PRESSURE_SETTINGS[mode]["labels"]

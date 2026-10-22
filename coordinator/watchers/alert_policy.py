@@ -163,6 +163,13 @@ def context_facts(line):
 
 
 def worker_facts(line):
+    waiting = re.fullmatch(r"WORKER WAITING .+ pane=\S+ owner=\S+ \d+m session=(\S+?)(?: (REPEAT|ESCALATE|cleared))?", line)
+    if waiting:
+        session, stage = waiting.groups()
+        key = f"workers:waiting:{session}:"
+        if stage == "cleared":
+            return [clear(key)]
+        return [fact(key + (stage or "start"), line, clearable=True)]
     match = re.match(r"WORKER (\S+) (RECOVERED )?(.+)$", line)
     if not match:
         return None

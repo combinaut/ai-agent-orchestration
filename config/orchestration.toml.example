@@ -48,6 +48,11 @@ codex_worker = "<codex-worker-model>"
 # Codex model for hard work; replace the placeholder
 codex_smart = "<codex-smart-model>"
 
+# Thresholds are seconds despite the historical MIN suffix
+[workers]
+wait_min = 600
+wait_repeat_min = 1800
+
 [recycle]
 # Tokens used at which RECYCLE fires
 tokens = 300000

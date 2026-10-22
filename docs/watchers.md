@@ -10,7 +10,7 @@ The watchers write alerts to files, and one notifier turns them into a feed at `
 | host | Memory, swap, processes, open files, load |
 | hog | Big processes and long or big `git` processes |
 | balance | Worktree CPU and memory against the heavy-slot cap |
-| workers | Blocked, errored or vanished agents |
+| workers | Blocked, errored or vanished agents; finished workers waiting on their architect |
 | user-todo | What waits on you (see [The to-do pane](../README.md#the-to-do-pane)) |
 
 **With services**: set `[watchers] service = true` (with `[herdr] bin` and `socket`) and run the installer again. It registers the watchers (audit and pulls only when `pr.author` is set in the config file, not just exported) with launchd (macOS) or `systemd --user` (Linux) to run now and at login. Back to `false` removes them. Off by default.
@@ -56,3 +56,23 @@ Queued terminal bytes are preserved; undecodable claims retry independently.
 Answer previews retain the watcher deadline without consuming submissions.
 Directory-read failures retain replay IDs. Failed pane setup closes the new pane
 through the intentional-close helper, leaving the question file available to retry.
+
+## Workers waiting
+
+A session in an owner-tagged workspace that stays `done` or `idle` for more than
+`workers.wait_min` seconds (default 600) emits
+`WORKER WAITING <name> pane=<pane> owner=<workspace> <minutes>m session=<id>`.
+Architect and Coordinator role panes are excluded. The owning architect gets a
+native message through its binding and the existing bounded retry outbox. There
+is one repeat after `workers.wait_repeat_min` seconds (default 1800), then one
+native Coordinator escalation after another such interval. No further repeats.
+The feed records every stage; the user's to-do list is unchanged.
+
+An observed `working` status resets the timer. Closing the session, removing its
+owner tag, or changing its owner clears its old alert immediately. An unreadable
+workspace or agent snapshot preserves state; a successful empty ownership read
+clears it. Timers are keyed by session ID and removed when that session vanishes,
+so a successor using the same pane and name starts fresh. Herdr's snapshot has no
+prompt timestamp: work that begins and finishes entirely between polls cannot
+be distinguished from uninterrupted waiting. The timer starts at the first
+observed done/idle snapshot and survives watcher restarts.
