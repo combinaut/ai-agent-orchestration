@@ -48,6 +48,8 @@ Settings for one repo (big-repo guard, legacy scan and its rules, focus) go in t
 
 To update, run the install command again. At session start a hook prints `ai-agent-orchestration setup out of date, run install.sh` when you are behind. Nothing updates on its own. The clone is never updated over local work: with uncommitted edits or commits that are not on origin the installer prints `REFUSED: … has local changes` and stops. It never stashes or resets. Put your changes in a PR, then run it again.
 
+To sync and link newly shared files without changing `settings.json`, starting services, or running an env adapter, run `install.sh --links-only`.
+
 ## 🚀 3. Use it
 
 ### 🧭 Start the Coordinator

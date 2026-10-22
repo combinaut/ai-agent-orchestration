@@ -89,18 +89,20 @@ release_lock() {
 
 usage() {
   cat <<'USAGE'
-Usage: install.sh [--env <name>]
+Usage: install.sh [--env <name>] [--links-only]
 
 Clones or updates the ai-agent-orchestration repo (ORCH_REPO_PATH, default ~/.claude/ai-agent-orchestration),
 then symlinks its shared files into ~/.claude. Install, update and repair are the same run.
 
   --env <name>   Run env/<name>/install.sh (e.g. herdr).
                  Without --env: ORCH_ENV from the config ("none" skips the env step), else herdr.
+  --links-only   Sync and link shared files without changing settings or services.
 USAGE
 }
 
 ENV_NAME=""
 ENV_GIVEN=0
+LINKS_ONLY=0
 STAGE=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -110,6 +112,7 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     --env=*) ENV_NAME=${1#--env=} ENV_GIVEN=1 && shift ;;
+    --links-only) LINKS_ONLY=1 && shift ;;
     --stage=link) STAGE="link" && shift ;;
     -h | --help) usage && exit 0 ;;
     *) die "unknown option: $1 (see --help)" ;;
@@ -276,8 +279,12 @@ if [ "$STAGE" != link ]; then
   sync_clone "$ORCH_REPO"
   export ORCH_REPO_PATH="$ORCH_REPO"
   if [ "$ENV_GIVEN" = 1 ]; then
+    if [ "$LINKS_ONLY" = 1 ]; then
+      exec /bin/bash "$ORCH_REPO/install.sh" --stage=link --links-only --env "$ENV_NAME"
+    fi
     exec /bin/bash "$ORCH_REPO/install.sh" --stage=link --env "$ENV_NAME"
   fi
+  [ "$LINKS_ONLY" = 1 ] && exec /bin/bash "$ORCH_REPO/install.sh" --stage=link --links-only
   exec /bin/bash "$ORCH_REPO/install.sh" --stage=link
 fi
 
@@ -1143,6 +1150,12 @@ remove_stale_links
 move_skill_backups
 link_shared_files
 write_manifest
+# shellcheck disable=SC2031 # link counters and parsed flags are intentionally shared in this script's execution scope.
+if [ "$LINKS_ONLY" = 1 ]; then
+  echo
+  echo "Done: $n_linked linked, $n_ok already linked, $n_backup backed up, $n_skipped skipped; settings and services were not touched."
+  exit 0
+fi
 personal_config
 merge_settings
 allow_bind_self

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# shellcheck disable=SC2154 # bats provides status and output after run.
+# shellcheck disable=SC2153,SC2154 # bats helpers provide fixture variables, status and output after run.
 
 load test_helper
 
@@ -9,6 +9,28 @@ load test_helper
   [ -L "$HOME/.claude/coordinator/watchers/watchers.py" ]
   [ -L "$HOME/.claude/coordinator/legacy-scan.sh" ]
   [ -d "$HOME/.claude/coordinator/watchers/bindings" ]
+}
+
+@test "--links-only syncs and links new files without touching settings or services" {
+  fresh_install
+  settings="$HOME/.claude/settings.json"
+  cp "$settings" "$TMP/settings-before.json"
+  : >"$LAUNCHCTL_CALLS"
+  : >"$SYSTEMCTL_CALLS"
+  mkdir -p "$SRC/rules"
+  printf 'new shared rule\n' >"$SRC/rules/links-only.md"
+  git -C "$SRC" add rules/links-only.md
+  git -C "$SRC" -c user.email=test@example.invalid -c user.name=test commit -qm links-only
+  git -C "$ORIGIN" fetch -q "$SRC" main:main
+
+  run /bin/bash -c 'cd "$1"; exec /bin/bash -c "$ONE_LINER" _ --links-only' _ "$TMP"
+  [ "$status" -eq 0 ]
+  [ -L "$HOME/.claude/rules/links-only.md" ]
+  [ "$HOME/.claude/rules/links-only.md" -ef "$CLONE/rules/links-only.md" ]
+  cmp "$TMP/settings-before.json" "$settings"
+  [ ! -s "$LAUNCHCTL_CALLS" ]
+  [ ! -s "$SYSTEMCTL_CALLS" ]
+  contains "$output" 'settings and services were not touched'
 }
 
 @test "CLAUDE.md marked orchestration block is replaced without changing surrounding text" {
