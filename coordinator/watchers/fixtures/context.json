@@ -12,11 +12,31 @@
           "terminal_title_stripped": "Architect::Example",
           "tokens": {"role": "architect"},
           "workspace_id": "workspace-demo"
+        },
+        {
+          "agent": "claude",
+          "agent_session": {"value": "session-worker-001"},
+          "agent_status": "working",
+          "cwd": "/home/dev/Projects/example-app/worktrees/fixture-task",
+          "name": "fixture-worker",
+          "pane_id": "workspace-task:p1",
+          "terminal_title_stripped": "Fixture task",
+          "tokens": {},
+          "workspace_id": "workspace-task"
         }
       ]
     }
   },
   "usage": {
-    "session-architect-001": {"tokens": 1200}
+    "session-architect-001": {"tokens": 1200},
+    "session-worker-001": {"tokens": 1200}
+  },
+  "workspaces": {
+    "result": {
+      "workspaces": [
+        {"workspace_id": "workspace-demo", "label": "example-app", "tokens": {}},
+        {"workspace_id": "workspace-task", "label": "fixture-task", "tokens": {"owner": "workspace-demo"}}
+      ]
+    }
   }
 }

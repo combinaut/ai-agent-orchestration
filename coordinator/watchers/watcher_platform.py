@@ -4,6 +4,7 @@ import re
 import subprocess
 import stat
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -168,10 +169,27 @@ def process_rows(command):
     return PROCESSES.collect(command)
 
 
-def balance_read(read):
+READ_REASON_CHARS = 200
+
+
+def read_failure_reason(error):
+    if isinstance(error, subprocess.CalledProcessError):
+        lines = str(error.stderr or "").strip().splitlines()
+        reason = f"exit {error.returncode}" + (f": {lines[0]}" if lines else "")
+    else:
+        reason = f"{type(error).__name__}: {error}"
+    return reason[:READ_REASON_CHARS]
+
+
+def balance_read(read, label=None):
+    """A labelled read that fails writes one stderr line saying which command, how long, and why."""
+    started = time.monotonic()
     try:
         return read()
-    except (OSError, subprocess.SubprocessError, MissingMetric, ValueError, IndexError, ZeroDivisionError):
+    except (OSError, subprocess.SubprocessError, MissingMetric, ValueError, IndexError, ZeroDivisionError) as error:
+        if label:
+            print(f"balance read failed: {label} after {time.monotonic() - started:.1f}s: "
+                  f"{read_failure_reason(error)}", file=sys.stderr)
         return None
 
 
@@ -275,8 +293,8 @@ class MacBalance:
                     load5=balance_read(lambda: mac_load(command, 1)))
 
     def processes(self, command):
-        text = balance_read(lambda: command("ps", "-U", str(os.getuid()), "-o", "pid=,%cpu=,rss=,stat=,uid="))
-        directories = balance_read(lambda: command("lsof", "-n", "-d", "cwd", "-Fpn"))
+        text = balance_read(lambda: command("ps", "-U", str(os.getuid()), "-o", "pid=,%cpu=,rss=,stat=,uid="), "ps")
+        directories = balance_read(lambda: command("lsof", "-n", "-d", "cwd", "-Fpn"), "lsof")
         if text is None or directories is None:
             return [], ["processes"]
         cwd = {}

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import copy
 import importlib.util
+import io
 import json
 import os
+import subprocess
 import tempfile
 import time
 import unittest
@@ -48,6 +50,21 @@ def healthy(mode):
                 t["isResolved"] = True
             pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["state"] = "SUCCESS"
     return raw
+
+
+def worker_context(tokens, owner="wArch"):
+    """The recorded context read with its worker session at `tokens` and the worker's workspace tagged `owner`
+    (None: no tag)."""
+    raw = fixture("context")
+    raw["usage"]["session-worker-001"] = {"tokens": tokens}
+    for row in raw["workspaces"]["result"]["workspaces"]:
+        if row["workspace_id"] == "workspace-task":
+            row["tokens"] = {"owner": owner} if owner else {}
+    return raw
+
+
+def worker_line(amount, owner="wArch", pane="workspace-task:p1"):
+    return f"RECYCLE-WORKER {pane} owner={owner} fixture-worker {amount}"
 
 
 class WatcherTests(IsolatedTestCase):
@@ -306,6 +323,151 @@ class WatcherTests(IsolatedTestCase):
         raw, rows = self.context_pair()
         raw["usage"][w.identity(rows[1])] = {"remaining": 44.3}
         self.assertTrue(any(line.endswith("56%") for line in w.conditions("context", raw).values()))
+
+    def events(self, raw):
+        line = self.cycle("context", raw)
+        return json.loads(line)["events"] if line else []
+
+    def test_context_worker_over_the_threshold_alerts_its_owner_once_per_crossing(self):
+        raw = worker_context(299999)
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            self.assertEqual(self.events(raw), [])
+            raw["usage"]["session-worker-001"]["tokens"] = 300000
+            self.assertEqual(self.events(raw), [worker_line("300k")])
+            self.assertEqual(self.events(raw), [])
+            raw["usage"]["session-worker-001"]["tokens"] = 440000
+            self.assertEqual(self.events(raw), [])
+
+    def test_context_worker_successor_alerts_again_and_the_old_pane_clears(self):
+        raw = worker_context(310000)
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            self.assertEqual(self.events(raw), [worker_line("310k")])
+            worker = w.agents(raw["herdr"])[1]
+            worker.update(pane_id="workspace-task:p2", agent_session={"value": "session-worker-002"})
+            raw["usage"]["session-worker-002"] = {"tokens": 300000}
+            self.assertEqual(self.events(raw), [worker_line("cleared"),
+                                                worker_line("300k", pane="workspace-task:p2")])
+            raw["herdr"]["result"]["agents"].remove(worker)
+            self.assertEqual(self.events(raw), [worker_line("cleared", pane="workspace-task:p2")])
+
+    def test_context_worker_without_an_owner_tag_stays_quiet(self):
+        untagged = worker_context(310000, owner=None)
+        unlisted = worker_context(310000)
+        unlisted["workspaces"]["result"]["workspaces"].pop()
+        unread = dict(worker_context(310000), workspaces=None)
+        absent = {key: value for key, value in worker_context(310000).items() if key != "workspaces"}
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            for name, raw in (("untagged", untagged), ("unlisted", unlisted), ("unread", unread), ("absent", absent)):
+                with self.subTest(name):
+                    after, events = w.reduce("context", None, raw)
+                    self.assertEqual((events, [key for key in after if key != w.WORKSPACE_FAILS]), ([], []))
+
+    def test_context_worker_owner_change_moves_its_alert(self):
+        raw = worker_context(310000)
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            before, _ = w.reduce("context", None, raw)
+            raw["workspaces"]["result"]["workspaces"][1]["tokens"]["owner"] = "wOther"
+            _, events = w.reduce("context", before, raw)
+        self.assertEqual(events, [worker_line("cleared"), worker_line("310k", owner="wOther")])
+
+    def test_context_worker_untagged_by_a_successful_read_clears_and_alerts_again_when_retagged(self):
+        raw = worker_context(310000)
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            before, _ = w.reduce("context", None, raw)
+            untagged = worker_context(310000, owner=None)
+            middle, events = w.reduce("context", before, untagged)
+            self.assertEqual(events, [worker_line("cleared")])
+            self.assertEqual(w.reduce("context", middle, raw)[1], [worker_line("310k")])
+
+    def test_context_worker_alert_survives_unreadable_owner_tags(self):
+        raw = worker_context(310000)
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            before, _ = w.reduce("context", None, raw)
+            after, events = w.reduce("context", before, dict(raw, workspaces=None))
+            self.assertEqual((after, events), (dict(before, **{w.WORKSPACE_FAILS: "1"}), []))
+            self.assertEqual(w.reduce("context", after, raw), (before, []))
+
+    def test_context_worker_without_a_sensor_or_off_claude_stays_quiet(self):
+        sensorless = worker_context(310000)
+        del sensorless["usage"]["session-worker-001"]
+        codex = worker_context(310000)
+        w.agents(codex["herdr"])[1]["agent"] = "codex"
+        unnamed = worker_context(310000)
+        w.agents(unnamed["herdr"])[1]["agent_session"] = None
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            for name, raw in (("sensorless", sensorless), ("codex", codex), ("no session", unnamed)):
+                with self.subTest(name):
+                    self.assertEqual(w.reduce("context", None, raw), ({}, []))
+
+    def test_context_worker_line_names_the_agent_never_the_terminal_title(self):
+        raw = worker_context(310000)
+        del w.agents(raw["herdr"])[1]["name"]
+        raw["usage"]["session-worker-001"] = {"remaining": 40}
+        with patch.dict(os.environ, {"ORCH_RECYCLE_PCT": "55"}):
+            self.assertEqual(list(w.conditions("context", raw).values()),
+                             ["RECYCLE-WORKER workspace-task:p1 owner=wArch 60%"])
+
+    def test_context_junk_workspace_rows_never_stop_the_architect_recycle(self):
+        raw = worker_context(310000)
+        raw["usage"]["session-architect-001"] = {"tokens": 310000}
+        raw["workspaces"]["result"]["workspaces"] += ["junk", None, {"workspace_id": "workspace-odd", "tokens": "x"}]
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            self.assertEqual(sorted(w.conditions("context", raw).values()),
+                             ["RECYCLE workspace-demo:p1 Architect::Example 310k", worker_line("310k")])
+
+    def test_context_the_coordinator_is_never_a_worker(self):
+        raw = worker_context(310000)
+        raw["usage"]["session-worker-001"] = {"tokens": 310000}
+        pane = w.agents(raw["herdr"])[1]
+        pane.update(name="Coordinator", tokens={"role": "coordinator"}, terminal_title_stripped="Coordinator")
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            self.assertEqual(list(w.conditions("context", raw).values()),
+                             ["RECYCLE workspace-task:p1 Coordinator 310k"])
+
+    def test_context_a_lasting_unreadable_workspace_list_reaches_the_feed_once_and_recovers(self):
+        raw = worker_context(310000)
+        unread = dict(raw, workspaces=None)
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            self.assertEqual([self.events(unread) for _ in range(4)],
+                             [[], [], ["context read failed 3 times (WorkspaceList)"], []])
+            self.assertEqual(self.events(raw), [worker_line("310k"), "context READ RECOVERED"])
+            self.assertEqual(self.events(raw), [])
+            self.assertEqual([self.events(unread) for _ in range(2)] + [self.events(raw)], [[], [], []])
+
+    def herdr_reads(self, raw, workspaces):
+        def read(*argv):
+            if argv[1:] != ("workspace", "list"):
+                return json.dumps(raw["herdr"])
+            if isinstance(workspaces, Exception):
+                raise workspaces
+            return workspaces
+        return read
+
+    def test_context_collect_reads_the_workspace_owner_tags(self):
+        raw = worker_context(310000)
+        with patch.dict(os.environ, {"HERDR_ENV": "1", "ORCH_RECYCLE_TOKENS": "300000"}), \
+             patch.object(w, "command", side_effect=self.herdr_reads(raw, json.dumps(raw["workspaces"]))) as command, \
+             patch.object(w, "session_usage", side_effect=lambda sid: raw["usage"][sid]):
+            collected = w.collect("context", None)
+        command.assert_any_call(os.environ["HERDR_BIN_PATH"], "workspace", "list")
+        self.assertEqual(collected["workspaces"], raw["workspaces"])
+        self.assertEqual(list(w.conditions("context", collected).values()), [worker_line("310k")])
+
+    def test_context_collect_survives_an_unreadable_workspace_list(self):
+        raw = worker_context(310000)
+        raw["usage"]["session-architect-001"] = {"tokens": 310000}
+        for failure in (subprocess.CalledProcessError(1, ["herdr"]), "not json", json.dumps({"result": {}}),
+                        json.dumps({"result": {"workspaces": {}}})):
+            with self.subTest(failure=failure), \
+                 patch.dict(os.environ, {"HERDR_ENV": "1", "ORCH_RECYCLE_TOKENS": "300000"}), \
+                 patch.object(w, "command", side_effect=self.herdr_reads(raw, failure)), \
+                 patch.object(w, "session_usage", side_effect=lambda sid: raw["usage"][sid]), \
+                 patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                collected = w.collect("context", None)
+                self.assertIsNone(collected["workspaces"])
+                self.assertIn("herdr workspace list", stderr.getvalue())
+                self.assertEqual(list(w.conditions("context", collected).values()),
+                                 ["RECYCLE workspace-demo:p1 Architect::Example 310k"])
     def test_host_fractional_number_format(self):
         for free, swap, load, expected in (
             (15.6, 1500.126, 41.236, "HOST PRESSURE(16% free) SWAP(1500.13MB) PROCS(1301) FILES(150001) LOAD(41.24)"),

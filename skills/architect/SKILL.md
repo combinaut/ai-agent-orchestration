@@ -29,7 +29,8 @@ Run `orch-settings` first: it prints every resolved setting as one `ORCH_NAME=va
 - Open user questions.
 - Coordinator session name.
 
-Reply with its path and stop. The Coordinator starts your successor in a fresh pane on `$ORCH_ARCHITECT_MODEL`, with the same Claude session name, Herdr agent name, tab name, owner and role tags. The successor reads only the handoff, not the old transcript, takes over your workers by pane id, closes your pane with `~/.claude/coordinator/watchers/close-pane.sh <old pane id>`; you never close yourself. Close any pane on purpose the same way: the script marks the pane as closed on purpose and removes the mark when the close fails.
+Reply with its path and stop. The Coordinator starts your successor in a fresh pane on `$ORCH_ARCHITECT_MODEL`, with the same Claude session name, Herdr agent name, tab name, owner and role tags. The successor reads only the handoff, not the old transcript, takes over your workers by pane id, which it finds with `orch-agents`, closes your pane with `~/.claude/coordinator/watchers/close-pane.sh <old pane id>`; you never close yourself. Close any pane on purpose the same way: the script marks the pane as closed on purpose and removes the mark when the close fails.
+Workers never recycle themselves: for a worker in a workspace you own, the context watcher sends you `RECYCLE-WORKER` at the same threshold; follow [references/worker-recycle.md](references/worker-recycle.md).
 
 **PR events come to you.** On start and after every recycle, run `python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/architect-$HERDR_WORKSPACE_ID.json` from your own Bash environment. The pulls watcher then sends APPROVED, RED, CHANGES, THREADS, COPILOT and MERGED for PRs whose branch is checked out in a workspace tagged `owner=$HERDR_WORKSPACE_ID` straight to you, within about 3 minutes. Do not poll for approvals.
 

@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import os
 import signal
@@ -6,6 +7,7 @@ import shutil
 import socket
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -18,6 +20,7 @@ import alert_policy as policy
 import feed_attach
 import feed_follow
 import watchers as w
+from test_watchers import worker_context
 
 spec = importlib.util.spec_from_file_location("inbox_policy", w.ROOT / "notify-inbox.py")
 inbox = importlib.util.module_from_spec(spec)
@@ -195,6 +198,28 @@ class PolicyTest(IsolatedTestCase):
         self.assertEqual(self.run_at(60, {"mode": "context", "events": ["RECYCLE p1 Architect::x 460k"]}), [])
         self.assertEqual(self.run_at(120, {"mode": "context", "events": ["RECYCLE p1 Architect::x cleared"]}),
                          ["context: RECYCLE p1 Architect::x 310k (clear)"])
+
+    def test_worker_recycle_starts_once_and_clears_when_the_session_leaves(self):
+        line = "RECYCLE-WORKER wW:p1 owner=wA fix-42"
+        self.assertEqual(self.run_at(0, {"mode": "context", "events": [line + " 310k"]}),
+                         [f"context: {line} 310k (start)"])
+        self.assertEqual(self.run_at(60, {"mode": "context", "events": [line + " 460k"]}), [])
+        self.assertEqual(self.run_at(120, {"mode": "context", "events": [line + " cleared"]}),
+                         [f"context: {line} 310k (clear)"])
+        self.assertEqual(self.run_at(180, {"mode": "context", "events": [line + " 300k"]}),
+                         [f"context: {line} 300k (start)"])
+
+    def test_a_worker_replaced_in_its_pane_stays_alerted_through_the_policy(self):
+        raw = worker_context(310000)
+        key = "context:workspace-task:p1 owner=wArch fixture-worker"
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            before, first = w.reduce("context", None, raw)
+            self.run_at(0, {"mode": "context", "events": first})
+            w.agents(raw["herdr"])[1]["agent_session"] = {"value": "session-worker-002"}
+            raw["usage"] = {"session-worker-002": {"tokens": 320000}}
+            _, events = w.reduce("context", before, raw)
+        self.run_at(60, {"mode": "context", "events": events})
+        self.assertTrue(self.state["keys"][key]["active"], events)
 
     def test_pull_events_start_clear_and_merge(self):
         approved = {"mode": "pulls", "events": ["APPROVED o/r#7 owner=wA Fix it"]}
@@ -583,6 +608,7 @@ class ActionPatternTest(IsolatedTestCase):
         "2026-10-13T22:02:00+0200 pulls: RED o/r#1 owner=? Fix [Validate] (start)": True,
         "2026-10-13T22:02:00+0200 audit: APPROVED o/r#1 Fix (start)": False,
         "2026-10-13T22:02:00+0200 context: RECYCLE wH:p1 finder 310k (start)": True,
+        "2026-10-13T22:02:00+0200 context: RECYCLE-WORKER wW:p1 owner=wMS fix-42 310k (start)": False,
         "2026-10-13T22:02:00+0200 host: HOST SWAP 16079.38MB (danger)": True,
         "2026-10-13T22:02:00+0200 host: HOST FILES 160000 (start)": False,
         "2026-10-13T22:02:00+0200 host: STATE RESET host: invalid JSON; moved to host.json.corrupt-20261014T160700000000Z (start)": True,
@@ -799,7 +825,7 @@ class DeliveryTest(IsolatedTestCase):
             for owner in ("wMS", "wA", "wNew"):
                 (directory / f"architect-{owner}.json").write_text("{}")
 
-    def deliver(self, now, binding=True, modes=("host",)):
+    def deliver(self, now, binding=True, modes=("host",), check=lambda path: (path, "token")):
         argv = ["notify-inbox.py", "--state-dir", str(self.base), "--cursor", str(self.base / "deliver.cursor"),
                 "--deliver", "file", "--modes", *modes]
         if binding:
@@ -807,7 +833,7 @@ class DeliveryTest(IsolatedTestCase):
         os.utime(self.base / "host.heartbeat", (now, now))
         sent = []
         with warnings.catch_warnings(), patch("sys.argv", argv), \
-                patch.object(inbox, "binding", side_effect=lambda path: (path, "token")), \
+                patch.object(inbox, "binding", side_effect=check), \
                 patch.object(inbox, "send_to_socket", side_effect=lambda path, token, text: sent.append((path.name, text))), \
                 patch.object(inbox.time, "time", return_value=now):
             warnings.simplefilter("ignore", ResourceWarning)
@@ -1185,6 +1211,80 @@ class DeliveryTest(IsolatedTestCase):
         outbox = json.loads((self.base / "deliver.cursor").read_text()).get("outbox", [])
         self.assertFalse([entry for entry in outbox if "architect-" in entry["binding"]])
         self.assertIn("pulls: APPROVED o/r#7 owner=wMS Fix (start)", self.feed_lines())
+
+    WORKER_LINE = "context: RECYCLE-WORKER workspace-task:p1 owner={} fixture-worker 310k (start)"
+
+    def context_cycle(self, owner=None, architect=1200, worker=1200, monitor=True):
+        """The recorded context read, after a quiet first read, with the worker's workspace tagged `owner`;
+        returns the time to deliver at."""
+        self.host_cycle()
+        raw = json.loads((w.ROOT / "fixtures/context.json").read_text())
+        raw["workspaces"]["result"]["workspaces"][1]["tokens"] = {"owner": owner} if owner else {}
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            w.cycle(self.base, "context", lambda before: raw)
+            raw["usage"] = {"session-architect-001": {"tokens": architect}, "session-worker-001": {"tokens": worker}}
+            w.cycle(self.base, "context", lambda before: raw)
+        now = (self.base / "host.heartbeat").stat().st_mtime
+        if monitor:
+            self.monitor(now)
+        os.utime(self.base / "context.heartbeat", (now, now))
+        return now
+
+    def test_a_worker_recycle_goes_to_its_owner_and_into_the_feed(self):
+        sent = self.deliver(self.context_cycle("wMS", worker=310000), modes=("host", "context"))
+        line = self.WORKER_LINE.format("wMS")
+        self.assertEqual(sent, [("architect-wMS.json", line + ". No reply needed.")])
+        self.assertIn(line, self.feed_lines())
+        raw = json.loads((w.ROOT / "fixtures/context.json").read_text())
+        raw["herdr"]["result"]["agents"].pop()
+        raw["usage"] = {}
+        w.cycle(self.base, "context", lambda before: raw)
+        now = (self.base / "host.heartbeat").stat().st_mtime
+        os.utime(self.base / "context.heartbeat", (now, now))
+        self.assertEqual(self.deliver(now, modes=("host", "context")), [])
+        self.assertTrue(any(feed.startswith("context: RECYCLE-WORKER ") and feed.endswith("(clear)")
+                            for feed in self.feed_lines()), self.feed_lines())
+
+    def test_only_a_worker_recycle_names_an_owner_in_a_context_line(self):
+        self.assertEqual(inbox.OWNER.match(self.WORKER_LINE.format("wMS")).group(1), "wMS")
+        for line in ("context: RECYCLE wJ:p8 owner=wMS Architect::x 310k (start)",
+                     "context: NOSENSOR wJ:p8 owner=wMS Architect::x (start)",
+                     "context: RECYCLE-WORKER wW:p1 fix-42 owner=wMS 310k (start)"):
+            self.assertIsNone(inbox.OWNER.match(line), line)
+
+    def test_a_worker_recycle_waits_in_the_outbox_until_its_owner_binding_appears(self):
+        now = self.context_cycle("wGone", worker=310000)
+        present = lambda path: (path.lstat(), "token") and (path, "token")
+        self.assertEqual(self.deliver(now, modes=("host", "context"), check=present), [])
+        outbox = json.loads((self.base / "deliver.cursor").read_text())["outbox"]
+        line = self.WORKER_LINE.format("wGone") + ". No reply needed."
+        self.assertEqual([(Path(entry["binding"]).name, entry["text"]) for entry in outbox], [("architect-wGone.json", line)])
+        self.assertIn(self.WORKER_LINE.format("wGone"), self.feed_lines())
+        (self.base / "bindings" / "architect-wGone.json").write_text("{}")
+        sent = self.deliver(now + inbox.OUTBOX_RETRY_SECONDS + 1, modes=("host", "context"), check=present)
+        self.assertEqual(sent, [("architect-wGone.json", line)])
+        self.assertNotIn("outbox", json.loads((self.base / "deliver.cursor").read_text()))
+
+    def test_a_worker_recycle_for_a_dead_owner_binding_waits_in_the_outbox(self):
+        process = subprocess.Popen([sys.executable, "-c", ""])
+        process.wait()
+        path = self.base / "bindings" / "architect-wMS.json"
+        path.write_text(json.dumps(dict(pid=process.pid, socket=f"/tmp/cc-socks/{process.pid}.sock", token="t",
+                                        session_id="s", proc_start="p")))
+        path.chmod(0o600)
+        now = self.context_cycle("wMS", worker=310000)
+        with patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            self.assertEqual(self.deliver(now, modes=("host", "context"), check=inbox.binding), [])
+        self.assertIn("native delivery to architect-wMS.json failed: ProcessLookupError", stderr.getvalue())
+        outbox = json.loads((self.base / "deliver.cursor").read_text())["outbox"]
+        self.assertEqual([(Path(entry["binding"]).name, entry["text"]) for entry in outbox],
+                         [("architect-wMS.json", self.WORKER_LINE.format("wMS") + ". No reply needed.")])
+
+    def test_an_architect_recycle_goes_to_the_coordinator_not_an_architect(self):
+        sent = self.deliver(self.context_cycle("wMS", architect=310000, monitor=False), modes=("host", "context"))
+        self.assertEqual([name for name, _ in sent], ["coordinator.json"])
+        self.assertTrue(sent[0][1].endswith(
+            " context: RECYCLE workspace-demo:p1 Architect::Example 310k (start). No reply needed."), sent[0][1])
 
     def test_unconfigured_pr_watchers_are_not_watched_for_heartbeats(self):
         self.host_cycle()

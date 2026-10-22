@@ -112,7 +112,7 @@ sequenceDiagram
 - The Coordinator recycles the same way with `handoff_coordinator.md`. Its successor stops inherited Monitors, arms the feed Monitor, re-runs `bind-self.py`, and closes the ancestor.
 - With `recycle.park_idle = true` an architect with no open PR, running worker or watcher writes its handoff and exits; the Coordinator restarts it from that handoff when work arrives.
 
-The procedures are in [`skills/coordinate/references/recycle.md`](../skills/coordinate/references/recycle.md).
+The procedures are in [`skills/coordinate/references/recycle.md`](../skills/coordinate/references/recycle.md) and, for workers, [`skills/architect/references/worker-recycle.md`](../skills/architect/references/worker-recycle.md).
 
 ## Watchers and the feed
 
@@ -130,12 +130,12 @@ flowchart LR
     N["notifier<br/>notify-inbox.sh"] --> F[("coordinator-feed.log")]
     F --> M["feed-monitor.sh<br/>(Coordinator's one Monitor)"]
     N -->|"no live Monitor:<br/>action lines only"| NC["native message to Coordinator"]
-    N -->|"PR event with owner"| NA["native message to owning architect"]
+    N -->|"PR event or worker recycle with owner"| NA["native message to owning architect"]
 ```
 
 | Producer | Interval | Reports |
 |---|---|---|
-| context | 300 s | `RECYCLE`, `NOSENSOR` |
+| context | 300 s | `RECYCLE`, `RECYCLE-WORKER`, `NOSENSOR` |
 | host | 60 s | memory, swap, processes, open files, load |
 | hog | 5 s | big processes, big or long `git` processes |
 | balance | 60 s | load, slot count, busy worktrees with a `top:` list |

@@ -23,8 +23,22 @@ HOST READFAIL cleared reports that all metrics are readable again. A scan with
 no readable metric increments the read-failure count. A combined alert marks an unreadable active metric as unavailable. HOST alerts combine all active flags,
 re-alert on swap steps of 1000 MB, file steps of 10,000, and whenever a flagged value crosses a step of `ORCH_ALERT_ESCALATE_RATIO` (1.5×) from its threshold, and emit
 HOST RECOVERED when all flags clear. Context emits NOSENSOR per unreadable
-session and RECYCLE with tokens or percentage, once per session id while it
+session of the Coordinator or an architect and RECYCLE with tokens or percentage, once per session id while it
 remains in the agent list. Departed session ids are pruned.
+
+Workers recycle through their architect. Each context pass also reads `herdr workspace list`. A Claude pane that is
+neither the Coordinator nor an architect, in a workspace with an `owner` tag, emits
+`RECYCLE-WORKER <pane> owner=<workspace> <name> <amount>` at the same threshold, once per session id. Only the Herdr
+agent name labels it, never the terminal title, which changes while a worker runs. A worker without an owner tag, a
+sensor (Codex panes have none) or a session id emits nothing. When the workspace list cannot be read, new worker lines
+wait, saved ones are kept, architect lines still go out, and stderr gets
+`context: herdr workspace list unreadable (<error>); worker recycle alerts wait`. An owner change clears the old line
+and starts one with the new owner; a departed session emits `RECYCLE-WORKER <pane> owner=<workspace> <name> cleared`.
+The notifier sends each `RECYCLE-WORKER` start natively to `bindings/architect-<owner>.json`, as it sends a PR event
+with an owner. Until that binding file exists, and while a binding of a dead session fails each send,
+the message waits in the outbox (one try per 60 seconds, dropped after an hour). It is not an action line, so the
+Coordinator's Monitor stays quiet. The architect then runs the
+[worker recycle](../../skills/architect/references/worker-recycle.md).
 
 ## Run the watchers without services
 
@@ -131,7 +145,7 @@ The feed is mode 0600 and append-only; each batch is one `O_APPEND` write of who
 
 Repeats, growth and band changes write nothing. Queued batches apply in order of the time their producer wrote them. A version-2 cursor is repaired once: each active PR event whose saved owner differs from the pulls snapshot's owner gets its `(owner)` line. When the cursor holds no state of version 2 or 3 (first run, or an older notifier), the notifier rebuilds key state from the producer events the cursor already consumed, the current audit lines and read failures in `audit.json` (in place of audit history, also for a fresh cursor, which then skips that history), and each heartbeat the cursor marks stale, and writes one `start` (or `danger`) line per condition still active. Folded into the digest: `WORKER <pane> closed` (a pane closed on purpose) and a `READFAIL` source marked `,new` (a pane the workers watcher first saw under 2 minutes ago).
 
-Keys: `host:<metric>`, `balance:<metric>`, `hog:<pid>/<process>`, `gitbig:<pid>/git`, `gitlong:<pid>/git`, `context:<pane> <label>`, `workers:<pane>`, `pulls:<kind> <repo>#<n>`, `audit:<kind> <subject>`, `heartbeat:<mode>`, `<mode>:readfail:<source>`, `<mode>:health:read`, else `<mode>:unparsed:<line shape>` (digits and bracketed details removed), with `watchers: unparsed <mode> line format: <shape> (unparsed)` written once per shape. Old hog lines without `comm=[…]` key on the basename of the first `cmd=[…]` token. `<MODE> RECOVERED` clears that mode's metric keys, a HOST or BALANCE line clears the metric keys it no longer lists, `<KIND> pid=<pid> comm=[<process>] cleared` clears a hog key, `hog LOG WRITE RECOVERED` the log-failure key, `NOSENSOR CLEARED <pane>` a missing-sensor key, `CLEARED <audit line>` an audit key, `RECYCLE <pane> <label> cleared` a context key (also emitted for the old pane and label when an alerted session moves or is renamed), `<kind> <repo>#<n> cleared` a pulls key, each source on a `<PREFIX> READFAIL a b` line is its own key and a source missing from the next such line is cleared, `READFAIL cleared` clears that mode's read-failure sources and `READ RECOVERED` its `health:read` key, `WORKER <pane> RECOVERED` and `WORKER <pane> closed` clear the pane, `HEARTBEAT RECOVERED` clears `HEARTBEAT STALE`, and `WORKER <old> MOVED <new>` moves its key. `dead/disappeared`, `MERGED` and `CLOSED` end their key at once, so the next alert on it starts again. Key state persists under `delivery` in the cursor file (an inactive or never-clearing key idle for 24 hours is dropped, and at most 1000 keys are kept, least recently active dropped first), written atomically with mode 0600. Each batch is committed as pending with the cursor before it is appended; on start the notifier writes a pending batch the feed does not already end with, so a crash neither loses nor repeats a batch. A producer is not reported stale until its heartbeat grace has passed since the cursor first saw it, or since the notifier last started.
+Keys: `host:<metric>`, `balance:<metric>`, `hog:<pid>/<process>`, `gitbig:<pid>/git`, `gitlong:<pid>/git`, `context:<pane> <label>` (for a worker `context:<pane> owner=<workspace> <name>`), `workers:<pane>`, `pulls:<kind> <repo>#<n>`, `audit:<kind> <subject>`, `heartbeat:<mode>`, `<mode>:readfail:<source>`, `<mode>:health:read`, else `<mode>:unparsed:<line shape>` (digits and bracketed details removed), with `watchers: unparsed <mode> line format: <shape> (unparsed)` written once per shape. Old hog lines without `comm=[…]` key on the basename of the first `cmd=[…]` token. `<MODE> RECOVERED` clears that mode's metric keys, a HOST or BALANCE line clears the metric keys it no longer lists, `<KIND> pid=<pid> comm=[<process>] cleared` clears a hog key, `hog LOG WRITE RECOVERED` the log-failure key, `NOSENSOR CLEARED <pane>` a missing-sensor key, `CLEARED <audit line>` an audit key, `RECYCLE <pane> <label> cleared` or `RECYCLE-WORKER <pane> owner=<workspace> <name> cleared` a context key (also emitted for the old pane, label or owner when an alerted session moves, is renamed or changes owner), `<kind> <repo>#<n> cleared` a pulls key, each source on a `<PREFIX> READFAIL a b` line is its own key and a source missing from the next such line is cleared, `READFAIL cleared` clears that mode's read-failure sources and `READ RECOVERED` its `health:read` key, `WORKER <pane> RECOVERED` and `WORKER <pane> closed` clear the pane, `HEARTBEAT RECOVERED` clears `HEARTBEAT STALE`, and `WORKER <old> MOVED <new>` moves its key. `dead/disappeared`, `MERGED` and `CLOSED` end their key at once, so the next alert on it starts again. Key state persists under `delivery` in the cursor file (an inactive or never-clearing key idle for 24 hours is dropped, and at most 1000 keys are kept, least recently active dropped first), written atomically with mode 0600. Each batch is committed as pending with the cursor before it is appended; on start the notifier writes a pending batch the feed does not already end with, so a crash neither loses nor repeats a batch. A producer is not reported stale until its heartbeat grace has passed since the cursor first saw it, or since the notifier last started.
 
 ### The Coordinator's Monitor
 
@@ -187,8 +201,14 @@ It re-alerts per load5 step of 10 and on slot count changes; RECOVERED appears
 only after a pressure flag has been raised and all metrics and process mappings
 are readable and all flags clear. Pending recovery is kept across unreadable
 scans; a READFAIL that clears without prior pressure sends only READFAIL cleared.
-BALANCE READFAIL names unavailable metrics and PIDs; valid metrics still alert,
-and unreadable active flags remain remembered. A scan with no readable metric
+BALANCE READFAIL names unavailable metrics and PIDs, a PID only after it is
+unreadable for three scans in a row (PIDs that change each scan show as
+`heavy`); valid metrics still alert, and unreadable active flags remain
+remembered. A source is reported only after three unreadable scans in a row; its
+last good value keeps the flag, and an alert line prints it as `unavailable`.
+`READFAIL cleared` follows only a reported READFAIL. A failing macOS `ps` or
+`lsof` call writes its command, seconds and reason (200 characters at most) to
+stderr. A scan with no readable metric
 increments the repeated read-failure counter.
 
 The `top:` list names up to four current-user worktrees ranked by aggregate CPU, with CPU

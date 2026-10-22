@@ -13,6 +13,7 @@ import uuid
 import os
 import re
 import subprocess
+import sys
 import time
 import watcher_runtime as runtime
 from pathlib import Path
@@ -123,31 +124,53 @@ def waiting_owners(raw):
         return None
 
 
+def recycle_amount(value):
+    """The context used, as `<n>k` or `<n>%`, at or over the recycle threshold; None under it or without a reading."""
+    if value.get("tokens") is not None:
+        tokens = int(value["tokens"])
+        return f"{tokens // 1000}k" if tokens >= int(os.environ.get("ORCH_RECYCLE_TOKENS", 300000)) else None
+    if value.get("remaining") is None:
+        return None
+    used = 100 - float(value["remaining"])
+    return f"{used:.0f}%" if used >= float(os.environ.get("ORCH_RECYCLE_PCT", 55)) else None
+
+
+def worker_recycle(agent, value, owners):
+    """`RECYCLE-WORKER <pane> owner=<workspace> [<name>] <amount>` for a worker over the threshold whose workspace has
+    an owner tag. Only the agent name labels it: a terminal title changes while the worker runs."""
+    owner = owners.get(agent.get("workspace_id"))
+    amount = recycle_amount(value) if owner else None
+    if not amount:
+        return None
+    return " ".join(part for part in ("RECYCLE-WORKER", agent["pane_id"], f"owner={owner}", agent.get("name"), amount)
+                    if part)
+
+
+
 def conditions(mode, raw):
     if mode in PRESSURE_SETTINGS:
         return thresholds(mode, {key: value for key, value in raw.items() if value is not None})
     if mode == "context":
         out = {}
+        owners = workspace_owners(raw)
         for agent in agents(raw["herdr"]):
+            if agent.get("agent") != "claude":
+                continue
             label = agent.get("name") or agent.get("terminal_title_stripped") or ""
             role = (agent.get("tokens") or {}).get("role")
-            if agent.get("agent") != "claude" or not (
-                label.startswith("Architect::") or role in ("architect", "coordinator")
-                or "Architect::" in (agent.get("terminal_title_stripped") or "")
-            ):
-                continue
             sid = (agent.get("agent_session") or {}).get("value")
             value = raw["usage"].get(sid, {})
+            if not (label.startswith("Architect::") or role in ("architect", "coordinator")
+                    or "Architect::" in (agent.get("terminal_title_stripped") or "")):
+                line = worker_recycle(agent, value, owners)
+                if line:
+                    out[sid] = line
+                continue
             if not sid or not value or (value.get("tokens") is None and value.get("remaining") is None):
                 out[f"nosensor:{sid or agent['pane_id']}"] = f"NOSENSOR {agent['pane_id']} {label}"
                 continue
-            if value.get("tokens") is not None:
-                hit = int(value["tokens"]) >= int(os.environ.get("ORCH_RECYCLE_TOKENS", 300000))
-            else:
-                hit = 100 - float(value["remaining"]) >= float(os.environ.get("ORCH_RECYCLE_PCT", 55))
-            if hit:
-                amount = (f"{int(value['tokens']) // 1000}k" if value.get("tokens") is not None
-                          else f"{100 - float(value['remaining']):.0f}%")
+            amount = recycle_amount(value)
+            if amount:
                 out[sid] = f"RECYCLE {agent['pane_id']} {label} {amount}"
         return out
     if mode == "hog":
@@ -221,9 +244,10 @@ def balance_top(raw):
 
 PRESSURE_SETTINGS = {
     "host": dict(labels=HOST_FLAGS, steps={"swap": 1000, "files": 10000}, counts=(),
-                 detail=host_detail, suffix=None, defer_recovery=False, state_fields=()),
+                 detail=host_detail, suffix=None, defer_recovery=False, state_fields=(), read_grace=False),
     "balance": dict(labels=BALANCE_FLAGS, steps={"load5": 10}, counts=("slots",),
-                    detail=balance_detail, suffix=balance_top, defer_recovery=True, state_fields=("cpu_sample",)),
+                    detail=balance_detail, suffix=balance_top, defer_recovery=True, state_fields=("cpu_sample",),
+                    read_grace=True),
 }
 
 
@@ -252,12 +276,29 @@ def reduce_pressure(mode, before, raw, after):
     settings = PRESSURE_SETTINGS[mode]
     labels = settings["labels"]
     prefix = mode.upper()
-    keys = pressure_keys(mode, flags, raw, after, settings)
     unreadable = [key for key in labels if raw.get(key) is None] + raw.get("unreadable", [])
+    state_extra = {}
+    reported = unreadable
+    read = raw  # what this scan read; a kept value prints as unavailable
+    if settings["read_grace"]:
+        # A source is reported only after READ_FAILURES unreadable passes in a row; until then
+        # a metric keeps its last good value.
+        # A state saved before the grace has no counts; a source it already reported stays reported.
+        passes = {source: previous.get("unreadable_passes", {}).get(
+            source, READ_FAILURES - 1 if source in previous.get("unreadable", []) else 0) + 1
+            for source in unreadable}
+        good = previous.get("last_good", {})
+        raw = dict(raw, **{key: good[key] for key in labels
+                           if raw.get(key) is None and passes[key] < READ_FAILURES and key in good})
+        reported = [source for source in unreadable if passes[source] >= READ_FAILURES]
+        state_extra = dict(unreadable_passes=passes,
+                           last_good={key: raw[key] for key in labels if raw.get(key) is not None})
+        after = conditions(mode, raw)
+    keys = pressure_keys(mode, flags, raw, after, settings)
     pending = previous.get("pending_recovery", False) or bool(flags) or bool(keys)
-    events = readfail_changes(prefix, previous.get("unreadable", []), unreadable)
+    events = readfail_changes(prefix, previous.get("unreadable", []), reported)
     if keys != flags and keys:
-        line = prefix + " " + " ".join(f"{label}({settings['detail'](key, raw.get(key))})"
+        line = prefix + " " + " ".join(f"{label}({settings['detail'](key, read.get(key))})"
                                         for key, label in labels.items() if key in keys)
         if settings["suffix"]:
             line += settings["suffix"](raw)
@@ -265,7 +306,7 @@ def reduce_pressure(mode, before, raw, after):
     if not keys and pending and (not settings["defer_recovery"] or not unreadable):
         events.append(prefix + " RECOVERED")
         pending = False
-    state = dict(flags=keys, unreadable=unreadable, pending_recovery=pending)
+    state = dict(flags=keys, unreadable=reported, pending_recovery=pending, **state_extra)
     state.update({key: raw.get(key) for key in settings["state_fields"]})
     return state, events
 
@@ -287,20 +328,47 @@ def subject_cleared(line):
     return nosensor_cleared(line) if line.startswith("NOSENSOR ") else recycle_cleared(line)
 
 
+RECYCLE_LINES = ("RECYCLE ", "RECYCLE-WORKER ")
+WORKSPACE_FAILS = "workspaces:unreadable"
+
+
+def workspace_failures(previous, raw):
+    """The passes in a row that `herdr workspace list` was unreadable, kept in the saved state as a string."""
+    return int(previous.get(WORKSPACE_FAILS, 0)) + 1 if raw.get("workspaces") is None else 0
+
+
+def worker_untagged(key, line, raw):
+    """True when a successful workspace read shows the owner tag gone from the workspace of the worker session `key`."""
+    if not line.startswith("RECYCLE-WORKER ") or raw.get("workspaces") is None:
+        return False
+    owners = workspace_owners(raw)
+    return any(not owners.get(row.get("workspace_id")) for row in agents(raw["herdr"])
+               if (row.get("agent_session") or {}).get("value") == key)
+
+
 def reduce_context(before, after, raw):
     previous = before or {}
-    moved = {key for key in after if key in previous and previous[key].startswith(("RECYCLE ", "NOSENSOR "))
+    moved = {key for key in after if key in previous and previous[key].startswith(RECYCLE_LINES + ("NOSENSOR ",))
              and subject_cleared(previous[key]) != subject_cleared(after[key])}
-    events = [subject_cleared(previous[key]) for key in sorted(moved)]
-    events += [after[key] for key in sorted(after)
-               if key not in previous or key in moved or context_step(after[key]) > context_step(previous[key])]
     present = {(a.get("agent_session") or {}).get("value") for a in agents(raw["herdr"])}
-    remembered = {key: value for key, value in previous.items() if not key.startswith("nosensor:") and key in present}
+    remembered = {key: value for key, value in previous.items() if not key.startswith("nosensor:") and key in present
+                  and not (key not in after and worker_untagged(key, value, raw))}
+    # A departed session clears before any start: a successor in the same pane shares the policy key.
+    events = [subject_cleared(previous[key]) for key in sorted(moved)]
     events += [nosensor_cleared(value) for key, value in sorted(previous.items())
                if key.startswith("nosensor:") and key not in after]
     events += [recycle_cleared(value) for key, value in sorted(previous.items())
-               if key not in remembered and key not in after and value.startswith("RECYCLE ")]
+               if key not in remembered and key not in after and value.startswith(RECYCLE_LINES)]
+    events += [after[key] for key in sorted(after)
+               if key not in previous or key in moved or context_step(after[key]) > context_step(previous[key])]
     remembered.update(after)
+    fails = workspace_failures(previous, raw)
+    if fails:
+        remembered[WORKSPACE_FAILS] = str(fails)
+    if fails == READ_FAILURES:
+        events.append(f"context read failed {READ_FAILURES} times (WorkspaceList)")
+    elif not fails and int(previous.get(WORKSPACE_FAILS, 0)) >= READ_FAILURES:
+        events.append("context READ RECOVERED")
     return remembered, events
 
 
@@ -948,6 +1016,20 @@ def cycle_pass(base, mode, collector, failures, budget):
         return line
 
 
+def workspace_list():
+    """`herdr workspace list`, for the owner tags of worker workspaces; None, with a stderr note, when it cannot be
+    read, so that architect alerts still go out."""
+    try:
+        listing = json.loads(command(herdr_bin(), "workspace", "list"))
+        if not isinstance(listing["result"]["workspaces"], list):
+            raise ValueError("workspaces not a list")
+        return listing
+    except discovery.READ_ERRORS as error:
+        print(f"context: herdr workspace list unreadable ({type(error).__name__}); worker recycle alerts wait",
+              file=sys.stderr, flush=True)
+        return None
+
+
 def session_usage(sid):
     path = Path.home() / ".claude/context-usage" / sid
     try:
@@ -1009,7 +1091,7 @@ def collect(mode, before, scope="", base=None):
             value = session_usage(sid)
             if value:
                 usage[sid] = value
-        return {"herdr": raw, "usage": usage}
+        return {"herdr": raw, "usage": usage, "workspaces": workspace_list()}
     if mode == "hog":
         return process_rows(command)
     if mode == "host":

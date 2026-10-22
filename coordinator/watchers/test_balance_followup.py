@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from test_support import IsolatedTestCase
 import watchers as w
+from test_balance import stuck
 from watcher_platform import LinuxBalance, MacBalance, balance_metrics
 
 
@@ -172,9 +173,9 @@ class BalanceFollowupTests(IsolatedTestCase):
                 raw = balance_metrics(None, w.BALANCE_LIMITS, Path(tmp), Adapter())
         self.assertEqual(raw['unreadable'], ['pid:7'])
         self.assertIsNone(raw['heavy'])
-        events = w.reduce('balance', None, raw)[1]
-        self.assertTrue(any('READFAIL heavy pid:7' in e for e in events))
+        before, events = w.reduce('balance', None, raw)
         self.assertTrue(any('LOAD5(21.00)' in e for e in events))
+        self.assertEqual(stuck(before, raw, w.READ_FAILURES - 1)[1], ['BALANCE READFAIL heavy pid:7'])
 
     def test_first_sample_lifetime_cpu_is_numeric_and_silent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -209,7 +210,7 @@ class BalanceFollowupTests(IsolatedTestCase):
     def test_load_pressure_then_unreadable_slot_then_clean_recovers_once(self):
         clean = dict(load5=1, free=50, slots=0, heavy=0, top=[])
         before, _ = w.reduce('balance', None, dict(clean, load5=21))
-        before, events = w.reduce('balance', before, dict(clean, slots=None, unreadable=['slot:denied']))
+        before, events = stuck(before, dict(clean, slots=None, unreadable=['slot:denied']))
         self.assertNotIn('BALANCE RECOVERED', events)
         self.assertTrue(before['pending_recovery'])
         before, events = w.reduce('balance', before, clean)
@@ -219,7 +220,7 @@ class BalanceFollowupTests(IsolatedTestCase):
 
     def test_readfail_clear_without_pressure_does_not_recover(self):
         clean = dict(load5=1, free=50, slots=0, heavy=0, top=[])
-        before, _ = w.reduce('balance', None, dict(clean, slots=None))
+        before, _ = stuck(None, dict(clean, slots=None))
         self.assertEqual(w.reduce('balance', before, clean)[1], ['BALANCE READFAIL cleared'])
 
     def test_exactly_four_known_worktrees_and_unreadable_pid_preserves_flag(self):
@@ -267,7 +268,7 @@ class BalanceFollowupTests(IsolatedTestCase):
         before, _ = w.reduce('host', None, dict(host, swap=1500))
         self.assertEqual(w.reduce('host', before, dict(host, free=None))[1], ['HOST READFAIL free', 'HOST RECOVERED'])
         balance = dict(free=50, slots=0, heavy=0, load5=1, top=[])
-        before, _ = w.reduce('balance', None, dict(balance, slots=None))
+        before, _ = stuck(None, dict(balance, slots=None))
         self.assertEqual(w.reduce('balance', before, balance)[1], ['BALANCE READFAIL cleared'])
 
     def test_first_sample_clock_is_after_process_birth(self):

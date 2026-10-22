@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Feed writer for watcher alerts. Dry-run by default; never injects pane input.
-`--deliver file` appends policy lines to the Coordinator feed; native messages carry only PR events to
-their owning architect and action lines while no feed Monitor is attached. Tokens come from mode-0600 binding files.
+`--deliver file` appends policy lines to the Coordinator feed; native messages carry only PR events and worker recycles
+to their owning architect and action lines while no feed Monitor is attached. Tokens come from mode-0600 binding files.
 """
 import argparse
 import fcntl
@@ -31,7 +31,7 @@ MONITOR_ACK_SECONDS = 20
 FEED_NAME = "coordinator-feed.log"
 FEED_BYTES = 1024 * 1024
 WAIT_OWNER = re.compile(r"^workers: WORKER WAITING .+ pane=\S+ owner=([A-Za-z0-9_-]+) \d+m session=\S+")
-OWNER = re.compile(r"^pulls: \S+ \S+#\d+ owner=([A-Za-z0-9_-]+) ")
+OWNER = re.compile(r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER \S+) owner=([A-Za-z0-9_-]+) ")
 
 spec = importlib.util.spec_from_file_location("reader", w.ROOT / "read-alerts.py")
 reader = importlib.util.module_from_spec(spec)
@@ -172,7 +172,8 @@ def commit(args, cursor):
 
 
 def native_messages(args, stamped, fallback, patterns):
-    """One native message per architect with a binding file, and one for the Coordinator, as (binding path, text)."""
+    """One native message per architect with a binding file (a worker recycle also for an architect not yet bound; it
+    waits in the outbox), and one for the Coordinator, as (binding path, text)."""
     by_owner = {}
     for line in stamped:
         body = line.split(" ", 1)[1].replace(alert_policy.WORKER_WAIT_NOTE, "")
@@ -181,7 +182,7 @@ def native_messages(args, stamped, fallback, patterns):
             continue
         owner = OWNER.match(body) or waiting
         if owner and not line.endswith("(clear)") and args.bindings_dir \
-                and (args.bindings_dir / f"architect-{owner.group(1)}.json").exists():
+                and (waiting or " RECYCLE-WORKER " in line or (args.bindings_dir / f"architect-{owner.group(1)}.json").exists()):
             by_owner.setdefault(owner.group(1), []).append(native(line.split(" ", 1)[1]) + ". No reply needed.")
     out = [(str(args.bindings_dir / f"architect-{owner}.json"), "\n".join(texts)) for owner, texts in sorted(by_owner.items())]
     actions = [line for line in stamped if is_action(line, patterns)] if args.binding and fallback else []

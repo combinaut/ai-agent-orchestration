@@ -368,6 +368,24 @@ class WaitingTests(IsolatedTestCase):
             self.assertIn("ESCALATE", self.scan(10)[0])
             self.assertEqual(self.scan(99999), [])
 
+    def test_missing_owner_binding_still_queues_native_waiting_message(self):
+        line = self.start()
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            args = argparse.Namespace(
+                bindings_dir=base, binding=base / "coordinator.json"
+            )
+            messages = inbox.native_messages(
+                args,
+                ["time workers: " + line + " (start)"],
+                False,
+                inbox.action_patterns(),
+            )
+            self.assertEqual(
+                [path for path, _ in messages], [str(base / "architect-architect.json")]
+            )
+            self.assertIn(alert_policy.WORKER_WAIT_NOTE, messages[0][1])
+
     def test_native_owner_route_and_coordinator_only_for_escalation(self):
         line = self.start()
         with tempfile.TemporaryDirectory() as tmp:

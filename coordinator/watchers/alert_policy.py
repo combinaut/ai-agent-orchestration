@@ -148,14 +148,14 @@ def hog_facts(line):
 
 
 def context_facts(line):
-    gone = re.match(r"RECYCLE (.+) cleared$", line)
+    gone = re.match(r"RECYCLE(?:-WORKER)? (.+) cleared$", line)
     if gone:
         return [clear(f"context:{gone.group(1)}", exact=True)]
     if line.startswith("NOSENSOR "):
         if line.startswith("NOSENSOR CLEARED "):
             return [clear("context:nosensor:" + line.split(" ")[2], exact=True)]
         return [fact("context:nosensor:" + line.split(" ")[1], line, clearable=True)]
-    match = re.match(r"RECYCLE (.+) (\d+)(k|%)$", line)
+    match = re.match(r"RECYCLE(?:-WORKER)? (.+) (\d+)(k|%)$", line)
     if not match:
         return [fact(f"context:{line[8:]}", line, clearable=True)] if line.startswith("RECYCLE ") else None
     subject, amount, unit = match.groups()
