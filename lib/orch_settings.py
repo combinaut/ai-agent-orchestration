@@ -62,7 +62,7 @@ SETTINGS = [
     _g('models.codex_worker', 'ORCH_CODEX_WORKER_MODEL', 'str', '<codex-worker-model>', 'Codex model for routine work; replace the placeholder'),
     _g('models.codex_smart', 'ORCH_CODEX_SMART_MODEL', 'str', '<codex-smart-model>', 'Codex model for hard work; replace the placeholder'),
     _g('workers.wait_min', 'ORCH_WAIT_MIN', 'number', 600, 'Seconds idle or done before WORKER WAITING'),
-    _g('workers.wait_repeat_min', 'ORCH_WAIT_REPEAT_MIN', 'number', 1800, 'Seconds before the single repeat and then escalation'),
+    _g('workers.wait_repeat_min', 'ORCH_WAIT_REPEAT_MIN', 'number', 1800, 'Waiting age for the single repeat; then seconds until escalation'),
     _g('recycle.tokens', 'ORCH_RECYCLE_TOKENS', 'int', 300000, 'Tokens used at which RECYCLE fires'),
     _g('recycle.pct', 'ORCH_RECYCLE_PCT', 'number', 55, 'Context percentage used when the token sensor is absent'),
     _g('recycle.park_idle', 'ORCH_PARK_IDLE', 'bool', False, 'Park architects that have no open PR, worker or watcher'),

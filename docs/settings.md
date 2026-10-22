@@ -45,7 +45,7 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `models.codex_worker` | `ORCH_CODEX_WORKER_MODEL` | `"<codex-worker-model>"` | Codex model for routine work; replace the placeholder |
 | `models.codex_smart` | `ORCH_CODEX_SMART_MODEL` | `"<codex-smart-model>"` | Codex model for hard work; replace the placeholder |
 | `workers.wait_min` | `ORCH_WAIT_MIN` | `600` | Seconds done/idle before WORKER WAITING |
-| `workers.wait_repeat_min` | `ORCH_WAIT_REPEAT_MIN` | `1800` | Seconds after the first alert before its single repeat, then before its single Coordinator escalation |
+| `workers.wait_repeat_min` | `ORCH_WAIT_REPEAT_MIN` | `1800` | Waiting age in seconds for the single repeat, then seconds until its single Coordinator escalation |
 | `recycle.tokens` | `ORCH_RECYCLE_TOKENS` | `300000` | Tokens used at which RECYCLE fires |
 | `recycle.pct` | `ORCH_RECYCLE_PCT` | `55` | Context percentage used when the token sensor is absent |
 | `recycle.park_idle` | `ORCH_PARK_IDLE` | `false` | Park architects that have no open PR, worker or watcher |

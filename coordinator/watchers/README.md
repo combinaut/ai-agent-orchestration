@@ -260,8 +260,8 @@ recovery, clear recovered warnings, and restore unreadable agents or producers.
 The audit reports workspace-level blocked lines.
 
 Owner-tagged worker sessions also emit `WORKER WAITING` after 600 seconds done or
-idle. The owning architect receives one native alert and one repeat 1800 seconds
-later; another 1800 seconds without new work escalates once to the Coordinator.
+idle. The owning architect receives one native alert and one repeat at 1800 seconds
+of waiting; another 1800 seconds without new work escalates once to the Coordinator.
 Role-tagged architects and coordinators are excluded. State and policy keys use
 the session ID (`workers:waiting:<session>:<stage>`), never a pane or name. Working,
 closing or a successful loss/change of owner clears the alert; unreadable reads

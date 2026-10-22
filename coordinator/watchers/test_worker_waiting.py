@@ -62,8 +62,8 @@ class WaitingTests(IsolatedTestCase):
         line = self.start()
         self.assertTrue(line.endswith("(may be waiting on its own job)"))
         self.row["name"] = "long-worker-name-" * 20
-        self.scan(2401)
-        line = self.scan(4201)[0]
+        self.scan(1800)
+        line = self.scan(3600)[0]
         self.assertLessEqual(len(line), alert_policy.LINE_LIMIT)
         self.assertTrue(line.endswith("(may be waiting on its own job)"))
         fact = alert_policy.worker_facts(line)[0]
@@ -72,10 +72,10 @@ class WaitingTests(IsolatedTestCase):
 
     def test_threshold_and_no_extra_repeats(self):
         self.start()
-        self.assertEqual(self.scan(2400), [])
-        self.assertIn("REPEAT", self.scan(2401)[0])
-        self.assertEqual(self.scan(4200), [])
-        self.assertIn("ESCALATE", self.scan(4201)[0])
+        self.assertEqual(self.scan(1799), [])
+        self.assertIn("REPEAT", self.scan(1800)[0])
+        self.assertEqual(self.scan(3599), [])
+        self.assertIn("ESCALATE", self.scan(3600)[0])
         self.assertEqual(self.scan(99999), [])
 
     def test_clears_and_prunes_on_working_closed_or_untagged(self):
@@ -169,8 +169,8 @@ class WaitingTests(IsolatedTestCase):
         policy = {}
         for now, text in (
             (601, line),
-            (2401, self.scan(2401)[0]),
-            (4201, self.scan(4201)[0]),
+            (1800, self.scan(1800)[0]),
+            (3600, self.scan(3600)[0]),
         ):
             lines = alert_policy.apply(
                 policy, [dict(mode="workers", at=now, events=[text])], now
@@ -178,16 +178,16 @@ class WaitingTests(IsolatedTestCase):
             self.assertEqual(len(lines), 1)
             self.assertTrue(lines[0].endswith("(start)"))
         self.row["agent_status"] = "working"
-        clear = self.scan(4300)[0]
+        clear = self.scan(3700)[0]
         lines = alert_policy.apply(
-            policy, [dict(mode="workers", at=4300, events=[clear])], 4300
+            policy, [dict(mode="workers", at=3700, events=[clear])], 3700
         )
         self.assertTrue(any(line.endswith("(clear)") for line in lines))
 
     def test_monitor_cannot_swallow_native_coordinator_escalation(self):
         self.start()
-        self.scan(2401)
-        line = "time workers: " + self.scan(4201)[0] + " (start)"
+        self.scan(1800)
+        line = "time workers: " + self.scan(3600)[0] + " (start)"
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             args = argparse.Namespace(
@@ -202,16 +202,16 @@ class WaitingTests(IsolatedTestCase):
                 )
             }
             with patch.object(inbox, "flush_outbox", return_value=False):
-                inbox.finish(args, cursor, 4201, inbox.action_patterns())
+                inbox.finish(args, cursor, 3600, inbox.action_patterns())
             self.assertEqual(len(cursor[inbox.OUTBOX_KEY]), 1)
             self.assertNotIn("watch", cursor[inbox.OUTBOX_KEY][0])
             with patch.object(inbox, "send_line", return_value=False) as send:
-                inbox.flush_outbox(args, cursor, 4201)
+                inbox.flush_outbox(args, cursor, 3600)
                 self.assertEqual(send.call_count, 1)
-                inbox.flush_outbox(args, cursor, 4220)
+                inbox.flush_outbox(args, cursor, 3620)
                 self.assertEqual(send.call_count, 1)
             with patch.object(inbox, "send_line", return_value=True):
-                inbox.flush_outbox(args, cursor, 4261)
+                inbox.flush_outbox(args, cursor, 3660)
             self.assertNotIn(inbox.OUTBOX_KEY, cursor)
 
     def test_threshold_settings_are_used(self):
@@ -219,8 +219,8 @@ class WaitingTests(IsolatedTestCase):
             self.scan(0)
             self.assertEqual(self.scan(2), [])
             self.assertEqual(len(self.scan(3)), 1)
-            self.assertIn("REPEAT", self.scan(8)[0])
-            self.assertIn("ESCALATE", self.scan(13)[0])
+            self.assertIn("REPEAT", self.scan(5)[0])
+            self.assertIn("ESCALATE", self.scan(10)[0])
             self.assertEqual(self.scan(99999), [])
 
     def test_native_owner_route_and_coordinator_only_for_escalation(self):
@@ -232,13 +232,13 @@ class WaitingTests(IsolatedTestCase):
             args = argparse.Namespace(
                 bindings_dir=base, binding=base / "coordinator.json"
             )
-            for text in (line, self.scan(2401)[0]):
+            for text in (line, self.scan(1800)[0]):
                 stamped = ["time workers: " + text + " (start)"]
                 messages = inbox.native_messages(
                     args, stamped, True, inbox.action_patterns()
                 )
                 self.assertEqual([path for path, _ in messages], [str(owner)])
-            stamped = ["time workers: " + self.scan(4201)[0] + " (start)"]
+            stamped = ["time workers: " + self.scan(3600)[0] + " (start)"]
             messages = inbox.native_messages(
                 args, stamped, False, inbox.action_patterns()
             )
@@ -270,8 +270,8 @@ class CollectionTests(IsolatedTestCase):
         test = WaitingTests()
         test.setUp()
         test.start()
-        test.scan(2401)
-        test.scan(4201)
+        test.scan(1800)
+        test.scan(3600)
         lines = inbox.snapshot_lines("workers", test.state)
         self.assertEqual(len(lines), 3)
         keys = [alert_policy.worker_facts(line)[0]["key"] for line in lines]

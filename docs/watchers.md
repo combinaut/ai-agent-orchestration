@@ -64,7 +64,7 @@ A session in an owner-tagged workspace that stays `done` or `idle` for more than
 `WORKER WAITING <name> pane=<pane> owner=<workspace> <minutes>m session=<id>`.
 Architect and Coordinator role panes are excluded. The owning architect gets a
 native message through its binding and the existing bounded retry outbox. There
-is one repeat after `workers.wait_repeat_min` seconds (default 1800), then one
+is one repeat at `workers.wait_repeat_min` seconds of waiting (default 1800), then one
 native Coordinator escalation after another such interval. No further repeats.
 The feed records every stage; the user's to-do list is unchanged.
 

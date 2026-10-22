@@ -376,7 +376,7 @@ def reduce_waiting(previous, raw):
         entry = dict(entry or dict(since=now, stage=0, owner=owner), row=dict(row))
         stage = entry["stage"]
         delay = float(os.environ.get("ORCH_WAIT_MIN", 600)) if stage == 0 else float(os.environ.get("ORCH_WAIT_REPEAT_MIN", 1800))
-        since = entry["since"] if stage == 0 else entry["sent"]
+        since = entry["since"] if stage < 2 else entry["sent"]
         if stage < 3 and (now - since > delay if stage == 0 else now - since >= delay):
             events.append(waiting_line(key, entry, now, ("", "REPEAT", "ESCALATE")[stage]))
             entry.update(stage=stage + 1, sent=now)
