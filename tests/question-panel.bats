@@ -290,3 +290,17 @@ EOF
   [ "$status" -eq 0 ]
   grep -qx 'pane rename question-pane Q: hide' "$TMP/question-herdr.calls"
 }
+
+@test "an interrupted split never closes a labelled pane that appeared in the tab" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  todo='{"pane_id":"todo-pane","tab_id":"t1","tokens":{"todo":"1"}}'
+  run env HERDR_KILL_OPENER=split HERDR_PANES="{\"result\":{\"panes\":[$todo]}}" "$ROOT/ask-user-question" release "$question"
+  : >"$TMP/question-herdr.calls"
+  panes="$todo,{\"pane_id\":\"editor\",\"tab_id\":\"t1\",\"label\":\"editor\"}"
+  run env HERDR_PANES="{\"result\":{\"panes\":[$panes]}}" "$ROOT/ask-user-question" release "$question"
+  [ "$status" -eq 0 ]
+  run grep -q '^pane close' "$TMP/question-herdr.calls"
+  [ "$status" -eq 1 ]
+  [ ! -e "${question%.md}.opening" ]
+}

@@ -57,7 +57,7 @@ if new:
     print(new if any(row["pane_id"] == new for row in rows) else "")
 else:
     found = [row["pane_id"] for row in rows if tab and row.get("tab_id") == tab and row["pane_id"] not in known
-             and not str(row.get("label") or "").startswith("Q: ")]
+             and not row.get("label")]
     print(found[0] if len(found) == 1 else "")
 ' "$1"
 }
