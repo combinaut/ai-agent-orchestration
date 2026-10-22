@@ -93,7 +93,7 @@ SETTINGS = [
     _g('hog.git_gb', 'ORCH_HOG_GIT_GB', 'number', 2, 'Hog watcher: git process size in GB'),
     _g('hog.git_age_s', 'ORCH_HOG_GIT_AGE_S', 'int', 180, 'Hog watcher: git process age in seconds'),
     _g('workers.wait_s', 'ORCH_WAIT_S', 'number', 600, 'Seconds idle or done before WORKER WAITING'),
-    _g('workers.wait_repeat_s', 'ORCH_WAIT_REPEAT_S', 'number', 1800, 'Waiting age for the single repeat; then seconds until escalation'),
+    _g('workers.wait_repeat_s', 'ORCH_WAIT_REPEAT_S', 'number', 1800, 'Seconds between waiting alerts (minimum 60)'),
     _g('pr_tabs.org', 'ORCH_PR_TABS_ORG', 'str', '', 'Organization the PR tabs extension manages; empty turns org actions off'),
     _g('pr_tabs.default_repo', 'ORCH_PR_TABS_DEFAULT_REPO', 'str', '', 'Repo name for bare PR numbers; empty turns number jumps off'),
     _g('pr_tabs.open_all', 'ORCH_PR_TABS_OPEN_ALL', 'str', '', 'GitHub search behind the Open all button; empty turns it off'),

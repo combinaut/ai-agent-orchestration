@@ -64,14 +64,12 @@ class WaitingTests(IsolatedTestCase):
         self.assertIn("session=s1", events[0])
         return events[0]
 
-    def test_own_background_jobs_are_explicitly_uncertain_without_a_reliable_sensor(
-        self,
-    ):
+    def test_waiting_protocol_keeps_the_uncertainty_caveat(self):
         line = self.start()
         self.assertTrue(line.endswith("(may be waiting on its own job)"))
         self.row["name"] = "long-worker-name-" * 20
-        self.scan(1800)
-        line = self.scan(3600)[0]
+        self.scan(2401)
+        line = self.scan(4201)[0]
         self.assertLessEqual(len(line), alert_policy.LINE_LIMIT)
         self.assertTrue(line.endswith("(may be waiting on its own job)"))
         fact = alert_policy.worker_facts(line)[0]
@@ -90,7 +88,7 @@ class WaitingTests(IsolatedTestCase):
             args = argparse.Namespace(
                 bindings_dir=base, binding=base / "coordinator.json"
             )
-            for now in (0, 601, 1800, 3600):
+            for now in (0, 601, 2401, 4201):
                 raw = dict(
                     result={"agents": [self.row]},
                     observed_at=now,
@@ -109,7 +107,7 @@ class WaitingTests(IsolatedTestCase):
                 )
                 self.assertEqual(
                     [path for path, _ in messages],
-                    [str(args.binding if now == 3600 else owner)],
+                    [str(args.binding if now == 4201 else owner)],
                 )
 
     def test_known_working_status_resets_during_ownership_outage(self):
@@ -204,7 +202,7 @@ class WaitingTests(IsolatedTestCase):
                 self.assertEqual(self.state["waiting"]["s1"]["since"], 0)
                 self.assertEqual(self.state["waiting"]["s1"]["stage"], 1)
                 self.row["agent_session"] = {"value": "s1"}
-                self.assertIn("REPEAT", self.scan(1800)[0])
+                self.assertIn("REPEAT", self.scan(2401)[0])
 
     def test_only_done_or_idle_workers_start_waiting_timers(self):
         for status in ("working", "waiting", "blocked", "error"):
@@ -217,10 +215,10 @@ class WaitingTests(IsolatedTestCase):
 
     def test_threshold_and_no_extra_repeats(self):
         self.start()
-        self.assertEqual(self.scan(1799), [])
-        self.assertIn("REPEAT", self.scan(1800)[0])
-        self.assertEqual(self.scan(3599), [])
-        self.assertIn("ESCALATE", self.scan(3600)[0])
+        self.assertEqual(self.scan(2400), [])
+        self.assertIn("REPEAT", self.scan(2401)[0])
+        self.assertEqual(self.scan(4200), [])
+        self.assertIn("ESCALATE", self.scan(4201)[0])
         self.assertEqual(self.scan(99999), [])
 
     def test_clears_and_prunes_on_working_closed_or_untagged(self):
@@ -262,10 +260,10 @@ class WaitingTests(IsolatedTestCase):
         self.row.update(agent="codex", agent_session=None)
         self.assertEqual(self.scan(0), [])
         self.assertIn("session=p1", self.scan(601)[0])
-        self.assertIn("REPEAT", self.scan(1800)[0])
-        self.assertIn("ESCALATE", self.scan(3600)[0])
+        self.assertIn("REPEAT", self.scan(2401)[0])
+        self.assertIn("ESCALATE", self.scan(4201)[0])
         self.row["agent_status"] = "working"
-        self.assertIn("cleared", self.scan(3700, owners=None)[0])
+        self.assertIn("cleared", self.scan(4301, owners=None)[0])
         self.assertEqual(self.state["waiting"], {})
 
     def test_session_appearing_after_pane_timer_starts_fresh(self):
@@ -421,7 +419,7 @@ class WaitingTests(IsolatedTestCase):
                 self.row.update(agent_status="idle", revision=99)
                 self.assertEqual(self.scan(700), [])
                 self.assertEqual(self.state["waiting"]["s1"]["since"], 0)
-                self.assertIn("REPEAT", self.scan(1800)[0])
+                self.assertIn("REPEAT", self.scan(2401)[0])
 
     def test_new_work_resets_timer_even_with_same_session(self):
         self.start()
@@ -437,8 +435,8 @@ class WaitingTests(IsolatedTestCase):
         policy = {}
         for now, text in (
             (601, line),
-            (1800, self.scan(1800)[0]),
-            (3600, self.scan(3600)[0]),
+            (2401, self.scan(2401)[0]),
+            (4201, self.scan(4201)[0]),
         ):
             lines = alert_policy.apply(
                 policy, [dict(mode="workers", at=now, events=[text])], now
@@ -446,16 +444,16 @@ class WaitingTests(IsolatedTestCase):
             self.assertEqual(len(lines), 1)
             self.assertTrue(lines[0].endswith("(start)"))
         self.row["agent_status"] = "working"
-        clear = self.scan(3700)[0]
+        clear = self.scan(4301)[0]
         lines = alert_policy.apply(
-            policy, [dict(mode="workers", at=3700, events=[clear])], 3700
+            policy, [dict(mode="workers", at=4301, events=[clear])], 4301
         )
         self.assertTrue(any(line.endswith("(clear)") for line in lines))
 
     def test_monitor_cannot_swallow_native_coordinator_escalation(self):
         self.start()
-        self.scan(1800)
-        line = "time workers: " + self.scan(3600)[0] + " (start)"
+        self.scan(2401)
+        line = "time workers: " + self.scan(4201)[0] + " (start)"
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             args = argparse.Namespace(
@@ -470,25 +468,25 @@ class WaitingTests(IsolatedTestCase):
                 )
             }
             with patch.object(inbox, "flush_outbox", return_value=False):
-                inbox.finish(args, cursor, 3600, inbox.action_patterns())
+                inbox.finish(args, cursor, 4201, inbox.action_patterns())
             self.assertEqual(len(cursor[inbox.OUTBOX_KEY]), 1)
             self.assertNotIn("watch", cursor[inbox.OUTBOX_KEY][0])
             with patch.object(inbox, "send_line", return_value=False) as send:
-                inbox.flush_outbox(args, cursor, 3600)
+                inbox.flush_outbox(args, cursor, 4201)
                 self.assertEqual(send.call_count, 1)
-                inbox.flush_outbox(args, cursor, 3620)
+                inbox.flush_outbox(args, cursor, 4221)
                 self.assertEqual(send.call_count, 1)
             with patch.object(inbox, "send_line", return_value=True):
-                inbox.flush_outbox(args, cursor, 3660)
+                inbox.flush_outbox(args, cursor, 4261)
             self.assertNotIn(inbox.OUTBOX_KEY, cursor)
 
     def test_threshold_settings_are_used(self):
-        with patch.dict(os.environ, ORCH_WAIT_S="2", ORCH_WAIT_REPEAT_S="5"):
+        with patch.dict(os.environ, ORCH_WAIT_S="2", ORCH_WAIT_REPEAT_S="95"):
             self.scan(0)
             self.assertEqual(self.scan(2), [])
             self.assertEqual(len(self.scan(3)), 1)
-            self.assertIn("REPEAT", self.scan(5)[0])
-            self.assertIn("ESCALATE", self.scan(10)[0])
+            self.assertIn("REPEAT", self.scan(98)[0])
+            self.assertIn("ESCALATE", self.scan(193)[0])
             self.assertEqual(self.scan(99999), [])
 
     def test_missing_owner_binding_still_queues_native_waiting_message(self):
@@ -518,13 +516,13 @@ class WaitingTests(IsolatedTestCase):
             args = argparse.Namespace(
                 bindings_dir=base, binding=base / "coordinator.json"
             )
-            for text in (line, self.scan(1800)[0]):
+            for text in (line, self.scan(2401)[0]):
                 stamped = ["time workers: " + text + " (start)"]
                 messages = inbox.native_messages(
                     args, stamped, True, inbox.action_patterns()
                 )
                 self.assertEqual([path for path, _ in messages], [str(owner)])
-            stamped = ["time workers: " + self.scan(3600)[0] + " (start)"]
+            stamped = ["time workers: " + self.scan(4201)[0] + " (start)"]
             messages = inbox.native_messages(
                 args, stamped, False, inbox.action_patterns()
             )
@@ -585,8 +583,8 @@ class CollectionTests(IsolatedTestCase):
         test = WaitingTests()
         test.setUp()
         test.start()
-        test.scan(1800)
-        test.scan(3600)
+        test.scan(2401)
+        test.scan(4201)
         lines = inbox.snapshot_lines("workers", test.state)
         self.assertEqual(len(lines), 3)
         keys = [alert_policy.worker_facts(line)[0]["key"] for line in lines]

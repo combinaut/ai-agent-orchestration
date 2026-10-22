@@ -65,8 +65,9 @@ A session in an owner-tagged workspace that stays `done` or `idle` for more than
 Architect and Coordinator role panes, and panes with an `Architect::` name or
 title, are excluded. The owning architect gets a native message through its
 binding and the existing bounded retry outbox. There is one repeat at
-`workers.wait_repeat_s` seconds of waiting (default 1800), then one native
-Coordinator escalation after another such interval. No further repeats. The feed
+`workers.wait_repeat_s` seconds after the initial alert (default 1800), then one
+native Coordinator escalation after another such interval. Each gap is at least
+60 seconds, including after laptop sleep. No further repeats. The feed
 records every stage; the user's to-do list is unchanged.
 
 An observed `working` status resets the timer. Closing the session, removing its
@@ -79,5 +80,9 @@ the timer, catching state transitions between polls even when both snapshots are
 done/idle. The timer starts at the first observed done/idle snapshot and survives
 watcher restarts.
 
-Herdr has no reliable background-job signal, so every waiting line ends with
+Before a due alert, the watcher reads the last 16 pane lines. Claude monitor/shell
+footers or monitor status-line counts, and Codex's background-terminal running
+line, suppress delivery without resetting the timer or advancing its stage. A
+failed pane read is treated as not busy and logged once until a successful read.
+These text indicators are incomplete, so every waiting line retains the caveat
 `(may be waiting on its own job)`, including native alerts and escalation.

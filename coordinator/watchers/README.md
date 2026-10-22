@@ -279,13 +279,18 @@ route blockers and errors to owners, verify disappeared sessions and arrange
 recovery, clear recovered warnings, and restore unreadable agents or producers.
 The audit reports workspace-level blocked lines.
 
-Owner-tagged worker sessions also emit `WORKER WAITING` after 600 seconds done or
-idle. The owning architect receives one native alert and one repeat at 1800 seconds
-of waiting; another 1800 seconds without new work escalates once to the Coordinator.
-Role-tagged architects and coordinators are excluded. State and policy keys use
-the session ID (`workers:waiting:<session>:<stage>`), never a pane or name. Working,
-closing or a successful loss/change of owner clears the alert; unreadable reads
-preserve it. See [waiting settings and snapshot limits](../../docs/watchers.md#workers-waiting).
+Owner-tagged workers emit `WORKER WAITING` after 600 seconds done or idle. The
+owning architect receives one native alert, then one repeat 1800 seconds after
+that alert; another 1800 seconds after the repeat escalates once to the
+Coordinator. Repeat/escalation gaps are at least 60 seconds. Architect/coordinator
+role tags and `Architect::` names or titles are excluded. State and policy keys
+use the session ID, falling back to the pane ID when no session is available
+(`workers:waiting:<identity>:<stage>`). Working, closing, a sequence change, or a
+successful loss/change of owner clears the alert; unreadable snapshots preserve
+it. Before a due alert, the last 16 pane lines are checked for Claude monitor/shell
+or Codex background-terminal indicators. A busy pane preserves its timer and stage
+without sending. A failed pane read allows the alert and logs once until a
+successful read. See [waiting settings and snapshot limits](../../docs/watchers.md#workers-waiting).
 
 ## Audit alerts
 

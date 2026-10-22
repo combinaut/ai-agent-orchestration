@@ -486,8 +486,10 @@ def reduce_waiting(previous, raw):
         entry = dict(entry or dict(since=now, stage=0, owner=owner), row=dict(row))
         stage = entry["stage"]
         delay = float(os.environ.get("ORCH_WAIT_S", 600)) if stage == 0 else float(os.environ.get("ORCH_WAIT_REPEAT_S", 1800))
-        since = entry["since"] if stage < 2 else entry["sent"]
-        if stage < 3 and (now - since > delay if stage == 0 else now - since >= delay):
+        since = entry["since"] if stage == 0 else entry["sent"]
+        if stage:
+            delay = max(60, delay)
+        if row["pane_id"] not in raw.get("waiting_busy", []) and stage < 3 and (now - since > delay if stage == 0 else now - since >= delay):
             events.append(waiting_line(key, entry, now, ("", "REPEAT", "ESCALATE")[stage]))
             entry.update(stage=stage + 1, sent=now)
         current[key] = entry
@@ -541,7 +543,8 @@ def reduce_workers(before, raw):
     waiting, waiting_events = reduce_waiting(previous, raw)
     events += waiting_events
     return dict(bad={key: value for key, value in bad.items() if key in present},
-                present=present, unreadable=unreadable, seen=seen, waiting=waiting), events
+                present=present, unreadable=unreadable, seen=seen, waiting=waiting,
+                waiting_read_failures=raw.get("waiting_read_failures", previous.get("waiting_read_failures", []))), events
 
 
 def pull_owners(command, prs, failed=None, work=None):
@@ -1071,6 +1074,41 @@ def closed_panes(base, present, before):
     return names
 
 
+BACKGROUND_JOB = re.compile(
+    r"^\s*[1-9]\d* (?:monitors?|shells?) still running(?:\s.*)?$"
+    r"|· [1-9]\d* monitors?(?:\s|$)"
+    r"|^\s*(?:[•*] Working[^\n]* · )?[1-9]\d* background terminals? running · /ps to view · /stop to close\s*$",
+    re.MULTILINE,
+)
+
+
+def collect_waiting_jobs(raw, before):
+    """Read only panes with a due alert. Failed reads allow delivery and log once until a successful read."""
+    previous = before or {}
+    old = previous.get("waiting", {})
+    # Reuse the pure reducer to find due sends without duplicating identity and eligibility rules.
+    due, _ = reduce_waiting(previous, raw)
+    live = {row["pane_id"] for row in agents(raw)}
+    failed = set(previous.get("waiting_read_failures", [])) & live
+    busy = []
+    for key, entry in due.items():
+        if entry["stage"] <= old.get(key, {}).get("stage", 0):
+            continue
+        pane = entry["row"]["pane_id"]
+        try:
+            text = command(herdr_bin(), "pane", "read", pane, "--source", "recent-unwrapped", "--lines", "16")
+        except discovery.READ_ERRORS as error:
+            if pane not in failed:
+                print(f"workers: pane {pane} background-job read failed ({type(error).__name__}); treating as not busy",
+                      file=sys.stderr, flush=True)
+            failed.add(pane)
+            continue
+        failed.discard(pane)
+        if BACKGROUND_JOB.search(text):
+            busy.append(pane)
+    raw.update(waiting_busy=busy, waiting_read_failures=sorted(failed))
+
+
 def collect(mode, before, scope="", base=None):
     if mode == "audit":
         return audit.collect(command, before=before)
@@ -1091,6 +1129,7 @@ def collect(mode, before, scope="", base=None):
                 raw["workspaces"] = json.loads(command(herdr_bin(), "workspace", "list"))
             except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError, MissingMetric):
                 raw["workspaces"] = None
+            collect_waiting_jobs(raw, before)
             if base is not None:
                 raw["closed"] = closed_panes(base, {row["pane_id"] for row in agents(raw)}, before)
             return raw
