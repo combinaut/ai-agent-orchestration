@@ -1,5 +1,6 @@
 """A question hidden until a time: the `<slug>.remind` file next to the question, and reopening what is due."""
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -30,10 +31,18 @@ def write_remind(question, until):
     atomic_write(remind_path(question), repr(float(until)))
 
 
+def opened(opener, slug, question):
+    try:
+        return opener(slug, question) in (OPENED, ALREADY_OPEN)
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def reopen_due(directory, now, opener):
     """Reopen every question whose reminder time has passed; the caller holds the answers lock.
     opener(slug, question) returns the exit status of `ask-user-question <slug> <question>`.
-    A reminder without its question or with an unreadable time is dropped; a failed open stays for the next pass."""
+    A reminder without its question or with an unreadable time is dropped; a failed or raising open stays for the next pass
+    and never stops the others."""
     reopened = []
     for path in sorted(Path(directory).glob("*.remind")):
         question = path.with_suffix(".md")
@@ -44,7 +53,7 @@ def reopen_due(directory, now, opener):
             continue
         if not question.is_file():
             path.unlink(missing_ok=True)
-        elif until <= now and opener(path.stem, question) in (OPENED, ALREADY_OPEN):
+        elif until <= now and opened(opener, path.stem, question):
             path.unlink(missing_ok=True)
             reopened.append(path.stem)
     return reopened

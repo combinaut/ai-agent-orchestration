@@ -35,7 +35,10 @@ print(matches[-1] if matches else "")
 ' "$title" "$prefix"
 }
 
-case ${1:-} in
+action=${1:-}
+# `hide <path>` opens a question that is itself called hide
+[ "$action" != hide ] || [[ ${2:-} != */* ]] || action=open
+case $action in
   close)
     [ $# -eq 2 ] || usage
     slug=$2

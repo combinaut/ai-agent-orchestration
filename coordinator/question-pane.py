@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 HINT = "1-9 answer · t type an answer · d dismiss · r remind me later"
 ESCAPE = "ESC"
 ESCAPE_WAIT = 0.05
+SETTLE_SECONDS = 5
 
 
 def answer_path(question):
@@ -30,7 +31,7 @@ def answer_path(question):
 def launch(question, *args):
     """Runs ask-user-question in its own session so it outlives the pane it closes."""
     env = dict(os.environ, ORCH_USER_QUESTIONS_DIR=str(Path(question).parent))
-    subprocess.Popen([str(ROOT / "ask-user-question"), *args], env=env, start_new_session=True,
+    return subprocess.Popen([str(ROOT / "ask-user-question"), *args], env=env, start_new_session=True,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -69,10 +70,19 @@ class Panel:
             return False
         return True
 
+    def settle(self, process):
+        """True once the helper ran on; False after showing why it failed. A pane that closes ends this process first."""
+        try:
+            code = process.wait(timeout=SETTLE_SECONDS)
+        except subprocess.TimeoutExpired:
+            return True
+        if code:
+            self.show(f"Closing the pane failed (exit {code}); the question is still open.")
+        return not code
+
     def dismiss(self):
         if self.record("DISMISSED {slug}"):
-            self.launcher(self.question, "close", self.slug)
-            self.done = True
+            self.done = self.settle(self.launcher(self.question, "close", self.slug))
 
     def remind(self, until):
         self.picker = None
@@ -80,9 +90,8 @@ class Panel:
             write_remind(self.question, until)
         when = time.strftime("%Y-%m-%d %H:%M", time.localtime(until))
         if self.record("REMIND {slug} " + when):
-            self.launcher(self.question, "hide", self.slug)
-            self.done = True
-        else:
+            self.done = self.settle(self.launcher(self.question, "hide", self.slug))
+        if not self.done:
             remind_path(self.question).unlink(missing_ok=True)
 
     def pick(self, token):

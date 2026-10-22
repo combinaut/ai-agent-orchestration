@@ -561,9 +561,7 @@ def answer_order(path):
 
 
 def open_question(slug, question):
-    return subprocess.run([str(ROOT.parents[1] / "ask-user-question"), slug, str(question)],
-                          env=dict(os.environ, ORCH_USER_QUESTIONS_DIR=str(questions_directory())),
-                          capture_output=True, timeout=30).returncode
+    return runtime.run([str(ROOT.parents[1] / "ask-user-question"), slug, str(question)], timeout=30).returncode
 
 
 def collect_answers(before, consume=True):

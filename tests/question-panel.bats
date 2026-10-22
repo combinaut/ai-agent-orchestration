@@ -196,7 +196,7 @@ EOF
 }
 
 @test "hide rejects an invalid slug" {
-  run "$ROOT/ask-user-question" hide ../x
+  run "$ROOT/ask-user-question" hide bad_slug
   [ "$status" -eq 64 ]
 }
 
@@ -222,4 +222,12 @@ EOF
   printf '%s\n' 1 >"$questions/due.remind"
   run env ORCH_USER_QUESTIONS_DIR="$questions" HERDR_FAIL=run HERDR_PANES='{"result":{"panes":[{"pane_id":"todo","tokens":{"todo":"1"}}]}}' "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --state-dir "$TMP/state"
   [ -f "$questions/due.remind" ]
+}
+
+@test "a question named hide still opens with the slug and file form" {
+  question="$HOME/.claude/coordinator/questions/hide.md"
+  printf question >"$question"
+  run env HERDR_PANES='{"result":{"panes":[{"pane_id":"todo","tokens":{"todo":"1"}}]}}' "$ROOT/ask-user-question" hide "$question"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane rename question-pane Q: hide' "$TMP/question-herdr.calls"
 }

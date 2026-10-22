@@ -2,6 +2,7 @@ import importlib.util
 import io
 import os
 import pty
+import subprocess
 import tempfile
 import time
 import tty
@@ -35,7 +36,12 @@ class PanelCase(IsolatedTestCase):
         self.feed = self.root / "feed.log"
         self.launched, self.out = [], io.StringIO()
         self.panel = pane.Panel(self.question, self.out, columns=lambda: 80, clock=lambda: NOW,
-                                launcher=lambda *args: self.launched.append(args[1:]), feed=self.feed)
+                                launcher=self.launch, feed=self.feed)
+        self.exit_code = 0
+
+    def launch(self, *args):
+        self.launched.append(args[1:])
+        return SimpleNamespace(wait=lambda timeout: self.exit_code)
 
     def press(self, *keys):
         for key in keys:
@@ -62,6 +68,19 @@ class DismissTest(PanelCase):
             self.press("d")
         self.assertEqual((self.launched, self.panel.done), ([], False))
         self.assertIn("nothing changed", self.out.getvalue())
+
+    def test_a_failed_close_keeps_the_panel_interactive_with_the_reason(self):
+        self.exit_code = 3
+        self.press("d")
+        self.assertFalse(self.panel.done)
+        self.assertIn("exit 3", self.out.getvalue())
+
+    def test_a_helper_still_running_after_the_wait_counts_as_closing(self):
+        def slow(timeout):
+            raise pane.subprocess.TimeoutExpired("x", timeout)
+        self.panel.launcher = lambda *args: SimpleNamespace(wait=slow)
+        self.press("d")
+        self.assertTrue(self.panel.done)
 
     def test_d_is_not_a_dismiss_inside_the_picker(self):
         self.press("r", "d")
@@ -107,6 +126,12 @@ class RemindTest(PanelCase):
         self.assertIsNone(self.panel.picker)
         self.assertEqual((self.feed_lines(), self.launched, self.remind_file().exists(), self.panel.done),
                          ([], [], False, False))
+
+    def test_a_failed_hide_keeps_the_panel_open_and_drops_the_reminder_file(self):
+        self.exit_code = 1
+        self.press("r", "1")
+        self.assertEqual((self.panel.done, self.remind_file().exists()), (False, False))
+        self.assertIn("still open", self.out.getvalue())
 
     def test_a_feed_that_cannot_be_written_leaves_no_reminder(self):
         with patch.object(pane.feed_attach, "append_line", side_effect=TimeoutError("lock")):
@@ -169,6 +194,23 @@ class ReopenTest(IsolatedTestCase):
         (self.dir / "junk.remind").write_text("soon")
         question_remind.reopen_due(self.dir, NOW, self.opener())
         self.assertEqual((self.opened, sorted(self.dir.glob("*.remind"))), ([], []))
+
+    def test_a_raising_open_does_not_stop_the_later_reminders(self):
+        self.make("aaa", NOW)
+        self.make("bbb", NOW)
+        def opener(slug, question):
+            if slug == "aaa":
+                raise subprocess.TimeoutExpired("ask-user-question", 30)
+            self.opened.append(slug)
+            return 0
+        self.assertEqual(question_remind.reopen_due(self.dir, NOW, opener), ["bbb"])
+        self.assertEqual((self.dir / "aaa.remind").exists(), True)
+
+    def test_open_question_runs_through_the_owned_process_group_runner(self):
+        with patch.object(w.runtime, "run", return_value=SimpleNamespace(returncode=73)) as run:
+            self.assertEqual(w.open_question("due", Path("/q/due.md")), 73)
+        self.assertEqual(run.call_args.args[0][1:], ["due", "/q/due.md"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 30)
 
     def test_the_answers_pass_reopens_but_a_preview_does_not(self):
         self.make("due", 1)
