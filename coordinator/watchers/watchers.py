@@ -369,8 +369,10 @@ def reduce_waiting(previous, raw):
         if owners is not None and not owner:
             continue
         if row.get("agent_status") not in WORKER_STATUSES or owners is None or key in gaps:
+            if entry and owners is not None and owner != entry["owner"]:
+                continue
             if entry:
-                current[key] = entry
+                current[key] = dict(entry, row=dict(entry["row"], pane_id=row["pane_id"]))
             continue
         if row.get("agent_status") not in ("done", "idle"):
             continue

@@ -148,6 +148,53 @@ class WaitingTests(IsolatedTestCase):
             )
             self.assertEqual([path for path, _ in messages], [str(owner)])
 
+    def test_readable_owner_change_clears_during_status_or_session_gap(self):
+        for gap in ("status", "session"):
+            with self.subTest(gap=gap):
+                self.state = None
+                self.row.update(agent_status="done", agent_session={"value": "s1"})
+                self.start()
+                self.row.update(
+                    agent_status="unknown" if gap == "status" else "done",
+                    agent_session=None if gap == "session" else {"value": "s1"},
+                )
+                raw = dict(
+                    result={"agents": [self.row]},
+                    observed_at=700,
+                    workspaces=[dict(workspace_id="w1", tokens={"owner": "new-owner"})],
+                )
+                self.state, events = w.reduce_workers(self.state, raw)
+                self.assertEqual(len([e for e in events if "cleared" in e]), 1)
+                self.assertEqual(self.state["waiting"], {})
+                self.row.update(agent_status="done", agent_session={"value": "s1"})
+                self.state, events = w.reduce_workers(
+                    self.state, dict(raw, observed_at=800)
+                )
+                self.assertEqual(self.state["waiting"]["s1"]["since"], 800)
+                self.assertEqual(self.state["waiting"]["s1"]["stage"], 0)
+
+    def test_move_during_unreadable_snapshot_then_session_gap_keeps_timer(self):
+        for gap in ("owner", "status"):
+            with self.subTest(gap=gap):
+                self.state = None
+                self.row.update(
+                    pane_id="p1", agent_status="done", agent_session={"value": "s1"}
+                )
+                self.start()
+                self.row.update(
+                    pane_id="p2", agent_status="unknown" if gap == "status" else "done"
+                )
+                self.assertEqual(
+                    self.scan(700, owners=None if gap == "owner" else True), []
+                )
+                self.assertEqual(self.state["waiting"]["s1"]["row"]["pane_id"], "p2")
+                self.row.update(agent_status="done", agent_session=None)
+                self.assertEqual(self.scan(800), [])
+                self.assertEqual(self.state["waiting"]["s1"]["since"], 0)
+                self.assertEqual(self.state["waiting"]["s1"]["stage"], 1)
+                self.row["agent_session"] = {"value": "s1"}
+                self.assertIn("REPEAT", self.scan(1800)[0])
+
     def test_threshold_and_no_extra_repeats(self):
         self.start()
         self.assertEqual(self.scan(1799), [])
