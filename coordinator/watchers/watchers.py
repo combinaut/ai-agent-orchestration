@@ -570,8 +570,9 @@ def collect_pulls(command, before, clock=time.monotonic):
                     # Legacy snapshots lack per-check evidence; retain that unknown condition until a full read.
                     incomplete.append("RED")
                     check_failures = None
-                if "APPROVED-STACKED" in lines:
-                    lines["APPROVED-STACKED"] = lines["APPROVED-STACKED"].replace("full CI not run", "full CI unknown")
+                stacked = lines.get("APPROVED-STACKED", "")
+                if stacked.endswith(", full CI not run]"):
+                    lines["APPROVED-STACKED"] = stacked.removesuffix("full CI not run]") + "full CI unknown]"
                     incomplete.append("APPROVED-STACKED")
             identities = pull_identities(pr, lines)
             if pr["reviewThreads"]["pageInfo"]["hasNextPage"]:
