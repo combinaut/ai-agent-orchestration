@@ -286,7 +286,8 @@ Coordinator. Repeat/escalation gaps are at least 60 seconds. Architect/coordinat
 role tags and `Architect::` names or titles are excluded. State and policy keys
 use the session ID, falling back to the pane ID when no session is available
 (`workers:waiting:<identity>:<stage>`). Working, closing, a sequence change, or a
-successful loss/change of owner clears the alert; unreadable snapshots preserve
+successful loss/change of owner clears the alert and its queued native retries;
+unreadable snapshots preserve
 it. Before a due alert, the last 16 pane lines are checked for Claude monitor/shell
 or Codex background-terminal indicators. A busy pane preserves its timer and stage
 without sending. A failed pane read allows the alert and logs once until a

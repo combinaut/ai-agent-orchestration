@@ -258,6 +258,31 @@ def flush_outbox(args, cursor, now):
     return changed
 
 
+WAIT_ID = re.compile(r"(?:^| )workers: WORKER WAITING .+ pane=\S+ owner=(\S+) \d+m session=(\S+)")
+
+
+def waiting_identity(line):
+    found = WAIT_ID.search(line)
+    return found.groups() if found else None
+
+
+def cancel_waiting(cursor, lines):
+    """A clear removes every queued stage of that owner/identity, preserving other lines and later restarts."""
+    cleared = {waiting_identity(line): index for index, line in enumerate(lines)
+               if line.endswith("(clear)") and waiting_identity(line) is not None}
+    if cleared:
+        kept = []
+        for entry in cursor.get(OUTBOX_KEY, []):
+            text = "\n".join(line for line in entry["text"].splitlines() if waiting_identity(line) not in cleared)
+            if text:
+                kept.append(dict(entry, text=text))
+        if kept:
+            cursor[OUTBOX_KEY] = kept
+        else:
+            cursor.pop(OUTBOX_KEY, None)
+    return {index for index, line in enumerate(lines) if index > cleared.get(waiting_identity(line), -1)}
+
+
 def finish(args, cursor, now, patterns):
     """Completes the pending batch. Under the feed lock its place is committed, it is written once, and the Monitor's
     record decides the Coordinator copy: none when the Monitor will read it (kept waiting until the Monitor has read it),
@@ -280,8 +305,10 @@ def finish(args, cursor, now, patterns):
             pending.update(fed=True, coordinator="watch" if will_read(record, pending["inode"], pending["offset"]) else "native")
             commit(args, cursor)
     coordinator = pending.get("coordinator", "native" if pending.get("fallback") else "none")
+    active = cancel_waiting(cursor, pending["lines"])
     dropped = dropped_lines(pending["lines"])
-    in_feed = pending["lines"][len(dropped):]
+    in_feed = [line for index, line in enumerate(pending["lines"]) if index >= len(dropped) and index in active]
+    dropped = [line for index, line in enumerate(dropped) if index in active]
     for target, text in native_messages(args, in_feed, coordinator != "none", patterns):
         entry = dict(binding=target, text=text, at=now)
         # WAITING escalation is native even with a Monitor: that feed line is deliberately not an action.

@@ -71,7 +71,9 @@ native Coordinator escalation after another such interval. Each gap is at least
 records every stage; the user's to-do list is unchanged.
 
 An observed `working` status resets the timer. Closing the session, removing its
-owner tag, or changing its owner clears its old alert immediately. An unreadable
+owner tag, or changing its owner clears its old alert immediately. Clears also
+cancel queued native retries for that owner and identity, preserving other
+messages and later restarts. An unreadable
 workspace or agent snapshot preserves state; a successful empty ownership read
 clears it. Timers are keyed by session ID (or pane ID when no session is available)
 and removed when that identity vanishes, so a successor using the same pane and

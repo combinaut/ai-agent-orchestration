@@ -596,3 +596,65 @@ class CollectionTests(IsolatedTestCase):
                 "workers:waiting:s1:ESCALATE",
             },
         )
+
+
+class WaitingOutboxTests(IsolatedTestCase):
+    def line(self, sid="s1", stage="", clear=False):
+        suffix = " cleared" if clear else (" " + stage if stage else "")
+        return f"time workers: WORKER WAITING worker pane=p1 owner=architect 11m session={sid}{suffix}{alert_policy.WORKER_WAIT_NOTE} ({'clear' if clear else 'start'})"
+
+    def finish(self, args, cursor, lines, now):
+        cursor[inbox.PENDING_KEY] = dict(
+            lines=lines, fed=True, coordinator="native", inode=1, offset=0
+        )
+        inbox.finish(args, cursor, now, inbox.action_patterns())
+
+    def test_clear_cancels_failed_waiting_retries_but_preserves_other_messages(self):
+        for stage in ("", "REPEAT", "ESCALATE"):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                args = argparse.Namespace(
+                    bindings_dir=base,
+                    binding=base / "coordinator.json",
+                    cursor=base / "cursor",
+                    feed=base / "feed",
+                )
+                cursor = {}
+                with patch.object(inbox, "send_line", return_value=False):
+                    self.finish(
+                        args,
+                        cursor,
+                        [self.line(stage=stage), self.line(sid="s2")],
+                        1000,
+                    )
+                self.assertIn(inbox.OUTBOX_KEY, cursor)
+                # Outbox compaction can merge unrelated messages into the same entry.
+                next(
+                    entry
+                    for entry in cursor[inbox.OUTBOX_KEY]
+                    if "session=s1" in entry["text"]
+                )["text"] += "\nunrelated message"
+                with patch.object(inbox, "send_line", return_value=True) as send:
+                    self.finish(args, cursor, [self.line(clear=True)], 1060)
+                delivered = "\n".join(call.args[1] for call in send.call_args_list)
+                self.assertNotIn("session=s1", delivered)
+                self.assertIn("session=s2", delivered)
+                self.assertIn("unrelated message", delivered)
+                self.assertNotIn(inbox.OUTBOX_KEY, cursor)
+
+    def test_clear_filters_earlier_same_batch_starts_but_keeps_later_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            args = argparse.Namespace(
+                bindings_dir=base,
+                binding=base / "coordinator.json",
+                cursor=base / "cursor",
+                feed=base / "feed",
+            )
+            cursor = {}
+            with patch.object(inbox, "send_line", return_value=True) as send:
+                self.finish(args, cursor, [self.line(), self.line(clear=True)], 1000)
+                send.assert_not_called()
+                self.finish(args, cursor, [self.line(clear=True), self.line()], 1060)
+            self.assertEqual(send.call_count, 1)
+            self.assertIn("session=s1", send.call_args.args[1])
