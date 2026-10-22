@@ -561,16 +561,11 @@ def answer_order(path):
 
 
 def open_question(slug, question):
-    return runtime.run([str(ROOT.parents[1] / "ask-user-question"), slug, str(question)], timeout=30).returncode
+    return runtime.run([str(ROOT.parents[1] / "ask-user-question"), slug, str(question)], timeout=question_remind.OPEN_TIMEOUT).returncode
 
 
 def collect_answers(before, consume=True):
     directory = questions_directory()
-    if consume:
-        try:
-            question_remind.reopen_due(directory, time.time(), open_question)
-        except (OSError, subprocess.SubprocessError):
-            pass
     answers, unreadable, blocked = [], [], set()
     try:
         files = list(directory.iterdir())
@@ -607,6 +602,11 @@ def collect_answers(before, consume=True):
         except (OSError, UnicodeError):
             blocked.add(slug)
             unreadable.append(str(processing))
+    if consume:
+        try:
+            question_remind.reopen_due(directory, time.time(), open_question)
+        except (OSError, subprocess.SubprocessError):
+            pass
     return {"answers": answers, "unreadable": unreadable}
 
 

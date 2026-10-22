@@ -206,11 +206,43 @@ class ReopenTest(IsolatedTestCase):
         self.assertEqual(question_remind.reopen_due(self.dir, NOW, opener), ["bbb"])
         self.assertEqual((self.dir / "aaa.remind").exists(), True)
 
+    def test_no_open_starts_after_the_budget_and_failures_go_to_the_back(self):
+        for slug in ("aaa", "bbb", "ccc"):
+            self.make(slug, NOW)
+        ticks = iter(range(0, 1000, 10))
+        order = []
+        def opener(slug, question):
+            order.append(slug)
+            return 1
+        question_remind.reopen_due(self.dir, NOW, opener, budget=20, clock=lambda: next(ticks))
+        self.assertEqual(len(order), 1)
+        first = list(order)
+        order.clear()
+        ticks = iter(range(0, 1000, 10))
+        question_remind.reopen_due(self.dir, NOW, opener, budget=20, clock=lambda: next(ticks))
+        self.assertNotEqual(order[0], first[0])
+
+    def test_slow_reopens_never_keep_a_pending_answer_from_publishing(self):
+        for slug in ("r1", "r2", "r3", "r4", "r5"):
+            self.make(slug, 1)
+        (self.dir / "ship.md").touch()
+        (self.dir / "ship.answer").write_text("yes\n")
+        base = self.dir / "state"
+        attempts = []
+        def slow(slug, question):
+            attempts.append(slug)
+            raise subprocess.TimeoutExpired("ask-user-question", 10)
+        with patch.dict(os.environ, {"ORCH_USER_QUESTIONS_DIR": str(self.dir)}), \
+                patch.object(w, "open_question", slow), patch.object(question_remind, "REOPEN_BUDGET", 0):
+            line = w.cycle(base, "answers", lambda before: w.collect_answers(before))
+        self.assertIn("ANSWER ship: yes", line)
+        self.assertEqual(attempts, [])
+
     def test_open_question_runs_through_the_owned_process_group_runner(self):
         with patch.object(w.runtime, "run", return_value=SimpleNamespace(returncode=73)) as run:
             self.assertEqual(w.open_question("due", Path("/q/due.md")), 73)
         self.assertEqual(run.call_args.args[0][1:], ["due", "/q/due.md"])
-        self.assertEqual(run.call_args.kwargs["timeout"], 30)
+        self.assertEqual(run.call_args.kwargs["timeout"], question_remind.OPEN_TIMEOUT)
 
     def test_the_answers_pass_reopens_but_a_preview_does_not(self):
         self.make("due", 1)

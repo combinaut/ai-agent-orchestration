@@ -2,10 +2,13 @@
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 OPENED = 0
 ALREADY_OPEN = 73
+REOPEN_BUDGET = 20
+OPEN_TIMEOUT = 10
 
 
 def atomic_write(path, text):
@@ -38,13 +41,15 @@ def opened(opener, slug, question):
         return False
 
 
-def reopen_due(directory, now, opener):
-    """Reopen every question whose reminder time has passed; the caller holds the answers lock.
+def reopen_due(directory, now, opener, budget=None, clock=time.monotonic):
+    """Reopen the questions whose reminder time has passed; the caller holds the answers lock.
     opener(slug, question) returns the exit status of `ask-user-question <slug> <question>`.
-    A reminder without its question or with an unreadable time is dropped; a failed or raising open stays for the next pass
-    and never stops the others."""
-    reopened = []
-    for path in sorted(Path(directory).glob("*.remind")):
+    A reminder without its question or with an unreadable time is dropped. A failed or raising open stays for the next
+    pass and never stops the others; no attempt starts once `budget` seconds are used, and a failure moves its reminder
+    to the back of the order so persistent failures do not starve the rest."""
+    budget = REOPEN_BUDGET if budget is None else budget
+    reopened, started = [], clock()
+    for path in sorted(Path(directory).glob("*.remind"), key=reminder_age):
         question = path.with_suffix(".md")
         try:
             until = float(path.read_text())
@@ -53,7 +58,17 @@ def reopen_due(directory, now, opener):
             continue
         if not question.is_file():
             path.unlink(missing_ok=True)
-        elif until <= now and opened(opener, path.stem, question):
-            path.unlink(missing_ok=True)
-            reopened.append(path.stem)
+        elif until <= now and clock() - started < budget:
+            if opened(opener, path.stem, question):
+                path.unlink(missing_ok=True)
+                reopened.append(path.stem)
+            else:
+                os.utime(path)
     return reopened
+
+
+def reminder_age(path):
+    try:
+        return path.stat().st_mtime_ns, path.name
+    except OSError:
+        return 0, path.name
