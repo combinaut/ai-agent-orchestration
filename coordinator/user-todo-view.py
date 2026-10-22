@@ -22,7 +22,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "watchers"))
 import feed_attach  # noqa: E402
 
 COORDINATOR = Path.home() / ".claude/coordinator"
-TODO = Path(os.environ.get("ORCH_USER_TODO_OUTPUT") or COORDINATOR / "user-todo.md")
+
+
+def configured_output():
+    """ORCH_USER_TODO_OUTPUT from the environment, else from the settings file; empty when neither sets it."""
+    if os.environ.get("ORCH_USER_TODO_OUTPUT"):
+        return os.environ["ORCH_USER_TODO_OUTPUT"]
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+        import orch_settings
+        return orch_settings.resolved_global(orch_settings.config_path(os.environ), os.environ)["ORCH_USER_TODO_OUTPUT"]
+    except Exception:
+        return ""
+
+
+TODO = Path(configured_output() or COORDINATOR / "user-todo.md")
 HIDDEN = TODO.with_name("user-todo-state.json")
 FEED = COORDINATOR / "watchers/prod-context/coordinator-feed.log"
 PICKS = (("1", "pick1", "15m"), ("2", "pick2", "1h"), ("3", "pick3", "2h"), ("4", "pick4", "4h"),

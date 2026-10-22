@@ -40,13 +40,6 @@ splits() { calls | grep -c '^pane split ' || true; }
   not_contains "$(calls)" 'pane focus'
 }
 
-@test "the pane command carries a configured to-do output file" {
-  printf '[user_todo]\noutput = "/data/todo out.md"\n' >"$TMP/todo.toml"
-  run env ORCH_CONFIG="$TMP/todo.toml" "$PANE"
-  [ "$status" -eq 0 ]
-  contains "$(calls)" 'env ORCH_USER_TODO_OUTPUT=/data/todo\ out.md '
-}
-
 @test "reuses a pane already labelled To-do and opens nothing" {
   printf '{"pane_id":"existing","label":"To-do"}' >"$TMP/panes.json"
   run "$PANE"

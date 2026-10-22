@@ -25,11 +25,7 @@ fi
 [ -n "${HERDR_PANE_ID:-}" ] || { echo "HERDR_PANE_ID is not set; run this from the Coordinator's pane" >&2; exit 69; }
 pane=$("$herdr" pane split "$HERDR_PANE_ID" --direction right --no-focus |
   "$python" -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')
-if [ -n "${ORCH_USER_TODO_OUTPUT:-}" ]; then
-  printf -v command 'env ORCH_USER_TODO_OUTPUT=%q %q %q' "$ORCH_USER_TODO_OUTPUT" "$python" "$root/user-todo-view.py"
-else
-  printf -v command '%q %q' "$python" "$root/user-todo-view.py"
-fi
+printf -v command '%q %q' "$python" "$root/user-todo-view.py"
 if ! "$herdr" pane run "$pane" "$command" || ! "$herdr" pane rename "$pane" "$label"; then
   "$root/watchers/close-pane.sh" "$pane"
   exit 1
