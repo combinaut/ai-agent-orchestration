@@ -523,6 +523,40 @@ class PullsTest(IsolatedTestCase):
         self.assertFalse(any("cleared" in event for event in events))
         self.assertIn("PULLS READFAIL pr:owner/product#7", events)
 
+    def test_title_only_edits_do_not_restart_conditions(self):
+        for decision, base, red in (("APPROVED", "main", False), ("APPROVED", "stack", False),
+                                    ("CHANGES_REQUESTED", "main", False), ("REVIEW_REQUIRED", "main", True)):
+            with self.subTest(decision=decision, base=base, red=red):
+                row = pr(7, decision=decision)
+                row["baseRefName"] = base
+                if red:
+                    row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0]["conclusion"] = "FAILURE"
+                with patch.object(w.audit, "repo_settings", return_value={}):
+                    state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+                    row["title"] = "A new display title"
+                    _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+                self.assertEqual(events, [])
+
+    def test_truncated_threads_reconcile_new_resolved_and_unseen_evidence(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        row["reviewThreads"]["nodes"] = [{"id": "T1", "isResolved": False}]
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        row["reviewThreads"]["pageInfo"]["hasNextPage"] = True
+        row["headRefOid"] = "head-2"
+        row["reviewThreads"]["nodes"] = [{"id": "T2", "isResolved": False}]
+        state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertTrue(any(event.startswith("THREADS owner/product#7 owner=") for event in events))
+        self.assertEqual(state["prs"]["owner/product#7"]["identities"]["THREADS"], ["head-2", ["T1", "T2"]])
+        state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, [])
+        row["reviewThreads"]["nodes"] = [{"id": "T1", "isResolved": True}]
+        state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(state["prs"]["owner/product#7"]["identities"]["THREADS"], ["head-2", ["T2"]])
+        self.assertTrue(any(event.startswith("THREADS owner/product#7 owner=") for event in events))
+        row["reviewThreads"] = {"nodes": [], "pageInfo": {"hasNextPage": False}}
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertIn("THREADS owner/product#7 cleared", events)
+
     def test_one_search_call_per_poll(self):
         w.collect_pulls(self.command([pr(n) for n in range(20)]), None)
         self.assertEqual(sum(argv[:3] == ("gh", "api", "graphql") for argv in self.calls), 1)

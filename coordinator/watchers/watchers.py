@@ -553,6 +553,18 @@ def collect_pulls(command, before, clock=time.monotonic):
                     for review in pr["reviews"]["nodes"]):
                 incomplete.append("COPILOT")
             for kind in incomplete:
+                if kind == "THREADS" and kind in old.get("identities", {}):
+                    # A partial page can prove a visible resolution/new thread, never an unseen resolution.
+                    threads = pr["reviewThreads"]["nodes"]
+                    unseen = set(old["identities"][kind][1]) - {thread["id"] for thread in threads}
+                    active = sorted(unseen | {thread["id"] for thread in threads if not thread["isResolved"]})
+                    if active:
+                        identities[kind] = [pr["headRefOid"], active]
+                        lines[kind] = f"THREADS {key} {pr['title']} [{len(active)} unresolved]"
+                    else:
+                        lines.pop(kind, None)
+                        identities.pop(kind, None)
+                    continue
                 if kind in old.get("lines", {}):
                     lines[kind] = old["lines"][kind]
                 if kind in old.get("identities", {}):
@@ -576,7 +588,8 @@ def collect_pulls(command, before, clock=time.monotonic):
 
 def pull_identities(pr, lines):
     """JSON-stable event identities, independent of display text and pane/session IDs."""
-    identities = {kind: [pr["headRefOid"], line] for kind, line in lines.items()}
+    label = f"{pr['repository']['nameWithOwner']}#{pr['number']} {pr['title']}"
+    identities = {kind: [pr["headRefOid"], line[len(kind) + 1 + len(label):]] for kind, line in lines.items()}
     if "THREADS" in lines:
         identities["THREADS"] = [pr["headRefOid"], sorted(
             thread["id"] for thread in pr["reviewThreads"]["nodes"]
