@@ -15,7 +15,7 @@ sys.path.insert(
     0, str(ROOT)
 )  # the script runs with -I, which leaves its own directory off the path
 
-from watchers import architect_like
+from watchers import architect_like  # noqa: E402
 
 SECTION = "## Closed workers"
 KEEP_LINES = 10

@@ -3,8 +3,9 @@
 import unittest
 from datetime import UTC, datetime
 
-import close_worker as cw
 from test_support import IsolatedTestCase
+
+import close_worker as cw
 
 NEW = "- NEW"
 

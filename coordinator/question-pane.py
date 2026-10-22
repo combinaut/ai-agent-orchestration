@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Show one user question and atomically record its answer."""
+
 import argparse
 import os
 import sys
@@ -31,7 +32,12 @@ def atomic_write(path, text):
 
 def show(question, status=""):
     os.system("clear")
-    print(Path(question).read_text().rstrip().replace("Answer in the Coordinator pane.", ""))
+    print(
+        Path(question)
+        .read_text()
+        .rstrip()
+        .replace("Answer in the Coordinator pane.", "")
+    )
     print("\nPress 1-9 to answer, or t to type an answer.")
     if status:
         print("\n" + status)
@@ -72,7 +78,9 @@ def follow(question):
             text = input("Your answer: ")
             if text.strip():
                 atomic_write(answer, text)
-                show(question, f"Sent: {text.strip()}. The Coordinator will pick it up.")
+                show(
+                    question, f"Sent: {text.strip()}. The Coordinator will pick it up."
+                )
             else:
                 show(question)
         time.sleep(0.05)

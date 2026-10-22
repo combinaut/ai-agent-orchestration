@@ -1,8 +1,9 @@
 """Host and process adapters selected once for the running platform."""
+
 import os
 import re
-import subprocess
 import stat
+import subprocess
 import sys
 import time
 from collections import Counter
@@ -15,13 +16,20 @@ class MissingMetric(Exception):
 
 def herdr_bin():
     """HERDR_BIN_PATH (set by the services), else the configured ORCH_HERDR_BIN, else herdr on PATH."""
-    return os.environ.get("HERDR_BIN_PATH") or os.environ.get("ORCH_HERDR_BIN") or "herdr"
+    return (
+        os.environ.get("HERDR_BIN_PATH") or os.environ.get("ORCH_HERDR_BIN") or "herdr"
+    )
 
 
 def optional(read):
     try:
         return read()
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, MissingMetric):
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        MissingMetric,
+    ):
         return None
 
 
@@ -50,16 +58,26 @@ def mac_free(command):
 
 
 def mac_load(command, index):
-    return float(fields(command("sysctl", "-n", "vm.loadavg").strip("{} \n"), index + 1)[index])
+    return float(
+        fields(command("sysctl", "-n", "vm.loadavg").strip("{} \n"), index + 1)[index]
+    )
 
 
 class MacHost:
     def collect(self, command):
         return {
             "free": optional(lambda: mac_free(command)),
-            "swap": optional(lambda: match_number(r"used = ([\d.]+)M", command("sysctl", "-n", "vm.swapusage"))),
-            "procs": optional(lambda: len(command("ps", "-A", "-o", "pid=").splitlines())),
-            "files": optional(lambda: int(fields(command("sysctl", "-n", "kern.num_files"), 1)[0])),
+            "swap": optional(
+                lambda: match_number(
+                    r"used = ([\d.]+)M", command("sysctl", "-n", "vm.swapusage")
+                )
+            ),
+            "procs": optional(
+                lambda: len(command("ps", "-A", "-o", "pid=").splitlines())
+            ),
+            "files": optional(
+                lambda: int(fields(command("sysctl", "-n", "kern.num_files"), 1)[0])
+            ),
             "load": optional(lambda: mac_load(command, 0)),
         }
 
@@ -69,28 +87,44 @@ class LinuxHost:
         self.proc = Path(proc)
 
     def memory(self):
-        return {line.split(":", 1)[0]: int(fields(line, 2)[1])
-                for line in (self.proc / "meminfo").read_text().splitlines()}
+        return {
+            line.split(":", 1)[0]: int(fields(line, 2)[1])
+            for line in (self.proc / "meminfo").read_text().splitlines()
+        }
 
     def free(self):
         values = self.memory()
-        return 100 * memory_field(values, "MemAvailable") / memory_field(values, "MemTotal")
+        return (
+            100
+            * memory_field(values, "MemAvailable")
+            / memory_field(values, "MemTotal")
+        )
 
     def swap(self):
         values = self.memory()
-        return (memory_field(values, "SwapTotal") - memory_field(values, "SwapFree")) / 1024
+        return (
+            memory_field(values, "SwapTotal") - memory_field(values, "SwapFree")
+        ) / 1024
 
     def files(self):
-        allocated, unused, _ = map(int, fields((self.proc / "sys/fs/file-nr").read_text(), 3))
+        allocated, unused, _ = map(
+            int, fields((self.proc / "sys/fs/file-nr").read_text(), 3)
+        )
         return allocated - unused
 
     def collect(self, command):
         return {
             "free": optional(self.free),
             "swap": optional(self.swap),
-            "procs": optional(lambda: sum(p.name.isdigit() and p.is_dir() for p in self.proc.iterdir())),
+            "procs": optional(
+                lambda: sum(
+                    p.name.isdigit() and p.is_dir() for p in self.proc.iterdir()
+                )
+            ),
             "files": optional(self.files),
-            "load": optional(lambda: float(fields((self.proc / "loadavg").read_text(), 1)[0])),
+            "load": optional(
+                lambda: float(fields((self.proc / "loadavg").read_text(), 1)[0])
+            ),
         }
 
 
@@ -123,9 +157,17 @@ class MacProcesses:
             if len(parts) != 10:
                 raise ValueError("unparseable process")
             pid, ppid, rss, elapsed = parts[:4]
-            rows.append(dict(pid=pid, ppid=ppid, rss=int(rss), age=elapsed_seconds(elapsed),
-                             start=" ".join(parts[4:9]), comm=parts[9],
-                             command=commands.get(pid, parts[9])))
+            rows.append(
+                dict(
+                    pid=pid,
+                    ppid=ppid,
+                    rss=int(rss),
+                    age=elapsed_seconds(elapsed),
+                    start=" ".join(parts[4:9]),
+                    comm=parts[9],
+                    command=commands.get(pid, parts[9]),
+                )
+            )
         return rows
 
 
@@ -136,16 +178,26 @@ class LinuxProcesses:
 
     def read_process(self, path, uptime):
         stat = (path / "stat").read_text()
-        name, _, tail = stat[stat.index("(") + 1:].rpartition(")")
+        name, _, tail = stat[stat.index("(") + 1 :].rpartition(")")
         values = fields(tail, 20)
         start = int(values[19])
         status = (path / "status").read_text()
-        rss = int(match_number(r"(?m)^VmRSS:\s*(\d+)\s+kB", status)) if "VmRSS:" in status else 0
+        rss = (
+            int(match_number(r"(?m)^VmRSS:\s*(\d+)\s+kB", status))
+            if "VmRSS:" in status
+            else 0
+        )
         argv = (path / "cmdline").read_bytes().decode(errors="replace").split("\0")
         cmd = " ".join(argv).strip()
-        return dict(pid=path.name, ppid=values[1], rss=rss,
-                    age=max(0, int(uptime - start / self.ticks)), start=str(start),
-                    comm=argv[0] or name, command=cmd or name)
+        return dict(
+            pid=path.name,
+            ppid=values[1],
+            rss=rss,
+            age=max(0, int(uptime - start / self.ticks)),
+            start=str(start),
+            comm=argv[0] or name,
+            command=cmd or name,
+        )
 
     def collect(self, command):
         uptime = float(fields((self.proc / "uptime").read_text(), 1)[0])
@@ -156,7 +208,13 @@ class LinuxProcesses:
                 continue
             try:
                 rows.append(self.read_process(path, uptime))
-            except (FileNotFoundError, ProcessLookupError, PermissionError, ValueError, MissingMetric):
+            except (
+                FileNotFoundError,
+                ProcessLookupError,
+                PermissionError,
+                ValueError,
+                MissingMetric,
+            ):
                 # A process may exit, be restricted, or expose incomplete fields.
                 self.skipped_processes += 1
         return rows
@@ -186,10 +244,20 @@ def balance_read(read, label=None):
     started = time.monotonic()
     try:
         return read()
-    except (OSError, subprocess.SubprocessError, MissingMetric, ValueError, IndexError, ZeroDivisionError) as error:
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        MissingMetric,
+        ValueError,
+        IndexError,
+        ZeroDivisionError,
+    ) as error:
         if label:
-            print(f"balance read failed: {label} after {time.monotonic() - started:.1f}s: "
-                  f"{read_failure_reason(error)}", file=sys.stderr)
+            print(
+                f"balance read failed: {label} after {time.monotonic() - started:.1f}s: "
+                f"{read_failure_reason(error)}",
+                file=sys.stderr,
+            )
         return None
 
 
@@ -207,7 +275,7 @@ def worktree_root(cwd):
     if "worktrees" not in parts:
         return None
     index = parts.index("worktrees")
-    boundary = Path(*parts[:index + 1])
+    boundary = Path(*parts[: index + 1])
     for candidate in (path, *path.parents):
         if candidate == boundary:
             break
@@ -223,7 +291,9 @@ def worktree_totals(rows, errors=None):
         try:
             root = worktree_root(row["cwd"])
         except OSError:
-            errors.append("pid:" + row["pid"] if row.get("pid") else "cwd:" + row["cwd"])
+            errors.append(
+                "pid:" + row["pid"] if row.get("pid") else "cwd:" + row["cwd"]
+            )
             continue
         if root:
             total = totals.setdefault(str(root), dict(name=root.name, cpu=0, mb=0))
@@ -273,7 +343,9 @@ def read_slots(directory=None):
             pid = int(path.read_text().strip())
             if pid <= 0:
                 raise ValueError("slot PID must be positive")
-            rows[key] = dict(name=path.name, directory=False, pid=pid, alive=process_alive(pid))
+            rows[key] = dict(
+                name=path.name, directory=False, pid=pid, alive=process_alive(pid)
+            )
         except FileNotFoundError:
             continue
         except (OSError, ValueError, OverflowError) as error:
@@ -283,18 +355,29 @@ def read_slots(directory=None):
 
 def live_slots(directory=None):
     rows, errors = read_slots(directory)
-    return (sum(row["alive"] for row in rows.values()) if rows is not None else None,
-            sorted(errors) if rows is not None else [])
+    return (
+        sum(row["alive"] for row in rows.values()) if rows is not None else None,
+        sorted(errors) if rows is not None else [],
+    )
 
 
 class MacBalance:
     def metrics(self, command):
-        return dict(free=balance_read(lambda: mac_free(command)),
-                    load5=balance_read(lambda: mac_load(command, 1)))
+        return dict(
+            free=balance_read(lambda: mac_free(command)),
+            load5=balance_read(lambda: mac_load(command, 1)),
+        )
 
     def processes(self, command):
-        text = balance_read(lambda: command("ps", "-U", str(os.getuid()), "-o", "pid=,%cpu=,rss=,stat=,uid="), "ps")
-        directories = balance_read(lambda: command("lsof", "-n", "-d", "cwd", "-Fpn"), "lsof")
+        text = balance_read(
+            lambda: command(
+                "ps", "-U", str(os.getuid()), "-o", "pid=,%cpu=,rss=,stat=,uid="
+            ),
+            "ps",
+        )
+        directories = balance_read(
+            lambda: command("lsof", "-n", "-d", "cwd", "-Fpn"), "lsof"
+        )
         if text is None or directories is None:
             return [], ["processes"]
         cwd = {}
@@ -318,7 +401,11 @@ class MacBalance:
                         continue
                     errors.append("pid:" + pid)
                     continue
-                rows.append(dict(pid=pid, cwd=cwd[pid], cpu=float(values[1]), rss=int(values[2])))
+                rows.append(
+                    dict(
+                        pid=pid, cwd=cwd[pid], cpu=float(values[1]), rss=int(values[2])
+                    )
+                )
             except (ValueError, IndexError):
                 errors.append("pid:" + pid)
         return rows, errors
@@ -337,18 +424,27 @@ class LinuxBalance:
         self.ticks = ticks or os.sysconf("SC_CLK_TCK")
 
     def metrics(self, command):
-        return dict(free=balance_read(self.host.free),
-                    load5=balance_read(lambda: float(fields((self.proc / "loadavg").read_text(), 2)[1])))
+        return dict(
+            free=balance_read(self.host.free),
+            load5=balance_read(
+                lambda: float(fields((self.proc / "loadavg").read_text(), 2)[1])
+            ),
+        )
 
     def process(self, path):
         stat = (path / "stat").read_text()
-        values = fields(stat[stat.rindex(")") + 1:], 22)
+        values = fields(stat[stat.rindex(")") + 1 :], 22)
         # Zombies and kernel threads cannot contribute worktree load.
         if values[0] == "Z" or int(values[6]) & 0x00200000:
             return None
-        return dict(pid=path.name, cwd=str((path / "cwd").readlink()),
-                    identity=path.name + ":" + values[19], start=int(values[19]), ticks=int(values[11]) + int(values[12]),
-                    rss=int(values[21]) * os.sysconf("SC_PAGE_SIZE") / 1024)
+        return dict(
+            pid=path.name,
+            cwd=str((path / "cwd").readlink()),
+            identity=path.name + ":" + values[19],
+            start=int(values[19]),
+            ticks=int(values[11]) + int(values[12]),
+            rss=int(values[21]) * os.sysconf("SC_PAGE_SIZE") / 1024,
+        )
 
     def owned_processes(self):
         paths = balance_read(lambda: list(self.proc.iterdir()))
@@ -371,17 +467,30 @@ class LinuxBalance:
 
     def sample(self, previous):
         rows, errors = self.owned_processes()
-        uptime = balance_read(lambda: float(fields((self.proc / "uptime").read_text(), 1)[0]))
+        uptime = balance_read(
+            lambda: float(fields((self.proc / "uptime").read_text(), 1)[0])
+        )
         if uptime is None or rows is None:
-            return dict(rows=[], errors=errors + ([] if rows is None else ["processes"]), cpu_sample=None)
+            return dict(
+                rows=[],
+                errors=errors + ([] if rows is None else ["processes"]),
+                cpu_sample=None,
+            )
         previous = previous or {}
         elapsed = uptime - previous.get("uptime", uptime)
         counters = {}
         for row in rows:
             counters[row["identity"]] = row["ticks"]
-            row["cpu"] = process_cpu(row["ticks"], previous.get("ticks", {}).get(row["identity"]),
-                                     elapsed, self.ticks, uptime - row["start"] / self.ticks)
-        return dict(rows=rows, errors=errors, cpu_sample=dict(uptime=uptime, ticks=counters))
+            row["cpu"] = process_cpu(
+                row["ticks"],
+                previous.get("ticks", {}).get(row["identity"]),
+                elapsed,
+                self.ticks,
+                uptime - row["start"] / self.ticks,
+            )
+        return dict(
+            rows=rows, errors=errors, cpu_sample=dict(uptime=uptime, ticks=counters)
+        )
 
 
 BALANCE = MacBalance() if sys.platform == "darwin" else LinuxBalance()

@@ -4,6 +4,7 @@
 The module is deliberately stdlib-only.  Its small functions are also used by the
 watcher and tests; the executable name retains the documented hyphen.
 """
+
 import argparse
 import fcntl
 import json
@@ -65,8 +66,13 @@ def status_items(directory, read=None):
             elif section is not None and line.startswith(("- ", "* ")):
                 text = normalized(line[2:])
                 if text and not placeholder(text):
-                    section.append({"source": path.name, "text": text,
-                                    "id": path.name + "\0" + text})
+                    section.append(
+                        {
+                            "source": path.name,
+                            "text": text,
+                            "id": path.name + "\0" + text,
+                        }
+                    )
     return now, unreadable
 
 
@@ -101,8 +107,13 @@ def merge(directory, output, state_path, now=None):
         cached = state.setdefault("items", {})
         dismissed = set(state.get("dismissed", []))
         unreadable_sources = {Path(path).name for path in unreadable}
-        retained = list(cached.values()) if str(directory) in unreadable else [
-            item for item in cached.values() if item["source"] in unreadable_sources]
+        retained = (
+            list(cached.values())
+            if str(directory) in unreadable
+            else [
+                item for item in cached.values() if item["source"] in unreadable_sources
+            ]
+        )
         current += [dict(item) for item in retained if not item.get("later")]
         seen = state.setdefault("first_seen", {})
         for item in current:
@@ -110,14 +121,25 @@ def merge(directory, output, state_path, now=None):
             item["age"] = max(0, int(now - seen[item["id"]]))
         present = {item["id"] for item in current}
         dismissed &= present
-        state["first_seen"] = {key: value for key, value in seen.items() if key in present}
-        state["items"] = {item["id"]: {key: value for key, value in item.items() if key not in ("age", "later")}
-                          for item in current}
+        state["first_seen"] = {
+            key: value for key, value in seen.items() if key in present
+        }
+        state["items"] = {
+            item["id"]: {
+                key: value for key, value in item.items() if key not in ("age", "later")
+            }
+            for item in current
+        }
         state["dismissed"] = sorted(dismissed)
         atomic_write(state_path, json.dumps(state, sort_keys=True))
         visible = [item for item in current if item["id"] not in dismissed]
         render(output, visible)
-        return {"now": visible, "unreadable": unreadable, "read": sorted(read), "scanned": str(directory) not in unreadable}
+        return {
+            "now": visible,
+            "unreadable": unreadable,
+            "read": sorted(read),
+            "scanned": str(directory) not in unreadable,
+        }
 
 
 AGE_PREFIX = re.compile(r"\[(now|\d+[mhd])\] (.*)")
@@ -141,9 +163,18 @@ def render(output, current):
     lines = []
     for source, items in groups.items():
         lines += ["", f"## {source}"]
-        lines += ["- " + (item["display"] if "display" in item else f"[{age(item['age'])}] {item['text']}")
-                  for item in items]
-    atomic_write(output, ("\n".join(lines) if lines else "Nothing waits on you.") + "\n")
+        lines += [
+            "- "
+            + (
+                item["display"]
+                if "display" in item
+                else f"[{age(item['age'])}] {item['text']}"
+            )
+            for item in items
+        ]
+    atomic_write(
+        output, ("\n".join(lines) if lines else "Nothing waits on you.") + "\n"
+    )
 
 
 def target(text):
@@ -155,13 +186,24 @@ def live_agent(session, rows):
     for row in rows:
         tokens = row.get("tokens") or {}
         named = row.get("name") == session
-        if named and tokens.get("role") not in ("architect", "coordinator"):  # Workers retain their Herdr agent name.
+        if named and tokens.get("role") not in (
+            "architect",
+            "coordinator",
+        ):  # Workers retain their Herdr agent name.
             return row.get("name")
-        if named or row.get("terminal_title_stripped") == session or tokens.get("session") == session:
+        if (
+            named
+            or row.get("terminal_title_stripped") == session
+            or tokens.get("session") == session
+        ):
             matches.append(row)
         elif session == "Coordinator" and tokens.get("role") == "coordinator":
             matches.append(row)
-        elif session.startswith("Architect::") and tokens.get("role") == "architect" and row.get("terminal_title_stripped") == session:
+        elif (
+            session.startswith("Architect::")
+            and tokens.get("role") == "architect"
+            and row.get("terminal_title_stripped") == session
+        ):
             matches.append(row)
     if not matches:
         return None
@@ -173,21 +215,35 @@ def jump(item, run=subprocess.run, platform=sys.platform):
     if not where:
         return "no target"
     if where.startswith(("https://", "http://")):
-        argv = ["open", "-a", "Google Chrome", where] if platform == "darwin" else ["xdg-open", where]
+        argv = (
+            ["open", "-a", "Google Chrome", where]
+            if platform == "darwin"
+            else ["xdg-open", where]
+        )
         try:
             result = run(argv, check=False)
         except OSError:
             return "open failed: " + where
-        return "opened " + where if getattr(result, "returncode", 0) == 0 else "open failed: " + where
-    herdr = os.environ.get("HERDR_BIN_PATH") or os.environ.get("ORCH_HERDR_BIN") or "herdr"
+        return (
+            "opened " + where
+            if getattr(result, "returncode", 0) == 0
+            else "open failed: " + where
+        )
+    herdr = (
+        os.environ.get("HERDR_BIN_PATH") or os.environ.get("ORCH_HERDR_BIN") or "herdr"
+    )
     try:
-        result = run([herdr, "agent", "list"], capture_output=True, text=True, check=False)
+        result = run(
+            [herdr, "agent", "list"], capture_output=True, text=True, check=False
+        )
     except OSError:
         return "agent list failed"
     if getattr(result, "returncode", 0) != 0:
         return "agent list failed"
     try:
-        agent = live_agent(where, json.loads(result.stdout).get("result", {}).get("agents", []))
+        agent = live_agent(
+            where, json.loads(result.stdout).get("result", {}).get("agents", [])
+        )
     except (ValueError, AttributeError):
         agent = None
     if not agent:
@@ -196,15 +252,40 @@ def jump(item, run=subprocess.run, platform=sys.platform):
         focused = run([herdr, "agent", "focus", agent], check=False)
     except OSError:
         return "focus failed: " + agent
-    return "focused " + agent if getattr(focused, "returncode", 0) == 0 else "focus failed: " + agent
+    return (
+        "focused " + agent
+        if getattr(focused, "returncode", 0) == 0
+        else "focus failed: " + agent
+    )
 
 
 def report_metadata(pane, count, run=subprocess.run):
     if pane:
-        herdr = os.environ.get("HERDR_BIN_PATH") or os.environ.get("ORCH_HERDR_BIN") or "herdr"
+        herdr = (
+            os.environ.get("HERDR_BIN_PATH")
+            or os.environ.get("ORCH_HERDR_BIN")
+            or "herdr"
+        )
         try:
-            tabbar = ["--token", f"tabbar=To-do {count}"] if count else ["--clear-token", "tabbar"]
-            run([herdr, "pane", "report-metadata", pane, "--source", "orchestrate", "--token", f"todo={count}", *tabbar], check=False)
+            tabbar = (
+                ["--token", f"tabbar=To-do {count}"]
+                if count
+                else ["--clear-token", "tabbar"]
+            )
+            run(
+                [
+                    herdr,
+                    "pane",
+                    "report-metadata",
+                    pane,
+                    "--source",
+                    "orchestrate",
+                    "--token",
+                    f"todo={count}",
+                    *tabbar,
+                ],
+                check=False,
+            )
         except OSError:
             pass
 
@@ -216,8 +297,17 @@ def number_selection(value, count):
 def load_orch_config(run=subprocess.run):
     library = Path(__file__).parent / "watchers/coord-lib.sh"
     try:
-        result = run(["/bin/bash", "-c", 'source "$1"; orch_load_config; orch_export_config; env -0',
-                      "user-todo", str(library)], capture_output=True, check=False)
+        result = run(
+            [
+                "/bin/bash",
+                "-c",
+                'source "$1"; orch_load_config; orch_export_config; env -0',
+                "user-todo",
+                str(library),
+            ],
+            capture_output=True,
+            check=False,
+        )
     except OSError:
         return False
     if result.returncode:
@@ -250,10 +340,16 @@ def rendered_items(output, state_path=None):
             if match := AGE_PREFIX.match(text):
                 tag, text = match.groups()
             elif match := AGE_SUFFIX.search(text):
-                text, tag = text[:match.start()], match.group(1)
+                text, tag = text[: match.start()], match.group(1)
             display = f"[{tag}] {text}" if tag else text
-            items.append({"source": source, "text": text, "display": display,
-                          "id": source + "\0" + text})
+            items.append(
+                {
+                    "source": source,
+                    "text": text,
+                    "display": display,
+                    "id": source + "\0" + text,
+                }
+            )
     dismissed = dismissed_ids(state_path) if state_path else set()
     return [item for item in items if item["id"] not in dismissed]
 
@@ -273,7 +369,10 @@ def dismiss_item(item, state_path, output=None):
         state["dismissed"] = sorted(dismissed)
         atomic_write(state_path, json.dumps(state, sort_keys=True))
         if output:
-            render(output, [candidate for candidate in visible if candidate["id"] != item["id"]])
+            render(
+                output,
+                [candidate for candidate in visible if candidate["id"] != item["id"]],
+            )
     return True
 
 
@@ -349,22 +448,36 @@ def page_starts(items, width, height):
 
 
 def mouse_events(buffer):
-    events = [(int(button), int(row), kind) for button, _column, row, kind in
-              re.findall(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])", buffer)]
+    events = [
+        (int(button), int(row), kind)
+        for button, _column, row, kind in re.findall(
+            r"\x1b\[<(\d+);(\d+);(\d+)([Mm])", buffer
+        )
+    ]
     remainder = re.sub(r"\x1b\[<\d+;\d+;\d+[Mm]", "", buffer)
     partial = re.search(r"\x1b(?:\[(?:<[0-9;]*|[0-9]*)?)?$", remainder)
     pending = partial.group() if partial else ""
-    return events, remainder[:partial.start()] if partial else remainder, pending
+    return events, remainder[: partial.start()] if partial else remainder, pending
 
 
 def jump_succeeded(result):
     return result.startswith(("focused ", "opened "))
 
 
-def follow(args, wait=select.select, read=os.read, run_jump=jump, report=report_metadata):
-    selected, typed, footer, pending_mouse, page = 0, "", "keyboard: number then Enter to jump", "", 0
+def follow(
+    args, wait=select.select, read=os.read, run_jump=jump, report=report_metadata
+):
+    selected, typed, footer, pending_mouse, page = (
+        0,
+        "",
+        "keyboard: number then Enter to jump",
+        "",
+        0,
+    )
     last_count = None
-    state_path = getattr(args, "state", Path(args.output).with_name("user-todo.state.json"))
+    state_path = getattr(
+        args, "state", Path(args.output).with_name("user-todo.state.json")
+    )
     fd = sys.stdin.fileno()
     saved = termios.tcgetattr(fd) if os.isatty(fd) else None
     mouse = "\033[?1000h\033[?1006h"
@@ -373,65 +486,79 @@ def follow(args, wait=select.select, read=os.read, run_jump=jump, report=report_
         sys.stdout.write(mouse)
         sys.stdout.flush()
     try:
-      while True:
-        items = rendered_items(args.output, state_path)
-        count = len(items)
-        if count != last_count:
-            report(args.pane or os.environ.get("HERDR_PANE_ID"), count)
-            last_count = count
-        try:
-            rendered = Path(args.output).read_text().rstrip()
-        except (OSError, ValueError):
-            rendered = "Nothing waits on you."
-        size = os.get_terminal_size() if os.isatty(fd) else os.terminal_size((80, 24))
-        starts = page_starts(items, size.columns, size.lines)
-        page = min(page, len(starts) - 1)
-        visible, rows = visible_items(items, size.columns, size.lines, starts[page])
-        room = max(1, size.lines - 3)
-        screen = [clip_rows(item_line(n, item), size.columns, room) for n, item in visible]
-        if not items:
-            screen.append(rendered)
-        status = f"page {page + 1}/{len(starts)}: n next, p prev | " + footer if len(starts) > 1 else footer
-        screen += ["", clip_rows(status, max(1, size.columns - 1), 1)]
-        print("\033[2J\033[H" + "\n".join(screen), flush=True)
-        readable, _, _ = wait([fd], [], [], 1)
-        if readable:
-            key = read(fd, 64)
-            if not key:
-                break
-            key = key.decode(errors="ignore")
-            events, key, pending_mouse = mouse_events(pending_mouse + key)
-            paging = re.findall(r"\x1b\[([56])~", key)
-            key = re.sub(r"\x1b\[[56]~", "", key)
-            step = sum(1 if code == "6" else -1 for code in paging)
-            step += key.count("n") - key.count("p")
-            shown = items
-            for button, row, kind in events:
-                if kind == "M" and button in (64, 65):
-                    step += 1 if button == 65 else -1
-                elif button == 0 and kind == "M" and 1 <= row <= len(rows):
-                    selected = rows[row - 1]
-                    footer = run_jump(shown[selected])
-                    if jump_succeeded(footer) and dismiss_item(shown[selected], state_path, args.output):
-                        footer += " (removed)"
-                        items = rendered_items(args.output, state_path)
-            page = max(0, page + step)
-            for char in key:
-                if char.isdigit():
-                    typed += char
-                    footer = "selected " + typed
-                elif char in ("\x7f", "\b"):
-                    typed = typed[:-1]
-                elif char in ("\n", "\r"):
-                    choice = number_selection(typed, len(items)) if typed else selected
-                    if choice is None or not 0 <= choice < len(items):
-                        footer = "not found: item " + typed
-                    else:
-                        selected, footer = choice, run_jump(items[choice])
-                        if jump_succeeded(footer) and dismiss_item(items[choice], state_path, args.output):
+        while True:
+            items = rendered_items(args.output, state_path)
+            count = len(items)
+            if count != last_count:
+                report(args.pane or os.environ.get("HERDR_PANE_ID"), count)
+                last_count = count
+            try:
+                rendered = Path(args.output).read_text().rstrip()
+            except (OSError, ValueError):
+                rendered = "Nothing waits on you."
+            size = (
+                os.get_terminal_size() if os.isatty(fd) else os.terminal_size((80, 24))
+            )
+            starts = page_starts(items, size.columns, size.lines)
+            page = min(page, len(starts) - 1)
+            visible, rows = visible_items(items, size.columns, size.lines, starts[page])
+            room = max(1, size.lines - 3)
+            screen = [
+                clip_rows(item_line(n, item), size.columns, room) for n, item in visible
+            ]
+            if not items:
+                screen.append(rendered)
+            status = (
+                f"page {page + 1}/{len(starts)}: n next, p prev | " + footer
+                if len(starts) > 1
+                else footer
+            )
+            screen += ["", clip_rows(status, max(1, size.columns - 1), 1)]
+            print("\033[2J\033[H" + "\n".join(screen), flush=True)
+            readable, _, _ = wait([fd], [], [], 1)
+            if readable:
+                key = read(fd, 64)
+                if not key:
+                    break
+                key = key.decode(errors="ignore")
+                events, key, pending_mouse = mouse_events(pending_mouse + key)
+                paging = re.findall(r"\x1b\[([56])~", key)
+                key = re.sub(r"\x1b\[[56]~", "", key)
+                step = sum(1 if code == "6" else -1 for code in paging)
+                step += key.count("n") - key.count("p")
+                shown = items
+                for button, row, kind in events:
+                    if kind == "M" and button in (64, 65):
+                        step += 1 if button == 65 else -1
+                    elif button == 0 and kind == "M" and 1 <= row <= len(rows):
+                        selected = rows[row - 1]
+                        footer = run_jump(shown[selected])
+                        if jump_succeeded(footer) and dismiss_item(
+                            shown[selected], state_path, args.output
+                        ):
                             footer += " (removed)"
                             items = rendered_items(args.output, state_path)
-                    typed = ""
+                page = max(0, page + step)
+                for char in key:
+                    if char.isdigit():
+                        typed += char
+                        footer = "selected " + typed
+                    elif char in ("\x7f", "\b"):
+                        typed = typed[:-1]
+                    elif char in ("\n", "\r"):
+                        choice = (
+                            number_selection(typed, len(items)) if typed else selected
+                        )
+                        if choice is None or not 0 <= choice < len(items):
+                            footer = "not found: item " + typed
+                        else:
+                            selected, footer = choice, run_jump(items[choice])
+                            if jump_succeeded(footer) and dismiss_item(
+                                items[choice], state_path, args.output
+                            ):
+                                footer += " (removed)"
+                                items = rendered_items(args.output, state_path)
+                        typed = ""
     finally:
         if saved is not None:
             sys.stdout.write("\033[?1000l\033[?1006l")
@@ -445,12 +572,28 @@ def main():
         return 1
     parser = argparse.ArgumentParser()
     coordinator = Path.home() / ".claude/coordinator"
-    parser.add_argument("--status-dir", type=Path,
-                        default=Path(os.environ.get("ORCH_USER_TODO_STATUS_DIR") or coordinator / "status"))
-    parser.add_argument("--output", type=Path,
-                        default=Path(os.environ.get("ORCH_USER_TODO_OUTPUT") or coordinator / "user-todo.md"))
-    parser.add_argument("--state", type=Path,
-                        default=Path(os.environ.get("ORCH_USER_TODO_STATE") or coordinator / "user-todo.state.json"))
+    parser.add_argument(
+        "--status-dir",
+        type=Path,
+        default=Path(
+            os.environ.get("ORCH_USER_TODO_STATUS_DIR") or coordinator / "status"
+        ),
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path(
+            os.environ.get("ORCH_USER_TODO_OUTPUT") or coordinator / "user-todo.md"
+        ),
+    )
+    parser.add_argument(
+        "--state",
+        type=Path,
+        default=Path(
+            os.environ.get("ORCH_USER_TODO_STATE")
+            or coordinator / "user-todo.state.json"
+        ),
+    )
     parser.add_argument("--follow", action="store_true")
     parser.add_argument("--pane")
     args = parser.parse_args()
