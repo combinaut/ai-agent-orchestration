@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Persistent Monitor source; cursor belongs to this reader, never a live watcher."""
+
 import argparse
 import fcntl
 import json
 import time
-import watcher_runtime as runtime
 from pathlib import Path
-from watchers import MODES, WATCH_TIMING, atomic
 
+import watcher_runtime as runtime
+from watchers import MODES, WATCH_TIMING, atomic
 
 TERMINAL_KINDS = ("MERGED", "CLOSED")
 
@@ -16,9 +17,17 @@ def terminal_alerts(entries):
     out = []
     for entry in entries:
         alert = json.loads(entry["line"])
-        ends = [line for line in alert.get("events", []) if line.split(" ", 1)[0] in TERMINAL_KINDS]
+        ends = [
+            line
+            for line in alert.get("events", [])
+            if line.split(" ", 1)[0] in TERMINAL_KINDS
+        ]
         if ends:
-            out.append(dict(alert, events=ends, **({"at": entry["at"]} if "at" in entry else {})))
+            out.append(
+                dict(
+                    alert, events=ends, **({"at": entry["at"]} if "at" in entry else {})
+                )
+            )
     return out
 
 
@@ -31,7 +40,9 @@ def read_once(base, cursor, now, stale_after, modes=MODES):
             state = json.loads((base / (mode + ".json")).read_text())
             if state.get("reset") and old.get("reset") != state["reset"]:
                 old.update(seq=0, reset=state["reset"])
-                if state.get("reset_line") and (not state["events"] or state["events"][0]["seq"] > 1):
+                if state.get("reset_line") and (
+                    not state["events"] or state["events"][0]["seq"] > 1
+                ):
                     events.append({"mode": mode, "events": [state["reset_line"]]})
             if state["events"] and old["seq"] < state["events"][0]["seq"] - 1:
                 # Batches between the cursor and the kept history are gone; the reader resumes from the snapshot,
@@ -52,7 +63,12 @@ def read_once(base, cursor, now, stale_after, modes=MODES):
         # A producer the cursor first saw within its heartbeat grace may still be starting.
         stale = stale and now - old.get("since", 0) > grace
         if stale != old["stale"]:
-            events.append({"mode": mode, "events": ["HEARTBEAT STALE" if stale else "HEARTBEAT RECOVERED"]})
+            events.append(
+                {
+                    "mode": mode,
+                    "events": ["HEARTBEAT STALE" if stale else "HEARTBEAT RECOVERED"],
+                }
+            )
             old["stale"] = stale
     return json.dumps({"alerts": events}, sort_keys=True) if events else None
 
@@ -73,7 +89,9 @@ def main():
     with lock:
         for _ in runtime.iterations(5, not args.once, "alert reader"):
             known = set(cursor)
-            line = read_once(args.state_dir, cursor, time.time(), args.stale_after, args.modes)
+            line = read_once(
+                args.state_dir, cursor, time.time(), args.stale_after, args.modes
+            )
             if line:
                 print(line, flush=True)
             if line or set(cursor) != known:

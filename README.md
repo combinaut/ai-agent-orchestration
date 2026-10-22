@@ -22,7 +22,7 @@ Run a team of Claude Code and Codex agents you can watch: one **Coordinator**, *
 
 The installer puts the skills, watchers, hooks and status line into `~/.claude`. It starts no agent; you open those sessions yourself. The panes come from an env adapter ([`env/README.md`](env/README.md) shows how to add one). [Herdr](https://herdr.dev) is the one shipped, so the installer also sets up Herdr and Radar.
 
-## 1. Install
+## 📦 1. Install
 
 You need macOS or Linux, [Claude Code](https://claude.com/claude-code) with the `ListAgents`, `SendMessage` and `Monitor` tools, `git`, `jq`, Python 3.11 or newer and `curl`. `gh` (logged in with `gh auth login`) is needed for the PR watchers. Codex CLI is optional.
 
@@ -34,7 +34,7 @@ It clones this repo to `~/.claude/ai-agent-orchestration`, links the files into 
 
 The installer adds a marked orchestration block to `~/.claude/CLAUDE.md`. Later runs replace the text between those markers. If you already pasted the older unmarked sections, it leaves them alone and tells you how to wrap them once with the markers from [`snippets/CLAUDE.md.snippet`](snippets/CLAUDE.md.snippet); any custom text inside the markers will be replaced on the next run.
 
-## 2. Set it up
+## 🔩 2. Set it up
 
 The first run copies [`config/orchestration.toml.example`](config/orchestration.toml.example) to `~/.claude/orchestration.toml`, or converts an existing `~/.claude/orchestration.env`. On a terminal it asks for the keys below while they are empty or a `<…>` placeholder, offering a default it found; Enter takes it, `-` leaves the key empty. Without a terminal it lists the keys to fill. Set at least:
 
@@ -48,9 +48,9 @@ Settings for one repo (big-repo guard, legacy scan and its rules, focus) go in t
 
 To update, run the install command again. At session start a hook prints `ai-agent-orchestration setup out of date, run install.sh` when you are behind. Nothing updates on its own. The clone is never updated over local work: with uncommitted edits or commits that are not on origin the installer prints `REFUSED: … has local changes` and stops. It never stashes or resets. Put your changes in a PR, then run it again.
 
-## 3. Use it
+## 🚀 3. Use it
 
-### Start the Coordinator
+### 🧭 Start the Coordinator
 
 There is one Coordinator per machine. In a Herdr pane of its own, start Claude Code and run:
 
@@ -60,7 +60,7 @@ There is one Coordinator per machine. In a Herdr pane of its own, start Claude C
 
 It lists the `Architect::<area>` sessions, introduces itself, tags its pane `role=coordinator`, binds itself as the inbox target (`bind-self.py`, again after every recycle) and arms one Monitor on `~/.claude/coordinator/watchers/feed-monitor.sh`. You talk to the Coordinator. It relays your orders to architects and gives you one overview. It never merges, undrafts, assigns reviewers, deploys or pushes. Details: [`skills/coordinate/SKILL.md`](skills/coordinate/SKILL.md).
 
-### Start an architect
+### 📐 Start an architect
 
 Open a session named `Architect::<area>`, run `/architect`, and give it the initiative:
 
@@ -72,19 +72,19 @@ The architect splits the work into tasks. It does not edit code. For each task i
 
 Workers, recycles and handoffs: [`docs/workers.md`](docs/workers.md).
 
-### The to-do pane
+### 📝 The to-do pane
 
 The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list as a popup (on by default; `todo_popup = false` turns the popup off). Details, keys and settings: [docs/todo.md](docs/todo.md).
 
-### User questions
+### ❓ User questions
 
 Every user question gets a pane. Create its Markdown file under `~/.claude/coordinator/questions/`, then run `ask-user-question <slug> <file>`; it stacks below the to-do pane without taking focus. Number keys or `t` record an answer, which the shared feed Monitor reports. Run `ask-user-question close <slug>` after handling it to find the pane by its exact `Q: <slug>` label, close it through `close-pane.sh`, then remove its files. A failed close keeps the files for retry.
 
-### Review PRs
+### 🔍 Review PRs
 
 `/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`) in a Herdr pane for every PR that is ready; Codex posts the review and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
 
-### Heavy jobs
+### 🐘 Heavy jobs
 
 Many sessions share one machine. `heavy-slot` caps how many test runs, browsers or builds run at once (`ORCH_HEAVY_SLOTS_MAX`):
 
@@ -96,7 +96,7 @@ heavy-slot list                          # names, pids, ages, stale records
 
 If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`](docs/heavy-slot.md).
 
-## Docs
+## 📚 Docs
 
 - [`docs/architecture.md`](docs/architecture.md): how the Coordinator, architects, workers and watchers fit together.
 - [`docs/installer.md`](docs/installer.md): every installer step, the file table and a troubleshooting table.

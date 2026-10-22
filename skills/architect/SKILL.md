@@ -110,7 +110,7 @@ happening. Close only what you created.
 
 **Close what is no longer needed, automatically, without asking.** In the same step as the event that ends a pane's job: a merged or closed PR → close its workspace and remove its worktree (if clean); a pane replaced by another (model change, budget out) → close the old pane; a reviewer or one-off pane → close once its report is dispatched. Keep a pane while it owns an open PR's review cycle.
 
-**A finished worker closes right away, without asking, once its report is read, it has no open work and nothing is typed in its composer. Close by pane, never pkill.**
+**A finished worker closes right away, without asking, once its report is read, it has no open work and nothing is typed in its composer. Close it with `~/.claude/coordinator/watchers/close-worker.sh <pane> --task <text> --report <path>`, which writes one recovery line in your status file and closes the pane; never pkill.** On `WORKER IDLE <pane> owner=<you>`, check the worker: close it the same way when its task is done, or keep it and do nothing else. Architects stay open. Read [`worker-close.md`](references/worker-close.md) before you close a worker.
 
 An author pane is the opposite: it lives as long as its PR is open, because it owns the review cycle.
 
@@ -146,7 +146,7 @@ Use `gh` and `gh api` for GitHub actions and queries.
 
 **GitHub duty.** A worker that asks twice to perform an authorized GitHub action loses its GitHub duty; the architect does that GitHub action itself with `gh`.
 
-**Message discipline.** An FYI ends with "no reply needed"; do not reply to one. Answer only questions and orders. Rewrite `~/.claude/coordinator/status/<architect-name>.md` on every state change. Keep `## Waits on the user` current, one `- <what> -> <session name or GitHub URL>` per item. The Coordinator derives the immediate user list from these files; never hand-maintain it. Read `~/.claude/coordinator/notes.md` at the start of each real turn and on recycle; it carries broadcast rules while idle architects stay unmessaged.
+**Message discipline.** An FYI ends with "no reply needed"; do not reply to one. Answer only questions and orders. Rewrite `~/.claude/coordinator/status/<architect-name>.md` on every state change, and keep its `## Closed workers` section: `close-worker.sh` writes it, and its lines are the only place that holds a closed worker's resume id. Keep `## Waits on the user` current, one `- <what> -> <session name or GitHub URL>` per item. The Coordinator derives the immediate user list from these files; never hand-maintain it. Read `~/.claude/coordinator/notes.md` at the start of each real turn and on recycle; it carries broadcast rules while idle architects stay unmessaged.
 
 Do **not** ask whether to start work already implied by the task. Dispatch it when dependencies permit: create and manage worktrees and branches, edit, test, format, commit, push, create and update PRs, and fix CI caused by the work.
 
@@ -274,8 +274,6 @@ Treat smart-model quota as scarce. Prefer worker → worker → smart escalation
 Use `herdr agent prompt` only for a brand-new worker's first brief or for follow-up prompts to a worker pane you own that nobody types into. Every message to the Coordinator, an architect, or another live user-facing session uses the native channel: `SendMessage` for Claude and `codex queue --thread <session-UUID-or-exact-Codex-name> --message <text>` for Codex. Never type into a composer a person may be using.
 
 **Recycle-start exception (Claude panes only).** The Coordinator or an architect may use `herdr agent prompt` in a fresh successor pane it just started for `date`, the `/architect …` or `/coordinate …` brief, and startup slash commands such as `/review-prs watch --org acme`; slash commands cannot go through `SendMessage`. This exception applies only to that fresh successor's startup.
-
-**Remote Control repair exception (Claude panes only, user OK 2026-10-11).** `/remote-control` may be sent with `herdr agent prompt` to an idle architect pane whose Remote Control failed, only after checking that its composer is empty. Do not send it unless both the idle state and empty composer are verified.
 
 Preserve saved names `Coordinator` and `Architect::...`, worker UUIDs, and current handoffs. Prefer a verified live UUID when names are ambiguous. Codex subagents in one collaboration tree may use their native collaboration channel. Verify the recipient runtime and supported native route before a mixed-runtime handoff. Do not silently fall back to input injection if native delivery fails; inspect and repair the native route. Rebind watcher destinations and verify a round-trip acknowledgement after recycle. Herdr remains available for layout and read-only inspection. Sandbox denial accessing Codex queue/state means request normal escalation. Do not replay stale holds or setup GO from historical queues.
 

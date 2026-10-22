@@ -1,6 +1,6 @@
 # Watchers and services
 
-The watchers write alerts to files, and one notifier turns them into a feed at `~/.claude/coordinator/watchers/prod-context/coordinator-feed.log`. The Coordinator's Monitor prints only the lines that need action (`RECYCLE`, HOST danger, PR events, `WORKER` blocked, error or dead, `HEARTBEAT STALE`).
+The watchers write alerts to files. One notifier turns them into a feed at `~/.claude/coordinator/watchers/prod-context/coordinator-feed.log`. The Coordinator's Monitor prints only the lines that need action: `RECYCLE`, HOST danger, PR events, `WORKER` blocked, error or dead, and `HEARTBEAT STALE`.
 
 | Watcher | Watches |
 |---|---|
@@ -10,24 +10,35 @@ The watchers write alerts to files, and one notifier turns them into a feed at `
 | host | Memory, swap, processes, open files, load |
 | hog | Big processes and long or big `git` processes |
 | balance | Worktree CPU and memory against the heavy-slot cap |
-| workers | Blocked, errored or vanished agents; finished workers waiting on their architect |
+| workers | Blocked, errored or vanished agents; finished workers waiting on their architect; sends `WORKER IDLE` (worker idle or done for `workers.idle_s`, 2 h by default, with no open PR) to the owning architect |
 | user-todo | What waits on you (see [The to-do pane](todo.md)) |
 
-**With services**: set `[watchers] service = true` (with `[herdr] bin` and `socket`) and run the installer again. It registers the watchers (audit and pulls only when `pr.author` is set in the config file, not just exported) with launchd (macOS) or `systemd --user` (Linux) to run now and at login. Back to `false` removes them. Off by default.
+## 🔔 With services
 
-**Without services**: run the loops yourself in the background, and the notifier too, because it fills the Coordinator's feed. The commands are in [Run the watchers without services](../coordinator/watchers/README.md#run-the-watchers-without-services). Each producer takes `--state-dir`, and `--loop --interval <seconds>` keeps it running. A watcher without `--loop` scans once and exits, which is the quick way to test one:
+Set `[watchers] service = true` (with `[herdr] bin` and `socket`) and run the installer again. It registers the watchers with launchd (macOS) or `systemd --user` (Linux), so they run now and at login. The audit and pulls watchers register only when `pr.author` is set in the config file, not just exported. Setting `service` back to `false` removes them. Off by default.
+
+## ✋ Without services
+
+Run the loops yourself in the background. Run the notifier too: it fills the Coordinator's feed. The commands are in [Run the watchers without services](../coordinator/watchers/README.md#run-the-watchers-without-services). Each producer takes `--state-dir`, and `--loop --interval <seconds>` keeps it running. A watcher without `--loop` scans once and exits, which is the quick way to test one:
 
 ```bash
 ORCH_HOST_FILES_MAX=1 ~/.claude/coordinator/watchers/coord-host-watch.sh --state-dir /tmp/host-check
 ```
 
-When the host is under pressure, the Coordinator follows the memory guard: on HOST danger it should stop heavy jobs by their slot pids and tell architects that hold slots. On HOST READFAIL it restores readable metrics and keeps heavy jobs paused. On host HEARTBEAT STALE it restores the producer's service and checks current metrics. HOST RECOVERED clears the pressure; it checks the guard before allowing heavy jobs again.
+## 🔥 Host pressure
 
-## Repos from the open work
+When the host is under pressure, the Coordinator follows the memory guard:
+
+- On HOST danger it should stop heavy jobs by their slot pids and tell architects that hold slots.
+- On HOST READFAIL it restores readable metrics and keeps heavy jobs paused.
+- On host HEARTBEAT STALE it restores the producer's service and checks current metrics.
+- HOST RECOVERED clears the pressure. The Coordinator checks the guard before it allows heavy jobs again.
+
+## 🔭 Repos from the open work
 
 The audit and pulls watchers take their repos from the open workspaces: each workspace's repo root is a clone to check for PACKS and WORKTREES, and its `origin` and `upstream` remotes (`owner/name` on GitHub) repos whose PRs to watch, each once, case-insensitive, `origin` first. `upstream` is the base repo of a fork, and is read only for a clone whose `origin` is a GitHub repo: every open PR of `pr.author` on it is watched, whatever its head. The env adapter reports the workspaces (`env/<name>/open_work.py`). When it cannot, or a clone's `origin` cannot be read, they use the last set saved in `~/.claude/coordinator/open-work.json` and log `open work unreadable (...)`; with no saved set the github and git sources are `READFAIL`. A clone without a GitHub `origin` remote is checked for pile-ups but has no PRs (its `upstream` is not read); a clone without an `upstream` remote is normal; an `upstream` that cannot be read logs `upstream of <clone> unreadable: <detail>; adding the repos last discovered in <path>` and adds the repos last saved to that pass, saves nothing and keeps every `origin` repo; a repo root whose folder is gone is skipped.
 
-## Focus report
+## 🎯 Focus report
 
 `focus-check.sh [interval]` prints one line every interval (default 900 seconds):
 
@@ -57,7 +68,7 @@ Answer previews retain the watcher deadline without consuming submissions.
 Directory-read failures retain replay IDs. Failed pane setup closes the new pane
 through the intentional-close helper, leaving the question file available to retry.
 
-## Workers waiting
+## 👷 Workers waiting
 
 A session in an owner-tagged workspace that stays `done` or `idle` for more than
 `workers.wait_s` seconds (default 600) emits
