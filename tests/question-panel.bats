@@ -338,3 +338,29 @@ time.sleep(float(sys.argv[3]))' "$HOME/.claude/coordinator/questions/.answers.lo
   [ "$status" -eq 0 ]
   grep -q '^pane split' "$TMP/question-herdr.calls"
 }
+
+@test "hide and close look the pane up while holding the answers lock" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  panes='{"result":{"panes":[{"pane_id":"question-pane","label":"Q: release"}]}}'
+  hold_lock 2
+  env HERDR_PANES="$panes" "$ROOT/ask-user-question" hide release &
+  hider=$!
+  sleep 1
+  run grep -q '^pane list' "$TMP/question-herdr.calls"
+  [ "$status" -ne 0 ]
+  wait "$hider"
+  wait "$holder"
+  grep -qx 'pane close question-pane' "$TMP/question-herdr.calls"
+  : >"$TMP/question-herdr.calls"
+  rm -f "$TMP/lock-ready"
+  hold_lock 2
+  env HERDR_PANES="$panes" "$ROOT/ask-user-question" close release &
+  closer=$!
+  sleep 1
+  run grep -q '^pane list' "$TMP/question-herdr.calls"
+  [ "$status" -ne 0 ]
+  wait "$closer"
+  wait "$holder"
+  grep -qx 'pane close question-pane' "$TMP/question-herdr.calls"
+}

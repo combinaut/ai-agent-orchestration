@@ -18,20 +18,15 @@ CLOSE_TIMEOUT = 30
 
 @contextmanager
 def answers_lock(directory=None):
-    """Children of the holder see HELD and skip the lock."""
+    """Holds the lock; a process the holder started with HELD in its environment does not lock again."""
+    if os.environ.get(HELD):
+        yield
+        return
     directory = Path(directory) if directory else questions_directory()
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / ".answers.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        previous = os.environ.get(HELD)
-        os.environ[HELD] = "1"
-        try:
-            yield
-        finally:
-            if previous is None:
-                os.environ.pop(HELD, None)
-            else:
-                os.environ[HELD] = previous
+        yield
 
 
 def run_group(argv, timeout):
@@ -50,10 +45,11 @@ def run_group(argv, timeout):
 
 def run_locked(argv):
     """Runs argv under the answers lock unless the caller already holds it; returns its exit status."""
+    held = dict(os.environ, **{HELD: "1"})
     if os.environ.get(HELD):
-        return subprocess.run(argv).returncode
+        return subprocess.run(argv, env=held).returncode
     with answers_lock():
-        return subprocess.run(argv).returncode
+        return subprocess.run(argv, env=held).returncode
 
 
 def close_question(slug, helper, pane):

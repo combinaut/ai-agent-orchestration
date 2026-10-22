@@ -273,7 +273,8 @@ class ReopenTest(IsolatedTestCase):
     def test_open_question_runs_through_the_owned_process_group_runner(self):
         with patch.object(w.runtime, "run", return_value=SimpleNamespace(returncode=73)) as run:
             self.assertEqual(w.open_question("due", Path("/q/due.md")), 73)
-        self.assertEqual(run.call_args.args[0][1:], ["due", "/q/due.md"])
+        self.assertEqual(run.call_args.args[0][1:3], [f"{question_lock.HELD}=1", str(w.ROOT.parents[1] / "ask-user-question")])
+        self.assertEqual(run.call_args.args[0][3:], ["due", "/q/due.md"])
         self.assertEqual(run.call_args.kwargs["timeout"], question_remind.OPEN_TIMEOUT)
 
     def test_the_answers_pass_reopens_but_a_preview_does_not(self):
@@ -321,10 +322,15 @@ class CloseHelperTest(IsolatedTestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             question_lock.run_group(["false"], 5)
 
-    def test_children_of_the_lock_holder_see_the_held_marker(self):
+    def test_a_process_started_by_the_holder_with_the_marker_does_not_lock_again(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {question_lock.HELD: "1"}):
+            with question_lock.answers_lock(tmp), question_lock.answers_lock(tmp):
+                pass
+            self.assertFalse((Path(tmp) / ".answers.lock").exists())
+
+    def test_the_lock_is_not_inherited_by_unrelated_children(self):
         with tempfile.TemporaryDirectory() as tmp, question_lock.answers_lock(tmp):
-            self.assertEqual(os.environ.get(question_lock.HELD), "1")
-        self.assertNotIn(question_lock.HELD, os.environ)
+            self.assertNotIn(question_lock.HELD, os.environ)
 
 
 class KeyReaderTest(IsolatedTestCase):

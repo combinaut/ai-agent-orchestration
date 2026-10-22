@@ -65,6 +65,10 @@ else:
 action=${1:-}
 # `hide <file>` opens a question that is itself called hide
 [ "$action" != hide ] || [ ! -f "${2:-}" ] || valid_slug "$2" || action=open
+# every action, including the pane lookup, runs under the answers lock
+if [ -z "${ORCH_QUESTION_LOCKED:-}" ] && [ $# -eq 2 ]; then
+  ORCH_QUESTION_LOCKED=1 ORCH_USER_QUESTIONS_DIR="$questions" exec "${ORCH_PYTHON3:-python3}" "$root/coordinator/watchers/question_lock.py" --run "$self" "$@"
+fi
 case $action in
   close)
     [ $# -eq 2 ] || usage
@@ -82,9 +86,6 @@ case $action in
     ;;
   *)
     [ $# -eq 2 ] || usage
-    if [ -z "${ORCH_OPEN_LOCKED:-}" ]; then
-      ORCH_OPEN_LOCKED=1 ORCH_USER_QUESTIONS_DIR="$questions" exec "${ORCH_PYTHON3:-python3}" "$root/coordinator/watchers/question_lock.py" --run "$self" "$@"
-    fi
     slug=$1 file=$2
     valid_slug "$slug" || { echo "invalid question slug: $slug" >&2; exit 64; }
     [ -f "$file" ] || { echo "question is not a regular file: $file" >&2; exit 66; }

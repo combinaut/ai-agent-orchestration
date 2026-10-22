@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Event reducers. Never sends messages or mutates source state."""
-from question_lock import answers_lock, questions_directory
+from question_lock import HELD, answers_lock, questions_directory
 import question_remind
 import alert_policy
 import argparse
@@ -561,7 +561,8 @@ def answer_order(path):
 
 
 def open_question(slug, question):
-    return runtime.run([str(ROOT.parents[1] / "ask-user-question"), slug, str(question)], timeout=question_remind.OPEN_TIMEOUT).returncode
+    argv = ["/usr/bin/env", f"{HELD}=1", str(ROOT.parents[1] / "ask-user-question"), slug, str(question)]
+    return runtime.run(argv, timeout=question_remind.OPEN_TIMEOUT).returncode
 
 
 def collect_answers(before, consume=True):
