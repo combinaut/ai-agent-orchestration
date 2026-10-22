@@ -246,3 +246,47 @@ EOF
   [ "$(grep -n -m1 '^pane close question-pane$' "$TMP/question-herdr.calls" | cut -d: -f1)" -lt "$(grep -n -m1 '^pane split ' "$TMP/question-herdr.calls" | cut -d: -f1)" ]
   [ ! -e "${question%.md}.opening" ]
 }
+
+@test "an opener killed while the split runs closes only the new unlabelled pane in its tab" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  todo='{"pane_id":"todo-pane","tab_id":"t1","tokens":{"todo":"1"}}'
+  run env HERDR_KILL_OPENER=split HERDR_PANES="{\"result\":{\"panes\":[$todo]}}" "$ROOT/ask-user-question" release "$question"
+  [ "$status" -ne 0 ]
+  [ -s "${question%.md}.opening" ]
+  : >"$TMP/question-herdr.calls"
+  panes="$todo,{\"pane_id\":\"orphan-pane\",\"tab_id\":\"t1\"},{\"pane_id\":\"elsewhere\",\"tab_id\":\"t2\"}"
+  run env HERDR_PANES="{\"result\":{\"panes\":[$panes]}}" "$ROOT/ask-user-question" release "$question"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane close orphan-pane' "$TMP/question-herdr.calls"
+  run grep -qx 'pane close elsewhere' "$TMP/question-herdr.calls"
+  [ "$status" -eq 1 ]
+  [ ! -e "${question%.md}.opening" ]
+}
+
+@test "an interrupted split with several candidate panes closes none of them" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  todo='{"pane_id":"todo-pane","tab_id":"t1","tokens":{"todo":"1"}}'
+  run env HERDR_KILL_OPENER=split HERDR_PANES="{\"result\":{\"panes\":[$todo]}}" "$ROOT/ask-user-question" release "$question"
+  : >"$TMP/question-herdr.calls"
+  panes="$todo,{\"pane_id\":\"a\",\"tab_id\":\"t1\"},{\"pane_id\":\"b\",\"tab_id\":\"t1\"}"
+  run env HERDR_PANES="{\"result\":{\"panes\":[$panes]}}" "$ROOT/ask-user-question" release "$question"
+  [ "$status" -eq 0 ]
+  run grep -q '^pane close' "$TMP/question-herdr.calls"
+  [ "$status" -eq 1 ]
+}
+
+@test "a question named hide opens from a bare relative file name and from an absolute path" {
+  questions="$HOME/.claude/coordinator/questions"
+  printf 'Hide?\n' >"$questions/hide.md"
+  panes='{"result":{"panes":[{"pane_id":"todo-pane","tokens":{"todo":"1"}}]}}'
+  cd "$questions"
+  run env HERDR_PANES="$panes" "$ROOT/ask-user-question" hide hide.md
+  [ "$status" -eq 0 ]
+  grep -qx 'pane rename question-pane Q: hide' "$TMP/question-herdr.calls"
+  : >"$TMP/question-herdr.calls"
+  run env HERDR_PANES="$panes" "$ROOT/ask-user-question" hide "$questions/hide.md"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane rename question-pane Q: hide' "$TMP/question-herdr.calls"
+}
