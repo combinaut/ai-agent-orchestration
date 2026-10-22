@@ -1552,6 +1552,31 @@ class PullsTest(IsolatedTestCase):
         _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
         self.assertEqual(events, ["THREADS owner/product#7 cleared"])
 
+    def test_merged_or_closed_and_unwatched_in_same_poll_reports_departure(self):
+        for merged, kind in ((True, "MERGED"), (False, "CLOSED")):
+            with self.subTest(kind=kind):
+                row = pr(7, decision="CHANGES_REQUESTED")
+                state, _ = w.reduce_pulls(
+                    None, w.collect_pulls(self.command([row]), None)
+                )
+                departed = {
+                    "repos/owner/product/pulls/7": {"state": "closed", "merged": merged}
+                }
+                with patch.object(
+                    w.discovery, "repos", return_value={"repos": [], "clones": []}
+                ):
+                    state, events = w.reduce_pulls(
+                        state, w.collect_pulls(self.command([], departed), state)
+                    )
+                self.assertEqual(
+                    events,
+                    [
+                        "CHANGES owner/product#7 cleared",
+                        f"{kind} owner/product#7 owner=wArch {PR['title']}",
+                    ],
+                )
+                self.assertEqual(state["prs"], {})
+
     def test_unwatched_open_departure_drops_then_rewatched_repo_alerts_once(self):
         row = pr(7, decision="CHANGES_REQUESTED")
         state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
@@ -1565,7 +1590,7 @@ class PullsTest(IsolatedTestCase):
             )
         self.assertEqual(state["prs"], {})
         self.assertEqual(events, ["CHANGES owner/product#7 cleared"])
-        self.assertFalse(
+        self.assertTrue(
             any(
                 argv[:2] == ("gh", "api") and argv[2].startswith("repos/")
                 for argv in self.calls
@@ -1577,6 +1602,31 @@ class PullsTest(IsolatedTestCase):
         self.assertEqual(events, [f"CHANGES owner/product#7 owner=wArch {PR['title']}"])
         _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
         self.assertEqual(events, [])
+
+    def test_unwatched_departures_share_budget_and_drop_unreadable_or_unread(self):
+        count = w.PULLS_DEPARTED_MAX + 2
+        rows = [pr(number, decision="CHANGES_REQUESTED") for number in range(count)]
+        before, _ = w.reduce_pulls(None, w.collect_pulls(self.command(rows), None))
+        # An unreadable unwatched departure must not leave a lasting READFAIL,
+        # including when the snapshot already records a previous failed read.
+        for saved in before["prs"].values():
+            saved["misses"] = 1
+        self.calls.clear()
+        with patch.object(
+            w.discovery, "repos", return_value={"repos": [], "clones": []}
+        ):
+            raw = w.collect_pulls(self.command([]), before)
+            state, events = w.reduce_pulls(before, raw)
+        reads = [
+            argv
+            for argv in self.calls
+            if argv[:2] == ("gh", "api") and argv[2].startswith("repos/")
+        ]
+        self.assertEqual(len(reads), w.PULLS_DEPARTED_MAX)
+        self.assertEqual(raw["failed"], [])
+        self.assertEqual(state, {"prs": {}, "unreadable": []})
+        self.assertEqual(len(events), count)
+        self.assertTrue(all(event.endswith(" cleared") for event in events))
 
     def test_legacy_snapshot_seeds_all_visible_bot_ids_without_stale_copilot_start(
         self,

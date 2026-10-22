@@ -994,7 +994,7 @@ def collect_pulls(command, before, clock=time.monotonic):
     }
     failed, attempted = [], set()
     pending = sorted(
-        set(known) - searched - set(departed),
+        set(known) - searched,
         key=lambda key: (
             known[key].get("departure_reads", known[key].get("misses", 0)),
             key,
@@ -1008,11 +1008,20 @@ def collect_pulls(command, before, clock=time.monotonic):
         repo, number = key.rsplit("#", 1)
         try:
             row = json.loads(command("gh", "api", f"repos/{repo}/pulls/{number}"))
-            departed[key] = "MERGED" if row.get("merged") else row["state"].upper()
+            state = "MERGED" if row.get("merged") else row["state"].upper()
+            # Unwatched PRs get one bounded chance to report a terminal event.
+            # Open/unreadable ones retain the drop marker, never saved evidence.
+            if departed.get(key) != "UNWATCHED" or state in ("MERGED", "CLOSED"):
+                departed[key] = state
         except audit.READ_ERRORS:
-            failed.append(key)
+            if departed.get(key) != "UNWATCHED":
+                failed.append(key)
     waiting = [
-        key for key in pending if key not in attempted and known[key].get("misses", 0)
+        key
+        for key in pending
+        if key not in attempted
+        and departed.get(key) != "UNWATCHED"
+        and known[key].get("misses", 0)
     ]
     unreadable, roots = [], []
     try:
