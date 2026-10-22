@@ -101,6 +101,28 @@ def identity(agent):
     return (agent.get("agent_session") or {}).get("value") or agent["pane_id"]
 
 
+def workspace_owners(raw):
+    """The `owner` tag of each workspace by id; none when the workspace list was not read."""
+    rows = ((raw.get("workspaces") or {}).get("result") or {}).get("workspaces") or []
+    return {row.get("workspace_id"): row["tokens"].get("owner") for row in rows
+            if isinstance(row, dict) and isinstance(row.get("tokens"), dict)}
+
+
+def waiting_owners(raw):
+    """Validate the shared #44/#47 envelope before treating missing owners as authoritative."""
+    listing = raw.get("workspaces")
+    if listing is None:
+        return None
+    try:
+        rows = [] if listing == {} else listing["result"]["workspaces"]
+        if not isinstance(rows, list) or not all(isinstance(row, dict) and "workspace_id" in row
+                                               and (row.get("tokens") is None or isinstance(row["tokens"], dict)) for row in rows):
+            return None
+        return workspace_owners(raw)
+    except (KeyError, TypeError):
+        return None
+
+
 def conditions(mode, raw):
     if mode in PRESSURE_SETTINGS:
         return thresholds(mode, {key: value for key, value in raw.items() if value is not None})
@@ -284,6 +306,7 @@ def reduce_context(before, after, raw):
 
 WORKER_STATUSES = ("working", "idle", "done", "blocked", "error", "waiting")
 ACTIVE_WORKER_STATUSES = ("working", "waiting", "blocked", "error")
+IDLE_STATUSES = ("idle", "done")
 
 
 def worker_snapshot(raw, previous, bad):
@@ -354,9 +377,7 @@ def reduce_waiting(previous, raw):
         if not (row.get("agent_session") or {}).get("value") and key and key not in rows:
             rows[key] = row
             gaps[key] = True
-    spaces = raw.get("workspaces")
-    owners = None if spaces is None else {row["workspace_id"]: (row.get("tokens") or {}).get("owner")
-                                         for row in spaces}
+    owners = waiting_owners(raw)
     current, events = {}, []
     for key, row in rows.items():
         entry = old.get(key)
@@ -374,7 +395,7 @@ def reduce_waiting(previous, raw):
             if entry:
                 current[key] = dict(entry, row=dict(entry["row"], pane_id=row["pane_id"]))
             continue
-        if row.get("agent_status") not in ("done", "idle"):
+        if row.get("agent_status") not in IDLE_STATUSES:
             continue
         if entry and entry["owner"] != owner:
             if entry["stage"]:
@@ -969,11 +990,12 @@ def collect(mode, before, scope="", base=None):
         if mode == "workers":
             raw["observed_at"] = time.time()
             try:
-                spaces = json.loads(command(herdr_bin(), "workspace", "list"))["result"]["workspaces"]
+                listing = json.loads(command(herdr_bin(), "workspace", "list"))
+                spaces = listing["result"]["workspaces"]
                 if not isinstance(spaces, list) or not all(isinstance(row, dict) and "workspace_id" in row
                                                           and (row.get("tokens") is None or isinstance(row["tokens"], dict)) for row in spaces):
                     raise ValueError("invalid workspace list")
-                raw["workspaces"] = spaces
+                raw["workspaces"] = listing
             except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError, MissingMetric):
                 raw["workspaces"] = None
             if base is not None:

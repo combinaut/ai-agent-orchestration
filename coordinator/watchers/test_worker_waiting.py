@@ -20,6 +20,16 @@ inbox = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(inbox)
 
 
+def workspace_snapshot(owner):
+    return {
+        "result": {
+            "workspaces": [dict(workspace_id="w1", tokens={"owner": owner})]
+            if owner
+            else []
+        }
+    }
+
+
 class WaitingTests(IsolatedTestCase):
     def setUp(self):
         self.state = None
@@ -36,9 +46,7 @@ class WaitingTests(IsolatedTestCase):
         raw = dict(
             result={"agents": [self.row] if rows is None else rows},
             observed_at=now,
-            workspaces=[dict(workspace_id="w1", tokens={"owner": "architect"})]
-            if owners
-            else [],
+            workspaces=workspace_snapshot("architect" if owners else None),
         )
         if owners is None:
             raw["workspaces"] = None
@@ -86,7 +94,7 @@ class WaitingTests(IsolatedTestCase):
                 raw = dict(
                     result={"agents": [self.row]},
                     observed_at=now,
-                    workspaces=[dict(workspace_id="w1", tokens={"owner": "a" * 36})],
+                    workspaces=workspace_snapshot("a" * 36),
                 )
                 state, events = w.reduce_workers(state, raw)
                 lines = alert_policy.apply(
@@ -164,7 +172,7 @@ class WaitingTests(IsolatedTestCase):
                 raw = dict(
                     result={"agents": [self.row]},
                     observed_at=700,
-                    workspaces=[dict(workspace_id="w1", tokens={"owner": "new-owner"})],
+                    workspaces=workspace_snapshot("new-owner"),
                 )
                 self.state, events = w.reduce_workers(self.state, raw)
                 self.assertEqual(len([e for e in events if "cleared" in e]), 1)
@@ -197,6 +205,15 @@ class WaitingTests(IsolatedTestCase):
                 self.assertEqual(self.state["waiting"]["s1"]["stage"], 1)
                 self.row["agent_session"] = {"value": "s1"}
                 self.assertIn("REPEAT", self.scan(1800)[0])
+
+    def test_only_done_or_idle_workers_start_waiting_timers(self):
+        for status in ("working", "waiting", "blocked", "error"):
+            with self.subTest(status=status):
+                self.state = None
+                self.row["agent_status"] = status
+                self.assertEqual(self.scan(0), [])
+                self.assertEqual(self.scan(99999), [])
+                self.assertEqual(self.state["waiting"], {})
 
     def test_threshold_and_no_extra_repeats(self):
         self.start()
@@ -276,7 +293,7 @@ class WaitingTests(IsolatedTestCase):
         raw = dict(
             result={"agents": [self.row]},
             observed_at=700,
-            workspaces=[dict(workspace_id="w1", tokens={"owner": "new-owner"})],
+            workspaces=workspace_snapshot("new-owner"),
         )
         self.state, events = w.reduce_workers(self.state, raw)
         self.assertTrue(events[0].endswith("cleared" + alert_policy.WORKER_WAIT_NOTE))

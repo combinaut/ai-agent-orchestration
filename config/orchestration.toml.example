@@ -48,12 +48,6 @@ codex_worker = "<codex-worker-model>"
 # Codex model for hard work; replace the placeholder
 codex_smart = "<codex-smart-model>"
 
-[workers]
-# Seconds idle or done before WORKER WAITING
-wait_min = 600
-# Waiting age for the single repeat; then seconds until escalation
-wait_repeat_min = 1800
-
 [recycle]
 # Tokens used at which RECYCLE fires
 tokens = 300000
@@ -141,6 +135,12 @@ gb = 6
 git_gb = 2
 # Hog watcher: git process age in seconds
 git_age_s = 180
+
+[workers]
+# Seconds idle or done before WORKER WAITING
+wait_min = 600
+# Waiting age for the single repeat; then seconds until escalation
+wait_repeat_min = 1800
 
 [pr_tabs]
 # Organization the PR tabs extension manages; empty turns org actions off
