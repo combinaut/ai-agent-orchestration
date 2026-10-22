@@ -550,7 +550,8 @@ def collect_pulls(command, before, clock=time.monotonic):
                 settings_failed.append(f"settings:{key}")
                 raise
         old = known.get(key, {})
-        same_scope = old.get("head") == pr.get("headRefOid") and old.get("base") == pr.get("baseRefName")
+        head, base = pr.get("headRefOid"), pr.get("baseRefName")
+        same_scope = old.get("head") == head and old.get("base") == base
         try:
             lines = {line.split(" ", 1)[0]: line for line in audit.pr_lines(pr, page_nodes, repo_settings)
                      if line.split(" ", 1)[0] in alert_policy.PULL_KINDS}
@@ -612,11 +613,12 @@ def collect_pulls(command, before, clock=time.monotonic):
             # Partial per-PR data must not discard readable siblings or saved evidence.
             lines, identities = old.get("lines", {}), old.get("identities", {})
             check_failures = old.get("check_failures")
+            head, base = old.get("head"), old.get("base")
             unreadable.append(f"pr:{key}")
         owner = owners[key] if key in owners else old.get("owner")
         current[key] = dict(title=pr["title"], owner=owner, lines=lines, identities=identities,
                             seen_reviews=old.get("seen_reviews", []), check_failures=check_failures,
-                            head=pr.get("headRefOid", old.get("head")), base=pr.get("baseRefName", old.get("base")))
+                            head=head, base=base)
     return dict(prs=current, departed=departed, failed=failed,
                 unreadable=unreadable + [f"pr:{key}" for key in sorted(failed + waiting)] + sorted(set(settings_failed)))
 

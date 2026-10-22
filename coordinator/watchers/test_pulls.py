@@ -628,6 +628,29 @@ class PullsTest(IsolatedTestCase):
         self.assertIn("full CI ran", state["prs"]["owner/product#7"]["lines"]["APPROVED-STACKED"])
         self.assertTrue(any(event.startswith("APPROVED-STACKED owner/product#7 owner=") for event in events))
 
+    def test_malformed_read_keeps_scope_with_its_saved_approval_evidence(self):
+        for change in ("head", "base"):
+            with self.subTest(change=change), patch.object(w.audit, "repo_settings", return_value={"ORCH_MERGE_GATE_CHECKS": "unit"}):
+                row = pr(7)
+                row["baseRefName"] = "stack-a"
+                state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+                if change == "head":
+                    row["headRefOid"] = "head-2"
+                    row["latestOpinionatedReviews"]["nodes"][0]["commit"]["oid"] = "head-2"
+                else:
+                    row["baseRefName"] = "stack-b"
+                row["reviews"] = None
+                state, _ = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+                self.assertEqual(state["prs"]["owner/product#7"]["head"], "head")
+                self.assertEqual(state["prs"]["owner/product#7"]["base"], "stack-a")
+                row["reviews"] = {"nodes": []}
+                contexts = row["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]
+                contexts["nodes"] = []
+                contexts["pageInfo"]["hasNextPage"] = True
+                state, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+                self.assertIn("full CI unknown", state["prs"]["owner/product#7"]["lines"]["APPROVED-STACKED"])
+                self.assertTrue(any(event.startswith("APPROVED-STACKED owner/product#7 owner=") for event in events))
+
     def test_one_search_call_per_poll(self):
         w.collect_pulls(self.command([pr(n) for n in range(20)]), None)
         self.assertEqual(sum(argv[:3] == ("gh", "api", "graphql") for argv in self.calls), 1)
