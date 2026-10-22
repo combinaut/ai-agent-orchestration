@@ -15,9 +15,37 @@ teardown() { teardown_fixture; }
 
 popup_install() { run env "$@" /bin/bash "$CLONE/install.sh" --env herdr; [ "$status" -eq 0 ]; }
 
-@test "popup off by default: no plugin link, no key block" {
+@test "popup on by default: links the plugin and writes the prefix+t block" {
   fresh_install
   install_ok --env herdr
+  [ "$(cat "$HERDR_TODO_PLUGIN")" = "$(cd "$CLONE" && pwd -P)/env/herdr/todo-plugin" ]
+  contains "$(cat "$HCONF")" "$START"
+}
+
+@test "popup on when the config file has no todo_popup key" {
+  fresh_install
+  install_ok --env herdr
+  sed -i.bak '/^todo_popup/d' "$HOME/.claude/orchestration.toml"
+  run grep -q todo_popup "$HOME/.claude/orchestration.toml"
+  [ "$status" -eq 1 ]
+  rm -f "$HERDR_TODO_PLUGIN"
+  install_ok --env herdr
+  [ -f "$HERDR_TODO_PLUGIN" ]
+}
+
+@test "popup set to false in the config file removes the plugin and the block" {
+  fresh_install
+  install_ok --env herdr
+  python3 -I "$CLONE/lib/orch_settings.py" set "$HOME/.claude/orchestration.toml" ORCH_HERDR_TODO_POPUP 0
+  install_ok --env herdr
+  [ ! -f "$HERDR_TODO_PLUGIN" ]
+  contains "$(cat "$HERDR_CALLS")" 'plugin unlink combinaut.todo'
+  not_contains "$(cat "$HCONF")" "$START"
+}
+
+@test "popup set to false before the first herdr install is never installed" {
+  fresh_install
+  popup_install ORCH_HERDR_TODO_POPUP=0
   not_contains "$(cat "$HERDR_CALLS")" 'plugin link '"$CLONE/env/herdr/todo-plugin"
   [ ! -f "$HERDR_TODO_PLUGIN" ]
   not_contains "$(cat "$HCONF")" "$START"
@@ -69,14 +97,6 @@ popup_install() { run env "$@" /bin/bash "$CLONE/install.sh" --env herdr; [ "$st
   popup_install ORCH_HERDR_TODO_POPUP=1
   contains "$(cat "$TMP/dropbox/config.toml")" 'name = "x"'
   [ "$(grep -c "$START" "$TMP/dropbox/config.toml")" -eq 1 ]
-}
-
-@test "popup setting in the config file turns it on" {
-  fresh_install
-  install_ok --env herdr
-  python3 -I "$CLONE/lib/orch_settings.py" set "$HOME/.claude/orchestration.toml" ORCH_HERDR_TODO_POPUP 1
-  install_ok --env herdr
-  contains "$(cat "$HCONF")" "$START"
 }
 
 @test "an unpaired start marker refuses to rewrite and leaves the file untouched" {

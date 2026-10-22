@@ -36,6 +36,21 @@ EOF
   grep -qx 'pane rename question-pane Q: release' "$TMP/question-herdr.calls"
 }
 
+@test "ask-user-question finds the to-do pane by its exact To-do label" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  run env HERDR_PANES='{"result":{"panes":[{"pane_id":"other","label":"To-do list"},{"pane_id":"todo-pane","label":"To-do","terminal_title_stripped":"python3 user-todo-view.py"}]}}' "$ROOT/ask-user-question" release "$question"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane split todo-pane --direction down --no-focus' "$TMP/question-herdr.calls"
+}
+
+@test "ask-user-question does not anchor on a label that only starts with To-do" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  run env HERDR_PANES='{"result":{"panes":[{"pane_id":"other","label":"To-do list"}]}}' "$ROOT/ask-user-question" release "$question"
+  [ "$status" -eq 69 ]
+}
+
 @test "ask-user-question closes its pane through close-pane and removes answer state" {
   question="$HOME/.claude/coordinator/questions/release.md"
   printf 'Which release?\n' >"$question"

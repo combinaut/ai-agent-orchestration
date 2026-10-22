@@ -94,7 +94,7 @@ bin = ""
 # Absolute path of the Herdr socket
 socket = ""
 # install.sh links a Herdr plugin that opens the to-do view in a popup titled "Your to-do" on prefix+t, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env
-todo_popup = false
+todo_popup = true
 
 [user_todo]
 # To-do status directory; empty means ~/.claude/coordinator/status

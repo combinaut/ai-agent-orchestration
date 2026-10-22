@@ -8,3 +8,4 @@ Read this file before the action named by its SKILL.md link. All source command 
 4. Tag your own pane: `herdr pane report-metadata "$HERDR_PANE_ID" --source orchestrate --token role=coordinator`.
 5. Stop every Monitor you inherited. Then arm exactly one Monitor on `~/.claude/coordinator/watchers/feed-monitor.sh` (persistent). It keeps its heartbeat fresh while it runs.
 6. Run `python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/coordinator.json`.
+7. Run `~/.claude/coordinator/todo-pane.sh`. It opens the to-do pane (label `To-do`) beside your pane without focus, and does nothing when a pane with that label is open, so a recycle successor keeps the existing one. Exit 69 means `HERDR_PANE_ID` is not set; tell the user.
