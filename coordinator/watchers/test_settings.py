@@ -973,6 +973,35 @@ class ProvidersTest(SettingsTest):
             self.assertEqual(s.tier_model(values, "ORCH_CODEX_WORKER_MODEL"), model)
             self.assertEqual(s.tier_model(values, "ORCH_CODEX_SMART_MODEL"), model)
 
+    def test_print_shows_the_set_codex_model_for_an_unset_tier(self):
+        for text, model in (
+            ('[models]\ncodex_smart = "only-smart"\n', "only-smart"),
+            (
+                '[models]\ncodex_worker = "only-worker"\ncodex_smart = ""\n',
+                "only-worker",
+            ),
+        ):
+            values = s.printed(self.resolve(text))
+            self.assertEqual(values["ORCH_CODEX_WORKER_MODEL"], model)
+            self.assertEqual(values["ORCH_CODEX_SMART_MODEL"], model)
+            self.assertEqual(
+                s.fill_models(self.resolve(text)),
+                [
+                    m
+                    for m in ("ORCH_CODEX_WORKER_MODEL", "ORCH_CODEX_SMART_MODEL")
+                    if m.endswith("WORKER_MODEL") == (model == "only-worker")
+                ],
+            )
+
+    def test_print_keeps_codex_and_pi_values_that_need_no_fallback(self):
+        for text in (
+            '[models]\ncodex_worker = "w"\ncodex_smart = "s"\n',
+            "",
+            '[models]\ncodex_worker = ""\ncodex_smart = ""\npi_smart = "lm/q"\n',
+        ):
+            values = self.resolve(text)
+            self.assertEqual(s.printed(values), values)
+
     def test_both_codex_models_set_are_both_still_listed(self):
         values = self.resolve('[models]\ncodex_worker = "w"\ncodex_smart = "s"\n')
         self.assertEqual(

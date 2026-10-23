@@ -68,6 +68,23 @@ teardown() {
   [[ "$output" == *'providers.enabled: must include "claude"'* ]]
 }
 
+@test "orch-settings prints the one set Codex model for both tiers" {
+  printf '[models]\ncodex_smart = "only-smart"\n' >"$ORCH_CONFIG"
+  run "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  has_line 'ORCH_CODEX_WORKER_MODEL=only-smart'
+  has_line 'ORCH_CODEX_SMART_MODEL=only-smart'
+  printf '[models]\ncodex_worker = "only-worker"\ncodex_smart = ""\n' >"$ORCH_CONFIG"
+  run "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  has_line 'ORCH_CODEX_WORKER_MODEL=only-worker'
+  has_line 'ORCH_CODEX_SMART_MODEL=only-worker'
+  : >"$ORCH_CONFIG"
+  run "$ROOT/orch-settings"
+  has_line 'ORCH_CODEX_WORKER_MODEL=<codex-worker-model>'
+  has_line 'ORCH_CODEX_SMART_MODEL=<codex-smart-model>'
+}
+
 @test "orch-settings prints the allowed Claude tiers and stops on an unknown or empty list" {
   : >"$ORCH_CONFIG"
   run "$ROOT/orch-settings"

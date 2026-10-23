@@ -676,6 +676,16 @@ def tier_model(values, env):
     return next((values[m] for m in provider.models if filled(values.get(m, ""))), "")
 
 
+def printed(values):
+    """Resolved values as orch-settings prints them: an unset tier of a "one" provider shows the model that serves it."""
+    shown = dict(values)
+    for p in PROVIDERS:
+        if p.need == "one":
+            for m in p.models:
+                shown[m] = tier_model(values, m) or values.get(m, "")
+    return shown
+
+
 def fill_models(values):
     """The required model settings without a usable built-in default: the ones the user has to fill in."""
     return [m for m in required_models(values) if not filled(BY_ENV[m].default)]
@@ -1841,7 +1851,9 @@ def main(argv):
         elif command == "print":
             sys.stdout.write(
                 print_lines(
-                    resolved_global(print_path(argv[2:], os.environ), os.environ)
+                    printed(
+                        resolved_global(print_path(argv[2:], os.environ), os.environ)
+                    )
                 )
             )
         elif command == "repo" and len(argv) == 3:
