@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
@@ -36,16 +37,36 @@ def answers_lock(directory=None):
 
 
 TERM_GRACE = 2
+OUTER_GRACE = 3 * TERM_GRACE
+KILL_WAIT = 5
 
 
-def stop_group(process):
-    """SIGTERMs the process group, waits the grace for it to exit, then SIGKILLs it."""
-    for signum in (signal.SIGTERM, signal.SIGKILL):
+def group_gone(process):
+    process.poll()
+    try:
+        os.killpg(process.pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return True
+    return False
+
+
+def wait_group_gone(process, seconds):
+    deadline = time.monotonic() + seconds
+    while not group_gone(process):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+    return True
+
+
+def stop_group(process, grace):
+    """SIGTERMs the process group, waits up to the grace for every member to exit, then SIGKILLs it."""
+    with suppress(ProcessLookupError, PermissionError):
+        os.killpg(process.pid, signal.SIGTERM)
+    if not wait_group_gone(process, grace):
         with suppress(ProcessLookupError, PermissionError):
-            os.killpg(process.pid, signum)
-        if signum == signal.SIGTERM:
-            with suppress(subprocess.TimeoutExpired):
-                process.wait(timeout=TERM_GRACE)
+            os.killpg(process.pid, signal.SIGKILL)
+        wait_group_gone(process, KILL_WAIT)
     process.wait()
 
 
@@ -53,20 +74,22 @@ def run_group(argv, timeout, env=None, check=True):
     """Runs argv in its own process group, stopped when it outlives the timeout or this process is interrupted or terminated."""
     process = subprocess.Popen(argv, start_new_session=True, env=env)
 
+    grace = TERM_GRACE if os.environ.get(HELD) else OUTER_GRACE
+
     def terminate(*_):
-        stop_group(process)
+        stop_group(process, grace)
         raise SystemExit(TIMED_OUT)
 
     previous = signal.signal(signal.SIGTERM, terminate)
     try:
         code = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        stop_group(process)
+        stop_group(process, grace)
         raise
     finally:
         signal.signal(signal.SIGTERM, previous)
         if process.poll() is None:
-            stop_group(process)
+            stop_group(process, grace)
     if code and check:
         raise subprocess.CalledProcessError(code, argv)
     return code

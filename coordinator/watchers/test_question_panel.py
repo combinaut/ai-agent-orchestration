@@ -1,3 +1,4 @@
+import fcntl
 import importlib.util
 import io
 import os
@@ -6,6 +7,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import termios
 import threading
 import time
 import tty
@@ -522,6 +524,57 @@ class CloseHelperTest(IsolatedTestCase):
                 with self.assertRaises(ProcessLookupError):
                     os.kill(int(child.read_text()), 0)
 
+    def test_the_lock_stays_held_until_a_sigterm_resistant_helper_is_gone(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                os.environ,
+                {
+                    "ORCH_USER_QUESTIONS_DIR": tmp,
+                    "PYTHONPATH": str(Path(__file__).parent),
+                },
+            ),
+        ):
+            child = Path(tmp) / "child.pid"
+            helper = Path(tmp) / "helper.sh"
+            helper.write_text(
+                f"#!/bin/sh\ntrap '' TERM\nsleep 60 &\necho $! > {child}\nwait\n"
+            )
+            helper.chmod(0o755)
+            code = f"import question_lock; question_lock.hide_question({str(helper)!r}, 'pane')"
+            action = Path(tmp) / "action.sh"
+            action.write_text(f'#!/bin/sh\n{sys.executable} -c "$1"\ntrue\n')
+            action.chmod(0o755)
+            freed_early = []
+
+            def watch():
+                while not child.exists():
+                    time.sleep(0.02)
+                pid = int(child.read_text())
+                os.kill(os.getpid(), signal.SIGINT)
+                with open(Path(tmp) / ".answers.lock", "a") as lock:
+                    while True:
+                        try:
+                            os.kill(pid, 0)
+                        except ProcessLookupError:
+                            return
+                        try:
+                            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            time.sleep(0.02)
+                            continue
+                        freed_early.append(pid)
+                        return
+
+            watcher = threading.Thread(target=watch)
+            watcher.start()
+            with self.assertRaises(KeyboardInterrupt):
+                question_lock.run_locked([str(action), code])
+            watcher.join(15)
+            self.assertEqual(freed_early, [])
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(child.read_text()), 0)
+
     def test_an_action_that_finishes_returns_its_status(self):
         with (
             tempfile.TemporaryDirectory() as tmp,
@@ -568,6 +621,55 @@ class KeyReaderTest(IsolatedTestCase):
 
     def test_a_plain_key_is_returned_as_typed(self):
         self.assertEqual(self.read(b"r"), "r")
+
+    def test_backspace_typed_between_reads_reaches_the_panel(self):
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        panel = pane.Panel(Path("x.md"), io.StringIO())
+        pressed = []
+
+        def press(token):
+            pressed.append(token)
+            panel.done = token == "0"
+
+        with (
+            os.fdopen(slave, "r") as stdin,
+            patch.object(pane.sys, "stdin", stdin),
+            patch.object(pane, "Panel", return_value=panel),
+            patch.object(panel, "show"),
+            patch.object(panel, "press", press),
+        ):
+            reader = threading.Thread(target=pane.follow, args=(Path("x.md"),))
+            reader.start()
+            time.sleep(0.3)
+            os.write(master, b"3")
+            while not pressed:
+                time.sleep(0.001)
+            os.write(master, b"\x7f")
+            time.sleep(0.3)
+            os.write(master, b"0")
+            reader.join(5)
+        self.assertEqual(pressed, ["3", "\x7f", "0"])
+
+    def test_follow_restores_the_terminal_mode_on_exit(self):
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        canonical = termios.ICANON | termios.ECHO
+
+        def line_flags():
+            return termios.tcgetattr(slave)[3] & canonical
+
+        before = line_flags()
+        panel = pane.Panel(Path("x.md"), io.StringIO())
+        with (
+            os.fdopen(slave, "r") as stdin,
+            patch.object(pane.sys, "stdin", stdin),
+            patch.object(pane, "Panel", return_value=panel),
+            patch.object(panel, "show"),
+            patch.object(pane, "read_key", lambda *_: ""),
+        ):
+            pane.follow(Path("x.md"))
+            self.assertEqual(line_flags(), before)
 
     def test_follow_sends_a_lone_esc_to_the_open_picker_and_skips_arrow_keys(self):
         panel = pane.Panel(Path("x.md"), io.StringIO())

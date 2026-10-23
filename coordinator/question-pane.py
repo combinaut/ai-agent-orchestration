@@ -2,6 +2,7 @@
 """Show one user question; record its answer, dismiss it, or hide it until a later time."""
 
 import argparse
+import contextlib
 import os
 import select
 import shutil
@@ -179,7 +180,8 @@ class Panel:
             self.show(f"Sent: {token}. The Coordinator will pick it up.")
         elif token == "t":
             self.show("")
-            text = input("Your answer: ")
+            with line_mode(sys.stdin.fileno()):
+                text = input("Your answer: ")
             if text.strip():
                 atomic_write(answer_path(self.question), text)
                 self.show(f"Sent: {text.strip()}. The Coordinator will pick it up.")
@@ -192,23 +194,55 @@ class Panel:
             self.show("")
 
 
+cooked_mode = None
+
+
+@contextlib.contextmanager
+def cbreak(fd):
+    """Holds the terminal in cbreak mode and restores the previous mode on exit; a no-op off a terminal."""
+    global cooked_mode
+    if not os.isatty(fd):
+        yield
+        return
+    cooked_mode = termios.tcgetattr(fd)
+    tty.setcbreak(fd, termios.TCSANOW)
+    try:
+        yield
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, cooked_mode)
+        cooked_mode = None
+
+
+@contextlib.contextmanager
+def line_mode(fd):
+    """Gives a full-line prompt the mode the terminal had before cbreak."""
+    if cooked_mode is None:
+        yield
+        return
+    termios.tcsetattr(fd, termios.TCSADRAIN, cooked_mode)
+    try:
+        yield
+    finally:
+        tty.setcbreak(fd, termios.TCSANOW)
+
+
 def read_key(wait=None):
     """One key as a character; ESCAPE for an Esc that no sequence follows; None when `wait` seconds pass without one."""
     fd = sys.stdin.fileno()
     if wait is not None and not select.select([fd], [], [], wait)[0]:
         return None
-    old = termios.tcgetattr(fd)
-    try:
-        tty.setcbreak(fd, termios.TCSANOW)
-        key = os.read(fd, 1).decode("latin1")
-        if key == "\x1b" and not select.select([fd], [], [], ESCAPE_WAIT)[0]:
-            return ESCAPE
-        return key
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    key = os.read(fd, 1).decode("latin1")
+    if key == "\x1b" and not select.select([fd], [], [], ESCAPE_WAIT)[0]:
+        return ESCAPE
+    return key
 
 
 def follow(question):
+    with cbreak(sys.stdin.fileno()):
+        run(question)
+
+
+def run(question):
     panel = Panel(question, sys.stdout)
     panel.show()
     escape = ""
