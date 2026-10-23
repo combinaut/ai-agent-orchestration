@@ -36,12 +36,17 @@ def answers_lock(directory=None):
 
 
 def run_group(argv, timeout, env=None, check=True):
-    """Runs argv in its own process group and kills the whole group when it outlives the timeout."""
-    process = subprocess.Popen(argv, start_new_session=True, env=env)
+    """Kills argv's process group when it outlives the timeout; a process under a holder's deadline stays in the holder's group."""
+    process = subprocess.Popen(
+        argv, start_new_session=not os.environ.get(HELD), env=env
+    )
     try:
         code = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
+        if process.pid == os.getpgid(process.pid):
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
         process.wait()
         raise
     if code and check:

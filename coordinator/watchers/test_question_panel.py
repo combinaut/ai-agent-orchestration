@@ -3,6 +3,7 @@ import io
 import os
 import pty
 import subprocess
+import sys
 import tempfile
 import time
 import tty
@@ -423,6 +424,32 @@ class CloseHelperTest(IsolatedTestCase):
                 os.kill(pid, 0)
             with question_lock.answers_lock(tmp):
                 pass
+
+    def test_a_close_helper_started_inside_an_action_dies_with_the_action_deadline(
+        self,
+    ):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                os.environ,
+                {
+                    "ORCH_USER_QUESTIONS_DIR": tmp,
+                    "PYTHONPATH": str(Path(__file__).parent),
+                },
+            ),
+            patch.object(question_lock, "ACTION_TIMEOUT", 1),
+        ):
+            child = Path(tmp) / "child.pid"
+            helper = Path(tmp) / "helper.sh"
+            helper.write_text(f"#!/bin/sh\nsleep 60 &\necho $! > {child}\nwait\n")
+            helper.chmod(0o755)
+            code = f"import question_lock; question_lock.hide_question({str(helper)!r}, 'pane')"
+            argv = [sys.executable, "-c", code]
+            self.assertEqual(question_lock.run_locked(argv), question_lock.TIMED_OUT)
+            pid = int(child.read_text())
+            time.sleep(0.2)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
 
     def test_an_action_that_finishes_returns_its_status(self):
         with (
