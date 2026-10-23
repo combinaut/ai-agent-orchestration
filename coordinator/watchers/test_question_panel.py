@@ -451,6 +451,24 @@ class CloseHelperTest(IsolatedTestCase):
             with self.assertRaises(ProcessLookupError):
                 os.kill(pid, 0)
 
+    def test_an_inner_close_timeout_kills_the_helper_and_its_children_inside_an_action(
+        self,
+    ):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(os.environ, {question_lock.HELD: "1"}),
+        ):
+            child = Path(tmp) / "child.pid"
+            helper = Path(tmp) / "helper.sh"
+            helper.write_text(f"#!/bin/sh\nsleep 60 &\necho $! > {child}\nwait\n")
+            helper.chmod(0o755)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                question_lock.run_group([str(helper)], 1)
+            pid = int(child.read_text())
+            time.sleep(0.2)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+
     def test_an_action_that_finishes_returns_its_status(self):
         with (
             tempfile.TemporaryDirectory() as tmp,

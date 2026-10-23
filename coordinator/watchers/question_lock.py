@@ -5,7 +5,7 @@ import os
 import signal
 import subprocess
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 
@@ -35,20 +35,33 @@ def answers_lock(directory=None):
         yield
 
 
+TERM_GRACE = 2
+
+
 def run_group(argv, timeout, env=None, check=True):
-    """Kills argv's process group when it outlives the timeout; a process under a holder's deadline stays in the holder's group."""
-    process = subprocess.Popen(
-        argv, start_new_session=not os.environ.get(HELD), env=env
-    )
+    """Runs argv in its own process group, killed when it outlives the timeout or this process is terminated."""
+    process = subprocess.Popen(argv, start_new_session=True, env=env)
+
+    def terminate(*_):
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        raise SystemExit(TIMED_OUT)
+
+    previous = signal.signal(signal.SIGTERM, terminate)
     try:
         code = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        if process.pid == os.getpgid(process.pid):
+        os.killpg(process.pid, signal.SIGTERM)
+        try:
+            process.wait(timeout=TERM_GRACE)
+        except subprocess.TimeoutExpired:
+            pass
+        with suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
-        else:
-            process.kill()
         process.wait()
         raise
+    finally:
+        signal.signal(signal.SIGTERM, previous)
     if code and check:
         raise subprocess.CalledProcessError(code, argv)
     return code
