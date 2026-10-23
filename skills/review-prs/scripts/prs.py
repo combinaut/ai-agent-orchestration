@@ -471,9 +471,24 @@ def changes(before, after, login=None):
             }.get(now["ci"] or "", f"CI {now['ci'] or 'cleared'}")
             parts.append(label)
         was_conflict = last_known_conflict(was)
+        ready_now = not now["draft"] and now["ci"] in (None, "SUCCESS")
+        readiness_changed = (
+            was["draft"]
+            or was_conflict is not False
+            or was["ci"] not in (None, "SUCCESS")
+            or (was.get("sha") != now.get("sha"))
+        )
+        deferred_ready = False
         if now["conflict"] is None:
+            kept = dict(now)
             if was_conflict is not None:
-                after[url] = {**now, "last_conflict": was_conflict}
+                kept["last_conflict"] = was_conflict
+            if ready_now and (was.get("pending_ready") or readiness_changed):
+                kept["pending_ready"] = True
+            after[url] = kept
+        elif was.get("pending_ready") and ready_now and now["conflict"] is False:
+            deferred_ready = True
+            parts.append("now ready for review")
         elif was_conflict is not True and now["conflict"] is True:
             parts.append("now conflicts")
         elif was_conflict is True and now["conflict"] is False:
@@ -485,7 +500,7 @@ def changes(before, after, login=None):
         ):
             parts.append("merge state known")
         if parts:
-            became_ready = (
+            became_ready = deferred_ready or (
                 not now["draft"]
                 and now["conflict"] is False
                 and now["ci"] in (None, "SUCCESS")

@@ -773,6 +773,29 @@ assert len(lines) == 1 and "now conflicts" in lines[0], lines
   [ "$status" -eq 0 ]
 }
 
+@test "readiness reached during an unknown merge state is emitted when known" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+pr = dict(title="t", draft=False, author="a", sha="s")
+url = "https://github.com/acme/app/pull/7"
+def poll(before, after):
+    lines, retained = prs.changes(before, after)
+    return lines, {**after, **retained}
+pending = {url: dict(pr, ci="PENDING", conflict=False)}
+unknown = {url: dict(pr, ci="SUCCESS", conflict=None)}
+known = {url: dict(pr, ci="SUCCESS", conflict=False)}
+lines, state = poll(pending, unknown)
+assert lines and "CI green" in lines[0], lines
+lines, state = poll(state, known)
+assert len(lines) == 1 and lines[0].startswith("ready:"), lines
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
 @test "watch-events keeps an event it could not print for the next start" {
   log="$TMP/pr-watch.log"
   printf '%s\n' 'noise' 'new: https://github.com/acme/app/pull/7 — t by a (ready)' >"$log"
