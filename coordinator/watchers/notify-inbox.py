@@ -654,6 +654,20 @@ def history(base, cursor, modes, now, late=None):
         except (OSError, ValueError, KeyError):
             events = []
             state = {}
+        if mode == "workers" and late is not None:
+            for event in events:
+                alert = json.loads(event["line"])
+                signals = [
+                    line
+                    for line in alert.get("events", [])
+                    if line.startswith(("WORKER DONE ", "WORKER QUESTION "))
+                ]
+                if (
+                    signals
+                    and event["seq"] > seen
+                    and now - event.get("at", now) <= OUTBOX_KEEP_SECONDS
+                ):
+                    late.append(dict(alert, events=signals))
         fresh = mode not in cursor
         unseen_reset = False
         if state.get("reset") and cursor.get(mode, {}).get("reset") != state["reset"]:
@@ -677,6 +691,12 @@ def history(base, cursor, modes, now, late=None):
         for event in events:
             if event["seq"] <= seen:
                 alert = json.loads(event["line"])
+                if mode == "workers":
+                    alert["events"] = [
+                        line
+                        for line in alert.get("events", [])
+                        if not line.startswith(("WORKER DONE ", "WORKER QUESTION "))
+                    ]
                 if unseen_reset and any(
                     line.startswith("STATE RESET ") for line in alert.get("events", [])
                 ):

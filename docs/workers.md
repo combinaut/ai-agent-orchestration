@@ -43,18 +43,19 @@ retries. Plain `QUESTION:` is the fallback when the command fails or times out;
 
 | Resource | Bound |
 |---|---|
-| Pending questions | One per pane; a second pending ask fails |
+| Pending questions | One per pane; at most 200 question records machine-wide, including deferred panel cleanup; further asks fail clearly |
 | Ask wait | `workers.ask_timeout_s` / `ORCH_ASK_TIMEOUT_S`, default 1800 seconds; positive finite override `--timeout` |
 | Waiting ask polling | At most once per second, last sleep capped by remaining time |
 | Heartbeats | One accepted per 30 seconds; fresh for 300 seconds |
 | Pane records | One per live pane; removed after a successful snapshot confirms pane closed or owner changed |
-| Question/answer files | One question and answer per pane; removed when consumed, replaced, closed, or at deadline + 3600 seconds by workers poll |
+| Question/answer files | Worker consumption returns immediately; Q closure is deferred to the workers poll. Removed when consumed, replaced, closed, or at deadline + 3600 seconds; a failed Q close retains one retry record and blocks another ask from that pane until closure succeeds |
 | Completion handoff | Latest 200 completions per pane for 3600 seconds; oldest dropped beyond cap, so rapid new-job resets cannot erase a completion before the poll |
 | Signal dedupe state | IDs from retained live completions and unexpired pending questions only |
 | Native outbox | Existing 200 entries; merge overflow by target, drop oldest beyond cap; retry every 60 seconds, expire after 3600 seconds |
 
 Files live under `~/.claude/coordinator/worker-signals/`, never in the repo.
-Escalated question files live in `~/.claude/coordinator/questions/`. Pruning uses
-the existing answers lock, so answer publication cannot race cancellation. A
+Escalated question files live in `~/.claude/coordinator/questions/`. Pruning uses a validated pane snapshot through the env adapter, preserves records when
+the snapshot is unreadable, and does not prune records newer than the snapshot cutoff.
+Pruning uses the existing answers lock, so answer publication cannot race cancellation. A
 successful `ask` prints only its answer to stdout; timeout exits nonzero with one
 clear line. The architect should use `list` to recover pending IDs after recycle.

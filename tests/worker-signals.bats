@@ -23,6 +23,8 @@ SH
 teardown() { rm -rf "$TMP"; }
 
 @test "worker signals wrapper resolves symlinks and completion is idempotent" {
+  printf '[workers]\nask_timeout_s = 1\n[herdr]\nbin = "%s"\n' "$HERDR_BIN_PATH" >"$ORCH_CONFIG"
+  unset HERDR_BIN_PATH
   ln -s "$ROOT/orch-signal" "$TMP/bin/orch-signal"
   run "$TMP/bin/orch-signal" heartbeat --new-job
   [ "$status" -eq 0 ]
@@ -37,7 +39,7 @@ teardown() { rm -rf "$TMP"; }
 @test "worker signals configured timeout exits with one clear line" {
   run "$ROOT/orch-signal" ask --question 'Which version?' --options v1,v2
   [ "$status" -ne 0 ]
-  [[ "$output" == 'orch-signal: question '*"timed out after 1s" ]]
+  [[ "$output" == 'orch-signal: question '*"timed out after 1s" ]] || { echo "$output"; false; }
   [ "${#lines[@]}" -eq 1 ]
 }
 

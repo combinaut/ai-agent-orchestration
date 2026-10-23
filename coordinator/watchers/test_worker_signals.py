@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -116,8 +117,22 @@ class SignalTests(IsolatedTestCase):
         (directory / (q["id"] + ".answer")).write_text("b")
         raw = w.collect_answers(None)
         w.acknowledge_answers(raw)
+        import subprocess
+
+        self.opener.side_effect = subprocess.TimeoutExpired("close question", 10)
         self.assertEqual(s.wait_answer(q, 0.01), "b")
+        self.opener.assert_not_called()
+        self.assertTrue(s.read(s.question_path(q["id"]))["cleanup"])
+        s.collect(None, None, s.time.time())
+        self.assertTrue(s.question_path(q["id"]).exists())
+        self.opener.side_effect = None
+        self.opener.return_value = 1
+        s.collect(None, None, s.time.time())
+        self.assertTrue(s.question_path(q["id"]).exists())
+        self.opener.return_value = 0
+        s.collect(None, None, s.time.time())
         self.assertFalse((directory / (q["id"] + ".md")).exists())
+        self.assertFalse(s.question_path(q["id"]).exists())
 
     def test_heartbeat_rate_and_done_dedupe(self):
         ident = s.identity()
@@ -143,7 +158,7 @@ class SignalTests(IsolatedTestCase):
             os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
         ):
             s.answer(q["id"], "a")
-        s.collect([], {}, 0)
+        s.collect([], {}, s.time.time() + 1)
         self.assertEqual(list(s.directory().glob("*.json")), [])
         self.assertFalse(s.answer_path(q["id"]).exists())
 
@@ -272,3 +287,122 @@ class SignalTests(IsolatedTestCase):
             with self.assertRaisesRegex(ValueError, "timed out"):
                 s.wait_answer(q, 0.02)
             self.assertLess(time.monotonic() - started, 1)
+
+    def test_notifier_startup_replays_only_unread_signals(self):
+        import importlib.util
+
+        import alert_policy
+
+        spec = importlib.util.spec_from_file_location(
+            "startup_inbox", Path(__file__).with_name("notify-inbox.py")
+        )
+        inbox = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inbox)
+        line = "WORKER QUESTION pane:1 owner=owner id=signal-test workspace=worker question=Which?"
+        (self.base / "workers.json").write_text(
+            json.dumps(
+                dict(
+                    before={},
+                    events=[
+                        dict(
+                            seq=1,
+                            at=100,
+                            line=json.dumps(dict(mode="workers", events=[line])),
+                        )
+                    ],
+                )
+            )
+        )
+        cursor, late = {}, []
+        history = inbox.history(self.base, cursor, ["workers"], 101, late)
+        state, initial = alert_policy.rebuild(history, 101)
+        self.assertEqual(initial, [])
+        sent = alert_policy.apply(state, late, 101)
+        self.assertEqual(len(sent), 1)
+        self.assertIn("question=Which?", sent[0])
+        again = []
+        inbox.history(self.base, cursor, ["workers"], 102, again)
+        self.assertEqual(again, [])
+
+    def test_live_pane_survives_agent_registry_exit(self):
+        record = s.record_signal(s.identity(), "done", outcome="succeeded")
+
+        def command(*args):
+            if args[-2:] == ("agent", "list"):
+                return json.dumps(dict(result=dict(agents=[])))
+            if args[-2:] == ("workspace", "list"):
+                return json.dumps(
+                    dict(
+                        result=dict(
+                            workspaces=[
+                                dict(workspace_id="worker", tokens=dict(owner="owner"))
+                            ]
+                        )
+                    )
+                )
+            raise AssertionError(args)
+
+        with (
+            patch.dict(os.environ, HERDR_ENV="1"),
+            patch.object(w, "command", side_effect=command),
+        ):
+            raw = w.collect("workers", None)
+        self.assertEqual(raw["signal_events"][0]["id"], record["id"])
+        self.assertTrue(s.pane_path("pane:1").exists())
+
+    def test_unreadable_pane_snapshot_preserves_signals(self):
+        s.record_signal(s.identity(), "done", outcome="succeeded")
+        with patch.object(
+            s.discovery, "open_work", side_effect=s.discovery.Unavailable("offline")
+        ):
+            _, events = s.collect_live(None, s.time.time())
+        self.assertEqual(len(events), 1)
+        self.assertTrue(s.pane_path("pane:1").exists())
+
+    def test_signal_newer_than_snapshot_is_not_pruned(self):
+        with patch.object(s.time, "time", return_value=200):
+            s.record_signal(s.identity(), "done", outcome="succeeded")
+        _, events = s.collect([], {}, 201, snapshot_at=100)
+        self.assertEqual(len(events), 1)
+        self.assertTrue(s.pane_path("pane:1").exists())
+
+    def test_expired_completion_not_emitted_but_still_done(self):
+        with patch.object(s.time, "time", return_value=100):
+            s.record_signal(s.identity(), "done", outcome="succeeded")
+        signals, events = s.collect(
+            [dict(pane_id="pane:1", workspace_id="worker")], {"worker": "owner"}, 3701
+        )
+        self.assertEqual(events, [])
+        self.assertEqual(signals["pane:1"]["kind"], "done")
+
+    def test_creation_timeout_bounds_contended_answer_lock(self):
+        import fcntl
+        import time
+
+        ident = s.identity()
+        s.questions_directory().mkdir(parents=True)
+        with (s.questions_directory() / ".answers.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            started = time.monotonic()
+            with self.assertRaisesRegex(ValueError, "timed out"):
+                s.new_question(ident, "Which?", "", timeout=0.02)
+            self.assertLess(time.monotonic() - started, 1)
+        self.assertEqual(list(s.directory().glob("*.json")), [])
+
+    def test_expired_escalation_defers_panel_cleanup_on_new_ask(self):
+        q = self.record(timeout=1)
+        (s.questions_directory() / (q["id"] + ".md")).write_text("Question")
+        with patch.object(s.time, "time", return_value=q["deadline"] + 1):
+            with self.assertRaisesRegex(ValueError, "cleanup"):
+                self.record(timeout=0.01)
+        self.opener.assert_not_called()
+        self.assertTrue(s.read(s.question_path(q["id"]))["cleanup"])
+
+    def test_question_cleanup_backlog_global_bound(self):
+        ident = s.identity()
+        with patch.object(s, "QUESTIONS_MAX", 2):
+            s.new_question(ident, "Which?", "", timeout=60)
+            s.new_question(dict(ident, pane="pane:2"), "Which?", "", timeout=60)
+            with self.assertRaisesRegex(ValueError, "capacity reached"):
+                s.new_question(dict(ident, pane="pane:3"), "Which?", "", timeout=60)
+        self.assertEqual(len(list(s.directory().glob("signal-*.json"))), 2)

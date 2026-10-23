@@ -9,6 +9,7 @@ done
 root=$(cd "$(dirname "$self")" && pwd)
 . "$root/coordinator/watchers/coord-lib.sh"
 orch_load_config
+orch_export_config
 export ORCH_ASK_TIMEOUT_S=${ORCH_ASK_TIMEOUT_S:-1800}
 orch_python >/dev/null || exit 2
 exec "$ORCH_LOADER_PYTHON" "$root/coordinator/watchers/worker_signals.py" "$@"

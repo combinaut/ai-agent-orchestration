@@ -2151,9 +2151,9 @@ def collect(mode, before, scope="", base=None):
             ):
                 raw["workspaces"] = None
             owners = waiting_owners(raw)
-            if owners is not None:
-                signals, events = worker_signals.collect(
-                    agents(raw), owners, raw["observed_at"]
+            if owners is not None and worker_signals.directory().exists():
+                signals, events = worker_signals.collect_live(
+                    command, raw["observed_at"]
                 )
                 if signals:
                     raw["worker_signals"] = signals

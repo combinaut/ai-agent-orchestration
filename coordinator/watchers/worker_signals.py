@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import subprocess
 import sys
 import time
 import uuid
@@ -19,6 +20,7 @@ POLL_SECONDS = 1
 HEARTBEAT_MIN_SECONDS = 30
 HEARTBEAT_FRESH_SECONDS = 300
 QUESTION_RETAIN_SECONDS = 3600
+QUESTIONS_MAX = 200
 DONE_EVENTS_MAX = 200
 DONE_EVENTS_KEEP_SECONDS = 3600
 ID = re.compile(r"signal-[a-f0-9]{32}\Z")
@@ -108,11 +110,22 @@ def record_signal(ident, kind, new_job=False, **fields):
         return record
 
 
-def remove_question(record):
+def remove_question(record, close_panel=True):
+    """Waiters defer Q closure; the workers poll retries failed closes with the record intact."""
     identifier = record["id"]
-    if (questions_directory() / (identifier + ".md")).exists():
-        # The existing close helper closes the Q pane and cleans up under this same lock.
-        open_user_question("close", identifier)
+    panel = questions_directory() / (identifier + ".md")
+    if panel.exists():
+        if not close_panel:
+            record["cleanup"] = True
+            write(question_path(identifier), record)
+            answer_path(identifier).unlink(missing_ok=True)
+            panel.with_suffix(".remind").unlink(missing_ok=True)
+            return False
+        try:
+            if open_user_question("close", identifier) != 0:
+                return False
+        except (OSError, subprocess.SubprocessError):
+            return False
     question_path(identifier).unlink(missing_ok=True)
     answer_path(identifier).unlink(missing_ok=True)
     directory = questions_directory()
@@ -120,48 +133,69 @@ def remove_question(record):
         (directory / f"{identifier}.{suffix}").unlink(missing_ok=True)
     for path in directory.glob(f"{identifier}.*.answer.*"):
         path.unlink(missing_ok=True)
+    return True
 
 
-def new_question(ident, question, options, timeout):
+def new_question(ident, question, options, timeout, deadline=None):
     worker_identity(ident)
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be a positive finite number of seconds")
     if not question.strip():
         raise ValueError("question must not be empty")
-    with answers_lock():
-        now = time.time()
-        for path in directory().glob("signal-*.json"):
-            old = read(path)
-            if old["pane"] == ident["pane"]:
-                if old["deadline"] > now:
-                    raise ValueError("pane already has a pending question")
-                remove_question(old)
-        record = dict(
-            ident,
-            id="signal-" + uuid.uuid4().hex,
-            kind="question",
-            question=question,
-            options=options,
-            at=now,
-            deadline=now + timeout,
-        )
-        write(question_path(record["id"]), record)
-        return record
+    deadline = time.monotonic() + timeout if deadline is None else deadline
+    try:
+        with answers_lock(timeout=max(0, deadline - time.monotonic())):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            now = time.time()
+            for path in directory().glob("signal-*.json"):
+                old = read(path)
+                if old["pane"] == ident["pane"]:
+                    if old.get("cleanup"):
+                        raise ValueError(
+                            "pane has a previous question awaiting panel cleanup"
+                        )
+                    if old["deadline"] > now:
+                        raise ValueError("pane already has a pending question")
+                    if not remove_question(old, close_panel=False):
+                        raise ValueError(
+                            "pane has a previous question awaiting panel cleanup"
+                        )
+            if sum(1 for _ in directory().glob("signal-*.json")) >= QUESTIONS_MAX:
+                raise ValueError(
+                    f"worker question capacity reached ({QUESTIONS_MAX}); clear pending panel cleanup"
+                )
+            record = dict(
+                ident,
+                id="signal-" + uuid.uuid4().hex,
+                kind="question",
+                question=question,
+                options=options,
+                at=now,
+                deadline=now + remaining,
+            )
+            write(question_path(record["id"]), record)
+            return record
+    except TimeoutError:
+        raise ValueError(
+            f"question timed out after {timeout:g}s before creation"
+        ) from None
 
 
-def wait_answer(record, timeout):
-    deadline = time.monotonic() + timeout
+def wait_answer(record, timeout, deadline=None):
+    deadline = time.monotonic() + timeout if deadline is None else deadline
     try:
         while True:
             with answers_lock(timeout=max(0, deadline - time.monotonic())):
                 path = answer_path(record["id"])
                 if path.exists():
                     text = path.read_text().strip()
-                    remove_question(record)
+                    remove_question(record, close_panel=False)
                     return text
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    remove_question(record)
+                    remove_question(record, close_panel=False)
                     break
             time.sleep(min(POLL_SECONDS, remaining))
     except TimeoutError:
@@ -179,7 +213,7 @@ def answer(identifier, text, to_user=False):
     caller = identity()
     with answers_lock():
         record = read(question_path(identifier))
-        if not record or record["deadline"] <= time.time():
+        if not record or record.get("cleanup") or record["deadline"] <= time.time():
             raise ValueError("question is missing or expired")
         if caller["workspace"] != record["owner"]:
             raise ValueError("only the owner architect workspace may answer")
@@ -215,17 +249,23 @@ def bridge_user_answer(identifier, text):
     record = read(question_path(identifier))
     if (
         record
+        and not record.get("cleanup")
         and record["deadline"] > time.time()
         and not answer_path(identifier).exists()
     ):
         atomic_write(answer_path(identifier), text)
 
 
-def collect(rows, owners, now):
+def collect(rows, owners, now, snapshot_at=None):
     """Read and prune only after a successful pane AND owner snapshot; never infer closed from a failed read."""
     if not directory().exists():
         return {}, []
-    live = {row["pane_id"]: row.get("workspace_id") for row in rows}
+    live = (
+        {row["pane_id"]: row.get("workspace_id") for row in rows}
+        if rows is not None
+        else None
+    )
+    snapshot_at = now if snapshot_at is None else snapshot_at
     signals, events = {}, []
     with answers_lock():
         for path in directory().glob("*.json"):
@@ -234,11 +274,21 @@ def collect(rows, owners, now):
                 continue
             pane, workspace = record["pane"], record["workspace"]
             closed = (
-                live.get(pane) != workspace or owners.get(workspace) != record["owner"]
+                live is not None
+                and owners is not None
+                and record["at"] <= snapshot_at
+                and (
+                    live.get(pane) != workspace
+                    or owners.get(workspace) != record["owner"]
+                )
             )
             if record["kind"] == "question":
                 answered = answer_path(record["id"]).exists()
-                if closed or now > record["deadline"] + QUESTION_RETAIN_SECONDS:
+                if (
+                    record.get("cleanup")
+                    or closed
+                    or now > record["deadline"] + QUESTION_RETAIN_SECONDS
+                ):
                     remove_question(record)
                 elif not answered and now < record["deadline"]:
                     events.append(record)
@@ -255,11 +305,22 @@ def collect(rows, owners, now):
                     record["done_events"] = pending
                     write(path, record)
                 events.extend(pending)
-                if record["kind"] == "done" and not any(
-                    event["id"] == record["id"] for event in pending
-                ):
-                    events.append(record)
     return signals, events
+
+
+def collect_live(command, now):
+    """Read liveness only through the env adapter, with a cutoff taken before the snapshot starts."""
+    snapshot_at = time.time()
+    try:
+        work = discovery.open_work(command)
+        rows = [
+            dict(pane_id=pane["pane"], workspace_id=pane["workspace"])
+            for pane in work["panes"]
+        ]
+        owners = {row["id"]: row.get("owner") for row in work["workspaces"]}
+    except discovery.Unavailable:
+        rows, owners = None, None
+    return collect(rows, owners, now, snapshot_at)
 
 
 def suppressed(row, raw):
@@ -315,8 +376,22 @@ def main():
         if args.action == "answer":
             answer(args.id, args.text, args.to_user)
         elif args.action == "ask":
-            record = new_question(identity(), args.question, args.options, args.timeout)
-            print(wait_answer(record, args.timeout))
+            if not math.isfinite(args.timeout) or args.timeout <= 0:
+                raise ValueError("timeout must be a positive finite number of seconds")
+            import watcher_runtime as runtime
+
+            deadline = time.monotonic() + args.timeout
+            try:
+                with runtime.deadline(args.timeout, "orch-signal ask", soft=True):
+                    record = new_question(
+                        identity(), args.question, args.options, args.timeout, deadline
+                    )
+                    result = wait_answer(record, args.timeout, deadline)
+            except TimeoutError:
+                raise ValueError(
+                    f"question timed out after {args.timeout:g}s"
+                ) from None
+            print(result)
         elif args.action == "list":
             caller = identity()
             with answers_lock():
@@ -324,6 +399,7 @@ def main():
                     record = read(path)
                     if (
                         caller["workspace"] in (record["workspace"], record["owner"])
+                        and not record.get("cleanup")
                         and record["deadline"] > time.time()
                         and not answer_path(record["id"]).exists()
                     ):
