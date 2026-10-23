@@ -361,3 +361,23 @@ class TodoAnswerTests(IsolatedTestCase):
                 report=lambda *_: None,
             )
         self.assertEqual(a.records(), [])
+
+    def test_toml_only_question_directory_uses_the_shared_lock(self):
+        import fcntl
+
+        configured = self.base / "configured-questions"
+        configured.mkdir()
+        config = self.base / "config.toml"
+        config.write_text(
+            "[user_questions]\ndir = " + json.dumps(str(configured)) + "\n"
+        )
+        with (
+            (configured / ".answers.lock").open("a") as lock,
+            patch.dict(os.environ, ORCH_CONFIG=str(config)),
+            patch.object(a, "LOCK_SECONDS", 0.02),
+        ):
+            os.environ.pop("ORCH_USER_QUESTIONS_DIR", None)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            with self.assertRaises(TimeoutError):
+                a.submit(OWNER, TEXT, "now")
+        self.assertEqual(a.records(), [])

@@ -94,7 +94,12 @@ def submit(owner, text, answer, generation=None):
         raise ValueError(
             "item changed or its status file is unreadable; refresh the list"
         )
-    with answers_lock(timeout=LOCK_SECONDS):
+    with answers_lock(
+        setting(
+            "ORCH_USER_QUESTIONS_DIR", Path.home() / ".claude/coordinator/questions"
+        ),
+        timeout=LOCK_SECONDS,
+    ):
         now = time.time()
         existing = records()
         for record in existing:
@@ -129,7 +134,12 @@ def submit(owner, text, answer, generation=None):
 def collect(command):
     if not directory().exists():
         return [], []
-    with answers_lock(timeout=LOCK_SECONDS):
+    with answers_lock(
+        setting(
+            "ORCH_USER_QUESTIONS_DIR", Path.home() / ".claude/coordinator/questions"
+        ),
+        timeout=LOCK_SECONDS,
+    ):
         now, current = time.time(), records()
         for record in current:
             if now - record["at"] > KEEP_SECONDS:
