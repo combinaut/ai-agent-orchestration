@@ -880,7 +880,7 @@ def reduce_workers(before, raw):
     for row in agents(raw):
         record = raw.get("worker_signals", {}).get(row["pane_id"])
         if record and record["kind"] == "done" and now > record["at"]:
-            if row.get("agent_status") == "idle":
+            if row.get("agent_status") in IDLE_STATUSES:
                 idle_done.add(record.get("id"))
             elif row.get("agent_status") == "working" and record.get("id") in idle_done:
                 resumed.add(record.get("id"))
@@ -1610,14 +1610,18 @@ def reduce_answers(before, raw):
 
 
 def acknowledge_answers(raw):
+    notices = []
     for slug, text, path, _ in raw.get("answers", []):
         if not path:
             continue
-        worker_signals.bridge_user_answer(slug, text)
+        notice = worker_signals.bridge_user_answer(slug, text)
+        if notice:
+            notices.append(notice)
         processing = Path(path)
         processing.replace(
             processing.with_name(processing.name.removesuffix(".processing") + ".seen")
         )
+    return notices
 
 
 def reduce(mode, before, raw):
@@ -1930,7 +1934,9 @@ def cycle_pass(base, mode, collector, failures, budget):
             events += failed_read(state, mode, failures, type(error).__name__)
         line = publish_events(base, mode, state, events)
         if mode == "answers" and reduced:
-            acknowledge_answers(raw)
+            notices = acknowledge_answers(raw)
+            if notices:
+                line = publish_events(base, mode, state, notices)
         if mode == "hog":
             log_events = log_hog_hits(base, state, hog_hits)
             if log_events:

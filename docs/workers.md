@@ -29,7 +29,7 @@ A **current job** begins with `heartbeat --new-job` and ends with `done`; every
 follow-up brief in a reused pane must begin a new job. Identical done calls are
 idempotent and print a no-op notice to stderr. A changed report, summary or outcome
 creates a new completion even without a reset. A done record suppresses WORKER WAITING
-until a post-completion idle observation is followed by working; a heartbeat
+until a post-completion idle/done observation is followed by working; a heartbeat
 within 300 seconds also suppresses it. Workers that send neither retain the old
 alerts. WORKER IDLE remains independent. Long jobs can send heartbeat periodically;
 calls less than 30 seconds apart are ignored. Ordinary heartbeats cannot undo done.
@@ -43,7 +43,8 @@ a re-ask replaces a record whose recorded asker PID is dead. `answer` refuses
 a dead asker with `asker is gone`, including escalation.
 An owner may answer or escalate a question. Escalation uses the existing questions
 directory, answers lock, reminders and Q panel; the answers watcher forwards the
-user's answer to the blocked worker. If opening the panel fails, a due reminder
+user's answer to the blocked worker. If the asker has died, the bridge discards
+the answer and emits one `ANSWERS READFAIL answer discarded:` notice instead. If opening the panel fails, a due reminder
 retries. Plain `QUESTION:` is the fallback when the command fails or times out;
 `NEED SLOT:` is unchanged. No picker opens in the worker pane.
 

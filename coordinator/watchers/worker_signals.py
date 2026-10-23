@@ -285,6 +285,12 @@ def bridge_user_answer(identifier, text):
         and record["deadline"] > time.time()
         and not answer_path(identifier).exists()
     ):
+        if not asker_alive(record):
+            if not record.get("user_answer_discarded"):
+                record["user_answer_discarded"] = True
+                write(question_path(identifier), record)
+                return f"ANSWERS READFAIL answer discarded: {identifier}: {text} (asker is gone)"
+            return
         atomic_write(answer_path(identifier), text)
 
 

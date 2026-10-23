@@ -770,3 +770,63 @@ class SignalTests(IsolatedTestCase):
                     s.answer(record["id"], "answer", to_user=to_user)
         self.assertFalse(s.answer_path(record["id"]).exists())
         self.opener.assert_not_called()
+
+    def test_background_done_transition_restores_waiting_after_resumed_work(self):
+        record = s.record_signal(s.identity(), "done", outcome="succeeded")
+        before, events = None, []
+        for seconds, status in (
+            (5, "working"),
+            (70, "done"),
+            (130, "working"),
+            (190, "done"),
+            (1200, "done"),
+        ):
+            raw = dict(
+                result=dict(
+                    agents=[
+                        dict(
+                            pane_id="pane:1", workspace_id="worker", agent_status=status
+                        )
+                    ]
+                ),
+                workspaces=dict(
+                    result=dict(
+                        workspaces=[
+                            dict(workspace_id="worker", tokens=dict(owner="owner"))
+                        ]
+                    )
+                ),
+                observed_at=record["at"] + seconds,
+                worker_signals={"pane:1": record},
+            )
+            before, lines = w.reduce_workers(before, raw)
+            events += lines
+        self.assertTrue(any("WORKER WAITING" in line for line in events))
+
+    def test_escalated_user_answer_to_dead_asker_is_discarded_with_one_notice(self):
+        record = self.record(timeout=60)
+        with patch.dict(
+            os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
+        ):
+            s.answer(record["id"], None, to_user=True)
+        record["asker_pid"] = 999999999
+        s.write(s.question_path(record["id"]), record)
+        (s.questions_directory() / (record["id"] + ".answer")).write_text("user choice")
+        state = self.base / "watcher-state"
+        result = json.loads(w.cycle(state, "answers", w.collect_answers))
+        self.assertFalse(s.answer_path(record["id"]).exists())
+        notices = [
+            line
+            for line in result["events"]
+            if "ANSWERS READFAIL" in line and "discarded" in line
+        ]
+        self.assertEqual(len(notices), 1)
+        self.assertIn(record["id"], notices[0])
+        self.assertIn("asker is gone", notices[0])
+        self.assertIn("user choice", notices[0])
+        repeated = json.loads(
+            w.cycle(state, "answers", w.collect_answers) or '{"events": []}'
+        )
+        self.assertFalse(any("discarded" in line for line in repeated["events"]))
+        self.assertIsNone(s.bridge_user_answer(record["id"], "user choice"))
+        self.assertFalse(s.answer_path(record["id"]).exists())
