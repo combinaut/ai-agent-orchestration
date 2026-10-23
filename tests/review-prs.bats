@@ -746,7 +746,7 @@ print(prs.status(pr))
   [ "$(dispatch_state)" = 'False "pending"' ]
 }
 
-@test "a merge state that turns unknown is a change" {
+@test "transient unknown merge states retain the last known state" {
   # shellcheck disable=SC2016 # Python source.
   run python3 -c '
 import sys
@@ -754,8 +754,20 @@ sys.path.insert(0, sys.argv[1])
 import prs
 pr = dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s")
 url = "https://github.com/acme/app/pull/7"
-lines = prs.changes({url: dict(pr, conflict=False)}, {url: dict(pr, conflict=None)})[0]
-assert lines and lines[0].startswith("changed:") and "merge state unknown" in lines[0], lines
+known = {url: dict(pr, conflict=False)}
+unknown = {url: dict(pr, conflict=None)}
+conflicting = {url: dict(pr, conflict=True)}
+def poll(before, after):
+    lines, retained = prs.changes(before, after)
+    return lines, {**after, **retained}
+lines, state = poll(known, unknown)
+assert lines == [], lines
+lines, state = poll(state, known)
+assert lines == [], lines
+lines, state = poll(known, unknown)
+assert lines == [], lines
+lines, state = poll(state, conflicting)
+assert len(lines) == 1 and "now conflicts" in lines[0], lines
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
