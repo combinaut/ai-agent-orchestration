@@ -603,6 +603,98 @@ class HeadingClickTest(AppCase):
         self.assertEqual(status, "not found: Architect::Tooling")
 
 
+class HeadingWindowTest(AppCase):
+    OWNERS = [
+        "Architect::Alpha::Billing::Reports",
+        "Architect::Beta",
+        "Architect::Gamma::Ops",
+    ]
+
+    def setUp(self):
+        super().setUp()
+        text = "".join(
+            f"## {owner}.md\n- " + "word " * 12 + f"end{n}\n"
+            for n, owner in enumerate(self.OWNERS)
+        )
+        self.current = view.parse(text)
+        self.jumps = []
+
+    def open_app(self, columns=80, lines=24):
+        self.screen.columns, self.screen.lines = columns, lines
+        app = self.app(jump=self.jumps.append)
+        return app
+
+    def focus_rows(self, app):
+        return [(h[0], h[1], h[2], h[4]) for h in app.hits if h[3] == "focus"]
+
+    def click_every_heading_row(self, make):
+        """Clicks each focus row of a fresh app; a click selects its item and moves the rows."""
+        seen = set()
+        for n in range(len(self.focus_rows(make()))):
+            app = make()
+            row, first, last, index = self.focus_rows(app)[n]
+            shown = self.screen.last_frame().split("\r\n")[row - 1].lstrip("▌ ")
+            self.assertIn(shown, f"{index + 1}. {app.rows[index][0]}")
+            self.assertTrue(shown)
+            self.jumps.clear()
+            app.feed(f"\x1b[<0;{(first + last) // 2};{row}M")
+            self.assertEqual(
+                self.jumps, [f"{app.rows[index][1]} -> {app.rows[index][0]}"]
+            )
+            seen.add(index)
+        return seen
+
+    def test_every_visible_row_of_a_wrapped_heading_focuses_its_architect(self):
+        app = self.open_app(columns=16)
+        rows = [r for r, _f, _l, i in self.focus_rows(app) if i == 0]
+        self.assertGreater(len(rows), 1)
+        self.assertEqual(
+            self.click_every_heading_row(lambda: self.open_app(columns=16)),
+            {i for _r, _f, _l, i in self.focus_rows(app)},
+        )
+
+    def test_headings_still_hit_after_the_pane_is_resized(self):
+        for columns, lines in ((80, 40), (20, 30), (50, 12), (30, 40)):
+
+            def resized():
+                app = self.open_app(columns=80, lines=40)
+                self.screen.columns, self.screen.lines = columns, lines
+                app.tick()
+                return app
+
+            visible = {i for _r, _f, _l, i in self.focus_rows(resized())}
+            self.assertIn(0, visible)
+            self.assertEqual(self.click_every_heading_row(resized), visible)
+
+    def test_headings_hit_in_a_scrolled_view_with_a_selected_item(self):
+        def scrolled():
+            app = self.open_app(columns=30, lines=8)
+            app.feed("3")
+            return app
+
+        app = scrolled()
+        self.assertEqual(app.selected, 2)
+        self.assertGreater(app.top, 0)
+        visible = {i for _r, _f, _l, i in self.focus_rows(app)}
+        self.assertIn(2, visible)
+        self.assertNotIn(0, visible)
+        self.assertEqual(self.click_every_heading_row(scrolled), visible)
+
+    def test_hover_and_other_buttons_never_focus(self):
+        app = self.open_app()
+        row, first, _last, _index = self.focus_rows(app)[0]
+        for report in (
+            f"\x1b[<35;{first};{row}M",
+            f"\x1b[<0;{first};{row}m",
+            f"\x1b[<1;{first};{row}M",
+            f"\x1b[<2;{first};{row}M",
+            f"\x1b[<64;{first};{row}M",
+            f"\x1b[<32;{first};{row}M",
+        ):
+            app.feed(report)
+        self.assertEqual(self.jumps, [])
+
+
 class PaneTokenTest(AppCase):
     def calls(self):
         log = Path(os.environ["TEST_TOOL_LOG"])
