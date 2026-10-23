@@ -539,7 +539,11 @@ def follow(
             if not items:
                 screen.append(rendered)
             if answering:
-                footer = answering["editor"].prompt()
+                footer = (
+                    "that item is gone; Esc cancels the answer"
+                    if answering.get("gone")
+                    else answering["editor"].prompt()
+                )
             status = (
                 f"page {page + 1}/{len(starts)}: n next, p prev | " + footer
                 if len(starts) > 1
@@ -581,10 +585,13 @@ def follow(
                 page = max(0, page + step)
                 for char in key:
                     if answering:
-                        if not any(
+                        if answering.get("gone") or not any(
                             item["id"] == answering["item"]["id"] for item in items
                         ):
-                            answering, footer = None, "that item is gone"
+                            answering["gone"] = True
+                            footer = "that item is gone; Esc cancels the answer"
+                            if char == "\x1b":
+                                answering, footer = None, "answer cancelled"
                             continue
                         action, answer = answering["editor"].feed(char)
                         footer = (

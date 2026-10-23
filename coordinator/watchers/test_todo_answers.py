@@ -310,3 +310,54 @@ class TodoAnswerTests(IsolatedTestCase):
         row = next(hit[0] for hit in app.hits if hit[3] == "answer-1")
         app.feed(f"\x1b[<0;24;{row}M")
         self.assertEqual(a.records()[0]["answer"], label)
+
+    def test_disappearing_question_cannot_retarget_buffered_view_input(self):
+        other = TEXT.replace("Deploy release", "Deploy another release")
+        source = self.base / "status" / f"{OWNER}.md"
+        source.write_text("## Waits on the user\n- " + TEXT + "\n- " + other + "\n")
+        app, _ = self.view_app()
+        app.feed("at")
+        source.write_text("## Waits on the user\n- " + other + "\n")
+        w.todo_module().merge(
+            self.base / "status", self.base / "todo.md", self.base / "todo.state.json"
+        )
+        app.feed("text a1")
+        self.assertEqual(a.records(), [])
+        app.feed("a1\n")
+        self.assertEqual(a.records(), [])
+        app.feed("\x1b")
+        app.lone_escape()
+        app.feed("a1")
+        self.assertEqual(a.records()[0]["text"], other)
+
+    def test_disappearing_question_cannot_retarget_legacy_input(self):
+        import contextlib
+        import io
+
+        module = w.todo_module()
+        other = TEXT.replace("Deploy release", "Deploy another release")
+        source = self.base / "status" / f"{OWNER}.md"
+        source.write_text("## Waits on the user\n- " + TEXT + "\n- " + other + "\n")
+        output = self.base / "todo.md"
+        state = self.base / "todo.state.json"
+        module.merge(self.base / "status", output, state)
+        keys = iter([b"1at", b"text", b" a1", b""])
+
+        def read(*_):
+            data = next(keys)
+            if data == b"text":
+                source.write_text("## Waits on the user\n- " + other + "\n")
+                module.merge(self.base / "status", output, state)
+            return data
+
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            patch.object(module.os, "isatty", return_value=False),
+        ):
+            module.follow(
+                argparse.Namespace(output=output, state=state, pane=None),
+                wait=lambda *_: ([0], [], []),
+                read=read,
+                report=lambda *_: None,
+            )
+        self.assertEqual(a.records(), [])

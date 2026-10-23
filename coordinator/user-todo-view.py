@@ -593,7 +593,11 @@ class App:
         )
         self.remember()
         if self.picker and self.find(self.picker["key"]) is None:
-            self.picker, self.status = None, "that item is gone"
+            if "answer" in self.picker:
+                self.picker["gone"] = True
+                self.status = "that item is gone; Esc cancels the answer"
+            else:
+                self.picker, self.status = None, "that item is gone"
         self.last_refresh = self.clock()
         count = self.hidden.open_count(self.items)
         if count != self.reported:
@@ -661,6 +665,9 @@ class App:
             and "answer" in self.picker
             and (action == "answer-key" or action.startswith("answer-"))
         ):
+            if self.picker.get("gone"):
+                self.status = "that item is gone; Esc cancels the answer"
+                return
             editor = self.picker["answer"]
             char = index if action == "answer-key" else action.removeprefix("answer-")
             result, value = editor.feed(char)
@@ -773,6 +780,8 @@ class App:
 
     def lone_escape(self):
         if self.buf == "\x1b":
+            if self.picker and "answer" in self.picker:
+                self.status = "answer cancelled"
             self.closing = self.popup and self.picker is None
             self.buf, self.picker = "", None
             self.refresh()

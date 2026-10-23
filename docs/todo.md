@@ -45,7 +45,7 @@ or **t** to type a free-text answer and **Enter** to send. **Esc** cancels the
 answer; in a popup it stays open. The simple `user-todo.py --follow` list also
 supports `a`: type the item number, press `a`, then choose or type. Outside answer
 mode, number/Enter jumps, n/p paging, mouse clicks, Ignore and Reminder keep their
-existing behavior. In text mode, letters such as q, n and p are answer text.
+existing behavior. In text mode, letters such as q, n and p are answer text. If the item disappears or changes while you type, press Esc to leave the canceled answer; buffered text cannot act on another item.
 
 The queued answer removes the item using the same dismissal state as a successful
 jump. It returns only when the architect changes or re-adds the status item.
