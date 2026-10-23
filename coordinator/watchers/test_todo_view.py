@@ -320,7 +320,7 @@ class ClickTest(ViewCase):
     def test_keys_map_to_the_selected_item(self):
         _lines, hits = self.layout(80)
         self.assertEqual(
-            view.input_events("oir", hits)[0],
+            view.input_events("ir", hits)[0],
             [("ignore", None), ("remind", None)],
         )
         self.assertEqual(
@@ -356,7 +356,7 @@ class ClickTest(ViewCase):
         self.assertEqual(view.input_events("t", hits, "pick")[0], [("type", None)])
 
 
-class HiddenOpenTest(ViewCase):
+class NoOpenTest(ViewCase):
     def layout(self, rows=None, selected=0, showing=False):
         rows = rows or self.hidden().visible(self.items)
         return view.layout(rows, 80, 1, selected, showing, None, len(rows))
@@ -365,11 +365,11 @@ class HiddenOpenTest(ViewCase):
         _lines, hits = self.layout()
         self.assertNotIn("open", {hit[3] for hit in hits})
 
-    def test_o_does_nothing_when_open_is_hidden(self):
+    def test_o_is_ignored(self):
         _lines, hits = self.layout()
         self.assertEqual(view.input_events("o", hits)[0], [])
 
-    def test_the_footer_omits_the_open_hint_by_default(self):
+    def test_the_footer_has_no_open_hint(self):
         self.assertNotIn("o open", " · ".join(view.footer_rows(200)))
 
     def test_a_reminder_row_has_ignore_and_cancel_reminder_without_open(self):
@@ -960,12 +960,19 @@ class KeyboardTest(AppCase):
         self.assertIn("will remind", app.status)
 
     def test_clicks_and_enter_in_one_read_keep_their_order(self):
-        app = self.app()
+        jumps = []
+
+        def jump(text):
+            jumps.append(text)
+            return "jumped"
+
+        app = self.app(jump=jump)
         lines = self.screen.last_frame().split("\r\n")
         row = next(n for n, line in enumerate(lines, 1) if "Ignore" in line)
         column = lines[row - 1].index("Ignore") + 2
         app.feed(f"\x1b[<0;{column};{row}M\r")
         self.assertEqual(app.status, "jumped")
+        self.assertEqual(jumps, [f"{self.items[1][1]} -> {self.items[1][0]}"])
         self.assertEqual(
             json.loads((self.root / "state.json").read_text())["ignored"],
             [view.key(*self.items[0])],
