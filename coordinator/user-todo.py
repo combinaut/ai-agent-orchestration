@@ -6,6 +6,7 @@ watcher and tests; the executable name retains the documented hyphen.
 """
 
 import argparse
+import codecs
 import fcntl
 import json
 import os
@@ -398,7 +399,8 @@ def answer_item(item, answer, state_path, output):
 def answer_from_view(owner, text, answer, output):
     state = Path(
         todo_answers.setting(
-            "ORCH_USER_TODO_STATE", Path(output).with_name("user-todo.state.json")
+            "ORCH_USER_TODO_STATE",
+            Path.home() / ".claude/coordinator/user-todo.state.json",
         )
     )
     item = dict(source=owner + ".md", text=text, id=todo_answers.item_id(owner, text))
@@ -441,6 +443,24 @@ def clip_rows(line, width, limit):
                 return line[:position]
         column += cells
     return line
+
+
+def answer_footer(answering, width, height):
+    editor = answering["editor"]
+    if answering.get("gone"):
+        return [clip_rows("that item is gone; Esc cancels the answer", width, 1)]
+    limit = max(1, min(4, height - 3))
+    rows, column = [""], 0
+    for char in editor.prompt():
+        cells = cell_width(char)
+        if column + cells > width:
+            rows.append("")
+            column = 0
+        rows[-1] += char
+        column += cells
+    if editor.error:
+        return [clip_rows(editor.error, width, 1)] + rows[-max(1, limit - 1) :]
+    return rows[-limit:]
 
 
 def item_row_count(index, item, width):
@@ -503,6 +523,7 @@ def follow(
         "",
         0,
     )
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
     answering = None
     last_count = None
     state_path = getattr(
@@ -529,21 +550,23 @@ def follow(
             size = (
                 os.get_terminal_size() if os.isatty(fd) else os.terminal_size((80, 24))
             )
-            starts = page_starts(items, size.columns, size.lines)
+            answer_rows = (
+                answer_footer(answering, max(1, size.columns - 1), size.lines)
+                if answering
+                else []
+            )
+            list_height = size.lines - max(0, len(answer_rows) - 1)
+            starts = page_starts(items, size.columns, list_height)
             page = min(page, len(starts) - 1)
-            visible, rows = visible_items(items, size.columns, size.lines, starts[page])
-            room = max(1, size.lines - 3)
+            visible, rows = visible_items(
+                items, size.columns, list_height, starts[page]
+            )
+            room = max(1, list_height - 3)
             screen = [
                 clip_rows(item_line(n, item), size.columns, room) for n, item in visible
             ]
             if not items:
                 screen.append(rendered)
-            if answering:
-                footer = (
-                    "that item is gone; Esc cancels the answer"
-                    if answering.get("gone")
-                    else answering["editor"].prompt()
-                )
             status = (
                 f"page {page + 1}/{len(starts)}: n next, p prev | " + footer
                 if len(starts) > 1
@@ -555,14 +578,18 @@ def follow(
                 and todo_answers.choices(items[selected]["text"])
             ):
                 status += " · a answer selected item"
-            screen += ["", clip_rows(status, max(1, size.columns - 1), 1)]
+            screen += [""] + (
+                answer_rows
+                if answering
+                else [clip_rows(status, max(1, size.columns - 1), 1)]
+            )
             print("\033[2J\033[H" + "\n".join(screen), flush=True)
             readable, _, _ = wait([fd], [], [], 1)
             if readable:
                 key = read(fd, 64)
                 if not key:
                     break
-                key = key.decode(errors="ignore")
+                key = decoder.decode(key)
                 events, key, pending_mouse = mouse_events(pending_mouse + key)
                 paging = re.findall(r"\x1b\[([56])~", key)
                 key = re.sub(r"\x1b\[[56]~", "", key)
@@ -607,7 +634,7 @@ def follow(
                                 items = rendered_items(args.output, state_path)
                                 answering = None
                             except (ValueError, OSError) as error:
-                                footer = str(error)
+                                answering["editor"].error = str(error)
                         continue
                     if char == "a":
                         choice = (

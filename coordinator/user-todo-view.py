@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Live view of the user to-do list with Ignore and Reminder buttons under every item."""
 
+import codecs
 import fcntl
 import importlib.util
 import json
@@ -816,6 +817,7 @@ def main():
         sys.stdout.write(ENTER)
         sys.stdout.flush()
         app = App(hidden, demo, sys.stdout, os.get_terminal_size, popup=popup)
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
         while not app.closing:
             app.tick()
             ready, _, _ = select.select([fd], [], [], 0.3 if app.buf == "\x1b" else 1)
@@ -825,7 +827,7 @@ def main():
             data = os.read(fd, 64)
             if not data:
                 break
-            app.feed(data.decode(errors="ignore"))
+            app.feed(decoder.decode(data))
     finally:
         if old is not None:
             sys.stdout.write(LEAVE)

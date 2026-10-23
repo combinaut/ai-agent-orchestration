@@ -381,3 +381,81 @@ class TodoAnswerTests(IsolatedTestCase):
             with self.assertRaises(TimeoutError):
                 a.submit(OWNER, TEXT, "now")
         self.assertEqual(a.records(), [])
+
+    def test_moved_output_answers_use_the_producer_state_generation(self):
+        module = w.todo_module()
+        output = self.base / "moved" / "todo.md"
+        state = self.base / ".claude/coordinator/user-todo.state.json"
+        module.merge(self.base / "status", output, state, now=100)
+        module.answer_from_view(OWNER, TEXT, "now", output)
+        self.assertEqual(a.records()[0]["generation"], 100)
+        source = self.base / "status" / f"{OWNER}.md"
+        original = source.read_text()
+        source.write_text("## Waits on the user\n")
+        module.merge(self.base / "status", output, state, now=101)
+        source.write_text(original)
+        module.merge(self.base / "status", output, state, now=102)
+        self.assertEqual(len(module.rendered_items(output, state)), 1)
+
+    def follow_screens(self, keys, error=None):
+        import contextlib
+        import io
+
+        module = w.todo_module()
+        output, state = self.base / "todo.md", self.base / "todo.state.json"
+        module.merge(self.base / "status", output, state)
+        keys = iter([*keys, b""])
+        stream = io.StringIO()
+        with (
+            contextlib.redirect_stdout(stream),
+            patch.object(module.os, "isatty", return_value=False),
+            patch.object(module, "answer_item", side_effect=error),
+        ):
+            module.follow(
+                argparse.Namespace(output=output, state=state, pane=None),
+                wait=lambda *_: ([0], [], []),
+                read=lambda *_: next(keys),
+                report=lambda *_: None,
+            )
+        return stream.getvalue().split("\033[2J\033[H")
+
+    def test_follow_submission_and_blank_errors_survive_redraw(self):
+        for error in (ValueError("capacity reached"), TimeoutError("lock timed out")):
+            with self.subTest(error=error):
+                screens = self.follow_screens([b"atyes\n"], error)
+                self.assertIn(str(error), screens[-1])
+                self.assertEqual(a.records(), [])
+        self.assertIn("Answer required", self.follow_screens([b"at\n"])[-1])
+
+    def test_follow_long_answer_keeps_the_typed_tail_visible(self):
+        screen = self.follow_screens([b"at" + b"x" * 150 + b"TAIL"])[-1]
+        self.assertIn("TAIL▏", screen)
+        self.assertLessEqual(len(screen.splitlines()), 24)
+
+    def test_follow_preserves_utf8_answer_split_across_reads(self):
+        received = []
+        encoded = ("x" * 61 + "界 café").encode()
+        self.follow_screens(
+            [b"at" + encoded[:62], encoded[62:] + b"\n"],
+            lambda item, answer, *_: received.append(answer) or "answer queued",
+        )
+        self.assertEqual(received, ["x" * 61 + "界 café"])
+
+    def test_buttons_main_preserves_utf8_answer_split_across_reads(self):
+        import contextlib
+        import io
+
+        app, view = self.view_app()
+        encoded = ("x" * 61 + "界 café").encode()
+        keys = iter([b"at" + encoded[:62], encoded[62:] + b"\n", b""])
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            patch.object(view, "App", return_value=app),
+            patch.object(view.termios, "tcgetattr", return_value=[]),
+            patch.object(view.termios, "tcsetattr"),
+            patch.object(view.tty, "setcbreak"),
+            patch.object(view.select, "select", return_value=([0], [], [])),
+            patch.object(view.os, "read", side_effect=lambda *_: next(keys)),
+        ):
+            view.main()
+        self.assertEqual(a.records()[0]["answer"], "x" * 61 + "界 café")
