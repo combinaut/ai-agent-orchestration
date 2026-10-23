@@ -872,7 +872,9 @@ def reduce_workers(before, raw):
         for record in raw.get("worker_signals", {}).values()
         if record["kind"] == "done"
     }
-    resumed = set(previous.get("resumed_done_ids", [])) & active_done
+    resumed = set(previous.get("resumed_done_ids", []))
+    if "worker_signals" in raw:
+        resumed &= active_done
     for row in agents(raw):
         record = raw.get("worker_signals", {}).get(row["pane_id"])
         if (
@@ -2224,8 +2226,7 @@ def collect(mode, before, scope="", base=None):
                 signals, events = worker_signals.collect_live(
                     command, raw["observed_at"]
                 )
-                if signals:
-                    raw["worker_signals"] = signals
+                raw["worker_signals"] = signals
                 raw["signal_events"] = events
                 raw["observed_at"] = time.time()
             collect_waiting_jobs(raw, before)

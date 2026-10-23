@@ -543,3 +543,36 @@ class TodoAnswerTests(IsolatedTestCase):
             lambda item, answer, *_: received.append(answer) or "queued",
         )
         self.assertEqual(received, ["beforeafter", "beforeafter"])
+
+    def test_canceled_answers_are_filtered_from_mixed_outbox_and_replay(self):
+        record = a.submit(OWNER, TEXT, "now")
+        text = a.event_line(dict(record, owner="workspace"))
+        (self.base / "status" / f"{OWNER}.md").write_text("## Waits on the user\n")
+        a.collect(w.command)
+        spec = importlib.util.spec_from_file_location(
+            "canceled_answer_delivery", w.ROOT / "notify-inbox.py"
+        )
+        inbox = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inbox)
+        cursor = {
+            inbox.OUTBOX_KEY: [
+                dict(
+                    binding=str(self.base / "architect-workspace.json"),
+                    text=text + "\nWORKER DONE keep this",
+                    at=1,
+                    tried=0,
+                )
+            ]
+        }
+        args = argparse.Namespace(feed=self.base / "feed.log")
+        with (
+            patch.object(inbox, "binding", return_value=("/socket", "token")),
+            patch.object(inbox, "send_to_socket") as send,
+        ):
+            inbox.flush_outbox(args, cursor, 100)
+            self.assertEqual(send.call_args.args[2], "WORKER DONE keep this")
+            send.reset_mock()
+            self.assertTrue(
+                inbox.send_line(self.base / "architect-workspace.json", text)
+            )
+            send.assert_not_called()

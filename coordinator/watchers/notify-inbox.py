@@ -194,6 +194,10 @@ def batch_written(path, inode, offset, data):
 
 def send_line(binding_path, text):
     try:
+        if "TODO ANSWER " in text:
+            text = w.todo_answers.filter_canceled(text)
+            if not text:
+                return True
         path, token = binding(binding_path)
         send_to_socket(path, token, text)
         if binding_path.name.startswith("architect-"):

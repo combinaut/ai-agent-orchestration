@@ -695,3 +695,35 @@ class SignalTests(IsolatedTestCase):
             ]
             self.assertEqual(len(lines), 1)
             self.assertLess(len(lines[0]), 180)
+
+    def test_resumed_completion_survives_unavailable_signal_snapshot(self):
+        record = s.record_signal(s.identity(), "done", outcome="succeeded")
+        row = dict(pane_id="pane:1", workspace_id="worker", agent_status="working")
+        raw = dict(
+            result=dict(agents=[row]),
+            workspaces=dict(
+                result=dict(
+                    workspaces=[dict(workspace_id="worker", tokens=dict(owner="owner"))]
+                )
+            ),
+            observed_at=record["at"] + 1,
+            worker_signals={"pane:1": record},
+        )
+        before, _ = w.reduce_workers(None, raw)
+        unavailable = dict(
+            raw,
+            result=dict(agents=[dict(row, agent_status="idle")]),
+            workspaces=None,
+            observed_at=record["at"] + 2,
+        )
+        unavailable.pop("worker_signals")
+        missing, _ = w.reduce_workers(before, unavailable)
+        self.assertEqual(missing.get("resumed_done_ids"), [record["id"]])
+        recovered = dict(
+            raw, result=unavailable["result"], observed_at=record["at"] + 3
+        )
+        later, _ = w.reduce_workers(missing, recovered)
+        _, events = w.reduce_workers(
+            later, dict(recovered, observed_at=record["at"] + 1000)
+        )
+        self.assertTrue(any("WORKER WAITING" in line for line in events))

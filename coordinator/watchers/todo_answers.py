@@ -136,6 +136,18 @@ def prune(now):
     return current
 
 
+def filter_canceled(text):
+    current = pending_ids()
+    kept = []
+    for line in text.splitlines():
+        match = re.search(
+            r"TODO ANSWER owner=[A-Za-z0-9_-]+ id=(todo-[a-f0-9]+)\b", line
+        )
+        if not match or match.group(1) in current:
+            kept.append(line)
+    return "\n".join(kept)
+
+
 def mark_delivered(text, owner=None):
     identifiers = {
         identifier
