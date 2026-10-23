@@ -102,7 +102,6 @@ class StateTest(ViewCase):
             (view.key_action("remind", rows, 0), view.key_action("remind", rows, 1)),
             ("remind", "cancel"),
         )
-        self.assertEqual(view.key_action("open", rows, 1), "open")
 
     def test_ignore_replaces_a_reminder_in_the_stored_state(self):
         hidden = self.hidden()
@@ -276,7 +275,7 @@ class ClickTest(ViewCase):
                 self.assertEqual(self.click(hits, line, last + 1), [])
                 label = shown[line - 1][first - 1 : last].strip().split("] ")[-1]
                 self.assertTrue(
-                    label in ("Open", "Ignore", "Reminder")
+                    label in ("Ignore", "Reminder")
                     or label.startswith(("show", "hide")),
                     label,
                 )
@@ -286,15 +285,15 @@ class ClickTest(ViewCase):
         lines, hits = self.layout(30)
         by_action = {action: line for line, _f, _l, action, _i in hits}
         self.assertEqual(
-            len(set(by_action[a] for a in ("open", "ignore", "remind"))) >= 1, True
+            len(set(by_action[a] for a in ("ignore", "remind"))) >= 1, True
         )
-        self.assertIn("Open", self.plain(lines)[by_action["open"] - 1])
+        self.assertIn("Ignore", self.plain(lines)[by_action["ignore"] - 1])
 
-    def test_three_actions_and_the_toggle_are_reachable(self):
+    def test_two_actions_and_the_toggle_are_reachable(self):
         _lines, hits = self.layout(80)
         self.assertEqual(
             {action for _l, _f, _t, action, _i in hits if _i == 0},
-            {"open", "ignore", "remind"},
+            {"ignore", "remind"},
         )
         self.assertIn("show", [action for _l, _f, _t, action, _i in hits])
 
@@ -315,14 +314,14 @@ class ClickTest(ViewCase):
         events, pending = view.input_events(sequence[:5], hits)
         self.assertEqual((events, pending), ([], sequence[:5]))
         self.assertEqual(
-            view.input_events(pending + sequence[5:], hits)[0], [("open", 0)]
+            view.input_events(pending + sequence[5:], hits)[0], [("ignore", 0)]
         )
 
     def test_keys_map_to_the_selected_item(self):
         _lines, hits = self.layout(80)
         self.assertEqual(
             view.input_events("oir", hits)[0],
-            [("open", None), ("ignore", None), ("remind", None)],
+            [("ignore", None), ("remind", None)],
         )
         self.assertEqual(
             view.input_events("\x1b[B\x1b[A", hits)[0], [("move", 1), ("move", -1)]
@@ -345,9 +344,9 @@ class ClickTest(ViewCase):
         other = next(h for h in hits if h[4] != index and h[3] == "remind")
         self.assertIn("Reminder", self.plain(lines)[other[0] - 1])
 
-    def test_key_hints_show_on_the_selected_item_only(self):
+    def test_ignore_key_hint_shows_on_the_selected_item_only(self):
         shown = self.plain(self.layout(80, 0)[0])
-        self.assertEqual(sum("[o] Open" in line for line in shown), 1)
+        self.assertEqual(sum("[i] Ignore" in line for line in shown), 1)
 
     def test_picker_buttons_are_clickable_and_digits_pick_a_time(self):
         lines, hits = self.layout(80, 0, {"index": 0, "mode": "pick", "entry": ""})
@@ -355,6 +354,34 @@ class ClickTest(ViewCase):
         self.assertEqual(picks, {"pick1", "pick2", "pick3", "pick4", "pick5"})
         self.assertEqual(view.input_events("3", hits, "pick")[0], [("pick3", None)])
         self.assertEqual(view.input_events("t", hits, "pick")[0], [("type", None)])
+
+
+class HiddenOpenTest(ViewCase):
+    def layout(self, rows=None, selected=0, showing=False):
+        rows = rows or self.hidden().visible(self.items)
+        return view.layout(rows, 80, 1, selected, showing, None, len(rows))
+
+    def test_no_open_hit_is_drawn_by_default(self):
+        _lines, hits = self.layout()
+        self.assertNotIn("open", {hit[3] for hit in hits})
+
+    def test_o_does_nothing_when_open_is_hidden(self):
+        _lines, hits = self.layout()
+        self.assertEqual(view.input_events("o", hits)[0], [])
+
+    def test_the_footer_omits_the_open_hint_by_default(self):
+        self.assertNotIn("o open", " · ".join(view.footer_rows(200)))
+
+    def test_a_reminder_row_has_ignore_and_cancel_reminder_without_open(self):
+        hidden = self.hidden()
+        hidden.remind(*self.items[0], self.clock.now + 60)
+        rows = hidden.visible(self.items, True)
+        index = next(i for i, row in enumerate(rows) if row[3])
+        _lines, hits = self.layout(rows, index, True)
+        self.assertEqual(
+            {hit[3] for hit in hits if hit[4] == index and hit[3] != "focus"},
+            {"ignore", "cancel"},
+        )
 
 
 class PickerTest(ViewCase):
@@ -801,6 +828,12 @@ class PickerIdentityTest(AppCase):
 
 
 class KeyboardTest(AppCase):
+    def test_enter_focuses_the_selected_architect(self):
+        jumps = []
+        app = self.app(jump=jumps.append)
+        app.feed("\r")
+        self.assertEqual(jumps, [f"{self.items[0][1]} -> {self.items[0][0]}"])
+
     def test_digits_select_only_existing_items_and_restart_after_a_miss(self):
         app = self.app()
         app.feed("9")
@@ -926,12 +959,12 @@ class KeyboardTest(AppCase):
         self.assertIsNone(app.picker)
         self.assertIn("will remind", app.status)
 
-    def test_clicks_and_keys_in_one_read_keep_their_order(self):
+    def test_clicks_and_enter_in_one_read_keep_their_order(self):
         app = self.app()
         lines = self.screen.last_frame().split("\r\n")
         row = next(n for n, line in enumerate(lines, 1) if "Ignore" in line)
         column = lines[row - 1].index("Ignore") + 2
-        app.feed(f"\x1b[<0;{column};{row}Mo")
+        app.feed(f"\x1b[<0;{column};{row}M\r")
         self.assertEqual(app.status, "jumped")
         self.assertEqual(
             json.loads((self.root / "state.json").read_text())["ignored"],
@@ -1023,9 +1056,7 @@ class ViewportTest(AppCase):
         rows = self.screen.last_frame().split("\r\n")
         for line, first, last, action, index in app.hits:
             self.assertLessEqual(line, self.screen.lines - 1)
-            label = {"open": "Open", "ignore": "Ignore", "remind": "Reminder"}.get(
-                action
-            )
+            label = {"ignore": "Ignore", "remind": "Reminder"}.get(action)
             if label:
                 self.assertIn(label, rows[line - 1][first - 1 : last])
 
@@ -1072,10 +1103,8 @@ class ViewportTest(AppCase):
             )
             plain = self.plain(lines)
             for line, first, last, action, index in hits:
-                if action in ("open", "ignore", "remind"):
-                    label = {"open": "Open", "ignore": "Ignore", "remind": "Reminder"}[
-                        action
-                    ]
+                if action in ("ignore", "remind"):
+                    label = {"ignore": "Ignore", "remind": "Reminder"}[action]
                     self.assertIn(
                         label, plain[line - 1][first - 1 : last], (width, action)
                     )
@@ -1091,7 +1120,6 @@ class ViewportTest(AppCase):
             ("Architect::Other", "short"),
         ]
         wanted = {
-            "open",
             "ignore",
             "remind",
             "pick1",
@@ -1102,7 +1130,6 @@ class ViewportTest(AppCase):
             "type",
         }
         labels = {
-            "open": "Open",
             "ignore": "Ignore",
             "remind": "Reminder",
             "pick1": "15m",

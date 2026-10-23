@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live view of the user to-do list with Open, Ignore and Reminder buttons under every item."""
+"""Live view of the user to-do list with Ignore and Reminder buttons under every item."""
 
 import fcntl
 import importlib.util
@@ -59,13 +59,12 @@ TARGET = re.compile(r"->\s*(\S.*?)\s*$")
 AGE_PREFIX = re.compile(r"\[(?:now|\d+[mhd])\] ")
 MOUSE = re.compile(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])")
 BUTTONS = (
-    ("o", "open", "Open"),
     ("i", "ignore", "Ignore"),
     ("r", "remind", "Reminder"),
 )
 CANCEL = ("r", "cancel", "Cancel reminder")
 GUTTER = 2
-FOOTER = "↑↓ or 1-9 select · o open · i ignore · r reminder · s show reminders"
+FOOTER = "↑↓ or 1-9 select · i ignore · r reminder · s show reminders"
 SHOW_HINT = "s show reminders"
 CLOSE_HINT = "Esc/q close"
 DEMO = [
@@ -324,7 +323,11 @@ def layout(
             for row in wrap(f"{index + 1}. {owner}", room, indent=0)
         ]
         body = wrap(label(text, flagged, note), room - 1, indent=0)
-        entries = BUTTONS[:2] + (CANCEL,) if note else BUTTONS
+        entries = (
+            tuple(entry for entry in BUTTONS if entry[1] != "remind") + (CANCEL,)
+            if note
+            else BUTTONS
+        )
         button_lines, spans = button_rows(room, picked, picked, entries)
         extra, extra_spans = (
             picker_lines(picker, room)
@@ -439,8 +442,6 @@ def act(hidden, rows, items, action, index, run_jump=jump, until=None):
     if index is None or not 0 <= index < len(rows):
         return ""
     owner, text = rows[index][:2]
-    if action == "open":
-        return run_jump(text)
     if action == "focus":
         return run_jump(f"{text} -> {owner}")
     if action == "ignore":
@@ -458,8 +459,8 @@ def act(hidden, rows, items, action, index, run_jump=jump, until=None):
 KEYS = {hotkey: action for hotkey, action, _ in BUTTONS} | {
     "s": "show",
     "q": "quit",
-    "\r": "open",
-    "\n": "open",
+    "\r": "focus",
+    "\n": "focus",
 }
 TOKEN = re.compile(
     r"\x1b\[<(\d+);(\d+);(\d+)([Mm])|\x1b[\[O]([AB])|\x1b[\[O][0-9;<]*[A-Za-z~]|(.)",
