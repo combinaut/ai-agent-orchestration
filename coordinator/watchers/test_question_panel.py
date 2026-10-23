@@ -575,6 +575,48 @@ class CloseHelperTest(IsolatedTestCase):
             with self.assertRaises(ProcessLookupError):
                 os.kill(int(child.read_text()), 0)
 
+    def test_a_sigterm_while_the_wait_holds_the_waitpid_lock_stops_the_group_without_hanging(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            child = Path(tmp) / "child.pid"
+            helper = Path(tmp) / "helper.sh"
+            helper.write_text(
+                f"#!/bin/sh\n(trap '' TERM; sleep 60) &\necho $! > {child}\nwait\n"
+            )
+            helper.chmod(0o755)
+            script = (
+                "import os, signal, sys, threading, time\n"
+                "from pathlib import Path\n"
+                "import question_lock\n"
+                "real = question_lock.subprocess.Popen\n"
+                "class Holding(real):\n"
+                "    first = True\n"
+                "    def wait(self, timeout=None):\n"
+                "        if Holding.first:\n"
+                "            Holding.first = False\n"
+                "            with self._waitpid_lock:\n"
+                "                time.sleep(60)\n"
+                "        return super().wait(timeout)\n"
+                "question_lock.subprocess.Popen = Holding\n"
+                "child = Path(sys.argv[2])\n"
+                "def term():\n"
+                "    while not child.exists():\n"
+                "        time.sleep(0.02)\n"
+                "    os.kill(os.getpid(), signal.SIGTERM)\n"
+                "threading.Thread(target=term, daemon=True).start()\n"
+                "question_lock.run_group([sys.argv[1]], 30)\n"
+            )
+            env = dict(os.environ, PYTHONPATH=str(Path(__file__).parent))
+            run = subprocess.run(
+                [sys.executable, "-c", script, str(helper), str(child)],
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(run.returncode, question_lock.TIMED_OUT)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(child.read_text()), 0)
+
     def test_an_action_that_finishes_returns_its_status(self):
         with (
             tempfile.TemporaryDirectory() as tmp,

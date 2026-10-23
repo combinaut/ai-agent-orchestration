@@ -77,19 +77,17 @@ def run_group(argv, timeout, env=None, check=True):
     grace = TERM_GRACE if os.environ.get(HELD) else OUTER_GRACE
 
     def terminate(*_):
-        stop_group(process, grace)
         raise SystemExit(TIMED_OUT)
 
     previous = signal.signal(signal.SIGTERM, terminate)
     try:
         code = process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except BaseException:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         stop_group(process, grace)
         raise
     finally:
         signal.signal(signal.SIGTERM, previous)
-        if process.poll() is None:
-            stop_group(process, grace)
     if code and check:
         raise subprocess.CalledProcessError(code, argv)
     return code
