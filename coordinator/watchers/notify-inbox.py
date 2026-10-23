@@ -196,6 +196,10 @@ def send_line(binding_path, text):
     try:
         path, token = binding(binding_path)
         send_to_socket(path, token, text)
+        if binding_path.name.startswith("architect-"):
+            w.todo_answers.mark_delivered(
+                text, binding_path.stem.removeprefix("architect-")
+            )
         return True
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(

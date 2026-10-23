@@ -1,5 +1,6 @@
 """Answers queued by the to-do UI; the existing todo producer and notifier own delivery."""
 
+import fcntl
 import hashlib
 import os
 import re
@@ -65,8 +66,7 @@ def pending_item_ids(generations=None):
     return {
         record["item_id"]
         for record in records()
-        if time.time() - record["at"] <= KEEP_SECONDS
-        and (
+        if (
             generations is None
             or record.get("generation") is None
             or record["generation"] == generations.get(record["item_id"])
@@ -76,6 +76,81 @@ def pending_item_ids(generations=None):
 
 def pending_ids():
     return {record["id"] for record in records()}
+
+
+def queue_lock():
+    return answers_lock(
+        setting(
+            "ORCH_USER_QUESTIONS_DIR", Path.home() / ".claude/coordinator/questions"
+        ),
+        timeout=LOCK_SECONDS,
+    )
+
+
+def undo_dismissal(record):
+    path = Path(
+        setting(
+            "ORCH_USER_TODO_STATE",
+            Path.home() / ".claude/coordinator/user-todo.state.json",
+        )
+    )
+    if not path.exists():
+        return
+    with path.with_suffix(path.suffix + ".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = read(path)
+        if record.get("generation") in (
+            None,
+            state.get("first_seen", {}).get(record["item_id"]),
+        ):
+            state["dismissed"] = [
+                identifier
+                for identifier in state.get("dismissed", [])
+                if identifier != record["item_id"]
+            ]
+            write(path, state)
+
+
+def prune(now):
+    from watchers import todo_module
+
+    items, unreadable = todo_module().status_items(status_directory())
+    present = {item["id"] for item in items}
+    current = []
+    for record in records():
+        source = status_directory() / (record["architect"] + ".md")
+        changed = (
+            record["item_id"] not in present
+            and str(status_directory()) not in unreadable
+            and str(source) not in unreadable
+        )
+        expired = (
+            record.get("delivered_at") and now - record["delivered_at"] > KEEP_SECONDS
+        )
+        if changed or expired:
+            if not record.get("delivered_at"):
+                undo_dismissal(record)
+            (directory() / (record["key"] + ".json")).unlink(missing_ok=True)
+        else:
+            current.append(record)
+    return current
+
+
+def mark_delivered(text, owner=None):
+    identifiers = {
+        identifier
+        for target, identifier in re.findall(
+            r"TODO ANSWER owner=([A-Za-z0-9_-]+) id=(todo-[a-f0-9]+)\b", text
+        )
+        if owner is None or target == owner
+    }
+    if not identifiers:
+        return
+    with queue_lock():
+        for record in records():
+            if record["id"] in identifiers and not record.get("delivered_at"):
+                record["delivered_at"] = time.time()
+                write(directory() / (record["key"] + ".json"), record)
 
 
 def submit(owner, text, answer, generation=None):
@@ -94,18 +169,9 @@ def submit(owner, text, answer, generation=None):
         raise ValueError(
             "item changed or its status file is unreadable; refresh the list"
         )
-    with answers_lock(
-        setting(
-            "ORCH_USER_QUESTIONS_DIR", Path.home() / ".claude/coordinator/questions"
-        ),
-        timeout=LOCK_SECONDS,
-    ):
+    with queue_lock():
         now = time.time()
-        existing = records()
-        for record in existing:
-            if now - record["at"] > KEEP_SECONDS:
-                (directory() / (record["key"] + ".json")).unlink(missing_ok=True)
-        existing = [record for record in existing if now - record["at"] <= KEEP_SECONDS]
+        existing = prune(now)
         if any(
             record["item_id"] == identifier and record.get("generation") == generation
             for record in existing
@@ -113,7 +179,7 @@ def submit(owner, text, answer, generation=None):
             raise ValueError("an answer is already queued for this item")
         if len(existing) >= PENDING_MAX:
             raise ValueError(
-                "to-do answer capacity reached; try after delivery or expiry"
+                "to-do answer capacity reached; try after delivery or a status change"
             )
         record = dict(
             id="todo-" + uuid.uuid4().hex,
@@ -134,17 +200,10 @@ def submit(owner, text, answer, generation=None):
 def collect(command):
     if not directory().exists():
         return [], []
-    with answers_lock(
-        setting(
-            "ORCH_USER_QUESTIONS_DIR", Path.home() / ".claude/coordinator/questions"
-        ),
-        timeout=LOCK_SECONDS,
-    ):
-        now, current = time.time(), records()
-        for record in current:
-            if now - record["at"] > KEEP_SECONDS:
-                (directory() / (record["key"] + ".json")).unlink(missing_ok=True)
-        current = [record for record in current if now - record["at"] <= KEEP_SECONDS]
+    with queue_lock():
+        current = [
+            record for record in prune(time.time()) if not record.get("delivered_at")
+        ]
     if not current:
         return [], []
     try:

@@ -22,7 +22,7 @@ SH
 
 teardown() { rm -rf "$TMP"; }
 
-@test "worker signals wrapper resolves symlinks and completion is idempotent" {
+@test "worker signals wrapper resolves symlinks, ignores identical done and preserves changed done" {
   printf '[workers]\nask_timeout_s = 1\n[herdr]\nbin = "%s"\n' "$HERDR_BIN_PATH" >"$ORCH_CONFIG"
   unset HERDR_BIN_PATH
   ln -s "$ROOT/orch-signal" "$TMP/bin/orch-signal"
@@ -31,9 +31,13 @@ teardown() { rm -rf "$TMP"; }
   run "$TMP/bin/orch-signal" "done" --outcome succeeded --report /tmp/report --summary passed
   [ "$status" -eq 0 ]
   before=$(cat "$HOME/.claude/coordinator/worker-signals/"pane-*.json)
-  run "$TMP/bin/orch-signal" "done" --outcome failed --report /tmp/report --summary failed
+  run "$TMP/bin/orch-signal" "done" --outcome succeeded --report /tmp/report --summary passed
   [ "$status" -eq 0 ]
+  [[ "$output" == 'orch-signal: done unchanged; no new completion' ]]
   [ "$(cat "$HOME/.claude/coordinator/worker-signals/"pane-*.json)" = "$before" ]
+  run "$TMP/bin/orch-signal" "done" --outcome failed --report /tmp/report2 --summary failed
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HOME/.claude/coordinator/worker-signals/"pane-*.json)" != "$before" ]
 }
 
 @test "worker signals configured timeout exits with one clear line" {

@@ -215,4 +215,4 @@ The Coordinator session is the user's remote channel. An instruction it relays a
 - A ready PR has a human reviewer. When there is none, the architect asks the user at once.
 - A worker owns its PR's review cycle: it resolves every thread, verifies each bot claim against the code, and re-requests the bot review after each push. Merging, undrafting, reviewer changes and scope changes are never the worker's.
 
-Workers can explicitly finish with `orch-signal done`, send `heartbeat`, and block for an architect answer with `ask`. Each new job begins with `heartbeat --new-job`. Signals share the existing workers producer and native notifier; details and capacity bounds: [worker signals](workers.md#explicit-worker-signals).
+Explicit completion, heartbeat and question commands: [worker signals](workers.md#explicit-worker-signals).

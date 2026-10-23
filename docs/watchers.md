@@ -104,4 +104,4 @@ not busy.
 These text indicators are incomplete, so every waiting line retains the caveat
 `(may be waiting on its own job)`, including native alerts and escalation.
 
-Workers can explicitly finish with `orch-signal done`, send `heartbeat`, and block for an architect answer with `ask`. Each new job begins with `heartbeat --new-job`. Signals share the existing workers producer and native notifier; details and capacity bounds: [worker signals](workers.md#explicit-worker-signals).
+Explicit completion, heartbeat and question commands: [worker signals](workers.md#explicit-worker-signals).

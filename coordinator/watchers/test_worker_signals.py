@@ -145,7 +145,12 @@ class SignalTests(IsolatedTestCase):
         first = s.record_signal(
             ident, "done", outcome="succeeded", report="/r", summary="ok"
         )
-        self.assertEqual(s.record_signal(ident, "done", outcome="failed"), first)
+        self.assertEqual(
+            s.record_signal(
+                ident, "done", outcome="succeeded", report="/r", summary="ok"
+            ),
+            first,
+        )
         self.assertEqual(s.record_signal(ident, "heartbeat")["kind"], "done")
         self.assertNotEqual(
             s.record_signal(ident, "heartbeat", new_job=True)["job"], first["job"]
@@ -546,3 +551,147 @@ class SignalTests(IsolatedTestCase):
         finally:
             if alive:
                 os.kill(pid, signal.SIGTERM)
+
+    def test_interrupted_ask_cancels_under_lock_and_can_reask(self):
+        import signal
+        import subprocess
+        import sys
+        import time
+
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signal=signum):
+                code = 'import worker_signals as s; s.identity=lambda:dict(pane="pane:1",workspace="worker",owner="owner"); raise SystemExit(s.main())'
+                process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-c",
+                        code,
+                        "ask",
+                        "--question",
+                        "Which?",
+                        "--timeout",
+                        "30",
+                    ],
+                    cwd=Path(s.__file__).parent,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                try:
+                    deadline = time.monotonic() + 5
+                    while (
+                        not list(s.directory().glob("signal-*.json"))
+                        and process.poll() is None
+                        and time.monotonic() < deadline
+                    ):
+                        time.sleep(0.01)
+                    self.assertTrue(list(s.directory().glob("signal-*.json")))
+                    process.send_signal(signum)
+                    process.communicate(timeout=5)
+                    self.assertFalse(list(s.directory().glob("signal-*.json")))
+                    record = self.record(timeout=60)
+                    self.assertEqual(record["asker_pid"], os.getpid())
+                    s.remove_question(record)
+                finally:
+                    if process.poll() is None:
+                        process.terminate()
+                    process.communicate(timeout=5)
+
+    def test_dead_asker_is_replaced_without_waiting_for_deadline(self):
+        record = self.record(timeout=60)
+        record["asker_pid"] = 999999999
+        s.atomic_write(s.questions_directory() / (record["id"] + ".md"), "Question")
+        s.write(s.question_path(record["id"]), record)
+        replacement = self.record(timeout=60)
+        self.assertNotEqual(record["id"], replacement["id"])
+        self.assertTrue(s.read(s.question_path(record["id"]))["cleanup"])
+
+    def test_changed_done_is_a_new_completion_and_noop_is_visible(self):
+        import contextlib
+        import io
+
+        ident = s.identity()
+        first = s.record_signal(
+            ident, "done", outcome="succeeded", report="/r1", summary="one"
+        )
+        second = s.record_signal(
+            ident, "done", outcome="failed", report="/r2", summary="two"
+        )
+        self.assertNotEqual(first["id"], second["id"])
+        self.assertEqual(second["report"], "/r2")
+        self.assertEqual(len(second["done_events"]), 2)
+        stream = io.StringIO()
+        with contextlib.redirect_stderr(stream):
+            self.assertEqual(
+                s.record_signal(
+                    ident, "done", outcome="failed", report="/r2", summary="two"
+                ),
+                second,
+            )
+        self.assertEqual(len(stream.getvalue().splitlines()), 1)
+
+    def test_work_after_done_restores_waiting_across_polls(self):
+        record = s.record_signal(s.identity(), "done", outcome="succeeded")
+
+        def raw(status, now):
+            return dict(
+                result=dict(
+                    agents=[
+                        dict(
+                            pane_id="pane:1", workspace_id="worker", agent_status=status
+                        )
+                    ]
+                ),
+                workspaces=dict(
+                    result=dict(
+                        workspaces=[
+                            dict(workspace_id="worker", tokens=dict(owner="owner"))
+                        ]
+                    )
+                ),
+                observed_at=now,
+                worker_signals={"pane:1": record},
+            )
+
+        before, _ = w.reduce_workers(None, raw("idle", record["at"] + 1))
+        working, _ = w.reduce_workers(before, raw("working", record["at"] + 2))
+        later, _ = w.reduce_workers(working, raw("idle", record["at"] + 3))
+        _, events = w.reduce_workers(later, raw("idle", record["at"] + 1000))
+        self.assertTrue(any("WORKER WAITING" in line for line in events))
+
+    def test_closed_or_retagged_pane_emits_remaining_done_once(self):
+        for rows, owners in (
+            ([], {}),
+            ([dict(pane_id="pane:1", workspace_id="worker")], {"worker": "other"}),
+        ):
+            record = s.record_signal(
+                s.identity(),
+                "done",
+                outcome="failed",
+                report="/report",
+                summary="failed",
+            )
+            _, events = s.collect(rows, owners, record["at"] + 1)
+            self.assertEqual([r["id"] for r in events], [record["id"]])
+            self.assertFalse(s.pane_path("pane:1").exists())
+            self.assertEqual(s.collect(rows, owners, record["at"] + 2)[1], [])
+
+    def test_worker_brief_retains_execution_and_picker_rules(self):
+        root = Path(s.__file__).parents[2]
+        for relative in (
+            "skills/architect/SKILL.md",
+            "skills/architect/references/dispatch.md",
+        ):
+            text = (root / relative).read_text()
+            self.assertIn("run_in_background", text)
+            self.assertIn("above `--timeout`", text)
+        skill = (root / "skills/architect/SKILL.md").read_text()
+        self.assertIn("SLOT: go", skill)
+        self.assertIn("may not answer", skill)
+        for relative in ("README.md", "docs/architecture.md", "docs/watchers.md"):
+            lines = [
+                line
+                for line in (root / relative).read_text().splitlines()
+                if "worker signals](" in line
+            ]
+            self.assertEqual(len(lines), 1)
+            self.assertLess(len(lines[0]), 180)

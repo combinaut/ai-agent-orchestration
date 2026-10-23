@@ -26,8 +26,10 @@ orch-signal answer signal-<id> --to-user
 ```
 
 A **current job** begins with `heartbeat --new-job` and ends with `done`; every
-follow-up brief in a reused pane must begin a new job. Repeated done calls are
-idempotent until that reset. A done record suppresses WORKER WAITING; a heartbeat
+follow-up brief in a reused pane must begin a new job. Identical done calls are
+idempotent and print a no-op notice to stderr. A changed report, summary or outcome
+creates a new completion even without a reset. A done record suppresses WORKER WAITING
+until the pane is seen working after the completion; a heartbeat
 within 300 seconds also suppresses it. Workers that send neither retain the old
 alerts. WORKER IDLE remains independent. Long jobs can send heartbeat periodically;
 calls less than 30 seconds apart are ignored. Ordinary heartbeats cannot undo done.
@@ -35,6 +37,9 @@ calls less than 30 seconds apart are ignored. Ordinary heartbeats cannot undo do
 Completion and question messages go through the workers producer, shared notifier,
 `bindings/architect-<owner>.json` and its existing outbox. Delivery is normally
 within one workers poll (60 seconds). There is no second notifier or cursor.
+Claude workers run `ask` with `run_in_background` or a Bash timeout above the
+command's `--timeout`. SIGTERM/SIGINT cancel the question under the answers lock;
+a re-ask replaces a record whose recorded asker PID is dead.
 An owner may answer or escalate a question. Escalation uses the existing questions
 directory, answers lock, reminders and Q panel; the answers watcher forwards the
 user's answer to the blocked worker. If opening the panel fails, a due reminder
@@ -48,8 +53,8 @@ retries. Plain `QUESTION:` is the fallback when the command fails or times out;
 | Waiting ask polling | At most once per second, last sleep capped by remaining time |
 | Heartbeats | One accepted per 30 seconds; fresh for 300 seconds |
 | Pane records | One per live pane; removed after a successful snapshot confirms pane closed or owner changed |
-| Question/answer files | Worker consumption returns immediately; Q closure is deferred to the workers poll. Removed when consumed, replaced, closed, or at deadline + 3600 seconds; a failed Q close retains one retry record and blocks another ask from that pane until closure succeeds |
-| Completion handoff | Latest 200 completions per pane for 3600 seconds; oldest dropped beyond cap, so rapid new-job resets cannot erase a completion before the poll |
+| Question/answer files | Worker consumption returns immediately; Q closure is deferred to the workers poll. Removed when consumed, replaced, closed, or at deadline + 3600 seconds; a failed Q close retains a retry record; live askers wait for cleanup, while dead askers can be replaced |
+| Completion handoff | Latest 200 completions per pane for 3600 seconds; oldest dropped beyond cap; remaining events are emitted once before pruning a closed or re-tagged pane |
 | Q-panel cleanup | At most one close attempt per workers poll, 2-second execution timeout with bounded process-group teardown; failed attempts rotate behind other pending panels |
 | Signal dedupe state | IDs from retained live completions and unexpired pending questions only |
 | Native outbox | Existing 200 entries; merge overflow by target, drop oldest beyond cap; retry every 60 seconds, expire after 3600 seconds |

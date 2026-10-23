@@ -113,4 +113,4 @@ If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`
 - [`env/README.md`](env/README.md): the env adapters (`herdr` and how to add one).
 - [`docs/contributing.md`](docs/contributing.md): running the tests and sending changes.
 
-Workers can explicitly finish with `orch-signal done`, send `heartbeat`, and block for an architect answer with `ask`. Each new job begins with `heartbeat --new-job`. Signals share the existing workers producer and native notifier; details and capacity bounds: [worker signals](docs/workers.md#explicit-worker-signals).
+Explicit completion, heartbeat and question commands: [worker signals](docs/workers.md#explicit-worker-signals).

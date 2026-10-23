@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -89,7 +90,15 @@ def record_signal(ident, kind, new_job=False, **fields):
         same = old and all(old.get(key) == ident[key] for key in ident)
         if same and not new_job:
             if old["kind"] == "done":
-                return old
+                if kind != "done":
+                    return old
+                if all(old.get(key) == value for key, value in fields.items()):
+                    print(
+                        "orch-signal: done unchanged; no new completion",
+                        file=sys.stderr,
+                    )
+                    return old
+                new_job = True
             if kind == "heartbeat" and now - old["at"] < HEARTBEAT_MIN_SECONDS:
                 return old
         record = dict(
@@ -138,6 +147,19 @@ def remove_question(record, close_panel=True, close_timeout=CLEANUP_SECONDS):
     return True
 
 
+def asker_alive(record):
+    pid = record.get("asker_pid")
+    if pid is None:  # Records from before PID tracking keep their existing deadline.
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
+
+
 def new_question(ident, question, options, timeout, deadline=None):
     worker_identity(ident)
     if not math.isfinite(timeout) or timeout <= 0:
@@ -154,13 +176,16 @@ def new_question(ident, question, options, timeout, deadline=None):
             for path in directory().glob("signal-*.json"):
                 old = read(path)
                 if old["pane"] == ident["pane"]:
+                    alive = asker_alive(old)
+                    if old.get("cleanup") and not alive:
+                        continue
                     if old.get("cleanup"):
                         raise ValueError(
                             "pane has a previous question awaiting panel cleanup"
                         )
-                    if old["deadline"] > now:
+                    if old["deadline"] > now and alive:
                         raise ValueError("pane already has a pending question")
-                    if not remove_question(old, close_panel=False):
+                    if not remove_question(old, close_panel=False) and alive:
                         raise ValueError(
                             "pane has a previous question awaiting panel cleanup"
                         )
@@ -172,6 +197,7 @@ def new_question(ident, question, options, timeout, deadline=None):
                 ident,
                 id="signal-" + uuid.uuid4().hex,
                 kind="question",
+                asker_pid=os.getpid(),
                 question=question,
                 options=options,
                 at=now,
@@ -312,6 +338,11 @@ def collect(rows, owners, now, snapshot_at=None):
                 elif not answered and now < record["deadline"]:
                     events.append(record)
             elif closed:
+                events.extend(
+                    event
+                    for event in record.get("done_events", [])
+                    if now - event["at"] <= DONE_EVENTS_KEEP_SECONDS
+                )
                 path.unlink(missing_ok=True)
             else:
                 signals[pane] = record
@@ -354,7 +385,10 @@ def suppressed(row, raw):
         return False
     return (
         record["kind"] == "done"
-        or 0 <= raw["observed_at"] - record["at"] <= HEARTBEAT_FRESH_SECONDS
+        and record.get("id") not in raw.get("resumed_done_ids", [])
+    ) or (
+        record["kind"] == "heartbeat"
+        and 0 <= raw["observed_at"] - record["at"] <= HEARTBEAT_FRESH_SECONDS
     )
 
 
@@ -400,16 +434,43 @@ def main():
             import watcher_runtime as runtime
 
             deadline = time.monotonic() + args.timeout
+            record = None
+
+            def interrupted(signum, frame):
+                raise KeyboardInterrupt
+
+            previous = {
+                number: signal.signal(number, interrupted)
+                for number in (signal.SIGTERM, signal.SIGINT)
+            }
             try:
-                with runtime.deadline(args.timeout, "orch-signal ask", soft=True):
-                    record = new_question(
-                        identity(), args.question, args.options, args.timeout, deadline
-                    )
-                    result = wait_answer(record, args.timeout, deadline)
-            except TimeoutError:
-                raise ValueError(
-                    f"question timed out after {args.timeout:g}s"
-                ) from None
+                try:
+                    with runtime.deadline(args.timeout, "orch-signal ask", soft=True):
+                        record = new_question(
+                            identity(),
+                            args.question,
+                            args.options,
+                            args.timeout,
+                            deadline,
+                        )
+                        result = wait_answer(record, args.timeout, deadline)
+                except TimeoutError:
+                    raise ValueError(
+                        f"question timed out after {args.timeout:g}s"
+                    ) from None
+                except KeyboardInterrupt:
+                    # Ignore further interrupts while cancelling under the lock.
+                    for number in previous:
+                        signal.signal(number, signal.SIG_IGN)
+                    if record:
+                        with answers_lock():
+                            current = read(question_path(record["id"]))
+                            if current:
+                                remove_question(current, close_panel=False)
+                    raise ValueError("question cancelled") from None
+            finally:
+                for number, handler in previous.items():
+                    signal.signal(number, handler)
             print(result)
         elif args.action == "list":
             caller = identity()

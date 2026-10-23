@@ -867,6 +867,22 @@ def reduce_workers(before, raw):
             )
         if new:
             events.append(worker_line(new))
+    active_done = {
+        record.get("id")
+        for record in raw.get("worker_signals", {}).values()
+        if record["kind"] == "done"
+    }
+    resumed = set(previous.get("resumed_done_ids", [])) & active_done
+    for row in agents(raw):
+        record = raw.get("worker_signals", {}).get(row["pane_id"])
+        if (
+            record
+            and record["kind"] == "done"
+            and row.get("agent_status") == "working"
+            and now > record["at"]
+        ):
+            resumed.add(record.get("id"))
+    raw = dict(raw, resumed_done_ids=list(resumed))
     waiting, waiting_events = reduce_waiting(previous, raw)
     events += waiting_events
     signal_events = raw.get("signal_events", [])
@@ -891,6 +907,8 @@ def reduce_workers(before, raw):
         ),
         idle=idle,
     )
+    if resumed:
+        result["resumed_done_ids"] = sorted(resumed)
     if signal_ids:
         result["signal_ids"] = signal_ids
     return result, events + idle_events
@@ -1442,17 +1460,25 @@ def reduce_todo(before, raw):
     after, events = reduce_todo_status(before, raw)
     records = raw.get("todo_answers", [])
     previous = set((before or {}).get("todo_answer_ids", []))
-    events += [
-        todo_answers.event_line(record)
+    now = raw.get("observed_at", time.time())
+    retries = (before or {}).get("todo_answer_retry_at", {})
+    emitted = {
+        record["id"]
         for record in records
         if record["id"] not in previous
+        or now - retries.get(record["id"], now) >= todo_answers.KEEP_SECONDS + 60
+    }
+    events += [
+        todo_answers.event_line(record) for record in records if record["id"] in emitted
     ]
-    seen = (
-        previous
-        & set(raw.get("todo_pending_ids", [record["id"] for record in records]))
-    ) | {record["id"] for record in records}
+    pending = set(raw.get("todo_pending_ids", [record["id"] for record in records]))
+    seen = (previous & pending) | {record["id"] for record in records}
     if seen:
         after["todo_answer_ids"] = sorted(seen)
+        after["todo_answer_retry_at"] = {
+            identifier: now if identifier in emitted else retries.get(identifier, now)
+            for identifier in seen
+        }
     return after, events
 
 

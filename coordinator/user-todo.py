@@ -610,7 +610,9 @@ def follow(
                             footer += " (removed)"
                             items = rendered_items(args.output, state_path)
                 page = max(0, page + step)
-                for char in key:
+                for char in re.findall(r"\x1b\[[0-?]*[ -/]*[@-~]|.", key, re.S):
+                    if answering and char.startswith("\x1b["):
+                        continue
                     if answering:
                         if answering.get("gone") or not any(
                             item["id"] == answering["item"]["id"] for item in items

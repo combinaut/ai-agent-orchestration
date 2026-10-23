@@ -67,6 +67,7 @@ class TodoAnswerTests(IsolatedTestCase):
             path.write_text(path.read_text() + "- " + other + "\n")
             with self.assertRaisesRegex(ValueError, "capacity"):
                 a.submit(OWNER, other, "later")
+            a.mark_delivered(a.event_line(dict(record, owner="workspace")))
             with patch.object(
                 a.time, "time", return_value=record["at"] + a.KEEP_SECONDS + 1
             ):
@@ -265,6 +266,7 @@ class TodoAnswerTests(IsolatedTestCase):
 
     def test_collect_expiry_prunes_pending_answer_records(self):
         record = a.submit(OWNER, TEXT, "now")
+        a.mark_delivered(a.event_line(dict(record, owner="workspace")))
         with patch.object(
             a.time, "time", return_value=record["at"] + a.KEEP_SECONDS + 1
         ):
@@ -459,3 +461,85 @@ class TodoAnswerTests(IsolatedTestCase):
         ):
             view.main()
         self.assertEqual(a.records()[0]["answer"], "x" * 61 + "界 café")
+
+    def test_undelivered_answer_survives_retention_and_retries(self):
+        record = a.submit(OWNER, TEXT, "now")
+        now = record["at"] + a.KEEP_SECONDS + 100
+        with (
+            patch.object(a.time, "time", return_value=now),
+            patch.object(a.discovery, "architect_owners", return_value={}),
+        ):
+            self.assertEqual(a.collect(w.command)[0], [])
+            self.assertEqual(a.records()[0]["answer"], "now")
+        with patch.object(a.time, "time", return_value=now):
+            ready, _ = a.collect(w.command)
+            raw = dict(
+                now=[],
+                unreadable=[],
+                read=[],
+                observed_at=record["at"],
+                todo_answers=ready,
+                todo_pending_ids=[record["id"]],
+            )
+            before, events = w.reduce_todo(None, raw)
+            self.assertTrue(any("TODO ANSWER" in line for line in events))
+            _, retry = w.reduce_todo(before, dict(raw, observed_at=now))
+            self.assertTrue(any("TODO ANSWER" in line for line in retry))
+
+    def test_changed_status_drops_undelivered_answer_and_undoes_dismissal(self):
+        module = w.todo_module()
+        state = self.base / ".claude/coordinator/user-todo.state.json"
+        output = self.base / "todo.md"
+        module.merge(self.base / "status", output, state, now=100)
+        module.answer_item(
+            module.rendered_items(output, state)[0], "now", state, output
+        )
+        (self.base / "status" / f"{OWNER}.md").write_text("## Waits on the user\n")
+        a.collect(w.command)
+        self.assertEqual(a.records(), [])
+        self.assertNotIn(
+            a.item_id(OWNER, TEXT), json.loads(state.read_text())["dismissed"]
+        )
+
+    def test_native_delivery_marks_answer_before_retention_prunes_it(self):
+        record = a.submit(OWNER, TEXT, "now")
+        spec = importlib.util.spec_from_file_location(
+            "answer_delivery", w.ROOT / "notify-inbox.py"
+        )
+        inbox = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inbox)
+        with (
+            patch.object(inbox, "binding", return_value=("/socket", "token")),
+            patch.object(inbox, "send_to_socket"),
+        ):
+            self.assertTrue(
+                inbox.send_line(
+                    self.base / "coordinator.json",
+                    a.event_line(dict(record, owner="coordinator")),
+                )
+            )
+            self.assertFalse(a.records()[0].get("delivered_at"))
+            self.assertTrue(
+                inbox.send_line(
+                    self.base / "architect-workspace.json",
+                    a.event_line(dict(record, owner="workspace")),
+                )
+            )
+        self.assertTrue(a.records()[0].get("delivered_at"))
+        with patch.object(
+            a.time, "time", return_value=record["at"] + a.KEEP_SECONDS + 1
+        ):
+            a.collect(w.command)
+        self.assertEqual(a.records(), [])
+
+    def test_legacy_answer_drops_whole_csi_sequences(self):
+        received = []
+        self.follow_screens(
+            [b"atbefore", b"\x1b[", b"Dafter\x1b[1;5D\x1b[200~\n"],
+            lambda item, answer, *_: received.append(answer) or "queued",
+        )
+        self.follow_screens(
+            [b"atbefore\x1b[Dafter\n"],
+            lambda item, answer, *_: received.append(answer) or "queued",
+        )
+        self.assertEqual(received, ["beforeafter", "beforeafter"])
