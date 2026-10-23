@@ -262,30 +262,15 @@ EOF
   [ ! -e "${question%.md}.opening" ]
 }
 
-@test "an opener killed while the split runs closes only the new unlabelled pane in its tab" {
+@test "an opener killed while the split runs leaves no marker and the next open closes no pane" {
   question="$HOME/.claude/coordinator/questions/release.md"
   printf 'Which release?\n' >"$question"
   todo='{"pane_id":"todo-pane","tab_id":"t1","tokens":{"todo":"1"}}'
   run env HERDR_KILL_OPENER=split HERDR_PANES="{\"result\":{\"panes\":[$todo]}}" "$ROOT/ask-user-question" release "$question"
   [ "$status" -ne 0 ]
-  [ -s "${question%.md}.opening" ]
+  [ ! -s "${question%.md}.opening" ]
   : >"$TMP/question-herdr.calls"
-  panes="$todo,{\"pane_id\":\"orphan-pane\",\"tab_id\":\"t1\"},{\"pane_id\":\"elsewhere\",\"tab_id\":\"t2\"}"
-  run env HERDR_PANES="{\"result\":{\"panes\":[$panes]}}" "$ROOT/ask-user-question" release "$question"
-  [ "$status" -eq 0 ]
-  grep -qx 'pane close orphan-pane' "$TMP/question-herdr.calls"
-  run grep -qx 'pane close elsewhere' "$TMP/question-herdr.calls"
-  [ "$status" -eq 1 ]
-  [ ! -e "${question%.md}.opening" ]
-}
-
-@test "an interrupted split with several candidate panes closes none of them" {
-  question="$HOME/.claude/coordinator/questions/release.md"
-  printf 'Which release?\n' >"$question"
-  todo='{"pane_id":"todo-pane","tab_id":"t1","tokens":{"todo":"1"}}'
-  run env HERDR_KILL_OPENER=split HERDR_PANES="{\"result\":{\"panes\":[$todo]}}" "$ROOT/ask-user-question" release "$question"
-  : >"$TMP/question-herdr.calls"
-  panes="$todo,{\"pane_id\":\"a\",\"tab_id\":\"t1\"},{\"pane_id\":\"b\",\"tab_id\":\"t1\"}"
+  panes="$todo,{\"pane_id\":\"orphan-pane\",\"tab_id\":\"t1\"},{\"pane_id\":\"b\",\"tab_id\":\"t1\"}"
   run env HERDR_PANES="{\"result\":{\"panes\":[$panes]}}" "$ROOT/ask-user-question" release "$question"
   [ "$status" -eq 0 ]
   run grep -q '^pane close' "$TMP/question-herdr.calls"
@@ -304,20 +289,6 @@ EOF
   run env HERDR_PANES="$panes" "$ROOT/ask-user-question" hide "$questions/hide.md"
   [ "$status" -eq 0 ]
   grep -qx 'pane rename question-pane Q: hide' "$TMP/question-herdr.calls"
-}
-
-@test "an interrupted split never closes a labelled pane that appeared in the tab" {
-  question="$HOME/.claude/coordinator/questions/release.md"
-  printf 'Which release?\n' >"$question"
-  todo='{"pane_id":"todo-pane","tab_id":"t1","tokens":{"todo":"1"}}'
-  run env HERDR_KILL_OPENER=split HERDR_PANES="{\"result\":{\"panes\":[$todo]}}" "$ROOT/ask-user-question" release "$question"
-  : >"$TMP/question-herdr.calls"
-  panes="$todo,{\"pane_id\":\"editor\",\"tab_id\":\"t1\",\"label\":\"editor\"}"
-  run env HERDR_PANES="{\"result\":{\"panes\":[$panes]}}" "$ROOT/ask-user-question" release "$question"
-  [ "$status" -eq 0 ]
-  run grep -q '^pane close' "$TMP/question-herdr.calls"
-  [ "$status" -eq 1 ]
-  [ ! -e "${question%.md}.opening" ]
 }
 
 hold_lock() {
@@ -378,4 +349,32 @@ time.sleep(float(sys.argv[3]))' "$HOME/.claude/coordinator/questions/.answers.lo
   wait "$closer"
   wait "$holder"
   grep -qx 'pane close question-pane' "$TMP/question-herdr.calls"
+}
+
+@test "a failed split leaves no marker, so a later user terminal in the tab is never closed" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  todo='{"pane_id":"todo-pane","tab_id":"t1","tokens":{"todo":"1"}}'
+  run env HERDR_FAIL=split HERDR_PANES="{\"result\":{\"panes\":[$todo]}}" "$ROOT/ask-user-question" release "$question"
+  [ "$status" -ne 0 ]
+  [ ! -s "${question%.md}.opening" ]
+  : >"$TMP/question-herdr.calls"
+  panes="$todo,{\"pane_id\":\"user-shell\",\"tab_id\":\"t1\",\"terminal_title_stripped\":\"zsh\"}"
+  run env HERDR_PANES="{\"result\":{\"panes\":[$panes]}}" "$ROOT/ask-user-question" release "$question"
+  [ "$status" -eq 0 ]
+  run grep -qx 'pane close user-shell' "$TMP/question-herdr.calls"
+  [ "$status" -eq 1 ]
+}
+
+@test "a stale marker naming a pane that is gone closes nothing and is cleared" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  printf 'gone-pane\n' >"${question%.md}.opening"
+  todo='{"pane_id":"todo-pane","tab_id":"t1","tokens":{"todo":"1"}}'
+  panes="$todo,{\"pane_id\":\"user-shell\",\"tab_id\":\"t1\"}"
+  run env HERDR_PANES="{\"result\":{\"panes\":[$panes]}}" "$ROOT/ask-user-question" release "$question"
+  [ "$status" -eq 0 ]
+  run grep -q '^pane close' "$TMP/question-herdr.calls"
+  [ "$status" -eq 1 ]
+  [ ! -e "${question%.md}.opening" ]
 }

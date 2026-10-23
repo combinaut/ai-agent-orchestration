@@ -35,30 +35,13 @@ print(matches[-1] if matches else "")
 ' "$title" "$prefix"
 }
 
-tab_snapshot() {
-  pane_rows | "${ORCH_PYTHON3:-python3}" -c '
-import json, sys
-rows = [row for row in json.load(sys.stdin).get("result", {}).get("panes", []) if isinstance(row, dict)]
-tab = next((row.get("tab_id") for row in rows if row.get("pane_id") == sys.argv[1]), "") or ""
-print(tab)
-print(" ".join(row["pane_id"] for row in rows if tab and row.get("tab_id") == tab and row.get("pane_id")))
-' "$1"
-}
-
-# Prints the pane an interrupted open left behind: the recorded new pane while it exists, else the one unlabelled pane
-# that appeared in the recorded tab since the snapshot. Nothing when it cannot be tied to the marker.
+# Prints the pane an interrupted open recorded in its marker while that pane still exists. Nothing otherwise.
 stale_pane() {
   pane_rows | "${ORCH_PYTHON3:-python3}" -c '
 import json, sys
-lines = open(sys.argv[1]).read().split("\n") + ["", "", ""]
-tab, known, new = lines[0], set(lines[1].split()), lines[2]
-rows = [row for row in json.load(sys.stdin).get("result", {}).get("panes", []) if isinstance(row, dict) and row.get("pane_id")]
-if new:
-    print(new if any(row["pane_id"] == new for row in rows) else "")
-else:
-    found = [row["pane_id"] for row in rows if tab and row.get("tab_id") == tab and row["pane_id"] not in known
-             and not row.get("label")]
-    print(found[0] if len(found) == 1 else "")
+recorded = open(sys.argv[1]).read().split()
+rows = json.load(sys.stdin).get("result", {}).get("panes", [])
+print(recorded[0] if recorded and any(isinstance(row, dict) and row.get("pane_id") == recorded[0] for row in rows) else "")
 ' "$1"
 }
 
@@ -97,7 +80,7 @@ case $action in
     if [ -s "$opening" ]; then
       stale=$(stale_pane "$opening")
       if [ -n "$stale" ]; then
-        "$root/coordinator/watchers/close-pane.sh" "$stale" || { echo "cannot close unlabelled pane $stale" >&2; exit 1; }
+        "$root/coordinator/watchers/close-pane.sh" "$stale" || { echo "cannot close pane $stale" >&2; exit 1; }
       fi
       rm -f "$opening"
     fi
@@ -114,10 +97,9 @@ for row in json.load(sys.stdin).get("result", {}).get("panes", []):
 ' )
     fi
     [ -n "$anchor" ] || { echo "to-do pane not found" >&2; exit 69; }
-    tab_snapshot "$anchor" >"$opening"
     pane=$("$herdr" pane split "$anchor" --direction down --no-focus |
       "${ORCH_PYTHON3:-python3}" -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')
-    printf '%s\n' "$pane" >>"$opening"
+    printf '%s\n' "$pane" >"$opening"
     printf -v command '%q %q %q' "${ORCH_PYTHON3:-python3}" "$root/coordinator/question-pane.py" "$canonical"
     if ! "$herdr" pane run "$pane" "$command" || ! "$herdr" pane rename "$pane" "Q: $slug"; then
       "$root/coordinator/watchers/close-pane.sh" "$pane"
