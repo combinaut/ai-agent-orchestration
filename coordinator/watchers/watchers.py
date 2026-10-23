@@ -22,6 +22,7 @@ import audit
 import discovery
 import question_remind
 import watcher_runtime as runtime
+import worker_signals
 from question_lock import HELD, answers_lock, questions_directory
 from watcher_platform import (
     MissingMetric,
@@ -752,6 +753,8 @@ def reduce_waiting(previous, raw):
     current, events = {}, []
     for key, row in rows.items():
         entry = old.get(key)
+        if worker_signals.suppressed(row, raw):
+            continue
         if architect_like(row):
             continue
         if row.get("agent_status") == "working" and key not in gaps:
@@ -865,7 +868,18 @@ def reduce_workers(before, raw):
             events.append(worker_line(new))
     waiting, waiting_events = reduce_waiting(previous, raw)
     events += waiting_events
-    return dict(
+    signal_events = raw.get("signal_events", [])
+    signal_ids = (
+        [record["id"] for record in signal_events]
+        if "signal_events" in raw
+        else previous.get("signal_ids", [])
+    )
+    events += [
+        worker_signals.event_line(record)
+        for record in signal_events
+        if record["id"] not in previous.get("signal_ids", [])
+    ]
+    result = dict(
         bad={key: value for key, value in bad.items() if key in present},
         present=present,
         unreadable=unreadable,
@@ -875,7 +889,10 @@ def reduce_workers(before, raw):
             "waiting_read_failures", previous.get("waiting_read_failures", [])
         ),
         idle=idle,
-    ), events + idle_events
+    )
+    if signal_ids:
+        result["signal_ids"] = signal_ids
+    return result, events + idle_events
 
 
 def pull_owners(command, prs, failed=None, work=None):
@@ -1520,9 +1537,10 @@ def reduce_answers(before, raw):
 
 
 def acknowledge_answers(raw):
-    for _, _, path, _ in raw.get("answers", []):
+    for slug, text, path, _ in raw.get("answers", []):
         if not path:
             continue
+        worker_signals.bridge_user_answer(slug, text)
         processing = Path(path)
         processing.replace(
             processing.with_name(processing.name.removesuffix(".processing") + ".seen")
@@ -2132,6 +2150,14 @@ def collect(mode, before, scope="", base=None):
                 MissingMetric,
             ):
                 raw["workspaces"] = None
+            owners = waiting_owners(raw)
+            if owners is not None:
+                signals, events = worker_signals.collect(
+                    agents(raw), owners, raw["observed_at"]
+                )
+                if signals:
+                    raw["worker_signals"] = signals
+                raw["signal_events"] = events
             collect_waiting_jobs(raw, before)
             if base is not None:
                 raw["closed"] = closed_panes(

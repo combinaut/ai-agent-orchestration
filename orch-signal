@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Explicit worker completion and questions; resolve installer symlinks like orch-settings.
+set -euo pipefail
+self=${BASH_SOURCE[0]}
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case "$link" in /*) self=$link ;; *) self=$(cd "$(dirname "$self")" && pwd)/$link ;; esac
+done
+root=$(cd "$(dirname "$self")" && pwd)
+. "$root/coordinator/watchers/coord-lib.sh"
+orch_load_config
+export ORCH_ASK_TIMEOUT_S=${ORCH_ASK_TIMEOUT_S:-1800}
+orch_python >/dev/null || exit 2
+exec "$ORCH_LOADER_PYTHON" "$root/coordinator/watchers/worker_signals.py" "$@"

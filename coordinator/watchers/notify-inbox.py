@@ -48,7 +48,7 @@ WAIT_OWNER = re.compile(
     r"^workers: WORKER WAITING .+ pane=\S+ owner=([A-Za-z0-9_-]+) \d+m session=\S+"
 )
 OWNER = re.compile(
-    r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER \S+|workers: WORKER IDLE \S+) owner=([A-Za-z0-9_-]+) "
+    r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER \S+|workers: WORKER IDLE \S+|workers: WORKER (?:DONE|QUESTION) \S+) owner=([A-Za-z0-9_-]+) "
 )
 
 spec = importlib.util.spec_from_file_location("reader", w.ROOT / "read-alerts.py")
@@ -227,11 +227,18 @@ def native_messages(args, stamped, fallback, patterns):
                 waiting
                 or " RECYCLE-WORKER " in line
                 or " WORKER IDLE " in line
+                or " WORKER DONE " in line
+                or " WORKER QUESTION " in line
                 or (args.bindings_dir / f"architect-{owner.group(1)}.json").exists()
             )
         ):
             by_owner.setdefault(owner.group(1), []).append(
-                native(line.split(" ", 1)[1]) + ". No reply needed."
+                native(line.split(" ", 1)[1])
+                + (
+                    ". Answer with orch-signal answer <id> <text>."
+                    if " WORKER QUESTION " in body
+                    else ". No reply needed."
+                )
             )
     out = [
         (str(args.bindings_dir / f"architect-{owner}.json"), "\n".join(texts))

@@ -151,6 +151,8 @@ git_gb = 2
 git_age_s = 180
 
 [workers]
+# Maximum seconds a worker question waits for an answer
+ask_timeout_s = 1800
 # Seconds idle or done before WORKER WAITING
 wait_s = 600
 # Seconds between waiting alerts (minimum 60)

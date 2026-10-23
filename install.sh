@@ -425,6 +425,7 @@ link_shared_files() {
   done
   link_entry "$ORCH_REPO/statusline-command.sh" "$CLAUDE_DIR/statusline-command.sh"
   link_entry "$ORCH_REPO/heavy-slot" "$HOME/.local/bin/heavy-slot"
+  link_entry "$ORCH_REPO/orch-signal" "$HOME/.local/bin/orch-signal"
   link_entry "$ORCH_REPO/ask-user-question" "$HOME/.local/bin/ask-user-question"
   link_entry "$ORCH_REPO/orch-agents" "$HOME/.local/bin/orch-agents"
   link_entry "$ORCH_REPO/orch-settings" "$HOME/.local/bin/orch-settings"

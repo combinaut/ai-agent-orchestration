@@ -383,3 +383,5 @@ Service managers own process lifetime; foreground Monitors own their children.
 Coordinator responses for each audit line are in `skills/coordinate/SKILL.md`.
 
 Rules reject bridge markers matching the empty string and pattern sets with no patterns.
+
+Workers can explicitly finish with `orch-signal done`, send `heartbeat`, and block for an architect answer with `ask`. Each new job begins with `heartbeat --new-job`. Signals share the existing workers producer and native notifier; details and capacity bounds: [worker signals](../../docs/workers.md#explicit-worker-signals).

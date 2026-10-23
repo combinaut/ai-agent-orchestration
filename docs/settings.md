@@ -94,6 +94,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `hog.gb` | `ORCH_HOG_GB` | `6` | Hog watcher: process size in GB |
 | `hog.git_gb` | `ORCH_HOG_GIT_GB` | `2` | Hog watcher: git process size in GB |
 | `hog.git_age_s` | `ORCH_HOG_GIT_AGE_S` | `180` | Hog watcher: git process age in seconds |
+| `workers.ask_timeout_s` | `ORCH_ASK_TIMEOUT_S` | `1800` | Maximum seconds a worker question waits for an answer |
 | `workers.wait_s` | `ORCH_WAIT_S` | `600` | Seconds idle or done before WORKER WAITING |
 | `workers.wait_repeat_s` | `ORCH_WAIT_REPEAT_S` | `1800` | Seconds between waiting alerts (minimum 60) |
 | `workers.idle_s` | `ORCH_WORKER_IDLE_S` | `7200` | Seconds idle or done before WORKER IDLE (no open PR) |

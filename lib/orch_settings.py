@@ -477,6 +477,13 @@ SETTINGS = [
         "Hog watcher: git process age in seconds",
     ),
     _g(
+        "workers.ask_timeout_s",
+        "ORCH_ASK_TIMEOUT_S",
+        "int",
+        1800,
+        "Maximum seconds a worker question waits for an answer",
+    ),
+    _g(
         "workers.wait_s",
         "ORCH_WAIT_S",
         "number",

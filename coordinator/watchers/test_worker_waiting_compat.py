@@ -119,5 +119,6 @@ class WaitingCompatibilityTests(IsolatedTestCase):
         parsed = tomllib.loads(example)
         self.assertEqual(example.count("[workers]"), 1)
         self.assertEqual(
-            parsed["workers"], dict(wait_s=600, wait_repeat_s=1800, idle_s=7200)
+            parsed["workers"],
+            dict(ask_timeout_s=1800, wait_s=600, wait_repeat_s=1800, idle_s=7200),
         )

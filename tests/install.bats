@@ -5,6 +5,8 @@ load test_helper
 
 @test "fresh one-liner installs links and watchers runtime directories" {
   fresh_install
+  [ -L "$HOME/.local/bin/orch-signal" ]
+  [ "$HOME/.local/bin/orch-signal" -ef "$CLONE/orch-signal" ]
   [ -L "$HOME/.claude/skills/architect" ]
   [ -L "$HOME/.claude/coordinator/watchers/watchers.py" ]
   [ -L "$HOME/.claude/coordinator/legacy-scan.sh" ]
