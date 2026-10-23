@@ -71,6 +71,8 @@ from submitting the same item again. The ordinary dismissal state preserves
 removal after that window. No choices means no new buttons or answer mode.
 
 Undelivered answers retry through the same notifier after its outbox retention window.
-Dropping an undelivered answer after a status-item change also removes its dismissal.
+Dropping an undelivered answer after a status-item change also removes its dismissal
+and emits one `TODO READFAIL answer discarded:` notice with the affected item and answer.
+Pending discard notices share the existing 200-record queue cap and leave the queue on collection.
 Unavailable status files retain the answer. The legacy answer editor ignores whole CSI
 key sequences, including arrows, so they cannot cancel or insert text into an answer.

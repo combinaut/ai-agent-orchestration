@@ -576,3 +576,23 @@ class TodoAnswerTests(IsolatedTestCase):
                 inbox.send_line(self.base / "architect-workspace.json", text)
             )
             send.assert_not_called()
+
+    def test_discarded_undelivered_answer_emits_one_user_notice(self):
+        record = a.submit(OWNER, TEXT, "now")
+        (self.base / "status" / f"{OWNER}.md").write_text("## Waits on the user\n")
+        # Submission-side pruning must retain the notice until the producer collects it.
+        with a.queue_lock():
+            a.prune(record["at"] + 1)
+        self.assertNotIn(record["id"], a.pending_ids())
+        raw = w.collect_todo(None)
+        after, events = w.reduce_todo(None, raw)
+        notices = [
+            line for line in events if "TODO READFAIL" in line and "discarded" in line
+        ]
+        self.assertEqual(len(notices), 1)
+        self.assertIn(OWNER, notices[0])
+        self.assertIn("status item changed", notices[0])
+        self.assertIn("now", notices[0])
+        _, repeated = w.reduce_todo(after, w.collect_todo(after))
+        self.assertFalse(any("discarded" in line for line in repeated))
+        self.assertEqual(a.records(), [])

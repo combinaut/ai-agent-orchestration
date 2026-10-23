@@ -247,6 +247,8 @@ def answer(identifier, text, to_user=False):
             raise ValueError("question is missing or expired")
         if caller["workspace"] != record["owner"]:
             raise ValueError("only the owner architect workspace may answer")
+        if not asker_alive(record):
+            raise ValueError("asker is gone")
         if answer_path(identifier).exists():
             raise ValueError("question already answered")
         if to_user:
@@ -441,7 +443,7 @@ def main():
 
             previous = {
                 number: signal.signal(number, interrupted)
-                for number in (signal.SIGTERM, signal.SIGINT)
+                for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
             }
             try:
                 try:

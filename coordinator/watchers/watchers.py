@@ -873,17 +873,17 @@ def reduce_workers(before, raw):
         if record["kind"] == "done"
     }
     resumed = set(previous.get("resumed_done_ids", []))
+    idle_done = set(previous.get("idle_done_ids", []))
     if "worker_signals" in raw:
         resumed &= active_done
+        idle_done &= active_done
     for row in agents(raw):
         record = raw.get("worker_signals", {}).get(row["pane_id"])
-        if (
-            record
-            and record["kind"] == "done"
-            and row.get("agent_status") == "working"
-            and now > record["at"]
-        ):
-            resumed.add(record.get("id"))
+        if record and record["kind"] == "done" and now > record["at"]:
+            if row.get("agent_status") == "idle":
+                idle_done.add(record.get("id"))
+            elif row.get("agent_status") == "working" and record.get("id") in idle_done:
+                resumed.add(record.get("id"))
     raw = dict(raw, resumed_done_ids=list(resumed))
     waiting, waiting_events = reduce_waiting(previous, raw)
     events += waiting_events
@@ -909,6 +909,8 @@ def reduce_workers(before, raw):
         ),
         idle=idle,
     )
+    if idle_done:
+        result["idle_done_ids"] = sorted(idle_done)
     if resumed:
         result["resumed_done_ids"] = sorted(resumed)
     if signal_ids:
@@ -1392,7 +1394,12 @@ def collect_todo(before):
     if todo_answers.directory().exists():
         raw["todo_answers"] = records
         raw["todo_pending_ids"] = list(todo_answers.pending_ids())
-        raw["unreadable"] += failed
+        raw["todo_answer_notices"] = [
+            notice for notice in failed if notice.startswith("answer discarded:")
+        ]
+        raw["unreadable"] += [
+            notice for notice in failed if not notice.startswith("answer discarded:")
+        ]
     return raw
 
 
@@ -1460,6 +1467,9 @@ def reduce_todo_status(before, raw):
 
 def reduce_todo(before, raw):
     after, events = reduce_todo_status(before, raw)
+    events += [
+        "TODO READFAIL " + notice for notice in raw.get("todo_answer_notices", [])
+    ]
     records = raw.get("todo_answers", [])
     previous = set((before or {}).get("todo_answer_ids", []))
     now = raw.get("observed_at", time.time())

@@ -29,7 +29,7 @@ A **current job** begins with `heartbeat --new-job` and ends with `done`; every
 follow-up brief in a reused pane must begin a new job. Identical done calls are
 idempotent and print a no-op notice to stderr. A changed report, summary or outcome
 creates a new completion even without a reset. A done record suppresses WORKER WAITING
-until the pane is seen working after the completion; a heartbeat
+until a post-completion idle observation is followed by working; a heartbeat
 within 300 seconds also suppresses it. Workers that send neither retain the old
 alerts. WORKER IDLE remains independent. Long jobs can send heartbeat periodically;
 calls less than 30 seconds apart are ignored. Ordinary heartbeats cannot undo done.
@@ -38,8 +38,9 @@ Completion and question messages go through the workers producer, shared notifie
 `bindings/architect-<owner>.json` and its existing outbox. Delivery is normally
 within one workers poll (60 seconds). There is no second notifier or cursor.
 Claude workers run `ask` with `run_in_background` or a Bash timeout above the
-command's `--timeout`. SIGTERM/SIGINT cancel the question under the answers lock;
-a re-ask replaces a record whose recorded asker PID is dead.
+command's `--timeout`. SIGTERM/SIGINT/SIGHUP cancel the question under the answers lock;
+a re-ask replaces a record whose recorded asker PID is dead. `answer` refuses
+a dead asker with `asker is gone`, including escalation.
 An owner may answer or escalate a question. Escalation uses the existing questions
 directory, answers lock, reminders and Q panel; the answers watcher forwards the
 user's answer to the blocked worker. If opening the panel fails, a due reminder

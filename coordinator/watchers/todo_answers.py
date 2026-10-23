@@ -66,7 +66,8 @@ def pending_item_ids(generations=None):
     return {
         record["item_id"]
         for record in records()
-        if (
+        if not record.get("discarded")
+        and (
             generations is None
             or record.get("generation") is None
             or record["generation"] == generations.get(record["item_id"])
@@ -75,7 +76,7 @@ def pending_item_ids(generations=None):
 
 
 def pending_ids():
-    return {record["id"] for record in records()}
+    return {record["id"] for record in records() if not record.get("discarded")}
 
 
 def queue_lock():
@@ -127,9 +128,14 @@ def prune(now):
         expired = (
             record.get("delivered_at") and now - record["delivered_at"] > KEEP_SECONDS
         )
-        if changed or expired:
-            if not record.get("delivered_at"):
-                undo_dismissal(record)
+        if record.get("discarded"):
+            current.append(record)
+        elif changed and not record.get("delivered_at"):
+            undo_dismissal(record)
+            record["discarded"] = True
+            write(directory() / (record["key"] + ".json"), record)
+            current.append(record)
+        elif changed or expired:
             (directory() / (record["key"] + ".json")).unlink(missing_ok=True)
         else:
             current.append(record)
@@ -160,7 +166,11 @@ def mark_delivered(text, owner=None):
         return
     with queue_lock():
         for record in records():
-            if record["id"] in identifiers and not record.get("delivered_at"):
+            if (
+                record["id"] in identifiers
+                and not record.get("delivered_at")
+                and not record.get("discarded")
+            ):
                 record["delivered_at"] = time.time()
                 write(directory() / (record["key"] + ".json"), record)
 
@@ -213,15 +223,25 @@ def collect(command):
     if not directory().exists():
         return [], []
     with queue_lock():
+        pruned = prune(time.time())
+        notices = []
+        for record in pruned:
+            if record.get("discarded"):
+                notices.append(
+                    f"answer discarded: {record['architect']}: {record['text']} = {record['answer']} (status item changed before delivery)"
+                )
+                (directory() / (record["key"] + ".json")).unlink(missing_ok=True)
         current = [
-            record for record in prune(time.time()) if not record.get("delivered_at")
+            record
+            for record in pruned
+            if not record.get("delivered_at") and not record.get("discarded")
         ]
     if not current:
-        return [], []
+        return [], notices
     try:
         owners = discovery.architect_owners(command)
     except discovery.Unavailable:
-        return [], ["answer:" + record["architect"] for record in current]
+        return [], notices + ["answer:" + record["architect"] for record in current]
     ready, failed = [], []
     for record in current:
         owner = owners.get(record["architect"])
@@ -229,7 +249,7 @@ def collect(command):
             ready.append(dict(record, owner=owner))
         else:
             failed.append("answer:" + record["architect"])
-    return ready, sorted(set(failed))
+    return ready, notices + sorted(set(failed))
 
 
 def event_line(record):

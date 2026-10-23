@@ -558,7 +558,7 @@ class SignalTests(IsolatedTestCase):
         import sys
         import time
 
-        for signum in (signal.SIGTERM, signal.SIGINT):
+        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             with self.subTest(signal=signum):
                 code = 'import worker_signals as s; s.identity=lambda:dict(pane="pane:1",workspace="worker",owner="owner"); raise SystemExit(s.main())'
                 process = subprocess.Popen(
@@ -652,9 +652,10 @@ class SignalTests(IsolatedTestCase):
                 worker_signals={"pane:1": record},
             )
 
-        before, _ = w.reduce_workers(None, raw("idle", record["at"] + 1))
-        working, _ = w.reduce_workers(before, raw("working", record["at"] + 2))
-        later, _ = w.reduce_workers(working, raw("idle", record["at"] + 3))
+        final_turn, _ = w.reduce_workers(None, raw("working", record["at"] + 5))
+        idle, _ = w.reduce_workers(final_turn, raw("idle", record["at"] + 10))
+        working, _ = w.reduce_workers(idle, raw("working", record["at"] + 20))
+        later, _ = w.reduce_workers(working, raw("idle", record["at"] + 30))
         _, events = w.reduce_workers(later, raw("idle", record["at"] + 1000))
         self.assertTrue(any("WORKER WAITING" in line for line in events))
 
@@ -709,7 +710,13 @@ class SignalTests(IsolatedTestCase):
             observed_at=record["at"] + 1,
             worker_signals={"pane:1": record},
         )
-        before, _ = w.reduce_workers(None, raw)
+        idle_raw = dict(
+            raw,
+            result=dict(agents=[dict(row, agent_status="idle")]),
+            observed_at=record["at"] + 0.5,
+        )
+        idle, _ = w.reduce_workers(None, idle_raw)
+        before, _ = w.reduce_workers(idle, raw)
         unavailable = dict(
             raw,
             result=dict(agents=[dict(row, agent_status="idle")]),
@@ -727,3 +734,39 @@ class SignalTests(IsolatedTestCase):
             later, dict(recovered, observed_at=record["at"] + 1000)
         )
         self.assertTrue(any("WORKER WAITING" in line for line in events))
+
+    def test_final_turn_working_five_seconds_after_done_keeps_suppression(self):
+        record = s.record_signal(s.identity(), "done", outcome="succeeded")
+        row = dict(pane_id="pane:1", workspace_id="worker", agent_status="working")
+        raw = dict(
+            result=dict(agents=[row]),
+            workspaces=dict(
+                result=dict(
+                    workspaces=[dict(workspace_id="worker", tokens=dict(owner="owner"))]
+                )
+            ),
+            observed_at=record["at"] + 5,
+            worker_signals={"pane:1": record},
+        )
+        before, _ = w.reduce_workers(None, raw)
+        idle = dict(
+            raw,
+            result=dict(agents=[dict(row, agent_status="idle")]),
+            observed_at=record["at"] + 10,
+        )
+        later, _ = w.reduce_workers(before, idle)
+        _, events = w.reduce_workers(later, dict(idle, observed_at=record["at"] + 1000))
+        self.assertFalse(any("WORKER WAITING" in line for line in events))
+
+    def test_dead_asker_cannot_be_answered_or_escalated(self):
+        record = self.record(timeout=60)
+        record["asker_pid"] = 999999999
+        s.write(s.question_path(record["id"]), record)
+        with patch.dict(
+            os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
+        ):
+            for to_user in (False, True):
+                with self.assertRaisesRegex(ValueError, "asker is gone"):
+                    s.answer(record["id"], "answer", to_user=to_user)
+        self.assertFalse(s.answer_path(record["id"]).exists())
+        self.opener.assert_not_called()
