@@ -11,26 +11,47 @@ load test_helper
   [ -d "$HOME/.claude/coordinator/watchers/bindings" ]
 }
 
-@test "--links-only syncs and links new files without touching settings or services" {
+@test "--links-only syncs links and removes stale links without touching settings or services" {
+  mkdir -p "$SRC/rules"
+  printf 'old shared rule\n' >"$SRC/rules/links-only-old.md"
+  git -C "$SRC" add rules/links-only-old.md
+  git -C "$SRC" -c user.email=test@example.invalid -c user.name=test commit -qm links-only-old
+  git -C "$ORIGIN" fetch -q "$SRC" main:main
   fresh_install
   settings="$HOME/.claude/settings.json"
   cp "$settings" "$TMP/settings-before.json"
+  find "$HOME" -path "$CLONE" -prune -o -path "$HOME/.claude/.orch-links" -prune -o -type f -exec cksum {} \; | LC_ALL=C sort >"$TMP/home-before.cksum"
   : >"$LAUNCHCTL_CALLS"
   : >"$SYSTEMCTL_CALLS"
+  : >"$HERDR_CALLS"
+  git -C "$SRC" rm -q rules/links-only-old.md
   mkdir -p "$SRC/rules"
   printf 'new shared rule\n' >"$SRC/rules/links-only.md"
   git -C "$SRC" add rules/links-only.md
   git -C "$SRC" -c user.email=test@example.invalid -c user.name=test commit -qm links-only
   git -C "$ORIGIN" fetch -q "$SRC" main:main
 
-  run /bin/bash -c 'cd "$1"; exec /bin/bash -c "$ONE_LINER" _ --links-only' _ "$TMP"
+  run /bin/bash -c 'cd "$1"; exec /bin/bash -c "$ONE_LINER" _ --links-only --env herdr' _ "$TMP"
   [ "$status" -eq 0 ]
   [ -L "$HOME/.claude/rules/links-only.md" ]
   [ "$HOME/.claude/rules/links-only.md" -ef "$CLONE/rules/links-only.md" ]
+  [ ! -e "$HOME/.claude/rules/links-only-old.md" ]
   cmp "$TMP/settings-before.json" "$settings"
+  find "$HOME" -path "$CLONE" -prune -o -path "$HOME/.claude/.orch-links" -prune -o -type f -exec cksum {} \; | LC_ALL=C sort >"$TMP/home-after.cksum"
+  cmp "$TMP/home-before.cksum" "$TMP/home-after.cksum"
   [ ! -s "$LAUNCHCTL_CALLS" ]
   [ ! -s "$SYSTEMCTL_CALLS" ]
+  [ ! -s "$HERDR_CALLS" ]
+  contains "$output" 'ignored'
   contains "$output" 'settings and services were not touched'
+  contains "$output" 'Run install.sh without --links-only to apply settings and service changes'
+}
+
+@test "--links-only refuses a first install" {
+  run /bin/bash -c 'cd "$1"; exec /bin/bash -c "$ONE_LINER" _ --links-only' _ "$TMP"
+  [ "$status" -ne 0 ]
+  contains "$output" 'run a full install first'
+  [ ! -e "$HOME/.claude/settings.json" ]
 }
 
 @test "CLAUDE.md marked orchestration block is replaced without changing surrounding text" {
