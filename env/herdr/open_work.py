@@ -89,3 +89,25 @@ def open_work(command):
             for pane in panes
         ],
     )
+
+
+def architect_owners(command):
+    """Saved architect names to workspace IDs; ambiguous names are omitted."""
+    rows = result(command, "agent", "list")["agents"]
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise ValueError("agents is not a list of records")
+    owners, ambiguous = {}, set()
+    for row in rows:
+        name, workspace = row.get("name"), row.get("workspace_id")
+        role = (row.get("tokens") or {}).get("role")
+        if (
+            not workspace
+            or not name
+            or (role != "architect" and not name.startswith("Architect::"))
+        ):
+            continue
+        for label in {name, row.get("terminal_title_stripped")} - {None, ""}:
+            if label in owners and owners[label] != workspace:
+                ambiguous.add(label)
+            owners[label] = workspace
+    return {name: owner for name, owner in owners.items() if name not in ambiguous}

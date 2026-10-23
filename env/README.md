@@ -56,3 +56,5 @@ To move either pin, change `env/herdr/radar.pin` (a full commit SHA from `combin
 The native host calls `coordinator/watchers/discovery.branch_owners`, using the same `open_work` adapter contract, workspace/pane snapshot and GitHub-origin parser as repository discovery. No separate PR-tabs adapter is required. It resolves architect labels and checked-out branches, omitting conflicting owners for one repository/branch. The host bounds the whole scan to five seconds.
 
 Results are cached for 30 seconds in one identity-checked `owners.json`; retired per-config caches are removed. Failed scans return `owners: null` so Chrome retains its last good map; a successful empty map clears ownership. Failures are also cached for 30 seconds. An absent adapter uses repository groups.
+
+Adapters that support to-do answers also expose `architect_owners(command)`: saved architect names mapped to workspace IDs, omitting ambiguous names. The to-do producer uses this mapping for the existing native architect bindings.

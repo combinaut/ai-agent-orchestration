@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "watchers"))
 import feed_attach  # noqa: E402
+import todo_answers  # noqa: E402
 from reminder_picker import (  # noqa: E402
     PICK_KEYS,
     RESET,
@@ -294,6 +295,19 @@ def footer_rows(width, popup=False, reminders=True):
     return rows
 
 
+def answer_lines(editor, width):
+    if editor.mode == "type":
+        rows = wrap(editor.prompt(), width)
+        return rows[-4:], []
+    entries = tuple(
+        (key, "answer-" + key, value) for key, value in editor.options.items()
+    ) + (("t", "answer-t", "Type answer"),)
+    rows, spans = button_rows(width, False, True, entries, "answer")
+    return ["Answer:"] + rows, [
+        (offset + 2, first, last, action) for offset, first, last, action in spans
+    ]
+
+
 def layout(
     rows,
     width,
@@ -328,9 +342,15 @@ def layout(
             if note
             else BUTTONS
         )
+        if todo_answers.choices(text):
+            entries += (("a", "answer", "Answer"),)
         button_lines, spans = button_rows(room, picked, picked, entries)
         extra, extra_spans = (
-            picker_lines(picker, room)
+            (
+                answer_lines(picker["answer"], room)
+                if "answer" in picker
+                else picker_lines(picker, room)
+            )
             if picker and picker["index"] == index
             else ([], [])
         )
@@ -366,6 +386,8 @@ def layout(
             "Everything is snoozed." if hidden_count else "Nothing waits on you."
         )
     footer = footer_rows(width - 1, popup, hidden_count > 0)
+    if any(todo_answers.choices(text) for _, text, *_ in rows):
+        footer += ["a answer selected item"]
     if hidden_count:
         shown = f"[s] {'hide' if showing else 'show'} reminders ({hidden_count})"
         lines += [paint("show", shown, False), ""]
@@ -422,6 +444,10 @@ def jump(text):
     return generator().jump({"text": text})
 
 
+def answer_item(owner, text, answer):
+    return generator().answer_from_view(owner, text, answer, TODO)
+
+
 def report_count(pane, count):
     generator().report_metadata(pane, count)
 
@@ -457,6 +483,7 @@ def act(hidden, rows, items, action, index, run_jump=jump, until=None):
 
 
 KEYS = {hotkey: action for hotkey, action, _ in BUTTONS} | {
+    "a": "answer",
     "s": "show",
     "q": "quit",
     "\r": "focus",
@@ -497,6 +524,8 @@ def input_events(buffer, hits, picking=None):
                 events.append(("move", 1 if arrow == "B" else -1))
         elif char is None or char == "\x1b":
             continue
+        elif picking == "answer":
+            events.append(("answer-key", char))
         elif picking == "type":
             event = entry_event(char)
             if event:
@@ -524,7 +553,9 @@ class App:
         run_jump=jump,
         report=report_count,
         popup=False,
+        run_answer=answer_item,
     ):
+        self.run_answer = run_answer
         self.hidden, self.demo, self.out, self.size, self.run_jump = (
             hidden,
             demo,
@@ -625,6 +656,43 @@ class App:
         self.show = self.show and not self.rows[index][3]
 
     def apply(self, action, index):
+        if (
+            self.picker
+            and "answer" in self.picker
+            and (action == "answer-key" or action.startswith("answer-"))
+        ):
+            editor = self.picker["answer"]
+            char = index if action == "answer-key" else action.removeprefix("answer-")
+            result, value = editor.feed(char)
+            self.status = editor.error
+            if result == "answer":
+                owner, text = self.picker["key"]
+                if self.find((owner, text)) is None:
+                    self.status = "that item is gone"
+                else:
+                    try:
+                        self.status = self.run_answer(owner, text, value)
+                        self.picker = None
+                    except (ValueError, OSError) as error:
+                        self.status = str(error)
+            elif result == "cancel":
+                self.picker = None
+            return
+        if action == "answer":
+            self.selected = self.selected if index is None else index
+            if 0 <= self.selected < len(self.rows):
+                self.remember()
+                options = todo_answers.choices(self.rows[self.selected][1])
+                if options:
+                    self.picker = {
+                        "key": self.selected_key,
+                        "mode": "answer",
+                        "answer": todo_answers.AnswerInput(options),
+                    }
+                else:
+                    return
+                self.typed = ""
+            return
         if action == "digit":
             candidate = self.typed + index
             self.typed = candidate if 1 <= int(candidate) <= len(self.rows) else index

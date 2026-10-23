@@ -50,6 +50,7 @@ retries. Plain `QUESTION:` is the fallback when the command fails or times out;
 | Pane records | One per live pane; removed after a successful snapshot confirms pane closed or owner changed |
 | Question/answer files | Worker consumption returns immediately; Q closure is deferred to the workers poll. Removed when consumed, replaced, closed, or at deadline + 3600 seconds; a failed Q close retains one retry record and blocks another ask from that pane until closure succeeds |
 | Completion handoff | Latest 200 completions per pane for 3600 seconds; oldest dropped beyond cap, so rapid new-job resets cannot erase a completion before the poll |
+| Q-panel cleanup | At most one close attempt per workers poll, timeout 2 seconds; failed attempts rotate behind other pending panels |
 | Signal dedupe state | IDs from retained live completions and unexpired pending questions only |
 | Native outbox | Existing 200 entries; merge overflow by target, drop oldest beyond cap; retry every 60 seconds, expire after 3600 seconds |
 

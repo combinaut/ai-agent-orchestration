@@ -44,6 +44,7 @@ OUTBOX_KEEP_SECONDS = 3600
 MONITOR_ACK_SECONDS = 20
 FEED_NAME = "coordinator-feed.log"
 FEED_BYTES = 1024 * 1024
+TODO_OWNER = re.compile(r"^todo: TODO ANSWER owner=([A-Za-z0-9_-]+) ")
 WAIT_OWNER = re.compile(
     r"^workers: WORKER WAITING .+ pane=\S+ owner=([A-Za-z0-9_-]+) \d+m session=\S+"
 )
@@ -218,7 +219,7 @@ def native_messages(args, stamped, fallback, patterns):
         waiting = WAIT_OWNER.match(body)
         if waiting and (body.endswith(" ESCALATE (start)") or line.endswith("(clear)")):
             continue
-        owner = OWNER.match(body) or waiting
+        owner = OWNER.match(body) or waiting or TODO_OWNER.match(body)
         if (
             owner
             and not line.endswith("(clear)")
@@ -229,6 +230,7 @@ def native_messages(args, stamped, fallback, patterns):
                 or " WORKER IDLE " in line
                 or " WORKER DONE " in line
                 or " WORKER QUESTION " in line
+                or " TODO ANSWER " in line
                 or (args.bindings_dir / f"architect-{owner.group(1)}.json").exists()
             )
         ):
@@ -236,7 +238,7 @@ def native_messages(args, stamped, fallback, patterns):
                 native(line.split(" ", 1)[1])
                 + (
                     ". Answer with orch-signal answer <id> <text>."
-                    if " WORKER QUESTION " in body
+                    if body.startswith("workers: WORKER QUESTION ")
                     else ". No reply needed."
                 )
             )
@@ -654,20 +656,6 @@ def history(base, cursor, modes, now, late=None):
         except (OSError, ValueError, KeyError):
             events = []
             state = {}
-        if mode == "workers" and late is not None:
-            for event in events:
-                alert = json.loads(event["line"])
-                signals = [
-                    line
-                    for line in alert.get("events", [])
-                    if line.startswith(("WORKER DONE ", "WORKER QUESTION "))
-                ]
-                if (
-                    signals
-                    and event["seq"] > seen
-                    and now - event.get("at", now) <= OUTBOX_KEEP_SECONDS
-                ):
-                    late.append(dict(alert, events=signals))
         fresh = mode not in cursor
         unseen_reset = False
         if state.get("reset") and cursor.get(mode, {}).get("reset") != state["reset"]:
@@ -685,17 +673,51 @@ def history(base, cursor, modes, now, late=None):
                     mode, {"seq": 0, "stale": False, "since": now}
                 ).update(seq=0, reset=state["reset"])
                 seen = 0
+        if mode in ("workers", "todo") and late is not None:
+            prefixes = ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ")
+            unread = [
+                event for event in events if event["seq"] > (0 if fresh else seen)
+            ]
+            has_signals = any(
+                any(
+                    line.startswith(prefixes)
+                    for line in json.loads(event["line"]).get("events", [])
+                )
+                and now - event.get("at", now) <= OUTBOX_KEEP_SECONDS
+                for event in unread
+            )
+            if has_signals:
+                for event in unread:
+                    alert = json.loads(event["line"])
+                    lines = [
+                        line
+                        for line in alert.get("events", [])
+                        if (
+                            line.startswith(prefixes)
+                            and now - event.get("at", now) <= OUTBOX_KEEP_SECONDS
+                        )
+                        or (not fresh and not line.startswith(prefixes))
+                    ]
+                    if lines:
+                        late.append(dict(alert, events=lines))
+                cursor.setdefault(mode, {"seq": 0, "stale": False, "since": now})[
+                    "seq"
+                ] = max(event["seq"] for event in events)
+                if fresh:
+                    seen = max(event["seq"] for event in events)
         if mode not in cursor and events:
             seen = max(event["seq"] for event in events)
             cursor[mode] = {"seq": seen, "stale": False, "since": now}
         for event in events:
             if event["seq"] <= seen:
                 alert = json.loads(event["line"])
-                if mode == "workers":
+                if mode in ("workers", "todo"):
                     alert["events"] = [
                         line
                         for line in alert.get("events", [])
-                        if not line.startswith(("WORKER DONE ", "WORKER QUESTION "))
+                        if not line.startswith(
+                            ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ")
+                        )
                     ]
                 if unseen_reset and any(
                     line.startswith("STATE RESET ") for line in alert.get("events", [])

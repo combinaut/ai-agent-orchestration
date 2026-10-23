@@ -406,3 +406,97 @@ class SignalTests(IsolatedTestCase):
             with self.assertRaisesRegex(ValueError, "capacity reached"):
                 s.new_question(dict(ident, pane="pane:3"), "Which?", "", timeout=60)
         self.assertEqual(len(list(s.directory().glob("signal-*.json"))), 2)
+
+    def test_corrupt_worker_state_still_publishes_explicit_signals(self):
+        record = self.record(timeout=60)
+        raw = dict(result=dict(agents=[]), signal_events=[record])
+        (self.base / "workers.json").write_text("corrupt")
+        first = w.cycle(self.base, "workers", lambda before: raw)
+        self.assertIn("WORKER QUESTION", first)
+        second = w.cycle(self.base, "workers", lambda before: raw)
+        self.assertFalse(second and "WORKER QUESTION" in second)
+
+    def test_existing_cursor_replay_preserves_other_events_once(self):
+        import importlib.util
+
+        import alert_policy
+
+        spec = importlib.util.spec_from_file_location(
+            "existing_cursor_inbox", Path(__file__).with_name("notify-inbox.py")
+        )
+        inbox = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inbox)
+        signal = "WORKER QUESTION pane:1 owner=owner id=signal-existing workspace=worker question=Which?"
+        event = dict(
+            seq=1,
+            at=100,
+            line=json.dumps(
+                dict(mode="workers", events=[signal, "WORKER pane:2 blocked"])
+            ),
+        )
+        (self.base / "workers.json").write_text(
+            json.dumps(dict(before={}, events=[event]))
+        )
+        (self.base / "workers.heartbeat").touch()
+        cursor = dict(workers=dict(seq=0, stale=False, since=100))
+        late = []
+        history = inbox.history(self.base, cursor, ["workers"], 101, late)
+        state, _ = alert_policy.rebuild(history, 101)
+        lines = alert_policy.apply(state, late, 101)
+        self.assertEqual(sum("WORKER QUESTION" in line for line in lines), 1)
+        self.assertTrue(any("pane:2 blocked" in line for line in lines))
+        again = inbox.reader.read_once(self.base, cursor, 102, 900, ["workers"])
+        self.assertIsNone(again)
+
+    def test_panel_cleanup_budget_rotates_failed_retries(self):
+        records = []
+        for number in range(3):
+            ident = dict(s.identity(), pane=f"pane:{number}")
+            record = s.new_question(ident, "Which?", "", 60)
+            (s.questions_directory() / (record["id"] + ".md")).write_text("Question")
+            record["cleanup"] = True
+            s.write(s.question_path(record["id"]), record)
+            records.append(record)
+        self.opener.return_value = 1
+        s.collect(None, None, 100)
+        self.assertEqual(self.opener.call_count, 1)
+        first = self.opener.call_args.args[1]
+        self.assertEqual(self.opener.call_args.kwargs["timeout"], 2)
+        s.collect(None, None, 101)
+        self.assertEqual(self.opener.call_count, 2)
+        self.assertNotEqual(self.opener.call_args.args[1], first)
+        self.assertEqual(len(list(s.directory().glob("signal-*.json"))), 3)
+
+    def test_heartbeat_published_during_snapshot_is_fresh(self):
+        clock = [100]
+        ident = s.identity()
+
+        def snapshot(_command):
+            clock[0] = 200
+            s.record_signal(ident, "heartbeat")
+            return self.work
+
+        def command(*args):
+            if args[-2:] == ("agent", "list"):
+                return json.dumps(dict(result=dict(agents=[])))
+            return json.dumps(
+                dict(
+                    result=dict(
+                        workspaces=[
+                            dict(workspace_id="worker", tokens=dict(owner="owner"))
+                        ]
+                    )
+                )
+            )
+
+        with (
+            patch.object(s.time, "time", side_effect=lambda: clock[0]),
+            patch.dict(os.environ, HERDR_ENV="1"),
+            patch.object(w, "command", side_effect=command),
+        ):
+            s.record_signal(ident, "heartbeat")
+            with patch.object(s.discovery, "open_work", side_effect=snapshot):
+                raw = w.collect("workers", None)
+        self.assertTrue(
+            s.suppressed(dict(pane_id="pane:1", workspace_id="worker"), raw)
+        )

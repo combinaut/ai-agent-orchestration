@@ -361,6 +361,11 @@ def pull_facts(line):
 
 
 def todo_facts(line):
+    answer = re.match(r"TODO ANSWER owner=\S+ id=(\S+)", line)
+    if answer:
+        item = fact("todo:answer:" + answer.group(1), line, terminal=True)
+        item["text"] = line
+        return [item]
     if line.startswith("TODO READFAIL "):
         return [
             fact("todo:readfail:" + line[len("TODO READFAIL ") :], line, clearable=True)

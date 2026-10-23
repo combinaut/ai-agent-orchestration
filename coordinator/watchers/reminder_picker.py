@@ -46,6 +46,7 @@ RESET = "\033[0m"
 SGR = re.compile(r"(\x1b\[[0-9;]*m)")
 # bright fill in the button's colour on the selected item; one faint neutral tint on every other button
 COLORS = {
+    "answer": (80, 16),
     "ignore": (174, 16),
     "remind": (214, 16),
     "cancel": (214, 16),

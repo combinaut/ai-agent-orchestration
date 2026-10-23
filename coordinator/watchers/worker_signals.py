@@ -21,6 +21,8 @@ HEARTBEAT_MIN_SECONDS = 30
 HEARTBEAT_FRESH_SECONDS = 300
 QUESTION_RETAIN_SECONDS = 3600
 QUESTIONS_MAX = 200
+CLEANUP_MAX = 1
+CLEANUP_SECONDS = 2
 DONE_EVENTS_MAX = 200
 DONE_EVENTS_KEEP_SECONDS = 3600
 ID = re.compile(r"signal-[a-f0-9]{32}\Z")
@@ -110,7 +112,7 @@ def record_signal(ident, kind, new_job=False, **fields):
         return record
 
 
-def remove_question(record, close_panel=True):
+def remove_question(record, close_panel=True, close_timeout=CLEANUP_SECONDS):
     """Waiters defer Q closure; the workers poll retries failed closes with the record intact."""
     identifier = record["id"]
     panel = questions_directory() / (identifier + ".md")
@@ -122,7 +124,7 @@ def remove_question(record, close_panel=True):
             panel.with_suffix(".remind").unlink(missing_ok=True)
             return False
         try:
-            if open_user_question("close", identifier) != 0:
+            if open_user_question("close", identifier, timeout=close_timeout) != 0:
                 return False
         except (OSError, subprocess.SubprocessError):
             return False
@@ -203,10 +205,12 @@ def wait_answer(record, timeout, deadline=None):
     raise ValueError(f"question {record['id']} timed out after {timeout:g}s")
 
 
-def open_user_question(identifier, path):
+def open_user_question(identifier, path, timeout=None):
     from watchers import open_question
 
-    return open_question(identifier, path)
+    return open_question(
+        identifier, path, **({"timeout": timeout} if timeout is not None else {})
+    )
 
 
 def answer(identifier, text, to_user=False):
@@ -268,8 +272,15 @@ def collect(rows, owners, now, snapshot_at=None):
     snapshot_at = now if snapshot_at is None else snapshot_at
     signals, events = {}, []
     with answers_lock():
-        for path in directory().glob("*.json"):
-            record = read(path)
+        saved = [(path, read(path)) for path in directory().glob("*.json")]
+        saved.sort(
+            key=lambda item: (
+                item[1].get("cleanup_tried", 0) if item[1] else 0,
+                item[0].name,
+            )
+        )
+        cleanup_used = 0
+        for path, record in saved:
             if not record:
                 continue
             pane, workspace = record["pane"], record["workspace"]
@@ -289,6 +300,14 @@ def collect(rows, owners, now, snapshot_at=None):
                     or closed
                     or now > record["deadline"] + QUESTION_RETAIN_SECONDS
                 ):
+                    panel = questions_directory() / (record["id"] + ".md")
+                    if panel.exists():
+                        if cleanup_used >= CLEANUP_MAX:
+                            remove_question(record, close_panel=False)
+                            continue
+                        cleanup_used += 1
+                        record.update(cleanup=True, cleanup_tried=now)
+                        write(path, record)
                     remove_question(record)
                 elif not answered and now < record["deadline"]:
                     events.append(record)

@@ -76,7 +76,7 @@ Workers, recycles and handoffs: [`docs/workers.md`](docs/workers.md).
 
 ### 📝 The to-do pane
 
-The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list as a popup (on by default; `todo_popup = false` turns the popup off). Details, keys and settings: [docs/todo.md](docs/todo.md).
+The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list as a popup (on by default; `todo_popup = false` turns the popup off). Items with numbered choices can be answered there: select one, press `a`, then choose a number or `t` for free text. Details, keys and settings: [docs/todo.md](docs/todo.md).
 
 ### ❓ User questions
 

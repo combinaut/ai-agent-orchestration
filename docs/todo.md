@@ -29,3 +29,43 @@ The Coordinator opens this view itself at start, in a pane labelled `To-do` besi
 `install.sh` (herdr env) also makes `prefix+t` open the buttons view as a popup titled "Your to-do". It links the Herdr plugin in `env/herdr/todo-plugin` and adds a marked `[[keys.command]]` block to Herdr's `config.toml`. To turn the popup off, set `todo_popup = false` under `[herdr]` in `~/.claude/orchestration.toml` and run `install.sh`; that removes both. See [docs/settings.md](settings.md).
 
 Question panes (`ask-user-question`) stack below the pane labelled `To-do`.
+
+## Answer an item
+
+Architects can add consecutive numbered choices, from 1 to 9, before the target:
+
+```markdown
+## Waits on the user
+- Deploy the release? [1: deploy now] [2: wait until tomorrow] -> Architect::Tooling
+```
+
+Select that item with the existing number keys or arrows in the buttons view,
+then press **a** (or click **Answer**). In answer mode, press its choice number,
+or **t** to type a free-text answer and **Enter** to send. **Esc** cancels the
+answer; in a popup it stays open. The simple `user-todo.py --follow` list also
+supports `a`: type the item number, press `a`, then choose or type. Outside answer
+mode, number/Enter jumps, n/p paging, mouse clicks, Ignore and Reminder keep their
+existing behavior. In text mode, letters such as q, n and p are answer text.
+
+The queued answer removes the item using the same dismissal state as a successful
+jump. It returns only when the architect changes or re-adds the status item.
+Ignore still emits `TODO IGNORED`; answering emits `TODO ANSWER` instead. The
+message goes to the architect whose status file owns the line, through the
+existing to-do producer, native architect binding and notifier outbox. The target
+after `->` still controls normal jumps. An unavailable architect keeps the answer
+queued and raises a to-do read warning; it is never sent by typing into a pane.
+
+| Resource | Bound |
+|---|---|
+| Choices | Consecutive 1–9; each label at most 512 characters |
+| Answer text | 1–512 characters; editor buffer stops at 512 |
+| Typing preview | Last four wrapped lines; the full answer is retained |
+| Pending answers | One per item, at most 200 records machine-wide |
+| Queue retention | 3600 seconds; expired records pruned on submission or to-do poll |
+| UI lock wait | At most 2 seconds for the existing answers lock |
+| Native delivery | Existing 200-entry outbox, 60-second retries, 3600-second expiry |
+
+Runtime queue records live under `~/.claude/coordinator/todo-answers/`. Accepted
+records are retained for the retention window to prevent a second stale view
+from submitting the same item again. The ordinary dismissal state preserves
+removal after that window. No choices means no new buttons or answer mode.

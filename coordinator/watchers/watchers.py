@@ -21,6 +21,7 @@ import alert_policy
 import audit
 import discovery
 import question_remind
+import todo_answers
 import watcher_runtime as runtime
 import worker_signals
 from question_lock import HELD, answers_lock, questions_directory
@@ -1366,10 +1367,16 @@ def collect_todo(before):
     state = Path(
         os.environ.get("ORCH_USER_TODO_STATE") or coordinator / "user-todo.state.json"
     )
-    return module.merge(directory, output, state)
+    raw = module.merge(directory, output, state)
+    records, failed = todo_answers.collect(command)
+    if todo_answers.directory().exists():
+        raw["todo_answers"] = records
+        raw["todo_pending_ids"] = list(todo_answers.pending_ids())
+        raw["unreadable"] += failed
+    return raw
 
 
-def reduce_todo(before, raw):
+def reduce_todo_status(before, raw):
     current = {item["id"]: item for item in raw["now"]}
     directory_down = any(Path(path).suffix != ".md" for path in raw["unreadable"])
     if directory_down and before:
@@ -1431,6 +1438,24 @@ def reduce_todo(before, raw):
     }, events
 
 
+def reduce_todo(before, raw):
+    after, events = reduce_todo_status(before, raw)
+    records = raw.get("todo_answers", [])
+    previous = set((before or {}).get("todo_answer_ids", []))
+    events += [
+        todo_answers.event_line(record)
+        for record in records
+        if record["id"] not in previous
+    ]
+    seen = (
+        previous
+        & set(raw.get("todo_pending_ids", [record["id"] for record in records]))
+    ) | {record["id"] for record in records}
+    if seen:
+        after["todo_answer_ids"] = sorted(seen)
+    return after, events
+
+
 def answer_order(path):
     claim = path.name.split(".", 2)[1]
     if re.fullmatch(r"[0-9]{20}-[0-9a-f]{32}", claim):
@@ -1441,7 +1466,7 @@ def answer_order(path):
         return 0, path.name
 
 
-def open_question(slug, question):
+def open_question(slug, question, timeout=question_remind.OPEN_TIMEOUT):
     argv = [
         "/usr/bin/env",
         f"{HELD}=1",
@@ -1449,7 +1474,7 @@ def open_question(slug, question):
         slug,
         str(question),
     ]
-    return runtime.run(argv, timeout=question_remind.OPEN_TIMEOUT).returncode
+    return runtime.run(argv, timeout=timeout).returncode
 
 
 def collect_answers(before, consume=True):
@@ -1822,6 +1847,14 @@ def cycle_pass(base, mode, collector, failures, budget):
             reduced = True
             if not state.get("baseline_pending") or mode == "answers":
                 events += reduced_events
+            else:
+                events += [
+                    line
+                    for line in reduced_events
+                    if line.startswith(
+                        ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ")
+                    )
+                ]
             if mode == "hog":
                 hog_hits = after
             if mode in PRESSURE_SETTINGS and not any(
@@ -2158,6 +2191,7 @@ def collect(mode, before, scope="", base=None):
                 if signals:
                     raw["worker_signals"] = signals
                 raw["signal_events"] = events
+                raw["observed_at"] = time.time()
             collect_waiting_jobs(raw, before)
             if base is not None:
                 raw["closed"] = closed_panes(

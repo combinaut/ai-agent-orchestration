@@ -207,6 +207,14 @@ def repos(command, work=None):
     return found
 
 
+def architect_owners(command):
+    """Architect saved names to workspace IDs through the env adapter; no ambiguous routing."""
+    try:
+        return adapter().architect_owners(command)
+    except READ_ERRORS as error:
+        raise Unavailable(str(error)[:200]) from error
+
+
 def main(argv):
     from watchers import command
 
