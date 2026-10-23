@@ -263,7 +263,8 @@ class ClickTest(ViewCase):
     def layout(self, width, selected=0, picker=None):
         hidden = self.hidden()
         rows = hidden.visible(self.items)
-        return view.layout(rows, width, 1, selected, False, picker, len(rows))
+        lines, hits = view.layout(rows, width, 1, selected, False, picker, len(rows))
+        return lines, [h for h in hits if h[3] != "focus"]
 
     def test_each_button_is_hit_across_its_whole_label_and_nowhere_else(self):
         for width in (80, 40, 24):
@@ -560,6 +561,46 @@ class AppCase(ViewCase):
         )
         app.tick()
         return app
+
+
+class HeadingClickTest(AppCase):
+    AGENTS = {
+        "result": {
+            "agents": [
+                {
+                    "name": "finder-1",
+                    "pane_id": "w1:p1",
+                    "terminal_title_stripped": "Architect::Finder",
+                    "tokens": {"role": "architect"},
+                }
+            ]
+        }
+    }
+
+    def run_click(self, line):
+        calls = []
+
+        def fake(argv, **_kwargs):
+            calls.append(argv[1:])
+            out = json.dumps(self.AGENTS) if argv[1:3] == ["agent", "list"] else ""
+            return subprocess.CompletedProcess(argv, 0, stdout=out)
+
+        app = self.app(jump=view.jump)
+        _lines, hits = view.layout(app.rows, 80, 0, 0, False, None, len(app.rows))
+        row = next(h[0] for h in hits if h[3] == "focus" and h[4] == line)
+        with patch("subprocess.run", fake):
+            app.feed(f"\x1b[<0;5;{row}M")
+        return calls, app.status
+
+    def test_clicking_a_heading_focuses_that_architects_agent(self):
+        calls, status = self.run_click(0)
+        self.assertIn(["agent", "focus", "finder-1"], calls)
+        self.assertEqual(status, "focused finder-1")
+
+    def test_an_unknown_architect_focuses_nothing_and_says_so(self):
+        calls, status = self.run_click(2)
+        self.assertFalse([c for c in calls if c[:2] == ["agent", "focus"]])
+        self.assertEqual(status, "not found: Architect::Tooling")
 
 
 class PaneTokenTest(AppCase):

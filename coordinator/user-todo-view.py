@@ -450,6 +450,10 @@ def layout(
                 head = []
             body = shorten(body, max(0, free - len(head)), room - 1)
         body = [(("\033[1m" + row + RESET) if picked else row) for row in body]
+        hits += [
+            (len(lines) + n + 1, GUTTER + 1, width, "focus", index)
+            for n in range(len(head))
+        ]
         first_row = len(lines) + len(head) + len(body)
         for offset, first, last, action in spans:
             hits.append(
@@ -550,6 +554,8 @@ def act(hidden, rows, items, action, index, run_jump=jump, until=None):
     owner, text = rows[index][:2]
     if action == "open":
         return run_jump(text)
+    if action == "focus":
+        return run_jump(f"{text} -> {owner}")
     if action == "ignore":
         fed = hidden.ignore(owner, text)
         return "removed; it returns only if its text changes" + (
