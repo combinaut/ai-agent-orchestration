@@ -38,34 +38,35 @@ def answers_lock(directory=None):
 TERM_GRACE = 2
 
 
+def stop_group(process):
+    """SIGTERMs the process group, waits the grace for it to exit, then SIGKILLs it."""
+    for signum in (signal.SIGTERM, signal.SIGKILL):
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signum)
+        if signum == signal.SIGTERM:
+            with suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=TERM_GRACE)
+    process.wait()
+
+
 def run_group(argv, timeout, env=None, check=True):
-    """Runs argv in its own process group, killed when it outlives the timeout or this process is terminated."""
+    """Runs argv in its own process group, stopped when it outlives the timeout or this process is interrupted or terminated."""
     process = subprocess.Popen(argv, start_new_session=True, env=env)
 
     def terminate(*_):
-        with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
+        stop_group(process)
         raise SystemExit(TIMED_OUT)
 
     previous = signal.signal(signal.SIGTERM, terminate)
     try:
         code = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGTERM)
-        try:
-            process.wait(timeout=TERM_GRACE)
-        except subprocess.TimeoutExpired:
-            pass
-        with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
+        stop_group(process)
         raise
     finally:
         signal.signal(signal.SIGTERM, previous)
         if process.poll() is None:
-            with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-            process.wait()
+            stop_group(process)
     if code and check:
         raise subprocess.CalledProcessError(code, argv)
     return code

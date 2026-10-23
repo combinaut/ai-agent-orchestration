@@ -491,6 +491,37 @@ class CloseHelperTest(IsolatedTestCase):
             with self.assertRaises(ProcessLookupError):
                 os.kill(pid, 0)
 
+    def test_an_interrupt_stops_the_action_and_its_nested_helper_before_the_lock_frees(
+        self,
+    ):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                os.environ,
+                {
+                    "ORCH_USER_QUESTIONS_DIR": tmp,
+                    "PYTHONPATH": str(Path(__file__).parent),
+                },
+            ),
+        ):
+            child = Path(tmp) / "child.pid"
+            helper = Path(tmp) / "helper.sh"
+            helper.write_text(f"#!/bin/sh\nsleep 60 &\necho $! > {child}\nwait\n")
+            helper.chmod(0o755)
+            code = f"import question_lock; question_lock.hide_question({str(helper)!r}, 'pane')"
+
+            def interrupt():
+                while not child.exists():
+                    time.sleep(0.05)
+                os.kill(os.getpid(), signal.SIGINT)
+
+            threading.Thread(target=interrupt, daemon=True).start()
+            with self.assertRaises(KeyboardInterrupt):
+                question_lock.run_locked([sys.executable, "-c", code])
+            with question_lock.answers_lock(tmp):
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(int(child.read_text()), 0)
+
     def test_an_action_that_finishes_returns_its_status(self):
         with (
             tempfile.TemporaryDirectory() as tmp,
