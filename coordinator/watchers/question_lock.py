@@ -62,6 +62,10 @@ def run_group(argv, timeout, env=None, check=True):
         raise
     finally:
         signal.signal(signal.SIGTERM, previous)
+        if process.poll() is None:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
     if code and check:
         raise subprocess.CalledProcessError(code, argv)
     return code

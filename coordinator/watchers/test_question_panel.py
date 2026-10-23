@@ -2,9 +2,11 @@ import importlib.util
 import io
 import os
 import pty
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tty
 import unittest
@@ -464,6 +466,26 @@ class CloseHelperTest(IsolatedTestCase):
             helper.chmod(0o755)
             with self.assertRaises(subprocess.TimeoutExpired):
                 question_lock.run_group([str(helper)], 1)
+            pid = int(child.read_text())
+            time.sleep(0.2)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+
+    def test_an_interrupt_while_waiting_kills_the_helper_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            child = Path(tmp) / "child.pid"
+            helper = Path(tmp) / "helper.sh"
+            helper.write_text(f"#!/bin/sh\nsleep 60 &\necho $! > {child}\nwait\n")
+            helper.chmod(0o755)
+
+            def interrupt():
+                while not child.exists():
+                    time.sleep(0.05)
+                os.kill(os.getpid(), signal.SIGINT)
+
+            threading.Thread(target=interrupt, daemon=True).start()
+            with self.assertRaises(KeyboardInterrupt):
+                question_lock.run_group([str(helper)], 5)
             pid = int(child.read_text())
             time.sleep(0.2)
             with self.assertRaises(ProcessLookupError):
