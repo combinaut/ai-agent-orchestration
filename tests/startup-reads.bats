@@ -68,6 +68,25 @@ teardown() {
   [[ "$output" == *'providers.enabled: must include "claude"'* ]]
 }
 
+@test "orch-settings prints the allowed Claude tiers and stops on an unknown or empty list" {
+  : >"$ORCH_CONFIG"
+  run "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  has_line 'ORCH_CLAUDE_TIERS=sonnet,opus,fable'
+  printf '[providers]\nclaude = ["opus", "sonnet"]\n' >"$ORCH_CONFIG"
+  run "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  has_line 'ORCH_CLAUDE_TIERS=sonnet,opus'
+  printf '[providers]\nclaude = ["haiku"]\n' >"$ORCH_CONFIG"
+  run "$ROOT/orch-settings"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'ERROR: '*'providers.claude: unknown entry "haiku"; known: sonnet, opus, fable'* ]]
+  printf '[providers]\nclaude = []\n' >"$ORCH_CONFIG"
+  run "$ROOT/orch-settings"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'providers.claude: must name at least one of sonnet, opus, fable'* ]]
+}
+
 @test "orch-settings defaults architect Remote Control on and accepts it off" {
   run env -u ORCH_CONFIG "$ROOT/orch-settings"
   [ "$status" -eq 0 ]

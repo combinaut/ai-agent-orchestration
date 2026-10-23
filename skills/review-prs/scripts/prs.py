@@ -71,16 +71,18 @@ def setting(name):
         sys.exit(str(error))
 
 
-def codex_enabled():
+def resolved():
     config = os.environ.get("ORCH_CONFIG") or str(
         Path.home() / ".claude" / "orchestration.toml"
     )
     try:
-        return "codex" in orch_settings.enabled_providers(
-            orch_settings.resolved_global(config, os.environ)
-        )
+        return orch_settings.resolved_global(config, os.environ)
     except orch_settings.ConfigError as error:
         sys.exit(str(error))
+
+
+def codex_enabled():
+    return "codex" in resolved()["ORCH_PROVIDERS"].split(",")
 
 
 CODEX_OFF = "codex is off in providers.enabled (ORCH_PROVIDERS); Codex reviews are not dispatched"
@@ -89,10 +91,10 @@ CODEX_OFF = "codex is off in providers.enabled (ORCH_PROVIDERS); Codex reviews a
 def worker_model():
     if not codex_enabled():
         sys.exit(CODEX_OFF)
-    model = setting("ORCH_CODEX_WORKER_MODEL")
-    if not model or model.startswith("<"):
+    model = orch_settings.tier_model(resolved(), "ORCH_CODEX_WORKER_MODEL")
+    if not model:
         sys.exit(
-            "set models.codex_worker (ORCH_CODEX_WORKER_MODEL) in ~/.claude/orchestration.toml"
+            "set models.codex_worker or models.codex_smart (ORCH_CODEX_WORKER_MODEL, ORCH_CODEX_SMART_MODEL) in ~/.claude/orchestration.toml"
         )
     return model
 

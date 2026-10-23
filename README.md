@@ -41,7 +41,7 @@ The first run copies [`config/orchestration.toml.example`](config/orchestration.
 | Key (prompt) | Set it to |
 |---|---|
 | `[pr] author` (`ORCH_PR_AUTHOR`) | your GitHub login (`"@me"` works); the watchers find the repos from the open workspaces |
-| `[models] codex_worker`, `codex_smart` (`ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) | a Codex model name each: `/coordinate` and `/architect` stop while either is a placeholder. No Codex? Answer `-` to both questions and the installer writes `[providers] enabled = ["claude"]` (plus `"pi"` when a pi model is set) when the list is empty, or set it yourself; it then stops asking |
+| `[models] codex_worker`, `codex_smart` (`ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) | a Codex model name; one is enough, it then serves both tiers. `/coordinate` and `/architect` stop while both are empty or a placeholder. No Codex? Answer `-` to both questions and the installer writes `[providers] enabled = ["claude"]` (plus `"pi"` when a pi model is set) when the list is empty, or set it yourself; it then stops asking |
 | `[herdr] bin`, `socket` (`ORCH_HERDR_BIN`, `ORCH_HERDR_SOCKET`) | Herdr's executable and socket; needed for the watcher services |
 
 Settings for one repo (big-repo guard, legacy scan and its rules, focus) go in that repo's `.orchestration.toml` (committed, shared), or `.orchestration.local.toml` for your own (keep it out of git). An exported `ORCH_*` variable beats both files. Restart Claude Code afterwards so it loads the hooks and skills. Every key: [`docs/settings.md`](docs/settings.md). Watcher services: [`docs/watchers.md`](docs/watchers.md).
@@ -84,7 +84,7 @@ Every question for you gets its own pane under the to-do pane, with keys to answ
 
 ### 🔍 Review PRs
 
-`/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`) in a Herdr pane for every PR that is ready; Codex posts the review and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. A PR absent from one search is checked directly before it is cleared; at most 10 checks run per poll and an unconfirmed absence clears after five misses. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
+`/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`, or `ORCH_CODEX_SMART_MODEL` when only that one is set) in a Herdr pane for every PR that is ready; Codex posts the review and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. A PR absent from one search is checked directly before it is cleared; at most 10 checks run per poll and an unconfirmed absence clears after five misses. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
 
 ### 🐘 Heavy jobs
 

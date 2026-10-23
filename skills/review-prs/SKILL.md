@@ -13,7 +13,7 @@ Scripts: `~/.claude/skills/review-prs/scripts/` (`prs.sh` runs `prs.py` on the o
 
 - **list** (default): open PRs that still request your review (`review-requested:@me`), bucketed by whether you can review now.
 - **watch**: the list once, then a background watcher that reports each change. It stays silent while nothing changes.
-- **auto-dispatch** (default on `watch`, and whenever the user asks to review/dispatch): for each **🔔 Ready for your review** PR, open a Herdr sibling pane and start Codex on `$ORCH_CODEX_WORKER_MODEL` to review or re-review it.
+- **auto-dispatch** (default on `watch`, and whenever the user asks to review/dispatch): for each **🔔 Ready for your review** PR, open a Herdr sibling pane and start Codex on `$ORCH_CODEX_WORKER_MODEL` (`$ORCH_CODEX_SMART_MODEL` when only that one is set) to review or re-review it.
 
 Read-only for the orchestrator: this skill never merges, closes, or assigns reviewers itself. Codex may post the GitHub review (that is the point of dispatch). Pass `--no-dispatch` to list/watch without launching agents.
 
@@ -21,7 +21,7 @@ Read-only for the orchestrator: this skill never merges, closes, or assigns revi
 
 Read through `orch-settings` ([docs/settings.md](../../docs/settings.md)), which prints the resolved values; never read `~/.claude/orchestration.toml` directly, since an empty `providers.enabled` there still means Codex is on:
 
-- `models.codex_worker` (`ORCH_CODEX_WORKER_MODEL`): the review model. Applies only when `codex` is in `ORCH_PROVIDERS`; then, empty or a `<placeholder>`: dispatch nothing and tell the user to fill it in.
+- `models.codex_worker` (`ORCH_CODEX_WORKER_MODEL`): the review model; when it is empty or a `<placeholder>`, `models.codex_smart` serves. Applies only when `codex` is in `ORCH_PROVIDERS`; then, both empty or a `<placeholder>`: dispatch nothing and tell the user to fill one in.
 - `providers.enabled` (`ORCH_PROVIDERS`): without `codex`, `dispatch-queue` plans an empty queue with a `note` and `dispatch.sh` refuses; list and watch as with `--no-dispatch`, and say once in one line that Codex reviews are off.
 - `watchers.pr_scope` (`ORCH_WATCHERS_PR_SCOPE`): the scope when no scope flag is given outside a repo.
 

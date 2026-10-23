@@ -107,6 +107,29 @@ dispatch() {
   [ ! -e "$TMP/review-herdr.calls" ]
 }
 
+@test "dispatch and the queue start Codex on the smart model when it is the only one set" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  ORCH_CODEX_WORKER_MODEL='<codex-worker-model>' ORCH_CODEX_SMART_MODEL=only-smart dispatch
+  [ "$status" -eq 0 ]
+  grep -q -- '--no-daemon --model only-smart' "$TMP/review-herdr.calls"
+  run env ORCH_CONFIG="$TMP/none.toml" ORCH_CODEX_WORKER_MODEL= ORCH_CODEX_SMART_MODEL=only-smart python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import prs; print(prs.worker_model())' "$ROOT/$SKILL_DIR/scripts"
+  [ "$status" -eq 0 ]
+  [ "$output" = only-smart ]
+}
+
+@test "dispatch refuses when both Codex models are empty" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  ORCH_CODEX_WORKER_MODEL='' ORCH_CODEX_SMART_MODEL='<codex-smart-model>' dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'set models.codex_worker or models.codex_smart'
+  [ ! -e "$TMP/review-herdr.calls" ]
+  run env ORCH_CONFIG="$TMP/none.toml" ORCH_CODEX_WORKER_MODEL= ORCH_CODEX_SMART_MODEL= python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import prs; prs.worker_model()' "$ROOT/$SKILL_DIR/scripts"
+  [ "$status" -ne 0 ]
+  contains "$output" 'set models.codex_worker or models.codex_smart'
+}
+
 @test "review prompt ends the Codex turn once the review is posted" {
   stub_review_tools
   : >"$TMP/none.toml"
@@ -129,12 +152,20 @@ dispatch() {
   contains "$worker" 'only when `codex` is in `ORCH_PROVIDERS`'
 }
 
-@test "a Fable author's fallback reviewer is named in the architect, Coordinator and gate texts" {
-  grep -qF 'A Fable author has no stronger tier' "$ROOT/skills/architect/SKILL.md"
-  grep -qF 'for a Fable author, a fresh Fable pane' "$ROOT/skills/architect/SKILL.md"
-  grep -qF 'a Fable author has none: a fresh Fable pane' "$ROOT/skills/coordinate/SKILL.md"
-  grep -qF 'for a Fable author, a fresh Fable pane' "$ROOT/docs/settings.md"
-  grep -qF 'a Fable author has none: a fresh Fable pane' "$ROOT/skills/architect/references/dispatch.md"
+@test "the fallback reviewer without a stronger allowed tier is named in the architect, Coordinator and gate texts" {
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md skills/architect/references/dispatch.md docs/settings.md; do
+    grep -qF 'no stronger allowed tier' "$ROOT/$file"
+    grep -qF 'a fresh pane of the strongest allowed tier that did not write the code' "$ROOT/$file"
+  done
+  grep -qF 'for a Fable author or with no stronger allowed tier' "$ROOT/skills/architect/SKILL.md"
+}
+
+@test "the architect and Coordinator pick Claude tiers only from ORCH_CLAUDE_TIERS and run on one Codex model" {
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md; do
+    # shellcheck disable=SC2016 # The backticks are literal skill text.
+    grep -qF 'only from `$ORCH_CLAUDE_TIERS`' "$ROOT/$file"
+    grep -qF 'one Codex model is enough' "$ROOT/$file"
+  done
 }
 
 @test "the skill holds no org, model, login or personal path literals" {

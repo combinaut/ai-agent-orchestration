@@ -35,6 +35,7 @@ class Setting:
         choices=None,
         required=(),
         why="",
+        nonempty=False,
     ):
         self.key, self.env, self.kind, self.default = key, env, kind, default
         self.scope, self.doc, self.sep, self.paths = scope, doc, sep, paths
@@ -44,6 +45,7 @@ class Setting:
             required,
             why,
         )
+        self.nonempty = nonempty
 
     @property
     def table(self):
@@ -63,18 +65,19 @@ def _r(key, env, kind, default, doc, **kw):
 
 
 class Provider:
-    """A worker family and its model settings; an optional one is on by default only when one of its models is set."""
+    """A worker family and its model settings; need is "all", "one" (that model serves every tier) or "none" (on by default only when a model is set)."""
 
-    def __init__(self, name, models, optional=False):
-        self.name, self.models, self.optional = name, models, optional
+    def __init__(self, name, models, need="all"):
+        self.name, self.models, self.need = name, models, need
 
 
 PROVIDERS = [
     Provider("claude", ["ORCH_COORDINATOR_MODEL", "ORCH_ARCHITECT_MODEL"]),
-    Provider("codex", ["ORCH_CODEX_WORKER_MODEL", "ORCH_CODEX_SMART_MODEL"]),
-    Provider("pi", ["ORCH_PI_WORKER_MODEL", "ORCH_PI_SMART_MODEL"], optional=True),
+    Provider("codex", ["ORCH_CODEX_WORKER_MODEL", "ORCH_CODEX_SMART_MODEL"], "one"),
+    Provider("pi", ["ORCH_PI_WORKER_MODEL", "ORCH_PI_SMART_MODEL"], "none"),
 ]
 REQUIRED_PROVIDERS = ["claude"]
+CLAUDE_TIERS = ["sonnet", "opus", "fable"]
 
 DEFAULT_PATH = [
     "~/.local/bin",
@@ -192,6 +195,16 @@ SETTINGS = [
         why="the Coordinator and the architects run on it",
     ),
     _g(
+        "providers.claude",
+        "ORCH_CLAUDE_TIERS",
+        "list",
+        list(CLAUDE_TIERS),
+        "Claude worker tiers the architects may pick (sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings",
+        sep=",",
+        choices=CLAUDE_TIERS,
+        nonempty=True,
+    ),
+    _g(
         "models.coordinator",
         "ORCH_COORDINATOR_MODEL",
         "str",
@@ -210,14 +223,14 @@ SETTINGS = [
         "ORCH_CODEX_WORKER_MODEL",
         "str",
         "<codex-worker-model>",
-        "Codex model for routine work; replace the placeholder",
+        "Codex model for routine work; empty or a placeholder means codex_smart serves it too. With codex on, set at least one of the two",
     ),
     _g(
         "models.codex_smart",
         "ORCH_CODEX_SMART_MODEL",
         "str",
         "<codex-smart-model>",
-        "Codex model for hard work; replace the placeholder",
+        "Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two",
     ),
     _g(
         "models.pi_worker",
@@ -594,7 +607,9 @@ class ConfigError(ValueError):
 
 
 def list_problem(setting, items):
-    """Why items break the setting's choices or required entries, else None."""
+    """Why items break the setting's choices, required entries or nonempty rule, else None."""
+    if setting.nonempty and not items:
+        return f"must name at least one of {', '.join(setting.choices)}"
     if setting.choices is not None:
         unknown = [item for item in items if item not in setting.choices]
         if unknown:
@@ -619,7 +634,7 @@ def enabled_providers(values):
         return [
             p.name
             for p in PROVIDERS
-            if not p.optional or any(filled(values.get(m, "")) for m in p.models)
+            if p.need != "none" or any(filled(values.get(m, "")) for m in p.models)
         ]
     names = text.split(setting.sep)
     problem = list_problem(setting, names)
@@ -628,12 +643,37 @@ def enabled_providers(values):
     return [p.name for p in PROVIDERS if p.name in names]
 
 
+def claude_tiers(values):
+    """The Claude worker tiers resolved ORCH_* values allow, in CLAUDE_TIERS order."""
+    setting = BY_KEY["providers.claude"]
+    text = values.get(setting.env, "")
+    names = text.split(setting.sep) if text else []
+    problem = list_problem(setting, names)
+    if problem:
+        raise ConfigError(f"{setting.key} ({setting.env}): {problem}")
+    return [t for t in CLAUDE_TIERS if t in names]
+
+
 def required_models(values):
-    """Model settings that must be filled: every model of each enabled provider that is not optional."""
+    """Model settings that must be filled: every model of an enabled "all" provider; of a "one" provider, its filled models, or all when none is."""
     enabled = enabled_providers(values)
-    return [
-        m for p in PROVIDERS if p.name in enabled and not p.optional for m in p.models
-    ]
+    needed = []
+    for p in PROVIDERS:
+        if p.name not in enabled or p.need == "none":
+            continue
+        set_models = [m for m in p.models if filled(values.get(m, ""))]
+        needed += set_models if p.need == "one" and set_models else p.models
+    return needed
+
+
+def tier_model(values, env):
+    """The model a tier runs on: its own setting, else, for a "one" provider, its first filled model; empty when none."""
+    if filled(values.get(env, "")):
+        return values[env]
+    provider = next(p for p in PROVIDERS if env in p.models)
+    if provider.need != "one":
+        return ""
+    return next((values[m] for m in provider.models if filled(values.get(m, ""))), "")
 
 
 def fill_models(values):
@@ -795,6 +835,7 @@ def resolved_global(path, environ):
         for s in scoped("global")
     }
     values[BY_KEY["providers.enabled"].env] = ",".join(enabled_providers(values))
+    values[BY_KEY["providers.claude"].env] = ",".join(claude_tiers(values))
     return values
 
 

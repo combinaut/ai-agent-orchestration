@@ -103,13 +103,17 @@ EOF
   [ "$(config_get ORCH_PROVIDERS)" = claude,pi ]
 }
 
-@test "one Codex answer empty and the other set leaves providers.enabled empty and the key to fill" {
+@test "one Codex answer empty and the other set leaves providers.enabled empty and no Codex key to fill" {
   fresh_install
   on_tty $'-\ngpt-x\n-\n-\n-'
   [ "$status" -eq 0 ]
   [ "$(config_get ORCH_PROVIDERS)" = "" ]
+  [ "$(config_line ORCH_CODEX_SMART_MODEL)" = 'ORCH_CODEX_SMART_MODEL=""' ]
   install_ok
-  contains "$output" 'ORCH_CODEX_SMART_MODEL'
+  not_contains "$output" 'ORCH_CODEX'
+  on_tty $'\n\n-'
+  [ "$status" -eq 0 ]
+  not_contains "$output" 'ORCH_CODEX_SMART_MODEL ('
 }
 
 @test "both Codex answers empty keep a providers.enabled the user already set" {

@@ -31,7 +31,7 @@ import sys
 sys.path.insert(0, sys.argv[1])
 import orch_settings as s
 values = {'str': 'from-file', 'int': 7, 'number': 7.5, 'bool': True, 'list': ['a', 'b'], 'json': [{'name': 'file'}], 'tables': [{'name': 'file'}]}
-print(s.render({setting: (list(setting.required) if setting.choices else values[setting.kind]) for setting in s.scoped(sys.argv[2]) if not setting.local_only}), end='')
+print(s.render({setting: ((list(setting.required) or setting.choices[:1]) if setting.choices else values[setting.kind]) for setting in s.scoped(sys.argv[2]) if not setting.local_only}), end='')
 PY
 }
 

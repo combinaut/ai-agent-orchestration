@@ -41,15 +41,17 @@ kill_grace = 10
 [providers]
 # Worker families this machine uses (claude, codex, pi); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi when a pi model is set. A family left out is never started or asked for, and its model settings may stay empty
 enabled = []
+# Claude worker tiers the architects may pick (sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings
+claude = ["sonnet", "opus", "fable"]
 
 [models]
 # Model of the Coordinator
 coordinator = "claude-opus-5-5"
 # Model of the architects
 architect = "claude-opus-5-5"
-# Codex model for routine work; replace the placeholder
+# Codex model for routine work; empty or a placeholder means codex_smart serves it too. With codex on, set at least one of the two
 codex_worker = "<codex-worker-model>"
-# Codex model for hard work; replace the placeholder
+# Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two
 codex_smart = "<codex-smart-model>"
 # pi model for routine work as provider/model-id; empty means pi is not used on this machine
 pi_worker = ""
