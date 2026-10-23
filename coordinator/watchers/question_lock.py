@@ -82,9 +82,18 @@ def stop_group(process, grace):
     process.wait()
 
 
-def run_group(argv, timeout, env=None, check=True):
+def run_group(argv, timeout, env=None, check=True, quiet=False):
     """Runs argv in its own process group, stopped when it outlives the timeout or this process is interrupted or terminated."""
-    process = subprocess.Popen(argv, start_new_session=True, env=env)
+    process = subprocess.Popen(
+        argv,
+        start_new_session=True,
+        env=env,
+        **(
+            {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+            if quiet
+            else {}
+        ),
+    )
 
     grace = TERM_GRACE if os.environ.get(HELD) else OUTER_GRACE
 

@@ -99,7 +99,7 @@ def button_rows(width, filled, hints, entries, tone=None):
     rows, spans, line, plain = [], [], " " * INDENT, INDENT
     for hotkey, action, name in entries:
         text = f"[{hotkey}] {name}" if hints else f"  {name}  "
-        size = len(text) + 2
+        size = cells(text) + 2
         if plain > INDENT and plain + size > width:
             rows.append(line)
             line, plain = " " * INDENT, INDENT

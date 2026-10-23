@@ -1467,6 +1467,16 @@ def answer_order(path):
 
 
 def open_question(slug, question, timeout=question_remind.OPEN_TIMEOUT):
+    if slug == "close":
+        from question_lock import run_group
+
+        return run_group(
+            [str(ROOT.parents[1] / "ask-user-question"), slug, str(question)],
+            timeout,
+            env=dict(os.environ, **{HELD: "1"}),
+            check=False,
+            quiet=True,
+        )
     argv = [
         "/usr/bin/env",
         f"{HELD}=1",

@@ -298,3 +298,15 @@ class TodoAnswerTests(IsolatedTestCase):
         a.submit(OWNER, TEXT, "now", generation)
         module.merge(self.base / "status", output, state, now=101)
         self.assertEqual(module.rendered_items(output, state), [])
+
+    def test_unicode_choice_click_cannot_select_the_next_answer(self):
+        label = "界" * 12
+        text = f"Deploy release [1: {label}] [2: later] -> Architect::Tooling"
+        (self.base / "status" / f"{OWNER}.md").write_text(
+            "## Waits on the user\n- " + text + "\n"
+        )
+        app, _ = self.view_app()
+        app.feed("a")
+        row = next(hit[0] for hit in app.hits if hit[3] == "answer-1")
+        app.feed(f"\x1b[<0;24;{row}M")
+        self.assertEqual(a.records()[0]["answer"], label)

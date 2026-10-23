@@ -500,3 +500,49 @@ class SignalTests(IsolatedTestCase):
         self.assertTrue(
             s.suppressed(dict(pane_id="pane:1", workspace_id="worker"), raw)
         )
+
+    def test_close_timeout_terminates_nested_close_process(self):
+        import signal
+        import subprocess
+        import sys
+
+        child = self.base / "child.py"
+        pidfile = self.base / "child.pid"
+        child.write_text(
+            "import os,pathlib,time\npathlib.Path("
+            + repr(str(pidfile))
+            + ").write_text(str(os.getpid()))\ntime.sleep(20)\n"
+        )
+        helper = self.base / "ask-user-question"
+        helper.write_text(
+            "#!"
+            + sys.executable
+            + "\nimport sys\nsys.path.insert(0,"
+            + repr(str(w.ROOT))
+            + ")\nfrom question_lock import run_group\nrun_group(["
+            + repr(sys.executable)
+            + ","
+            + repr(str(child))
+            + "],30)\n"
+        )
+        helper.chmod(0o755)
+        root = self.base / "coordinator/watchers"
+        root.mkdir(parents=True)
+        with patch.object(w, "ROOT", root):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                w.open_question("close", "signal-test", timeout=1)
+        self.assertTrue(
+            pidfile.exists(), "the owned descendant must start before cancellation"
+        )
+        pid = int(pidfile.read_text())
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            alive = False
+        else:
+            alive = True
+        try:
+            self.assertFalse(alive, "nested closer survived cancellation")
+        finally:
+            if alive:
+                os.kill(pid, signal.SIGTERM)
