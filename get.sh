@@ -75,10 +75,6 @@ main() {
   [ -f "$dir/install.sh" ] || die "$dir has no install.sh"
   export ORCH_REPO_PATH="$dir"
   # The clone's install.sh fast-forwards the clone, refusing local commits and upstreams outside origin.
-  # With curl | bash, stdin is the script; hand the installer the terminal for its questions.
-  if [ ! -t 0 ] && { : </dev/tty; } 2>/dev/null; then
-    exec /bin/bash "$dir/install.sh" "$@" </dev/tty
-  fi
   exec /bin/bash "$dir/install.sh" "$@"
 }
 

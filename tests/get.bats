@@ -23,7 +23,8 @@ if [ "${1:-}" = --print-repo-path ]; then
   echo "${STUB_REPO_PATH:-$HOME/.claude/ai-agent-orchestration}"
   exit 0
 fi
-printf 'args=%s\nrepo=%s\npwd=%s\n' "$*" "$ORCH_REPO_PATH" "$PWD" >"${STUB_OUT:?}"
+[ -t 0 ] && stdin=tty || stdin=other
+printf 'args=%s\nrepo=%s\npwd=%s\nstdin=%s\n' "$*" "$ORCH_REPO_PATH" "$PWD" "$stdin" >"${STUB_OUT:?}"
 echo "stub install ran"
 STUB
   export STUB_OUT="$TMP/stub.out"
@@ -218,4 +219,10 @@ contains() { printf '%s' "$1" | grep -F -- "$2" >/dev/null; }
   [ -f "$HOME/orch/install.sh" ]
   [ ! -e "$TMP/~" ]
   contains "$(cat "$STUB_OUT")" "repo=$HOME/orch"
+}
+
+@test "a redirected stdin stays as it is, even on a terminal" {
+  run env PTY_ANSWERS="" python3 "$ROOT/tests/pty_run.py" /bin/bash -c 'exec /bin/bash "$1" </dev/null' _ "$ROOT/get.sh"
+  [ "$status" -eq 0 ]
+  contains "$(cat "$STUB_OUT")" "stdin=other"
 }
