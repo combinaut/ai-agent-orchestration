@@ -87,3 +87,7 @@ validates that captured generation, queues the answer, and dismisses the item wh
 holding the queue and to-do state locks (queue first). If an identical wait was
 removed and re-added, it rejects the stale answer with one visible error line and
 leaves the replacement decision visible. Escape and reopen Answer to respond to it.
+
+A complete Escape cancels answer mode before the next key in the same terminal read
+is processed. A trailing incomplete Escape still waits for its existing timeout,
+so split control sequences retain their normal handling.

@@ -494,7 +494,7 @@ TOKEN = re.compile(
     r"\x1b\[<(\d+);(\d+);(\d+)([Mm])|\x1b[\[O]([AB])|\x1b[\[O][0-9;<]*[A-Za-z~]|(.)",
     re.S,
 )
-PENDING = re.compile(r"\x1b(?:[\[O][<0-9;]*)?$")
+PENDING = re.compile(r"\x1b(?:[\[O][<0-9;]*)?\Z")
 
 
 def split_input(buffer):
@@ -772,6 +772,11 @@ class App:
         self.last_input = self.clock()
         tokens, self.buf = split_input(self.buf + data)
         for token in tokens:
+            if token == "\x1b" and self.picker and "answer" in self.picker:
+                self.picker = None
+                self.status = "answer cancelled"
+                self.refresh()
+                continue
             events = input_events(
                 token, self.hits, self.picker and self.picker["mode"]
             )[0]

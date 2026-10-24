@@ -754,3 +754,75 @@ class TodoAnswerTests(IsolatedTestCase):
         for view in ("buttons", "legacy"):
             with self.subTest(view=view):
                 self.answer_replacement_race(view, during_submit=True)
+
+    def test_buttons_complete_escape_cancels_before_following_keys(self):
+        for opening, following in (("a", "2"), ("atdraft", "\n")):
+            with self.subTest(following=repr(following)):
+                app, _ = self.view_app(popup=True)
+                jumps = []
+                app.run_jump = lambda *_: jumps.append(True) or "not jumping"
+                app.feed(opening)
+                app.feed("\x1b" + following)
+                self.assertEqual(app.buf, "")
+                self.assertEqual(len(jumps), 1 if following == "\n" else 0)
+                self.assertEqual(a.records(), [])
+                self.assertIsNone(app.picker)
+                self.assertFalse(app.closing)
+        app, _ = self.view_app(popup=True)
+        app.feed("atdraft")
+        app.feed("\x1b")
+        self.assertIsNotNone(app.picker)
+        self.assertEqual(app.buf, "\x1b")
+        app.lone_escape()
+        self.assertIsNone(app.picker)
+        self.assertFalse(app.closing)
+
+    def test_legacy_complete_escape_cancels_before_following_keys(self):
+        import contextlib
+        import io
+
+        module = w.todo_module()
+        output, state = self.base / "todo.md", self.base / "todo.state.json"
+        module.merge(self.base / "status", output, state)
+        for chunks, expected_jumps in (
+            ([b"a", b"\x1b2", b""], 0),
+            ([b"atdraft", b"\x1b\n", b""], 1),
+            ([b"atdraft", b"\x1b", None, b""], 0),
+        ):
+            with self.subTest(chunks=chunks):
+                steps = iter(chunks)
+                current, received, jumps, timed = [], [], [], []
+                stream = io.StringIO()
+
+                def wait(*_):
+                    current[:] = [next(steps)]
+                    if current[0] is None:
+                        timed.append(stream.getvalue().split("\033[2J\033[H")[-1])
+                        return [], [], []
+                    return [0], [], []
+
+                with (
+                    contextlib.redirect_stdout(stream),
+                    patch.object(module.os, "isatty", return_value=False),
+                    patch.object(
+                        module,
+                        "answer_item",
+                        side_effect=lambda item, answer, *_: (
+                            received.append(answer) or "queued"
+                        ),
+                    ),
+                ):
+                    module.follow(
+                        argparse.Namespace(output=output, state=state, pane=None),
+                        wait=wait,
+                        read=lambda *_: current[0],
+                        run_jump=lambda *_: jumps.append(True) or "not jumping",
+                        report=lambda *_: None,
+                    )
+                self.assertEqual(received, [])
+                self.assertEqual(len(jumps), expected_jumps)
+                final = stream.getvalue().split("\033[2J\033[H")[-1]
+                self.assertNotIn("Answer: draft", final)
+                if timed:
+                    self.assertIn("Answer: draft", timed[0])
+                    self.assertIn("answer cancelled", final)

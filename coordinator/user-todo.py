@@ -530,7 +530,7 @@ def mouse_events(buffer):
         )
     ]
     remainder = re.sub(r"\x1b\[<\d+;\d+;\d+[Mm]", "", buffer)
-    partial = re.search(r"\x1b(?:\[[0-?]*[ -/]*)?$", remainder)
+    partial = re.search(r"\x1b(?:\[[0-?]*[ -/]*)?\Z", remainder)
     pending = partial.group() if partial else ""
     return events, remainder[: partial.start()] if partial else remainder, pending
 
