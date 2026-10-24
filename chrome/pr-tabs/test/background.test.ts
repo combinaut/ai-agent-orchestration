@@ -1,171 +1,113 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { test } from "vitest";
+import { afterEach, test } from "vitest";
+import type * as Background from "../src/background";
+import { CONFIGURED, fakeChrome, installFakeChrome, world, type FakeTab } from "./fakeChrome";
 
-interface FakeTab {
-  id: number;
-  url: string;
-  windowId?: number;
-  groupId?: number;
-  title?: string;
-  active?: boolean;
-  incognito?: boolean;
-  windowType?: string;
-}
-type Store = Record<string, any>;
-
-const noop = { addListener() {} };
-const matches = (pattern: string, url: string) =>
-  new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`).test(url);
-
-let tabs: FakeTab[] = [];
-let nativeHandler: (message: { type: string }) => Promise<unknown>;
-let settingsCalls = 0;
-let grouped: { title?: string; color?: string }[] = [];
-let createdAlarms: { name: string; options: { delayInMinutes?: number } }[] = [];
-let alarmListener: (alarm: { name: string }) => void;
-let installedListener: () => Promise<void>;
-let hostSettings: Record<string, unknown> = {
-  ok: true,
-  org: "acme",
-  defaultRepo: "webapp",
-  openAll: "is:pr is:open author:tester org:acme",
-};
-let nextId = 100;
-let store: Store = {};
-
-globalThis.fetch = (async () => ({
-  json: async () => JSON.parse(readFileSync(new URL("../public/rules.json", import.meta.url), "utf8")),
-})) as unknown as typeof fetch;
-const fake = {
-  tabs: {
-    query: async ({ url, windowType }: { url: string; windowType?: string }) =>
-      tabs.filter((tab) => matches(url, tab.url) && (!windowType || (tab.windowType ?? "normal") === windowType)),
-    get: async (id: number) => tabs.find((tab) => tab.id === id),
-    create: async ({ url }: { url: string }) => {
-      const tab = { id: nextId++, url, windowId: 1, groupId: -1, title: "" };
-      tabs.push(tab);
-      return tab;
-    },
-    update: async (id: number, props: Partial<FakeTab>) =>
-      Object.assign(tabs.find((tab) => tab.id === id) || {}, props),
-    remove: async (id: number) => {
-      tabs = tabs.filter((tab) => tab.id !== id);
-    },
-    group: async () => 1,
-    onUpdated: noop,
-    onRemoved: noop,
-  },
-  tabGroups: {
-    TAB_GROUP_ID_NONE: -1,
-    query: async () => [],
-    update: async (_id: number, properties: { title?: string; color?: string }) => {
-      grouped.push(properties);
-    },
-    get: async () => ({}),
-  },
-  windows: { getLastFocused: async () => ({ id: 1 }), update: async () => {} },
-  alarms: {
-    onAlarm: {
-      addListener(listener: typeof alarmListener) {
-        alarmListener = listener;
-      },
-    },
-    get: async () => null,
-    create: async (name: string, options: { delayInMinutes?: number }) => {
-      createdAlarms.push({ name, options });
-    },
-    clear: async () => {},
-  },
-  action: { setBadgeText: async () => {} },
-  storage: {
-    local: {
-      get: async (defaults: Store) => ({ ...defaults, ...store }),
-      set: async (values: Store): Promise<unknown> => Object.assign(store, values),
-    },
-  },
-  runtime: {
-    onMessage: noop,
-    onStartup: noop,
-    onInstalled: {
-      addListener(listener: typeof installedListener) {
-        installedListener = listener;
-      },
-    },
-    getURL: (path: string) => path,
-    lastError: undefined,
-    sendNativeMessage: (_host: string, message: { type: string }, callback: (reply: unknown) => void) =>
-      (message.type === "settings" ? (settingsCalls++, Promise.resolve(hostSettings)) : nativeHandler(message)).then(
-        callback,
-      ),
-  },
-};
-globalThis.chrome = fake as unknown as typeof chrome;
+installFakeChrome();
 // A fresh service worker instance: its own settings cache, ownership and timers.
-const freshWorker = (tag: string): Promise<typeof import("../src/background")> =>
-  import(/* @vite-ignore */ `../src/background.ts?${tag}`);
-const { closeDuplicates, goTo, openAll, prEntries, checkNow: chromeMessageCheck } = await import("../src/background");
+function freshWorker(tag: string): Promise<typeof Background> {
+  return import(/* @vite-ignore */ `../src/background.ts?${tag}`);
+}
+const {
+  closeDuplicates,
+  goTo,
+  openAll,
+  prEntries,
+  checkNow: chromeMessageCheck,
+} = await import("../src/background");
 
-test("PR tabs whose URL differs from the org in case are kept; other orgs are dropped", async () => {
-  const configured = hostSettings;
-  try {
-    hostSettings = { ...configured, org: "" };
-    const noOrg = await freshWorker("missing-org");
-    assert.deepEqual(await noOrg.goTo("7"), {
-      error: "Set pr_tabs.org in orchestration.toml",
-    });
-    hostSettings = { ...configured, defaultRepo: "" };
-    const noRepo = await freshWorker("missing-repo");
-    assert.deepEqual(await noRepo.goTo("7"), {
-      error: "Set pr_tabs.default_repo in orchestration.toml",
-    });
-  } finally {
-    hostSettings = configured;
-  }
-  const realNow = Date.now;
+const realNow = Date.now;
+afterEach(() => {
+  Date.now = realNow;
+  world.hostSettings = CONFIGURED;
+});
+
+// Freezes Date.now until advance moves it.
+function fakeClock() {
   let now = realNow();
   Date.now = () => now;
-  try {
-    tabs = [];
-    store = {};
-    grouped = [];
-    settingsCalls = 0;
-    hostSettings = { ...configured, defaultRepo: "cached" };
-    const seed = await freshWorker("cache-seed");
-    await seed.goTo("1");
-    assert.deepEqual(store.prTabsSettings, hostSettings);
-    const good = store.prTabsSettings;
-    hostSettings = { ok: false, error: "host unavailable" };
-    const offline = await freshWorker("cache-offline");
-    const before = settingsCalls;
-    await offline.goTo("2");
-    assert.equal(grouped.at(-1)?.title, "cached");
-    for (let i = 0; i < 5; i++) await offline.goTo("2");
-    assert.equal(settingsCalls, before + 1, "failed host retries are backed off");
-    assert.deepEqual(store.prTabsSettings, good);
-    now += 60001;
-    hostSettings = { ...configured, defaultRepo: "docs" };
-    await offline.goTo("3");
-    assert.equal(settingsCalls, before + 2);
-    assert.equal(store.prTabsSettings.defaultRepo, "docs");
-    assert.ok(tabs.some((tab) => tab.url === "https://github.com/acme/docs/pull/3"));
-    store = {};
-    hostSettings = { ok: false, error: "host unavailable" };
-    const empty = await freshWorker("cache-empty");
-    const initial = settingsCalls;
-    for (let i = 0; i < 5; i++) await assert.rejects(empty.goTo("4"), /host unavailable/);
-    assert.equal(settingsCalls, initial + 1, "even a missing cache backs off retries");
-    now += 60001;
-    hostSettings = configured;
-    await empty.goTo("4");
-    assert.equal(settingsCalls, initial + 2);
-  } finally {
-    Date.now = realNow;
-    hostSettings = configured;
-    store = {};
-    tabs = [];
+  return {
+    advance(ms: number) {
+      now += ms;
+    },
+  };
+}
+
+function tabWithId(id: number): FakeTab {
+  const tab = world.tabs.find((candidate) => candidate.id === id);
+  assert.ok(tab);
+  return tab;
+}
+
+test("goTo names the setting that is missing", async () => {
+  world.hostSettings = { ...CONFIGURED, org: "" };
+  const noOrg = await freshWorker("missing-org");
+  assert.deepEqual(await noOrg.goTo("7"), {
+    error: "Set pr_tabs.org in orchestration.toml",
+  });
+  world.hostSettings = { ...CONFIGURED, defaultRepo: "" };
+  const noRepo = await freshWorker("missing-repo");
+  assert.deepEqual(await noRepo.goTo("7"), {
+    error: "Set pr_tabs.default_repo in orchestration.toml",
+  });
+});
+
+async function repeat(times: number, task: () => Promise<unknown>): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await task();
   }
-  tabs = [
+}
+
+async function rejectsGoTo(worker: typeof Background, input: string): Promise<void> {
+  await assert.rejects(worker.goTo(input), /host unavailable/);
+}
+
+const OFFLINE = { ok: false, error: "host unavailable" };
+
+test("cached settings serve an offline host, with backed-off retries", async () => {
+  const clock = fakeClock();
+  world.tabs = [];
+  world.store = {};
+  world.grouped = [];
+  world.hostSettings = { ...CONFIGURED, defaultRepo: "cached" };
+  await (await freshWorker("cache-seed")).goTo("1");
+  assert.deepEqual(world.store.prTabsSettings, world.hostSettings);
+  const good = world.store.prTabsSettings;
+  world.hostSettings = OFFLINE;
+  const offline = await freshWorker("cache-offline");
+  const before = world.settingsCalls;
+  await offline.goTo("2");
+  assert.equal(world.grouped.at(-1)?.title, "cached");
+  await repeat(5, () => offline.goTo("2"));
+  assert.equal(world.settingsCalls, before + 1, "failed host retries are backed off");
+  assert.deepEqual(world.store.prTabsSettings, good);
+  clock.advance(60001);
+  world.hostSettings = { ...CONFIGURED, defaultRepo: "docs" };
+  await offline.goTo("3");
+  assert.equal(world.settingsCalls, before + 2);
+  assert.equal(world.store.prTabsSettings?.defaultRepo, "docs");
+  assert.ok(world.tabs.some((tab) => tab.url === "https://github.com/acme/docs/pull/3"));
+});
+
+test("an offline host without cached settings fails and backs off retries", async () => {
+  const clock = fakeClock();
+  world.tabs = [];
+  world.store = {};
+  world.hostSettings = OFFLINE;
+  const empty = await freshWorker("cache-empty");
+  const initial = world.settingsCalls;
+  await repeat(5, () => rejectsGoTo(empty, "4"));
+  assert.equal(world.settingsCalls, initial + 1, "even a missing cache backs off retries");
+  clock.advance(60001);
+  world.hostSettings = CONFIGURED;
+  await empty.goTo("4");
+  assert.equal(world.settingsCalls, initial + 2);
+  world.store = {};
+  world.tabs = [];
+});
+
+test("PR tabs whose URL differs from the org in case are kept; other orgs are dropped", async () => {
+  world.tabs = [
     { id: 1, url: "https://github.com/Acme/webapp/pull/1" },
     { id: 2, url: "https://github.com/acme/webapp/pull/2" },
     { id: 3, url: "https://github.com/other/webapp/pull/3" },
@@ -178,69 +120,63 @@ test("PR tabs whose URL differs from the org in case are kept; other orgs are dr
 });
 
 test("a no-cache settings failure arms a retry that recovers after backoff", async () => {
-  const configured = hostSettings;
-  const realNow = Date.now;
-  let now = realNow();
-  Date.now = () => now;
-  try {
-    tabs = [];
-    store = {};
-    createdAlarms = [];
-    settingsCalls = 0;
-    hostSettings = { ok: false, error: "host unavailable" };
-    await freshWorker("settings-retry-alarm");
-    await installedListener();
-    assert.equal(createdAlarms.at(-1)?.options.delayInMinutes, 1);
-    now += 60001;
-    hostSettings = { ...configured };
-    alarmListener({ name: "pr-tabs-poll" });
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(settingsCalls, 2);
-  } finally {
-    Date.now = realNow;
-    hostSettings = configured;
-    store = {};
-    tabs = [];
-  }
+  const clock = fakeClock();
+  world.tabs = [];
+  world.store = {};
+  world.createdAlarms = [];
+  world.settingsCalls = 0;
+  world.hostSettings = OFFLINE;
+  await freshWorker("settings-retry-alarm");
+  await world.installedListener();
+  assert.equal(world.createdAlarms.at(-1)?.options.delayInMinutes, 1);
+  clock.advance(60001);
+  world.hostSettings = { ...CONFIGURED };
+  world.alarmListener({ name: "pr-tabs-poll" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(world.settingsCalls, 2);
+  world.store = {};
+  world.tabs = [];
 });
 
 test("a PR opened by goTo while Open all searches is not opened a second time", async () => {
-  tabs = [];
-  store = {};
+  world.tabs = [];
+  world.store = {};
   const url = "https://github.com/acme/webapp/pull/7";
-  nativeHandler = async () => {
+  world.nativeHandler = async () => {
     await goTo("7");
     return { ok: true, total: 1, prs: [{ url, title: "t", headRefName: "b" }], hasNextPage: false };
   };
   await openAll();
-  assert.equal(tabs.filter((tab) => tab.url === url).length, 1);
+  assert.equal(world.tabs.filter((tab) => tab.url === url).length, 1);
 });
 
 const PR = "https://github.com/acme/webapp/pull";
-const ids = () => tabs.map((tab) => tab.id);
+const ids = () => world.tabs.map((tab) => tab.id);
 
 test("goTo focuses an open tab of the same PR on another sub-page and opens no second one", async () => {
-  tabs = [{ id: 1, url: `${PR}/7/files?w=1#diff`, windowId: 1, groupId: -1 }];
-  assert.deepEqual(await goTo("https://GitHub.com/Acme/Webapp/pull/7"), { focused: "acme/webapp#7" });
+  world.tabs = [{ id: 1, url: `${PR}/7/files?w=1#diff`, windowId: 1, groupId: -1 }];
+  assert.deepEqual(await goTo("https://GitHub.com/Acme/Webapp/pull/7"), {
+    focused: "acme/webapp#7",
+  });
   assert.deepEqual(ids(), [1]);
-  assert.equal(tabs[0]?.active, true);
+  assert.equal(world.tabs[0]?.active, true);
 });
 
 test("Open all skips a PR that is open on a sub-page", async () => {
-  tabs = [{ id: 1, url: `${PR}/7/commits`, windowId: 1, groupId: -1 }];
-  store = {};
-  nativeHandler = async () => ({
+  world.tabs = [{ id: 1, url: `${PR}/7/commits`, windowId: 1, groupId: -1 }];
+  world.store = {};
+  world.nativeHandler = async () => ({
     ok: true,
     total: 1,
     prs: [{ url: `${PR}/7`, title: "t", headRefName: "b" }],
     hasNextPage: false,
   });
-  assert.equal((await openAll()).opened, 0);
+  assert.deepEqual(await openAll(), { opened: 0, remaining: 0, estimated: false });
   assert.deepEqual(ids(), [1]);
 });
 
 test("Close duplicate tabs closes the extras of a PR across windows and reports the count", async () => {
-  tabs = [
+  world.tabs = [
     { id: 5, url: `${PR}/7`, windowId: 2 },
     { id: 3, url: `${PR}/7/files`, windowId: 1 },
     { id: 4, url: `${PR}/7/checks#x`, windowId: 1 },
@@ -250,7 +186,7 @@ test("Close duplicate tabs closes the extras of a PR across windows and reports 
 });
 
 test("Close duplicate tabs keeps the active tab, even a newer one", async () => {
-  tabs = [
+  world.tabs = [
     { id: 3, url: `${PR}/7`, windowId: 1 },
     { id: 9, url: `${PR}/7/files`, windowId: 1, active: true },
   ];
@@ -259,7 +195,7 @@ test("Close duplicate tabs keeps the active tab, even a newer one", async () => 
 });
 
 test("Close duplicate tabs leaves other PRs, non-PR tabs and incognito tabs alone", async () => {
-  tabs = [
+  world.tabs = [
     { id: 1, url: `${PR}/7` },
     { id: 2, url: `${PR}/8` },
     { id: 3, url: "https://github.com/acme/webapp/issues/7" },
@@ -273,12 +209,12 @@ test("Close duplicate tabs leaves other PRs, non-PR tabs and incognito tabs alon
 });
 
 test("goTo does not reuse an incognito tab", async () => {
-  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1, incognito: true }];
+  world.tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1, incognito: true }];
   assert.deepEqual(await goTo("7"), { opened: "acme/webapp#7" });
 });
 
 test("Close duplicate tabs ignores tabs outside normal windows", async () => {
-  tabs = [
+  world.tabs = [
     { id: 1, url: `${PR}/7` },
     { id: 2, url: `${PR}/7`, windowType: "popup" },
     { id: 3, url: `${PR}/7`, windowType: "app" },
@@ -289,24 +225,26 @@ test("Close duplicate tabs ignores tabs outside normal windows", async () => {
 
 // Runs change() when closeDuplicates re-reads the tabs for the first time after the initial scan.
 function changeAfterScan(change: () => void) {
-  const query = fake.tabs.query;
+  const query = fakeChrome.tabs.query;
   let calls = 0;
-  fake.tabs.query = async (args) => {
-    if (++calls === 2) change();
+  fakeChrome.tabs.query = async (args) => {
+    if (++calls === 2) {
+      change();
+    }
     return query(args);
   };
   return () => {
-    fake.tabs.query = query;
+    fakeChrome.tabs.query = query;
   };
 }
 
 test("Close duplicate tabs does not close a tab that is no longer a duplicate", async () => {
-  tabs = [
+  world.tabs = [
     { id: 1, url: `${PR}/7` },
     { id: 2, url: `${PR}/7` },
   ];
   const restore = changeAfterScan(() => {
-    tabs[0]!.url = `${PR}/8`;
+    tabWithId(1).url = `${PR}/8`;
   });
   try {
     assert.deepEqual(await closeDuplicates(), { closed: 0 });
@@ -317,12 +255,12 @@ test("Close duplicate tabs does not close a tab that is no longer a duplicate", 
 });
 
 test("Close duplicate tabs does not close a tab that became active meanwhile", async () => {
-  tabs = [
+  world.tabs = [
     { id: 1, url: `${PR}/7` },
     { id: 2, url: `${PR}/7` },
   ];
   const restore = changeAfterScan(() => {
-    tabs[1]!.active = true;
+    tabWithId(2).active = true;
   });
   try {
     assert.deepEqual(await closeDuplicates(), { closed: 0 });
@@ -333,13 +271,13 @@ test("Close duplicate tabs does not close a tab that became active meanwhile", a
 });
 
 test("Close duplicate tabs does not close the last tab when the kept one is gone", async () => {
-  tabs = [
+  world.tabs = [
     { id: 1, url: `${PR}/7` },
     { id: 2, url: `${PR}/7` },
     { id: 3, url: `${PR}/7` },
   ];
   const restore = changeAfterScan(() => {
-    tabs = tabs.filter((tab) => tab.id !== 1);
+    world.tabs = world.tabs.filter((tab) => tab.id !== 1);
   });
   try {
     await closeDuplicates();
@@ -350,13 +288,13 @@ test("Close duplicate tabs does not close the last tab when the kept one is gone
 });
 
 test("Close duplicate tabs does not close a tab that moved to another duplicated PR", async () => {
-  tabs = [
+  world.tabs = [
     { id: 5, url: `${PR}/7` },
     { id: 6, url: `${PR}/7` },
     { id: 3, url: `${PR}/8` },
   ];
   const restore = changeAfterScan(() => {
-    tabs[1]!.url = `${PR}/8`;
+    tabWithId(6).url = `${PR}/8`;
   });
   try {
     await closeDuplicates();
@@ -367,7 +305,7 @@ test("Close duplicate tabs does not close a tab that moved to another duplicated
 });
 
 test("Close duplicate tabs keeps the active tab of the focused window (window 1)", async () => {
-  tabs = [
+  world.tabs = [
     { id: 1, url: `${PR}/7`, windowId: 2, active: true },
     { id: 2, url: `${PR}/7`, windowId: 1, active: true },
   ];
@@ -376,11 +314,11 @@ test("Close duplicate tabs keeps the active tab of the focused window (window 1)
 });
 
 test("existing check cadence regroups tabs after ownership changes or disappears", async () => {
-  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
-  store = {};
-  grouped = [];
+  world.tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
+  world.store = {};
+  world.grouped = [];
   let owners: Record<string, string> = { "acme/webapp:feature": "Finder" };
-  nativeHandler = async () => ({
+  world.nativeHandler = async () => ({
     ok: true,
     owners,
     prs: {
@@ -388,132 +326,162 @@ test("existing check cadence regroups tabs after ownership changes or disappears
     },
   });
   await chromeMessageCheck();
-  assert.equal(grouped.at(-1)?.title, "Finder");
+  assert.equal(world.grouped.at(-1)?.title, "Finder");
   owners = { "acme/webapp:feature": "Agent::Tooling" };
   await chromeMessageCheck();
-  assert.equal(grouped.at(-1)?.title, "Agent::Tooling");
+  assert.equal(world.grouped.at(-1)?.title, "Agent::Tooling");
   owners = {};
   await chromeMessageCheck();
-  assert.equal(grouped.at(-1)?.title, "webapp");
+  assert.equal(world.grouped.at(-1)?.title, "webapp");
 });
 
 test("a restarted worker restores ownership before grouping persisted PR metadata", async () => {
-  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
-  store = {
+  world.tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
+  world.store = {
     owners: { "acme/webapp:feature": "Finder" },
     meta: {
       "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
     },
   };
-  grouped = [];
+  world.grouped = [];
   await freshWorker("ownership-restart");
-  await installedListener();
-  assert.equal(grouped.at(-1)?.title, "Finder");
+  await world.installedListener();
+  assert.equal(world.grouped.at(-1)?.title, "Finder");
 });
 
-test("a delayed persisted restore cannot overwrite fresh ownership from a check", async () => {
-  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
-  store = {
-    owners: { "acme/webapp:feature": "Old" },
-    meta: {
-      "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
-    },
-  };
-  const get = fake.storage.local.get;
-  const set = fake.storage.local.set;
-  let release!: () => void, signalRead!: () => void, signalFresh!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const reading = new Promise<void>((resolve) => {
-    signalRead = resolve;
-  });
-  const fresh = new Promise<void>((resolve) => {
-    signalFresh = resolve;
-  });
+// Holds the first owners read until release, signalling reading when it starts.
+function holdOwnersRead() {
+  const get = fakeChrome.storage.local.get;
+  const { promise: held, resolve: release } = Promise.withResolvers<void>();
+  const { promise: reading, resolve: signalRead } = Promise.withResolvers<void>();
   let intercepted = false;
-  fake.storage.local.get = async (defaults) => {
-    const snapshot = await get(defaults);
-    if ("owners" in defaults && !intercepted) {
+  fakeChrome.storage.local.get = async (key) => {
+    const snapshot = await get(key);
+    if (key === "owners" && !intercepted) {
       intercepted = true;
       signalRead();
       await held;
     }
     return snapshot;
   };
-  fake.storage.local.set = async (values) => {
+  function restore() {
+    release();
+    fakeChrome.storage.local.get = get;
+  }
+  return { reading, release, restore };
+}
+
+// Resolves fresh once owners naming title are written.
+function watchOwnersWrite(title: string) {
+  const set = fakeChrome.storage.local.set;
+  const { promise: fresh, resolve: signalFresh } = Promise.withResolvers<void>();
+  fakeChrome.storage.local.set = async (values) => {
     await set(values);
-    if (values.owners?.["acme/webapp:feature"] === "Fresh") signalFresh();
+    if (values.owners?.["acme/webapp:feature"] === title) {
+      signalFresh();
+    }
   };
-  nativeHandler = async () => ({
+  function restore() {
+    fakeChrome.storage.local.set = set;
+  }
+  return { fresh, restore };
+}
+
+const OPEN_FEATURE = { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } };
+
+test("a delayed persisted restore cannot overwrite fresh ownership from a check", async () => {
+  world.tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
+  world.store = { owners: { "acme/webapp:feature": "Old" }, meta: OPEN_FEATURE };
+  const read = holdOwnersRead();
+  const write = watchOwnersWrite("Fresh");
+  world.nativeHandler = async () => ({
     ok: true,
     owners: { "acme/webapp:feature": "Fresh" },
-    prs: {
-      "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
-    },
+    prs: OPEN_FEATURE,
   });
   try {
     const worker = await freshWorker("ownership-restore-race");
-    const starting = installedListener();
-    await reading;
+    const starting = world.installedListener();
+    await read.reading;
     const checking = worker.checkNow();
-    await fresh;
-    release();
+    await write.fresh;
+    read.release();
     await Promise.all([starting, checking]);
-    assert.equal(grouped.at(-1)?.title, "Fresh");
+    assert.equal(world.grouped.at(-1)?.title, "Fresh");
   } finally {
-    release();
-    fake.storage.local.get = get;
-    fake.storage.local.set = set;
+    read.restore();
+    write.restore();
   }
 });
 
 test("failed scans preserve the last good map for checks and Open all, including after restart", async () => {
   const good = { "acme/webapp:feature": "Finder" };
-  tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
-  store = { owners: good, meta: { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } } };
-  grouped = [];
-  nativeHandler = async (message) =>
+  world.tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
+  world.store = {
+    owners: good,
+    meta: { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } },
+  };
+  world.grouped = [];
+  world.nativeHandler = async (message) =>
     message.type === "states"
-      ? { ok: true, owners: null, prs: { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } } }
-      : { ok: true, owners: null, total: 1, prs: [{ url: `${PR}/8`, headRefName: "feature" }], hasNextPage: false };
+      ? {
+          ok: true,
+          owners: null,
+          prs: { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } },
+        }
+      : {
+          ok: true,
+          owners: null,
+          total: 1,
+          prs: [{ url: `${PR}/8`, headRefName: "feature" }],
+          hasNextPage: false,
+        };
   const worker = await freshWorker("failed-ownership-scan");
   await worker.checkNow();
-  assert.equal(grouped.at(-1)?.title, "Finder");
-  assert.deepEqual(store.owners, good);
+  assert.equal(world.grouped.at(-1)?.title, "Finder");
+  assert.deepEqual(world.store.owners, good);
   await worker.openAll();
-  assert.equal(grouped.at(-1)?.title, "Finder");
-  assert.deepEqual(store.owners, good);
+  assert.equal(world.grouped.at(-1)?.title, "Finder");
+  assert.deepEqual(world.store.owners, good);
 });
 
-test("goTo opens a bare number in the picked repo and remembers the pick", async () => {
-  const configured = hostSettings;
-  try {
-    tabs = [];
-    store = {};
-    hostSettings = { ...configured, repos: ["webapp", "api", "docs"] };
-    const multi = await freshWorker("multi-repo");
-    assert.deepEqual(await multi.repoChoices(), { repos: ["webapp", "api", "docs"], selected: "webapp", show: true });
-    assert.deepEqual(await multi.goTo("7", "api"), { opened: "acme/api#7" });
-    await multi.pickRepo("api");
-    assert.equal(store.prTabsRepo, "api");
-    assert.deepEqual(await multi.repoChoices(), { repos: ["webapp", "api", "docs"], selected: "api", show: true });
-    assert.deepEqual(await multi.goTo("11"), { opened: "acme/api#11" }, "no pick sent: the stored pick wins");
-    await multi.pickRepo("docs");
-    assert.equal(store.prTabsRepo, "docs");
-    await multi.pickRepo("unlisted");
-    assert.equal(store.prTabsRepo, "docs");
-    await multi.pickRepo("api");
-    assert.deepEqual(await multi.goTo("docs#8", "api"), { opened: "acme/docs#8" });
-    assert.deepEqual(await multi.goTo("9", "unlisted"), { opened: "acme/webapp#9" });
-    assert.equal(store.prTabsRepo, "api");
-    assert.deepEqual(await multi.goTo("other#1"), { error: "Not a acme PR number or URL" });
-    hostSettings = { ...configured, repos: ["webapp"] };
-    const single = await freshWorker("single-repo");
-    assert.equal((await single.repoChoices()).show, false);
-  } finally {
-    hostSettings = configured;
-    store = {};
-    tabs = [];
-  }
+const REPOS = ["webapp", "api", "docs"];
+
+async function multiRepoWorker(tag: string) {
+  world.tabs = [];
+  world.store = {};
+  world.hostSettings = { ...CONFIGURED, repos: REPOS };
+  return freshWorker(tag);
+}
+
+test("the dropdown lists the repos and selects the remembered listed pick", async () => {
+  const multi = await multiRepoWorker("multi-repo-choices");
+  assert.deepEqual(await multi.repoChoices(), { repos: REPOS, selected: "webapp", show: true });
+  await multi.pickRepo("api");
+  assert.equal(world.store.prTabsRepo, "api");
+  assert.deepEqual(await multi.repoChoices(), { repos: REPOS, selected: "api", show: true });
+  await multi.pickRepo("docs");
+  assert.equal(world.store.prTabsRepo, "docs");
+  await multi.pickRepo("unlisted");
+  assert.equal(world.store.prTabsRepo, "docs");
+});
+
+test("goTo opens a bare number in the picked repo, else the remembered pick", async () => {
+  const multi = await multiRepoWorker("multi-repo");
+  assert.deepEqual(await multi.goTo("7", "api"), { opened: "acme/api#7" });
+  await multi.pickRepo("api");
+  const stored = await multi.goTo("11");
+  assert.deepEqual(stored, { opened: "acme/api#11" }, "no pick sent: the stored pick wins");
+  assert.deepEqual(await multi.goTo("docs#8", "api"), { opened: "acme/docs#8" });
+  assert.deepEqual(await multi.goTo("9", "unlisted"), { opened: "acme/webapp#9" });
+  assert.equal(world.store.prTabsRepo, "api");
+  assert.deepEqual(await multi.goTo("other#1"), { error: "Not a acme PR number or URL" });
+  world.store = {};
+  world.tabs = [];
+});
+
+test("one listed repo hides the dropdown", async () => {
+  world.hostSettings = { ...CONFIGURED, repos: ["webapp"] };
+  const single = await freshWorker("single-repo");
+  assert.equal((await single.repoChoices()).show, false);
 });

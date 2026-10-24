@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { ask, messageListener, NO_ANSWER, type Message } from "../src/messages";
+import { ask, errorText, failed, messageListener, NO_ANSWER } from "../src/messages";
 
 // The listener's answer, or "no answer" when sendResponse is not called within a second.
-function deliver(listener: ReturnType<typeof messageListener>, message: Message): Promise<any> {
+function deliver(listener: ReturnType<typeof messageListener>, message: unknown): Promise<unknown> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve("no answer"), 1000);
     listener(message, {}, (answer: unknown) => {
@@ -11,6 +11,11 @@ function deliver(listener: ReturnType<typeof messageListener>, message: Message)
       resolve(answer);
     });
   });
+}
+
+function errorOf(answer: unknown): string {
+  assert.ok(typeof answer === "object" && answer !== null && "error" in answer);
+  return String(answer.error);
 }
 
 test("an async handler answers through sendResponse with the channel kept open", async () => {
@@ -38,10 +43,10 @@ test("a handler that returns nothing still answers", async () => {
 });
 
 test("unknown and inherited message types answer with an error instead of nothing", async () => {
-  const listener = messageListener({ summary: async () => ({}) });
+  const listener = messageListener({ summary: async () => ({ prs: 0, groups: [] }) });
   for (const type of ["bogus", "constructor", "toString", undefined]) {
     const answer = await deliver(listener, { type });
-    assert.match(answer.error, /Unknown message type/);
+    assert.match(errorOf(answer), /Unknown message type/);
   }
 });
 
@@ -63,7 +68,9 @@ test("the popup shows the real error after the retry", async () => {
     { type: "summary" },
   );
   assert.equal(calls, 2);
-  assert.deepEqual(answer, { error: "Could not establish connection. Receiving end does not exist." });
+  assert.deepEqual(answer, {
+    error: "Could not establish connection. Receiving end does not exist.",
+  });
 });
 
 test("two silent answers name the stale service worker", async () => {
@@ -107,4 +114,16 @@ test("closeDuplicates is not retried when no answer comes back", async () => {
   );
   assert.equal(calls, 1);
   assert.deepEqual(answer, { error: NO_ANSWER });
+});
+
+test("a reply failed only when it carries an error text", () => {
+  assert.equal(failed({ error: "gh: not logged in" }), true);
+  assert.equal(failed({ error: "" }), false);
+  assert.equal(failed({ opened: 1 }), false);
+});
+
+test("an error reads as its message, anything else as text", () => {
+  assert.equal(errorText(new Error("gh: not logged in")), "gh: not logged in");
+  assert.equal(errorText({ message: "" }), "[object Object]");
+  assert.equal(errorText("timeout"), "timeout");
 });

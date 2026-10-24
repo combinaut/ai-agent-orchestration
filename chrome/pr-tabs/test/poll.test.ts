@@ -76,7 +76,11 @@ test("open all skips open PRs, opens at most the cap and counts the rest", () =>
 });
 
 test("open all under the cap opens everything new and leaves nothing", () => {
-  const plan = planOpenAll({ total: 2, prs: [hit("webapp", 1), hit("other", 2)] }, new Set(), "acme");
+  const plan = planOpenAll(
+    { total: 2, prs: [hit("webapp", 1), hit("other", 2)] },
+    new Set(),
+    "acme",
+  );
   assert.deepEqual(
     plan.open.map(({ pr }) => pr.key),
     ["acme/webapp#1", "acme/other#2"],

@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { checkText, pruneMeta, recordStates, seedOpen, shouldClose, stillShowsPr, tabsToClose } from "../src/core";
+import {
+  checkText,
+  pruneMeta,
+  recordStates,
+  seedOpen,
+  shouldClose,
+  stillShowsPr,
+  tabsToClose,
+} from "../src/core";
 
 const background = { active: false };
 
@@ -38,7 +46,10 @@ test("every background tab of a merged or closed PR is closed, nothing else", ()
 
 test("a tab that moved to another page since the poll started is not closed", () => {
   const key = "acme/webapp#1";
-  assert.equal(stillShowsPr({ url: "https://github.com/acme/webapp/pull/1/files" }, key, "acme"), true);
+  assert.equal(
+    stillShowsPr({ url: "https://github.com/acme/webapp/pull/1/files" }, key, "acme"),
+    true,
+  );
   assert.equal(stillShowsPr({ url: "https://github.com/acme/webapp/pull/2" }, key, "acme"), false);
   assert.equal(stillShowsPr({ url: "https://github.com/acme/webapp" }, key, "acme"), false);
   assert.equal(stillShowsPr(null, key, "acme"), false);
@@ -46,7 +57,11 @@ test("a tab that moved to another page since the poll started is not closed", ()
 
 test("fetched states are recorded, missing PRs keep what was known", () => {
   const meta = { "acme/webapp#1": { state: "OPEN" }, "acme/webapp#3": { state: "OPEN" } };
-  const states = { "acme/webapp#1": { state: "MERGED" }, "acme/webapp#2": { state: "OPEN" }, "acme/webapp#3": null };
+  const states = {
+    "acme/webapp#1": { state: "MERGED" },
+    "acme/webapp#2": { state: "OPEN" },
+    "acme/webapp#3": null,
+  };
   assert.deepEqual(recordStates(meta, states), {
     "acme/webapp#1": { state: "MERGED" },
     "acme/webapp#2": { state: "OPEN" },
@@ -62,7 +77,10 @@ test("opening a PR seeds OPEN only where no state is recorded yet", () => {
     },
     { hit: { title: "Two", headRefName: "b" }, pr: { key: "acme/webapp#2" } },
   ];
-  const next = seedOpen({ "acme/webapp#2": { state: "CLOSED", title: "Two", headRefName: "b" } }, opened);
+  const next = seedOpen(
+    { "acme/webapp#2": { state: "CLOSED", title: "Two", headRefName: "b" } },
+    opened,
+  );
   assert.deepEqual(next, {
     "acme/webapp#1": {
       state: "OPEN",
@@ -76,7 +94,9 @@ test("opening a PR seeds OPEN only where no state is recorded yet", () => {
 
 test("pruning keeps only PRs that still have a tab", () => {
   const meta = { "acme/webapp#1": { state: "OPEN" }, "acme/webapp#2": { state: "OPEN" } };
-  assert.deepEqual(pruneMeta(meta, new Set(["acme/webapp#2"])), { "acme/webapp#2": { state: "OPEN" } });
+  assert.deepEqual(pruneMeta(meta, new Set(["acme/webapp#2"])), {
+    "acme/webapp#2": { state: "OPEN" },
+  });
 });
 
 test("the check result names what was closed, what stayed in view and what waits", () => {
@@ -85,14 +105,26 @@ test("the check result names what was closed, what stayed in view and what waits
     { key: "acme/webapp#3284", state: "MERGED" },
     { key: "acme/ai-agent-orchestration#17", state: "MERGED" },
   ];
-  assert.equal(checkText({ tabs: 5, prs: 5, checked: 5, closed, inView: [] }), "Closed 3 merged tabs.");
   assert.equal(
-    checkText({ tabs: 2, prs: 2, checked: 2, closed: [{ key: "a", state: "CLOSED" }], inView: ["acme/webapp#9"] }),
+    checkText({ tabs: 5, prs: 5, checked: 5, closed, inView: [] }),
+    "Closed 3 merged tabs.",
+  );
+  assert.equal(
+    checkText({
+      tabs: 2,
+      prs: 2,
+      checked: 2,
+      closed: [{ key: "a", state: "CLOSED" }],
+      inView: ["acme/webapp#9"],
+    }),
     "Closed 1 closed-PR tab; 1 tab in view kept (acme/webapp#9).",
   );
   assert.equal(
     checkText({ tabs: 120, prs: 110, checked: 100, closed: [], inView: [] }),
     "No merged or closed PRs among 100 PRs checked; 10 more next time.",
   );
-  assert.equal(checkText({ tabs: 0, prs: 0, checked: 0, closed: [], inView: [] }), "No PR tabs open");
+  assert.equal(
+    checkText({ tabs: 0, prs: 0, checked: 0, closed: [], inView: [] }),
+    "No PR tabs open",
+  );
 });

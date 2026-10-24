@@ -53,14 +53,20 @@ test("anything else is not a target", () => {
 });
 
 test("only acme PR URLs are PR tabs", () => {
-  assert.equal(parsePrUrl("https://github.com/acme/webapp/pull/7/commits", "acme")?.key, "acme/webapp#7");
+  assert.equal(
+    parsePrUrl("https://github.com/acme/webapp/pull/7/commits", "acme")?.key,
+    "acme/webapp#7",
+  );
   assert.equal(parsePrUrl("https://github.com/acme/webapp/pulls", "acme"), null);
   assert.equal(parsePrUrl("https://github.com/acme/webapp/pull/77x", "acme"), null);
 });
 
 test("PR URLs past the native host's limits are not PR tabs", () => {
   assert.equal(parsePrUrl(`https://github.com/acme/${"r".repeat(101)}/pull/1`, "acme"), null);
-  assert.equal(parsePrUrl(`https://github.com/acme/${"r".repeat(100)}/pull/1`, "acme")?.repo.length, 100);
+  assert.equal(
+    parsePrUrl(`https://github.com/acme/${"r".repeat(100)}/pull/1`, "acme")?.repo.length,
+    100,
+  );
   assert.equal(parsePrUrl("https://github.com/acme/webapp/pull/1234567890", "acme"), null);
   assert.equal(parsePrUrl("https://github.com/acme/webapp/pull/0", "acme"), null);
 });
@@ -71,10 +77,17 @@ test("PR identities ignore owner and repo casing", () => {
   assert.equal(pr?.url, "https://github.com/acme/webapp/pull/1");
 });
 
-const entry = (id: number, windowId: number, key: string): Entry => ({ tab: { id, windowId }, pr: { key } });
+const entry = (id: number, windowId: number, key: string): Entry => ({
+  tab: { id, windowId },
+  pr: { key },
+});
 
 test("an open tab for the PR is found, preferring the focused window", () => {
-  const entries = [entry(1, 10, "acme/webapp#1"), entry(2, 20, "acme/webapp#2"), entry(3, 30, "acme/webapp#2")];
+  const entries = [
+    entry(1, 10, "acme/webapp#1"),
+    entry(2, 20, "acme/webapp#2"),
+    entry(3, 30, "acme/webapp#2"),
+  ];
   assert.equal(findOpenTab(entries, "acme/webapp#2", 30)?.tab.id, 3);
   assert.equal(findOpenTab(entries, "acme/webapp#2", 10)?.tab.id, 2);
   assert.equal(findOpenTab(entries, "acme/webapp#1", undefined)?.tab.id, 1);
@@ -92,7 +105,11 @@ test("the summary counts distinct PRs and the PRs in each group", () => {
     entry(4, 10, "acme/webapp#3"),
     entry(5, 10, "acme/webapp#4"),
   ];
-  [7, 7, 7, 8, -1].forEach((groupId, i) => (entries[i]!.tab.groupId = groupId));
+  for (const [i, groupId] of [7, 7, 7, 8, -1].entries()) {
+    const tab = entries[i]?.tab;
+    assert.ok(tab);
+    tab.groupId = groupId;
+  }
   const groups = new Map([
     [7, { title: "Search", color: "blue" }],
     [8, { title: "Infra", color: "red" }],
@@ -130,10 +147,23 @@ test("an unrelated tab's load or title change skips the grouping and alarm path"
 });
 
 test("PR tabs, tabs known as PR tabs and URL changes take the grouping and alarm path", () => {
-  assert.equal(tabUpdateMatters({ status: "complete" }, { url: "https://github.com/acme/webapp/pull/1" }, false), true);
+  assert.equal(
+    tabUpdateMatters(
+      { status: "complete" },
+      { url: "https://github.com/acme/webapp/pull/1" },
+      false,
+    ),
+    true,
+  );
   assert.equal(tabUpdateMatters({ title: "x" }, {}, true), true);
-  assert.equal(tabUpdateMatters({ url: "https://example.com/" }, { url: "https://example.com/" }, false), true);
-  assert.equal(tabUpdateMatters({ groupId: 5 }, { url: "https://github.com/acme/webapp/pull/1" }, true), false);
+  assert.equal(
+    tabUpdateMatters({ url: "https://example.com/" }, { url: "https://example.com/" }, false),
+    true,
+  );
+  assert.equal(
+    tabUpdateMatters({ groupId: 5 }, { url: "https://github.com/acme/webapp/pull/1" }, true),
+    false,
+  );
 });
 
 test("prKey is one key per PR: owner and repo lowercased, sub-page, query and fragment ignored, any owner", () => {
@@ -233,8 +263,9 @@ test("<repo>#<number> is accepted for listed repos only", () => {
   assert.equal(parseTarget("api#12", multi, "docs")?.key, "acme/api#12");
   assert.equal(parseTarget(" DOCS#3 ", multi)?.key, "acme/docs#3");
   assert.equal(parseTarget("webapp#9", rules)?.key, "acme/webapp#9");
-  for (const input of ["other#1", "api#0", "api#", "#api", "api#1x", "api #1"])
+  for (const input of ["other#1", "api#0", "api#", "#api", "api#1x", "api #1"]) {
     assert.equal(parseTarget(input, multi), null, input);
+  }
   assert.equal(parseTarget("api#1", rules), null);
   assert.equal(parseTarget("api#1", { ...multi, org: "" }), null);
 });

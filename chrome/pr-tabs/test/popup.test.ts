@@ -21,14 +21,24 @@ async function popup(repos: string[]) {
     runtime: {
       sendMessage: async (message: { type: string; repo?: string }) => {
         sent.push(message);
-        if (message.type === "repos")
-          return { repos: effectiveRepos(rules), selected: pickedRepo(rules), show: showRepoPicker(rules) };
-        if (message.type === "summary") return { prs: 0, groups: [] };
+        if (message.type === "repos") {
+          return {
+            repos: effectiveRepos(rules),
+            selected: pickedRepo(rules),
+            show: showRepoPicker(rules),
+          };
+        }
+        if (message.type === "summary") {
+          return { prs: 0, groups: [] };
+        }
         return { error: "unexpected" };
       },
     },
   });
-  const wrapper = mount(App, { attachTo: document.body, global: { plugins: [[PrimeVue, primeVueOptions]] } });
+  const wrapper = mount(App, {
+    attachTo: document.body,
+    global: { plugins: [[PrimeVue, primeVueOptions]] },
+  });
   await flushPromises();
   return { wrapper, sent };
 }
