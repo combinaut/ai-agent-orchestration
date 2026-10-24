@@ -30,8 +30,10 @@ Workers recycle through their architect. Each context pass also reads `herdr wor
 neither the Coordinator nor an architect, in a workspace with an `owner` tag, emits
 `RECYCLE-WORKER-SOFT <pane> owner=<workspace> <name> <amount>` at `recycle.worker_soft_tokens` (300000),
 then `RECYCLE-WORKER-HARD` at `min(recycle.worker_hard_tokens, 0.6 × model window)` (configured hard: 450000).
-The status line publishes `.window` and `.model` next to `.tokens`; missing Claude window metadata uses
-the conservative 200000-token fallback in `worker_recycle.py`. Each stage starts once per session/owner;
+The status line publishes `.window` and `.model` next to `.tokens`. With missing window metadata,
+there is no clamp: hard is at least soft and otherwise uses the configured hard. The watcher logs it
+once per live session. With a known window, remaining percentage uses the token thresholds; only an
+unknown window uses `recycle.pct` for SOFT. Each stage starts once per session/owner;
 HARD remains pending across decreasing readings. Only the Herdr
 agent name labels it, never the terminal title, which changes while a worker runs. A worker without an owner tag, a
 sensor (Codex panes have none) or a session id emits nothing. When the workspace list cannot be read, new worker lines

@@ -272,7 +272,7 @@ SETTINGS = [
         "ORCH_WORKER_HARD_TOKENS",
         "int",
         450000,
-        "Worker hard limit, clamped to 60 percent of the model window",
+        "Worker hard limit: known window clamps to 60 percent; unknown window uses at least soft",
     ),
     _g(
         "recycle.worker_ask_timeout_s",

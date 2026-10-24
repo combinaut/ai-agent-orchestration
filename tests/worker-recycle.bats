@@ -45,11 +45,11 @@ policy() { printf '%s' "$1" | python3 "$ROOT/coordinator/watchers/worker_recycle
   run policy '{"value":{"tokens":300000,"window":1000000},"answer":"FINISH ten fix"}'
   [ "$output" = ASK_VALID_REPLY ]
 }
-@test "all enabled tiers use conservative missing-window fallback and Codex cache" {
+@test "missing model windows do not clamp and Codex reads its cache" {
   model_home=$(mktemp -d)
   for model in claude-haiku-5-5 claude-sonnet-5-5 claude-opus-5-5 claude-fable-5-1 gpt-5.6-terra gpt-6.1-sol; do
     run env HOME="$model_home" python3 "$ROOT/coordinator/watchers/worker_recycle.py" <<<"{\"value\":{\"model\":\"$model\",\"tokens\":120000}}"
-    [ "$output" = HANDOFF_CALL_BOUNDARY ]
+    [ "$output" = ASK ]
   done
   mkdir -p "$model_home/.codex"
   printf '%s\n' '{"models":[{"slug":"gpt-6.1-sol","context_window":1000000}]}' >"$model_home/.codex/models_cache.json"
@@ -75,4 +75,29 @@ policy() { printf '%s' "$1" | python3 "$ROOT/coordinator/watchers/worker_recycle
   [ "$output" = WAIT_REPLY ]
   run policy '{"value":{"tokens":310000,"window":1000000},"elapsed":0,"pending":true}'
   [ "$output" = WAIT_REPLY ]
+}
+
+@test "known window percentage sensor reaches soft before hard" {
+  run env PYTHONPATH="$ROOT/coordinator/watchers" python3 -c 'import worker_recycle as r; print(r.stage({"remaining":69,"window":1000000}))'
+  [ "$output" = SOFT ]
+}
+@test "FINISH uses current consumption above soft" {
+  run policy '{"value":{"tokens":420000,"window":1000000},"answer":"FINISH 100000 checks"}'
+  [ "$output" = HANDOFF_CLEAN_POINT ]
+}
+@test "NOW accepts case and punctuation and FINISH accepts k tokens" {
+  for answer in now NOW. nOw.; do
+    run policy "{\"value\":{\"tokens\":300000,\"window\":1000000},\"answer\":\"$answer\"}"
+    [ "$output" = HANDOFF ]
+  done
+  run policy '{"value":{"tokens":300000,"window":1000000},"answer":"FINISH 100k checks"}'
+  [ "$output" = WAIT_DONE ]
+}
+@test "FINISH exact hard boundary requires handoff" {
+  run policy '{"value":{"tokens":300000,"window":1000000},"answer":"FINISH 150000 checks"}'
+  [ "$output" = HANDOFF_CLEAN_POINT ]
+}
+@test "unknown window hard cannot precede soft" {
+  run env ORCH_WORKER_HARD_TOKENS=100000 python3 "$ROOT/coordinator/watchers/worker_recycle.py" <<<'{"value":{"tokens":180000}}'
+  [ "$output" = ASK ]
 }

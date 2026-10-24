@@ -1947,6 +1947,22 @@ class DeliveryTest(IsolatedTestCase):
         os.utime(self.base / "context.heartbeat", (now, now))
         return now
 
+    def test_soft_then_hard_reaches_owner_in_two_delivery_passes(self):
+        now = self.context_cycle("wMS", worker=310000)
+        soft = self.WORKER_LINE.format("wMS")
+        self.assertEqual(
+            self.deliver(now, modes=("host", "context")),
+            [("architect-wMS.json", soft + ". No reply needed.")],
+        )
+        raw = worker_context(460000, owner="wMS")
+        w.cycle(self.base, "context", lambda before: raw)
+        hard = soft.replace("-SOFT", "-HARD").replace("310k", "460k")
+        self.assertEqual(
+            self.deliver(now + 1, modes=("host", "context")),
+            [("architect-wMS.json", hard + ". No reply needed.")],
+        )
+        self.assertEqual(self.feed_lines(), [soft, hard])
+
     def test_worker_hard_stage_reaches_owner(self):
         sent = self.deliver(
             self.context_cycle("wMS", worker=450000), modes=("host", "context")

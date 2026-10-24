@@ -532,6 +532,7 @@ RECYCLE_LINES = (
     "RECYCLE-WORKER-HARD ",
 )
 WORKSPACE_FAILS = "workspaces:unreadable"
+WINDOW_WARN_PREFIX = "window-warning:"
 
 
 def workspace_failures(previous, raw):
@@ -570,8 +571,7 @@ def reduce_context(before, after, raw):
             and line.startswith("RECYCLE-WORKER-SOFT ")
             and old.split()[2] == line.split()[2]
         ):
-            # A forced handoff can be waiting on a heavy slot. Keep it pending
-            # for this session/owner even if a later sensor reading decreases.
+            # HARD stays latched per session and owner.
             after[key] = line.replace("RECYCLE-WORKER-SOFT ", "RECYCLE-WORKER-HARD ", 1)
     moved = {
         key
@@ -615,6 +615,28 @@ def reduce_context(before, after, raw):
         )
     ]
     remembered.update(after)
+    owners = workspace_owners(raw)
+    for agent in agents(raw["herdr"]):
+        sid = (agent.get("agent_session") or {}).get("value")
+        marker = WINDOW_WARN_PREFIX + (sid or "")
+        if not sid:
+            continue
+        if marker in previous:
+            remembered[marker] = previous[marker]
+            continue
+        value = raw["usage"].get(sid, {})
+        if (
+            agent.get("agent") == "claude"
+            and not architect_like(agent)
+            and owners.get(agent.get("workspace_id"))
+            and (value.get("tokens") is not None or value.get("remaining") is not None)
+            and recycle_policy.model_window(value) is None
+        ):
+            print(
+                f"context: {agent['pane_id']} model window unavailable; using configured worker hard limit {recycle_policy.limits(value)[1]} tokens (no clamp)",
+                file=sys.stderr,
+            )
+            remembered[marker] = "logged"
     fails = workspace_failures(previous, raw)
     if fails:
         remembered[WORKSPACE_FAILS] = str(fails)

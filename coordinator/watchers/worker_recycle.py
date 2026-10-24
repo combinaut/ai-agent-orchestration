@@ -6,23 +6,14 @@ import re
 import sys
 from pathlib import Path
 
-# Confirm new model windows with the architect before changing these fallbacks.
-MODEL_WINDOWS = dict.fromkeys(
-    (
-        "claude-haiku-5-5",
-        "claude-sonnet-5-5",
-        "claude-opus-5-5",
-        "claude-fable-5-1",
-        "gpt-5.6-terra",
-        "gpt-6.1-sol",
-    ),
-    200000,
-)
-
 
 def model_window(value):
-    if value.get("window"):
-        return int(value["window"])
+    try:
+        window = int(value.get("window", 0))
+        if window > 0:
+            return window
+    except (TypeError, ValueError):
+        pass
     model = value.get("model", "")
     if model.startswith("gpt-"):
         try:
@@ -32,28 +23,35 @@ def model_window(value):
                     return int(row["context_window"])
         except (OSError, KeyError, TypeError, ValueError):
             pass
-    return MODEL_WINDOWS.get(model, 200000)
+    return None
 
 
 def limits(value):
     soft = int(os.environ.get("ORCH_WORKER_SOFT_TOKENS", 300000))
     hard = int(os.environ.get("ORCH_WORKER_HARD_TOKENS", 450000))
     window = model_window(value)
-    if window:
-        hard = min(hard, int(int(window) * 0.6))
+    hard = min(hard, int(window * 0.6)) if window is not None else max(soft, hard)
     return soft, hard
+
+
+def used_tokens(value):
+    if value.get("tokens") is not None:
+        return int(value["tokens"])
+    window = model_window(value)
+    if window is not None and value.get("remaining") is not None:
+        return (100 - float(value["remaining"])) * window / 100
+    return None
 
 
 def stage(value):
     soft, hard = limits(value)
-    tokens = value.get("tokens")
+    tokens = used_tokens(value)
     if tokens is not None:
         return "HARD" if tokens >= hard else "SOFT" if tokens >= soft else None
     if value.get("remaining") is not None:
-        used = 100 - float(value["remaining"])
-        if used * model_window(value) / 100 >= hard:
-            return "HARD"
-        if used >= float(os.environ.get("ORCH_RECYCLE_PCT", 55)):
+        if 100 - float(value["remaining"]) >= float(
+            os.environ.get("ORCH_RECYCLE_PCT", 55)
+        ):
             return "SOFT"
     return None
 
@@ -72,12 +70,19 @@ def decision(
         return "WAIT_SLOT"
     if hard_pending or stage(value) == "HARD":
         return "HANDOFF_CALL_BOUNDARY"
-    if answer.strip() == "NOW":
+    if answer.strip().removesuffix(".").upper() == "NOW":
         return "HANDOFF"
-    finish = re.fullmatch(r"FINISH ([0-9]+) (\S.*)", answer.strip())
+    finish = re.fullmatch(
+        r"FINISH\s+([0-9]+)(k)?\s+(\S.*)", answer.strip(), re.IGNORECASE
+    )
     if finish:
         soft, hard = limits(value)
-        return "WAIT_DONE" if soft + int(finish[1]) < hard else "HANDOFF_CLEAN_POINT"
+        needed = int(finish[1]) * (1000 if finish[2] else 1)
+        return (
+            "WAIT_DONE"
+            if max(soft, used_tokens(value) or 0) + needed < hard
+            else "HANDOFF_CLEAN_POINT"
+        )
     if elapsed >= int(os.environ.get("ORCH_WORKER_ASK_TIMEOUT_S", 600)):
         return "ASK" if idle else "REASK_WHEN_IDLE"
     if not answer and (pending or elapsed > 0):

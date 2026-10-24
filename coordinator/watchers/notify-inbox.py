@@ -541,7 +541,13 @@ def audit_snapshot(base):
 
 def snapshot_lines(mode, before):
     """Lines that describe the conditions a producer's saved state holds now."""
-    if mode in ("hog", "context"):
+    if mode == "context":
+        return [
+            line
+            for key, line in before.items()
+            if not key.startswith(w.WINDOW_WARN_PREFIX)
+        ]
+    if mode == "hog":
         return list(before.values())
     if mode == "workers":
         lines = [
