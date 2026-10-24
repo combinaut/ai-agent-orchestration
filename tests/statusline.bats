@@ -333,3 +333,20 @@ plain_remotes() {
 @test "scp-style forms without user@ that are local paths or have no dotted host stay plain" {
   plain_remotes ./a:b a/b:c c:foo
 }
+
+@test "worker sensor writes window and model metadata and removes missing metadata" {
+  sensor_home=$(mktemp -d)
+  run env HOME="$sensor_home" /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"fixture","model":{"id":"claude-haiku-5-5"},"context_window":{"context_window_size":200000,"remaining_percentage":40,"current_usage":{"input_tokens":120000}}}
+JSON
+  [ "$status" -eq 0 ]
+  [ "$(cat "$sensor_home/.claude/context-usage/fixture.window")" = 200000 ]
+  [ "$(cat "$sensor_home/.claude/context-usage/fixture.model")" = claude-haiku-5-5 ]
+  run env HOME="$sensor_home" /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"fixture","context_window":{"remaining_percentage":40}}
+JSON
+  [ "$status" -eq 0 ]
+  [ ! -e "$sensor_home/.claude/context-usage/fixture.window" ]
+  [ ! -e "$sensor_home/.claude/context-usage/fixture.model" ]
+  rm -rf "$sensor_home"
+}

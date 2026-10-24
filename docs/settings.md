@@ -64,6 +64,9 @@ A family left out is never started: the installer does not ask for its models, a
 | `models.pi_smart` | `ORCH_PI_SMART_MODEL` | empty | pi model for hard work as provider/model-id; empty means pi is not used on this machine |
 | `remote_control.architects` | `ORCH_REMOTE_CONTROL_ARCHITECTS` | `true` | Give architect sessions Remote Control on start and recycle |
 | `recycle.tokens` | `ORCH_RECYCLE_TOKENS` | `300000` | Tokens used at which RECYCLE fires |
+| `recycle.worker_soft_tokens` | `ORCH_WORKER_SOFT_TOKENS` | `300000` | Worker tokens at which the architect asks for a clean point |
+| `recycle.worker_hard_tokens` | `ORCH_WORKER_HARD_TOKENS` | `450000` | Worker hard limit, clamped to 60 percent of the model window |
+| `recycle.worker_ask_timeout_s` | `ORCH_WORKER_ASK_TIMEOUT_S` | `600` | Seconds before deferring a worker re-ask until idle or done |
 | `recycle.pct` | `ORCH_RECYCLE_PCT` | `55` | Context percentage used when the token sensor is absent |
 | `recycle.park_idle` | `ORCH_PARK_IDLE` | `false` | Park architects that have no open PR, worker or watcher |
 | `install.repo_path` | `ORCH_REPO_PATH` | empty | The clone install.sh keeps up to date and links into ~/.claude; empty means ~/.claude/ai-agent-orchestration |

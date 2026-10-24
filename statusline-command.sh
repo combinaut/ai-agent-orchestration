@@ -20,6 +20,22 @@ if [ -n "$session_id" ] && [ -n "$tokens" ]; then
     || echo "statusline: cannot write $HOME/.claude/context-usage/$session_id.tokens" >&2
 fi
 
+# Model metadata for worker hard-limit clamping. Remove old metadata when absent.
+if [ -n "$session_id" ]; then
+  for field in window model; do
+    case $field in
+      window) value=$(echo "$input" | jq -r '.context_window.context_window_size // empty') ;;
+      model) value=$(echo "$input" | jq -r '.model.id // empty') ;;
+    esac
+    sensor="$HOME/.claude/context-usage/$session_id.$field"
+    if [ -n "$value" ]; then
+      { mkdir -p "$(dirname "$sensor")" && printf '%s\n' "$value" >"$sensor"; } 2>/dev/null || true
+    else
+      rm -f "$sensor"
+    fi
+  done
+fi
+
 dir_name=$(basename "$dir" 2>/dev/null)
 
 # https://host/owner/repo for an ssh, ssh:// or https remote URL, credentials dropped; fails otherwise.

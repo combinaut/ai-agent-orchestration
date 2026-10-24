@@ -23,6 +23,7 @@ import discovery
 import question_remind
 import todo_answers
 import watcher_runtime as runtime
+import worker_recycle as recycle_policy
 import worker_signals
 from question_lock import HELD, answers_lock, questions_directory
 from watcher_platform import (
@@ -208,16 +209,25 @@ def recycle_amount(value):
 
 
 def worker_recycle(agent, value, owners):
-    """`RECYCLE-WORKER <pane> owner=<workspace> [<name>] <amount>` for a worker over the threshold whose workspace has
+    """`RECYCLE-WORKER-{SOFT,HARD} <pane> owner=<workspace> [<name>] <amount>` for a worker over the threshold whose workspace has
     an owner tag. Only the agent name labels it: a terminal title changes while the worker runs."""
     owner = owners.get(agent.get("workspace_id"))
-    amount = recycle_amount(value) if owner else None
+    stage = recycle_policy.stage(value) if owner else None
+    amount = (
+        (
+            f"{int(value['tokens']) // 1000}k"
+            if value.get("tokens") is not None
+            else f"{100 - float(value['remaining']):.0f}%"
+        )
+        if stage
+        else None
+    )
     if not amount:
         return None
     return " ".join(
         part
         for part in (
-            "RECYCLE-WORKER",
+            f"RECYCLE-WORKER-{stage}",
             agent["pane_id"],
             f"owner={owner}",
             agent.get("name"),
@@ -515,7 +525,12 @@ def subject_cleared(line):
     )
 
 
-RECYCLE_LINES = ("RECYCLE ", "RECYCLE-WORKER ")
+RECYCLE_LINES = (
+    "RECYCLE ",
+    "RECYCLE-WORKER ",
+    "RECYCLE-WORKER-SOFT ",
+    "RECYCLE-WORKER-HARD ",
+)
 WORKSPACE_FAILS = "workspaces:unreadable"
 
 
@@ -530,7 +545,12 @@ def workspace_failures(previous, raw):
 
 def worker_untagged(key, line, raw):
     """True when a successful workspace read shows the owner tag gone from the workspace of the worker session `key`."""
-    if not line.startswith("RECYCLE-WORKER ") or raw.get("workspaces") is None:
+    if (
+        not line.startswith(
+            ("RECYCLE-WORKER ", "RECYCLE-WORKER-SOFT ", "RECYCLE-WORKER-HARD ")
+        )
+        or raw.get("workspaces") is None
+    ):
         return False
     owners = workspace_owners(raw)
     return any(
@@ -1977,9 +1997,16 @@ def session_usage(sid):
     path = Path.home() / ".claude/context-usage" / sid
     try:
         try:
-            return {"tokens": int(Path(str(path) + ".tokens").read_text().strip())}
+            value = {"tokens": int(Path(str(path) + ".tokens").read_text().strip())}
         except FileNotFoundError:
-            return {"remaining": float(path.read_text().strip())}
+            value = {"remaining": float(path.read_text().strip())}
+        for field in ("window", "model"):
+            try:
+                text = Path(str(path) + "." + field).read_text().strip()
+                value[field] = int(text) if field == "window" else text
+            except (OSError, ValueError):
+                pass
+        return value
     except Exception:
         return {}
 

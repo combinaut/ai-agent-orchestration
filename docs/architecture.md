@@ -139,7 +139,7 @@ flowchart LR
 
 | Producer | Interval | Reports |
 |---|---|---|
-| context | 300 s | `RECYCLE`, `RECYCLE-WORKER`, `NOSENSOR` |
+| context | 300 s | `RECYCLE`, `RECYCLE-WORKER-SOFT` / `RECYCLE-WORKER-HARD`, `NOSENSOR` |
 | host | 60 s | memory, swap, processes, open files, load |
 | hog | 5 s | big processes, big or long `git` processes |
 | balance | 60 s | load, slot count, busy worktrees with a `top:` list |

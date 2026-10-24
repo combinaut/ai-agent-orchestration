@@ -52,7 +52,7 @@ WAIT_OWNER = re.compile(
     r"^workers: WORKER WAITING .+ pane=\S+ owner=([A-Za-z0-9_-]+) \d+m session=\S+"
 )
 OWNER = re.compile(
-    r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER \S+|workers: WORKER IDLE \S+|workers: WORKER (?:DONE|QUESTION) \S+) owner=([A-Za-z0-9_-]+) "
+    r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER(?:-SOFT|-HARD)? \S+|workers: WORKER IDLE \S+|workers: WORKER (?:DONE|QUESTION) \S+) owner=([A-Za-z0-9_-]+) "
 )
 
 spec = importlib.util.spec_from_file_location("reader", w.ROOT / "read-alerts.py")
@@ -240,7 +240,14 @@ def native_messages(args, stamped, fallback, patterns):
             and not line.endswith("(clear)")
             and args.bindings_dir
             and (
-                " RECYCLE-WORKER " in line
+                any(
+                    signal in line
+                    for signal in (
+                        " RECYCLE-WORKER ",
+                        " RECYCLE-WORKER-SOFT ",
+                        " RECYCLE-WORKER-HARD ",
+                    )
+                )
                 or " WORKER IDLE " in line
                 or " WORKER DONE " in line
                 or " WORKER QUESTION " in line

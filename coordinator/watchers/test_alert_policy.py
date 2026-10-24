@@ -1924,9 +1924,7 @@ class DeliveryTest(IsolatedTestCase):
         )
         self.assertIn("pulls: APPROVED o/r#7 owner=wMS Fix (start)", self.feed_lines())
 
-    WORKER_LINE = (
-        "context: RECYCLE-WORKER workspace-task:p1 owner={} fixture-worker 310k (start)"
-    )
+    WORKER_LINE = "context: RECYCLE-WORKER-SOFT workspace-task:p1 owner={} fixture-worker 310k (start)"
 
     def context_cycle(self, owner=None, architect=1200, worker=1200, monitor=True):
         """The recorded context read, after a quiet first read, with the worker's workspace tagged `owner`;
@@ -1940,7 +1938,7 @@ class DeliveryTest(IsolatedTestCase):
             w.cycle(self.base, "context", lambda before: raw)
             raw["usage"] = {
                 "session-architect-001": {"tokens": architect},
-                "session-worker-001": {"tokens": worker},
+                "session-worker-001": {"tokens": worker, "window": 1000000},
             }
             w.cycle(self.base, "context", lambda before: raw)
         now = (self.base / "host.heartbeat").stat().st_mtime
@@ -1948,6 +1946,18 @@ class DeliveryTest(IsolatedTestCase):
             self.monitor(now)
         os.utime(self.base / "context.heartbeat", (now, now))
         return now
+
+    def test_worker_hard_stage_reaches_owner(self):
+        sent = self.deliver(
+            self.context_cycle("wMS", worker=450000), modes=("host", "context")
+        )
+        line = (
+            self.WORKER_LINE.format("wMS")
+            .replace("-SOFT", "-HARD")
+            .replace("310k", "450k")
+        )
+        self.assertEqual(sent, [("architect-wMS.json", line + ". No reply needed.")])
+        self.assertIn(line, self.feed_lines())
 
     def test_a_worker_recycle_goes_to_its_owner_and_into_the_feed(self):
         sent = self.deliver(
@@ -1965,7 +1975,8 @@ class DeliveryTest(IsolatedTestCase):
         self.assertEqual(self.deliver(now, modes=("host", "context")), [])
         self.assertTrue(
             any(
-                feed.startswith("context: RECYCLE-WORKER ") and feed.endswith("(clear)")
+                feed.startswith("context: RECYCLE-WORKER-SOFT ")
+                and feed.endswith("(clear)")
                 for feed in self.fyi_lines()
             ),
             self.fyi_lines(),
