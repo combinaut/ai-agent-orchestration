@@ -175,7 +175,8 @@ async function readRules(): Promise<unknown> {
   return JSON.parse(readFileSync(new URL("../public/rules.json", import.meta.url), "utf8"));
 }
 
-// Installs the stub as chrome and serves rules.json to fetch; it covers only what background.ts calls.
+// Installs the stub as chrome and serves rules.json to fetch; it covers only what background.ts
+// calls.
 export function installFakeChrome(): void {
   globalThis.chrome = fakeChrome as unknown as typeof chrome;
   globalThis.fetch = (async () => ({ json: readRules })) as unknown as typeof fetch;

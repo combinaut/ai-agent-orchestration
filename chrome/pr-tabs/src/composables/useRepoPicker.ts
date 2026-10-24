@@ -6,7 +6,8 @@ import type { Ask } from "./useServiceWorker";
 
 export type RepoPicker = ReturnType<typeof useRepoPicker>;
 
-// The repo dropdown: available with two or more listed repos, visible while the input is a bare PR number.
+// The repo dropdown: available with two or more listed repos, visible while the input is a bare PR
+// number.
 export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>) {
   const repo = ref("");
   async function loadChoices(): Promise<RepoChoices | null> {

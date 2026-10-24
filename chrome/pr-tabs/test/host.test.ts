@@ -14,10 +14,15 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-writeFileSync(
-  join(dir, "gh"),
-  '#!/bin/sh\nprintf "%s\\n" "$*" >>"$GH_CALLS"\ncat "$GH_REPLY"\n[ -z "$GH_STDERR" ] || echo "$GH_STDERR" >&2\nexit "${GH_STATUS:-0}"\n',
-);
+const FAKE_GH = [
+  "#!/bin/sh",
+  'printf "%s\\n" "$*" >>"$GH_CALLS"',
+  'cat "$GH_REPLY"',
+  '[ -z "$GH_STDERR" ] || echo "$GH_STDERR" >&2',
+  'exit "${GH_STATUS:-0}"',
+  "",
+].join("\n");
+writeFileSync(join(dir, "gh"), FAKE_GH);
 chmodSync(join(dir, "gh"), 0o755);
 
 interface HostAnswer {

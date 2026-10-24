@@ -123,7 +123,8 @@ function makePr(ownerName: string, repoName: string, number: number): Pr {
   };
 }
 
-// The PR a github.com URL points at, any owner: lowercase owner/repo#number, whatever the sub-page, query or fragment; else null.
+// The PR a github.com URL points at, any owner: lowercase owner/repo#number, whatever the sub-page,
+// query or fragment; else null.
 export function prKey(url: string | null | undefined): string | null {
   const match = matchPrUrl(url);
   if (!match || match.number < 1) {
@@ -136,7 +137,8 @@ export function isPrUrl(url: string | null | undefined): boolean {
   return PR_URL.test((url || "").trim());
 }
 
-// A tab update needs the grouping and alarm path: a URL change, or a load or title change on a PR tab or a tab known as one.
+// A tab update needs the grouping and alarm path: a URL change, or a load or title change on a PR
+// tab or a tab known as one.
 export function tabUpdateMatters(
   change: { url?: string; status?: string; title?: string; groupId?: number },
   tab: { url?: string } | undefined,
@@ -160,7 +162,8 @@ export function parsePrUrl(url: string | null | undefined, org: string | undefin
   return makePr(org, match.repo, match.number);
 }
 
-// Repos a bare number can go to: defaultRepo first, then rules.repos, without case-insensitive repeats.
+// Repos a bare number can go to: defaultRepo first, then rules.repos, without case-insensitive
+// repeats.
 export function effectiveRepos(rules: Pick<Rules, "defaultRepo" | "repos">): string[] {
   const repos: string[] = [];
   for (const name of [rules.defaultRepo, ...(rules.repos || [])]) {
@@ -205,7 +208,8 @@ function prIn(org: string, repo: string | null, digits: string | undefined): Pr 
   return repo && number > 0 ? makePr(org, repo, number) : null;
 }
 
-// The PR named by popup input: a number (#123 or 123) in the picked repo (default: pickedRepo), <repo>#<number> for a listed repo, or a PR URL.
+// The PR named by popup input: a number (#123 or 123) in the picked repo (default: pickedRepo),
+// <repo>#<number> for a listed repo, or a PR URL.
 export function parseTarget(
   input: string | undefined,
   rules: Pick<Rules, "org" | "defaultRepo" | "repos">,
@@ -236,7 +240,8 @@ export function findOpenTab<E extends Entry>(
   return matches.find((entry) => entry.tab.windowId === focusedWindowId) || matches[0] || null;
 }
 
-// Tab IDs to close so each PR keeps one tab: the active tab in the focused window, else any active tab, else the lowest ID (the oldest). Non-PR tabs are never listed.
+// Tab IDs to close so each PR keeps one tab: the active tab in the focused window, else any active
+// tab, else the lowest ID (the oldest). Non-PR tabs are never listed.
 export function duplicateTabIds(tabs: TabLike[], focusedWindowId?: number): number[] {
   const byKey = new Map<string, TabLike[]>();
   for (const tab of tabs) {
@@ -374,7 +379,8 @@ export function pollBatch(keys: string[], cursor: number): { batch: string[]; ne
   return { batch, nextCursor: (start + MAX_PRS_PER_POLL) % keys.length };
 }
 
-// The search hits to open (not already open, at most cap) and how many stay unopened; an estimate when results were left unfetched.
+// The search hits to open (not already open, at most cap) and how many stay unopened; an estimate
+// when results were left unfetched.
 export function planOpenAll(
   search: { total: number; prs: SearchHit[] },
   openKeys: Set<string>,

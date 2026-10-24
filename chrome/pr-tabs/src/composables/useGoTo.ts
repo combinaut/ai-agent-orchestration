@@ -14,7 +14,8 @@ function closePopup() {
   window.close();
 }
 
-// Go to a PR: sends the input, with the picked repo while the dropdown is available, and closes the popup on success.
+// Go to a PR: sends the input, with the picked repo while the dropdown is available, and closes the
+// popup on success.
 export function useGoTo({ ask, status, picker }: GoToDeps, input = ref(""), close = closePopup) {
   const isBlank = computed(() => !input.value.trim());
   function request(): RequestOf<"goTo"> {

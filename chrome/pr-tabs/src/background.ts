@@ -520,7 +520,8 @@ function noTabsChecked(): CheckResult {
   return { tabs: 0, prs: 0, checked: 0, closed: [], inView: [] };
 }
 
-// Fetches the PR states in one host call, closes background tabs of merged or closed PRs and reports what happened.
+// Fetches the PR states in one host call, closes background tabs of merged or closed PRs and
+// reports what happened.
 async function checkOnce(): Promise<CheckReply> {
   const rules = await loadRules();
   const entries = await prEntries(rules);
@@ -535,7 +536,8 @@ async function checkOnce(): Promise<CheckReply> {
   return applyStates(rules, entries, fetched);
 }
 
-// Re-checks the open tabs inside the serial chain, so a tab opened since the search is not duplicated.
+// Re-checks the open tabs inside the serial chain, so a tab opened since the search is not
+// duplicated.
 function openPr({ hit, pr }: Planned, rules: Rules): Promise<boolean> {
   async function openIfMissing() {
     if ((await prEntries(rules)).some((entry) => entry.pr.key === pr.key)) {
@@ -615,12 +617,14 @@ export async function openAll(): Promise<Reply<"openAll">> {
   return { opened: opened.length, remaining: plan.remaining, estimated: plan.estimated };
 }
 
-// Focuses the PR's open tab (window, group, tab) or opens it in its architect group, one request at a time.
+// Focuses the PR's open tab (window, group, tab) or opens it in its architect group, one request at
+// a time.
 export function goTo(input?: string, repo?: string): Promise<Reply<"goTo">> {
   return serial(() => findOrOpen(input, repo));
 }
 
-// What the popup needs for the repo dropdown: the listed repos, the selected one, and whether to show it.
+// What the popup needs for the repo dropdown: the listed repos, the selected one, and whether to
+// show it.
 export async function repoChoices(): Promise<RepoChoices> {
   const rules = await loadRules();
   const stored = await readStored("prTabsRepo");
@@ -717,7 +721,8 @@ async function closeEachDuplicate(): Promise<{ closed: number }> {
   return { closed };
 }
 
-// Keeps one tab per PR (the active one, else the oldest) and closes the rest; each close is re-decided from the current tabs.
+// Keeps one tab per PR (the active one, else the oldest) and closes the rest; each close is re-
+// decided from the current tabs.
 export function closeDuplicates(): Promise<{ closed: number }> {
   return serial(closeEachDuplicate);
 }
@@ -817,7 +822,8 @@ async function groupOpenTabs(rules: Rules, meta: Meta): Promise<void> {
   }
 }
 
-// Groups the PR tabs already open and polls soon; restored tabs may still be arriving, so the alarm is armed regardless.
+// Groups the PR tabs already open and polls soon; restored tabs may still be arriving, so the alarm
+// is armed regardless.
 async function start(): Promise<void> {
   await chrome.alarms.create(ALARM, { delayInMinutes: FIRST_POLL_SECONDS / 60 });
   const rules = await loadRules();

@@ -133,7 +133,8 @@ async function sendOnce(send: Send, message: Request): Promise<{ reply: unknown 
   }
 }
 
-// Sends message, retrying once when there is no answer or the send throws, unless NOT_RETRIED; failures come back as { error }.
+// Sends message, retrying once when there is no answer or the send throws, unless NOT_RETRIED;
+// failures come back as { error }.
 export async function ask<M extends Request>(send: Send, message: M): Promise<Reply<M["type"]>> {
   const attempts = NOT_RETRIED.has(message.type) ? 1 : 2;
   let failure: Failure = { error: NO_ANSWER };

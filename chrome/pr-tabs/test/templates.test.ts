@@ -68,7 +68,8 @@ function interpolationProblems(node: TemplateNode): string[] {
   return text === null || VARIABLE.test(text.trim()) ? [] : [`{{${text}}}`];
 }
 
-// Every handler that is not a handle<Thing><Event> name and every binding that is more than a variable.
+// Every handler that is not a handle<Thing><Event> name and every binding that is more than a
+// variable.
 function problems(node: TemplateNode): string[] {
   const props = node.type === ELEMENT ? (node.props ?? []) : [];
   const directives = props.filter((prop) => prop.type === DIRECTIVE).flatMap(directiveProblems);
