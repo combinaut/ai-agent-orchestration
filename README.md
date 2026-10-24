@@ -104,7 +104,7 @@ If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`
 
 Releases are cut by [release-please](https://github.com/googleapis/release-please). Merging to `main` keeps a release PR open that bumps `version.txt` and `CHANGELOG.md` from the Conventional Commits since the last release. Merge that PR to tag the version and publish the GitHub release. The first release is 1.0.0. PR titles must be Conventional Commits (`feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`, `perf`, `build`, `revert`; optional scope; `!` for breaking).
 
-PRs the default `GITHUB_TOKEN` opens do not trigger other workflows, so the release PR gets no Validate run until the workflow uses a PAT or GitHub App token.
+PRs opened with the default `GITHUB_TOKEN` trigger no checks, so the workflow dispatches Validate on the release PR branch. Closing and reopening the PR also works.
 
 ## 📚 Docs
 
