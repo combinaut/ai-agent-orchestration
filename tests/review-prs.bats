@@ -775,8 +775,7 @@ prs.load_dispatched = lambda: dispatched
 nodes, _login = prs.fetch("repo:acme/app")
 assert nodes == [pr], nodes
 assert prs.needs_dispatch(nodes[0], dispatched) == (True, "re-review")
-pr["headRefOid"] = old
-pr["myReviews"] = {"nodes": [{"commit": {"oid": old}}]}
+dispatched[url]["heads"][new] = {"state": "done"}
 nodes, _login = prs.fetch("repo:acme/app")
 assert nodes == [], nodes
 ' "$ROOT/$SKILL_DIR/scripts"

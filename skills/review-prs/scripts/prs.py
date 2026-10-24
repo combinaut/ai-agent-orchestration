@@ -169,9 +169,11 @@ def my_review_sha(pr):
 def dispatched_done_on_other_head(pr, dispatched):
     """Whether a completed local dispatch reviewed a SHA other than this head."""
     head = pr.get("headRefOid") or ""
-    return bool(head) and any(
-        sha != head and record.get("state") == "done"
-        for sha, record in heads(dispatched.get(pr["url"]) or {}).items()
+    records = heads(dispatched.get(pr["url"]) or {})
+    if not head or records.get(head, {}).get("state") == "done":
+        return False
+    return any(
+        sha != head and record.get("state") == "done" for sha, record in records.items()
     )
 
 
