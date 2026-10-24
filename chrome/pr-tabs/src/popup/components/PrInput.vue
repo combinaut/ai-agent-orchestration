@@ -32,7 +32,7 @@ useFocus(useTemplateRef("field"), { initialValue: true });
       :readonly="readonly"
     />
     <InputGroupAddon>
-      <kbd id="target-hint" class="font-sans text-hint" aria-label="Press Enter">↵ Enter</kbd>
+      <kbd id="target-hint" class="font-popup text-hint" aria-label="Press Enter">↵ Enter</kbd>
     </InputGroupAddon>
   </InputGroup>
 </template>

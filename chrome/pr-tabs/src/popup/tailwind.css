@@ -20,6 +20,9 @@
   --spacing-group-row: var(--pr-tabs-group-row-padding);
   --spacing-dot: var(--pr-tabs-dot-size);
   --spacing-icon: var(--pr-tabs-icon-size);
+  --font-popup: var(--pr-tabs-font-family);
+  --font-weight-label: var(--pr-tabs-label-font-weight);
+  --radius-dot: var(--pr-tabs-dot-radius);
   --text-body: var(--pr-tabs-font-size);
   --text-hint: var(--pr-tabs-hint-font-size);
   --leading-popup: var(--pr-tabs-line-height);

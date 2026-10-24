@@ -10,16 +10,11 @@ const { title, count, dotClass, countLabel } = useGroupItem(() => props.group);
 <template>
   <li class="flex items-center gap-2 py-group-row">
     <span
-      class="size-dot flex-none rounded-full shadow-dot-ring"
+      class="size-dot flex-none rounded-dot shadow-dot-ring"
       :class="dotClass"
       aria-hidden="true"
     />
     <span>{{ title }}</span>
-    <Badge
-      class="ml-auto tabular-nums"
-      severity="secondary"
-      :value="count"
-      :aria-label="countLabel"
-    />
+    <Badge class="ml-auto" severity="secondary" :value="count" :aria-label="countLabel" />
   </li>
 </template>
