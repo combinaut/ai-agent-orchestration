@@ -11,7 +11,7 @@ A PR drifts while it is being reviewed. Each round adds a fix on top of the last
 
 This skill reads the complete PR diff as a whole, as if it were written in one go, and finds what the final change does not need.
 
-Comments are out of scope here; `/finalize-code-comments` covers them. Run that one as well.
+Comments are out of scope here; `/finalize-code-comments` covers them.
 
 ## Input
 
