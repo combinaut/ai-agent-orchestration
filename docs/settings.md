@@ -25,13 +25,13 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 
 ## 🧩 Worker families
 
-`[providers] enabled` turns worker families on and off. `claude` must be in the list: the Coordinator and the architects run on it. Left empty, it means `claude` and `codex`, plus `pi` when `models.pi_worker` or `models.pi_smart` is set. `orch-settings` prints the resolved list as `ORCH_PROVIDERS`.
+`[providers] enabled` turns worker families on and off. `claude` must be in the list: the Coordinator and the architects run on it. Left empty, it means `claude` and `codex`, plus `pi` when `models.pi_worker`, `models.pi_smart` or `models.pi_models` is set. `orch-settings` prints the resolved list as `ORCH_PROVIDERS`.
 
 | Family | Model settings | Needed when on |
 |---|---|---|
 | `claude` | `models.coordinator`, `models.architect` | both |
 | `codex` | `models.codex_worker`, `models.codex_smart` | at least one; it then serves both tiers, and `orch-settings` prints it for both |
-| `pi` | `models.pi_worker`, `models.pi_smart` | neither; an empty tier is not used |
+| `pi` | `models.pi_worker`, `models.pi_smart`, `models.pi_models` | none of them; an empty tier is not used |
 
 A family left out is never started: the installer does not ask for its models, architects do not pick it (a review falls back to a fresh Sonnet pane of the author's family (Opus for an Opus author), a stronger allowed tier only for credentials, security, shared config, money, installer or watchers, or a HIGH finding; with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code), `/review-prs` dispatches no Codex review, and `pi-start.sh` refuses. Its model settings may stay empty. On a terminal run with `providers.enabled` empty, answering `-` to both Codex model questions writes `enabled = ["claude"]` (plus `"pi"` when a pi model is set). A new family is one more entry in `PROVIDERS` in `lib/orch_settings.py`, with its model settings.
 
@@ -62,6 +62,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `models.codex_smart` | `ORCH_CODEX_SMART_MODEL` | `"<codex-smart-model>"` | Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two |
 | `models.pi_worker` | `ORCH_PI_WORKER_MODEL` | empty | pi model for routine work as provider/model-id; empty means pi is not used on this machine |
 | `models.pi_smart` | `ORCH_PI_SMART_MODEL` | empty | pi model for hard work as provider/model-id; empty means pi is not used on this machine |
+| `models.pi_models` | `ORCH_PI_MODELS` | empty | More pi models as provider/model-id that the architect may pick per task, besides pi_worker and pi_smart; any of the three set turns pi on |
 | `remote_control.architects` | `ORCH_REMOTE_CONTROL_ARCHITECTS` | `true` | Give architect sessions Remote Control on start and recycle |
 | `recycle.tokens` | `ORCH_RECYCLE_TOKENS` | `300000` | Tokens used at which RECYCLE fires |
 | `recycle.pct` | `ORCH_RECYCLE_PCT` | `55` | Context percentage used when the token sensor is absent |
@@ -119,7 +120,7 @@ A family left out is never started: the installer does not ask for its models, a
 
 ### 🥧 pi workers
 
-`models.pi_worker` and `models.pi_smart` are `provider/model-id`, for example `lmstudio/qwen/qwen3.6-35b-a3b`; pi's `--model` accepts that form (`provider/id`, the model id may itself contain slashes). Check ids with `pi --list-models <provider>`. Both default to empty, and empty means pi is not used on this machine; `install.sh` does not ask for them and the architect does not stop on them.
+`models.pi_worker` and `models.pi_smart` are `provider/model-id`, for example `lmstudio/qwen/qwen3.6-35b-a3b`; pi's `--model` accepts that form (`provider/id`, the model id may itself contain slashes). Check ids with `pi --list-models <provider>`. `models.pi_models` is a list of more such ids (`pi_models = ["lmstudio/a", "lmstudio/b"]`; `ORCH_PI_MODELS` is comma-separated) that the architect may pick per task: `pi-start.sh` starts a model id only when it is exactly one entry of the list, and the DeepSeek rule below applies to it too. All three default to empty, and empty means pi is not used on this machine; `install.sh` does not ask for them and the architect does not stop on them.
 
 DeepSeek sends the code to a remote API, so it is off for every repo. A repo opts in with `[pi] deepseek = true` in its personal `.orchestration.local.toml` (the main checkout's file also applies to its linked worktrees). The key in a committed `.orchestration.toml` is ignored with a warning, because a committed file would opt in every clone. The same key in a git-tracked `.orchestration.local.toml` is ignored too, and so is it when git cannot say whether the file is tracked (a broken index or a timeout), with a warning. DeepSeek counts as named when `deepseek` appears, in any case, in the provider or in the model id (`openrouter/deepseek/…`); every other provider, LM Studio included, needs no opt-in. `coordinator/pi-start.sh` enforces this when it starts a pi worker: it refuses an empty provider, ignores an exported `ORCH_PI_DEEPSEEK` and `GIT_*` variables, and its refusal tells the session to ask the user rather than edit the file. The Bash guard denies the ways around it; `docs/bash-guard.md` lists what stays open.
 

@@ -9,7 +9,7 @@ setup() {
   export PATH="$TMP/bin:$PATH"
   export HERDR_CALLS="$TMP/herdr.calls"
   export ORCH_CONFIG="$TMP/orchestration.toml"
-  unset ORCH_PI_WORKER_MODEL ORCH_PI_SMART_MODEL ORCH_PI_DEEPSEEK
+  unset ORCH_PI_WORKER_MODEL ORCH_PI_SMART_MODEL ORCH_PI_MODELS ORCH_PI_DEEPSEEK
   mkdir -p "$HOME" "$TMP/bin" "$TMP/repo"
   git -C "$TMP/repo" init -q
   git -C "$TMP/repo" -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m init
@@ -239,5 +239,66 @@ teardown() {
   ORCH_PROVIDERS=codex run "$SCRIPT" w1 p1 worker
   [ "$status" -eq 2 ]
   [[ "$output" == *'providers.enabled (ORCH_PROVIDERS): must include "claude"'* ]]
+  [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "a model listed in pi_models starts with that provider, model and one --models entry" {
+  printf '[models]\npi_models = ["lmstudio/other/model-b", "lmstudio/model-c"]\n' >"$ORCH_CONFIG"
+  run "$SCRIPT" w1 pane1 lmstudio/other/model-b
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind pi --pane pane1 -- --provider lmstudio --model other/model-b --models lmstudio/other/model-b" ]
+}
+
+@test "a model that is not exactly one pi_models entry exits 2" {
+  printf '[models]\npi_worker = "lmstudio/w"\npi_models = ["lmstudio/model-b"]\n' >"$ORCH_CONFIG"
+  for id in lmstudio/model lmstudio/model-b-2 model-b lmstudio/w lmstudio/other; do
+    run "$SCRIPT" w1 pane1 "$id"
+    [ "$status" -eq 2 ]
+  done
+  [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "a listed DeepSeek model is refused in a repo that did not opt in" {
+  printf '[models]\npi_models = ["deepseek/listed"]\n' >"$ORCH_CONFIG"
+  run "$SCRIPT" w1 pane1 deepseek/listed
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DeepSeek is off"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
+  printf '[pi]\ndeepseek = true\n' >"$TMP/repo/.orchestration.local.toml"
+  run "$SCRIPT" w1 pane1 deepseek/listed
+  [ "$status" -eq 0 ]
+}
+
+@test "pi_models alone counts as configured; worker with an empty slot still fails" {
+  printf '[models]\npi_models = ["lmstudio/model-b"]\n' >"$ORCH_CONFIG"
+  run "$SCRIPT" w1 pane1 lmstudio/model-b
+  [ "$status" -eq 0 ]
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pi is not configured"* ]] || false
+}
+
+@test "a glob or comma in the model argument never matches a pi_models entry" {
+  printf '[models]\npi_models = ["a/x"]\n' >"$ORCH_CONFIG"
+  run "$SCRIPT" w1 pane1 a/x
+  [ "$status" -eq 0 ]
+  rm -f "$HERDR_CALLS"
+  printf '[models]\npi_models = ["lmstudio/qwen/x", "deepseek/deepseek-flash", "a/x", "b/y"]\n' >"$ORCH_CONFIG"
+  for id in 'lmstudio/*' '?mstudio/qwen/x' '[d]eepseek/[d]eepseek-flash' 'a/x,b/y' 'a/x b/y' '*'; do
+    run "$SCRIPT" w1 pane1 "$id"
+    [ "$status" -eq 2 ]
+  done
+  [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "list entries with whitespace or a glob are never expanded, and a file cannot stand in" {
+  touch "$TMP/repo/lmstudio-evil"
+  mkdir -p "$TMP/repo/lmstudio"
+  touch "$TMP/repo/lmstudio/evil"
+  export ORCH_PI_MODELS="lmstudio/a b,lmstudio/*"
+  for id in lmstudio/a b lmstudio/evil; do
+    run "$SCRIPT" w1 pane1 "$id"
+    [ "$status" -eq 2 ]
+  done
   [ ! -e "$HERDR_CALLS" ]
 }

@@ -27,7 +27,7 @@ BIG_REPO_REASON = (
     "No git grep in a configured big repo. Use rg scoped to the directories you need."
 )
 BIG_REPO_BATCH_REASON = "No whole-tree cat-file batch read in a configured big repo. Use rg scoped to the directories you need."
-PI_REASON = "pi starts only through ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart>; DeepSeek is off unless the repo opted in, and a live pi never switches model."
+PI_REASON = "pi starts only through ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart|provider/model-id from ORCH_PI_MODELS>; DeepSeek is off unless the repo opted in, and a live pi never switches model."
 MODEL_COMMAND = re.compile(r"\s*/(?:model|models|scoped-models|settings)\b", re.I)
 BAD_ATTR = re.compile(
     r"co-authored-by:\s*(?:Claude|Codex|ChatGPT|OpenAI|Copilot|Gemini)|co-authored-by:[^\n]*(?:anthropic\.com|openai\.com|chatgpt\.com)|generated-by:\s*(?:Claude|Codex|ChatGPT|OpenAI|Copilot|Gemini)|Generated (?:with|using) (?:\[?(?:Claude Code|Codex|ChatGPT|OpenAI|Copilot|Gemini)\]?)|🤖\s*Generated|claude\.ai/code/session_",

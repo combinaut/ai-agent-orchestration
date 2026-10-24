@@ -57,6 +57,8 @@ codex_smart = "<codex-smart-model>"
 pi_worker = ""
 # pi model for hard work as provider/model-id; empty means pi is not used on this machine
 pi_smart = ""
+# More pi models as provider/model-id that the architect may pick per task, besides pi_worker and pi_smart; any of the three set turns pi on
+pi_models = []
 
 [remote_control]
 # Give architect sessions Remote Control on start and recycle

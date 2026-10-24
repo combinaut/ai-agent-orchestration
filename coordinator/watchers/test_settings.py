@@ -993,6 +993,12 @@ class ProvidersTest(SettingsTest):
                 ],
             )
 
+    def test_pi_models_alone_turn_pi_on_and_arrive_comma_separated(self):
+        values = self.resolve('[models]\npi_models = ["lmstudio/a", "lmstudio/b/c"]\n')
+        self.assertEqual(values["ORCH_PI_MODELS"], "lmstudio/a,lmstudio/b/c")
+        self.assertEqual(values["ORCH_PROVIDERS"], "claude,codex,pi")
+        self.assertEqual(self.resolve()["ORCH_PI_MODELS"], "")
+
     def test_print_keeps_codex_and_pi_values_that_need_no_fallback(self):
         for text in (
             '[models]\ncodex_worker = "w"\ncodex_smart = "s"\n',

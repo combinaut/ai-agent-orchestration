@@ -142,6 +142,14 @@ EOF
   [ "$(config_get ORCH_PROVIDERS)" = claude,pi ]
 }
 
+@test "only models.pi_models in the file adds pi to the family list" {
+  fresh_install
+  config_set ORCH_PI_MODELS lm/pi-listed
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude,pi ]
+}
+
 @test "a pi model that is only exported does not add pi to the file" {
   fresh_install
   export ORCH_PI_WORKER_MODEL=lm/pi-env

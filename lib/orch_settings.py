@@ -74,7 +74,9 @@ class Provider:
 PROVIDERS = [
     Provider("claude", ["ORCH_COORDINATOR_MODEL", "ORCH_ARCHITECT_MODEL"]),
     Provider("codex", ["ORCH_CODEX_WORKER_MODEL", "ORCH_CODEX_SMART_MODEL"], "one"),
-    Provider("pi", ["ORCH_PI_WORKER_MODEL", "ORCH_PI_SMART_MODEL"], "none"),
+    Provider(
+        "pi", ["ORCH_PI_WORKER_MODEL", "ORCH_PI_SMART_MODEL", "ORCH_PI_MODELS"], "none"
+    ),
 ]
 REQUIRED_PROVIDERS = ["claude"]
 CLAUDE_TIERS = ["haiku", "sonnet", "opus", "fable"]
@@ -245,6 +247,14 @@ SETTINGS = [
         "str",
         "",
         "pi model for hard work as provider/model-id; empty means pi is not used on this machine",
+    ),
+    _g(
+        "models.pi_models",
+        "ORCH_PI_MODELS",
+        "list",
+        [],
+        "More pi models as provider/model-id that the architect may pick per task, besides pi_worker and pi_smart; any of the three set turns pi on",
+        sep=",",
     ),
     _g(
         "remote_control.architects",
