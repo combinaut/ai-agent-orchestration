@@ -180,7 +180,7 @@ contains() { printf '%s' "$1" | grep -F -- "$2" >/dev/null; }
 
 @test "the documented command runs nothing when curl fails part way" {
   mkdir "$TMP/curlbin"
-  printf '#!/bin/sh\nhead -n 20 "%s"\nexit 18\n' "$ROOT/get.sh" >"$TMP/curlbin/curl"
+  printf '#!/bin/sh\nhead -n 30 "%s"\nexit 18\n' "$ROOT/get.sh" >"$TMP/curlbin/curl"
   chmod +x "$TMP/curlbin/curl"
   run env PATH="$TMP/curlbin:$PATH" /bin/bash -c 'curl -fsSL https://example.invalid/get.sh | bash -s -- --links-only'
   [ "$status" -ne 0 ]
@@ -247,6 +247,15 @@ contains() { printf '%s' "$1" | grep -F -- "$2" >/dev/null; }
   run env PTY_ANSWERS="" python3 "$ROOT/tests/pty_run.py" /bin/bash -c 'cat "$1" | bash -s' _ "$ROOT/get.sh"
   [ "$status" -eq 0 ]
   contains "$(cat "$STUB_OUT")" "stdin=tty"
+}
+
+@test "bash -c with a redirected stdin keeps it, even on a terminal" {
+  for sh in /bin/bash bash; do
+    rm -f "$STUB_OUT"
+    run env PTY_ANSWERS="" python3 "$ROOT/tests/pty_run.py" /bin/bash -c 'cat "$1" >"$2"; exec "$3" -c "$(cat "$2")" _ </dev/null' _ "$ROOT/get.sh" "$TMP/copy.sh" "$sh"
+    [ "$status" -eq 0 ]
+    contains "$(cat "$STUB_OUT")" "stdin=other"
+  done
 }
 
 @test "a piped script with no terminal keeps stdin and still succeeds" {

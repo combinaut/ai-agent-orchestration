@@ -8,8 +8,10 @@
 set -euo pipefail
 
 REPO_SLUG="combinaut/ai-agent-orchestration"
-# Empty when the script is read from stdin; inside a function Bash 5.3 reports the shell name there.
+# Both are read at top level: inside a function Bash 5.3 reports the shell name as the script.
+# Empty SCRIPT_FILE without the c flag means the script is read from stdin; Bash 3.2 sets no s flag there.
 SCRIPT_FILE=${BASH_SOURCE[0]:-}
+SHELL_FLAGS=$-
 
 die() {
   echo "ERROR: $*" >&2
@@ -78,7 +80,7 @@ main() {
   [ -f "$dir/install.sh" ] || die "$dir has no install.sh"
   export ORCH_REPO_PATH="$dir"
   # The clone's install.sh fast-forwards the clone, refusing local commits and upstreams outside origin.
-  if [ -z "$SCRIPT_FILE" ] && { : </dev/tty; } 2>/dev/null; then
+  if [ -z "$SCRIPT_FILE" ] && [[ $SHELL_FLAGS != *c* ]] && { : </dev/tty; } 2>/dev/null; then
     exec /bin/bash "$dir/install.sh" "$@" </dev/tty
   fi
   exec /bin/bash "$dir/install.sh" "$@"
