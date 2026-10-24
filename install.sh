@@ -90,7 +90,7 @@ release_lock() {
 
 usage() {
   cat <<'USAGE'
-Usage: install.sh [--env <name>] [--links-only]
+Usage: install.sh [--env <name>] [--links-only] [--print-repo-path]
 
 Clones or updates the ai-agent-orchestration repo (ORCH_REPO_PATH, default ~/.claude/ai-agent-orchestration),
 then symlinks its shared files into ~/.claude. Install, update and repair are the same run.
@@ -98,12 +98,14 @@ then symlinks its shared files into ~/.claude. Install, update and repair are th
   --env <name>   Run env/<name>/install.sh (e.g. herdr).
                  Without --env: ORCH_ENV from the config ("none" skips the env step), else herdr.
   --links-only   Sync and link shared files without changing settings or services.
+  --print-repo-path  Print the clone folder this install uses (config or default) and exit.
 USAGE
 }
 
 ENV_NAME=""
 ENV_GIVEN=0
 LINKS_ONLY=0
+PRINT_REPO_PATH=0
 STAGE=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -114,6 +116,7 @@ while [ $# -gt 0 ]; do
       ;;
     --env=*) ENV_NAME=${1#--env=} ENV_GIVEN=1 && shift ;;
     --links-only) LINKS_ONLY=1 && shift ;;
+    --print-repo-path) PRINT_REPO_PATH=1 && shift ;;
     --stage=link) STAGE="link" && shift ;;
     -h | --help) usage && exit 0 ;;
     *) die "unknown option: $1 (see --help)" ;;
@@ -250,6 +253,10 @@ for candidate in ${ORCH_PYTHON3:+"$ORCH_PYTHON3"} python3 ${ORCH_PYTHON_FALLBACK
 done
 ORCH_REPO=$(config_value ORCH_REPO_PATH)
 [ -n "$ORCH_REPO" ] || ORCH_REPO="$CLAUDE_DIR/ai-agent-orchestration"
+if [ "$PRINT_REPO_PATH" = 1 ]; then
+  printf '%s\n' "$ORCH_REPO"
+  exit 0
+fi
 
 PLATFORM=$(uname -s)
 case "$PLATFORM" in

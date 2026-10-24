@@ -1613,3 +1613,20 @@ TOML
   not_contains "$output" 'removed pr_tabs.topics'
   not_contains "$output" 'repos and architects come from the open work'
 }
+
+@test "--print-repo-path prints the configured clone folder and does nothing else" {
+  mkdir -p "$HOME/.claude"
+  printf '[install]\nrepo_path = "%s/custom-clone"\n' "$TMP" >"$HOME/.claude/orchestration.toml"
+  run /bin/bash "$SRC/install.sh" --print-repo-path
+  [ "$status" -eq 0 ]
+  [ "$output" = "$TMP/custom-clone" ]
+  [ ! -e "$HOME/.claude/.orch-links" ]
+  run env -u ORCH_REPO_PATH /bin/bash "$SRC/install.sh" --print-repo-path
+  [ "$output" = "$TMP/custom-clone" ]
+}
+
+@test "--print-repo-path defaults to ~/.claude/ai-agent-orchestration" {
+  run /bin/bash "$SRC/install.sh" --print-repo-path
+  [ "$status" -eq 0 ]
+  [ "$output" = "$HOME/.claude/ai-agent-orchestration" ]
+}

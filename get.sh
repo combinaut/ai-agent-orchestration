@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# One-line installer: clones (or fast-forwards) ai-agent-orchestration, then runs its install.sh.
-#   curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/get.sh | bash
-# Installer arguments go after -s --:  ... | bash -s -- --env herdr
-# ORCH_INSTALL_DIR sets the clone folder (default ORCH_REPO_PATH, else ~/.claude/ai-agent-orchestration).
+# One-line installer: clones the repo if missing, then runs its install.sh, which updates the clone.
+# Runs nothing unless the whole download arrived (curl's exit status gates bash):
+#   s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/get.sh) && bash -c "${s:?empty download}" _
+# Installer arguments follow the final _:  ... _ --env herdr
+# ORCH_INSTALL_DIR sets the clone folder; otherwise install.sh decides (ORCH_REPO_PATH, the config's repo_path, ~/.claude/ai-agent-orchestration).
 set -euo pipefail
 
 REPO_SLUG="combinaut/ai-agent-orchestration"
@@ -26,7 +27,7 @@ same_origin() {
 }
 
 main() {
-  local dir url origin dirty before after
+  local dir url origin dirty tmp
 
   [ "${BASH_VERSINFO[0]}" -gt 3 ] || { [ "${BASH_VERSINFO[0]}" -eq 3 ] && [ "${BASH_VERSINFO[1]}" -ge 2 ]; } ||
     die "bash 3.2 or newer is required (this is $BASH_VERSION)"
@@ -37,8 +38,16 @@ main() {
   command -v git >/dev/null 2>&1 || die "git not found. Install git, then run this again"
   [ -n "${HOME:-}" ] || die "HOME is not set"
 
-  dir=${ORCH_INSTALL_DIR:-${ORCH_REPO_PATH:-$HOME/.claude/ai-agent-orchestration}}
   url=${ORCH_REPO_URL:-https://github.com/$REPO_SLUG.git}
+  dir=${ORCH_INSTALL_DIR:-}
+  if [ -z "$dir" ]; then
+    command -v curl >/dev/null 2>&1 || die "curl not found. Install curl, then run this again"
+    tmp=$(mktemp "${TMPDIR:-/tmp}/ao-install.XXXXXX")
+    trap 'rm -f "$tmp"' EXIT
+    curl -fsSL "${ORCH_INSTALLER_URL:-https://raw.githubusercontent.com/$REPO_SLUG/main/install.sh}" -o "$tmp" ||
+      die "cannot download install.sh. Check the network and run this again"
+    dir=$(/bin/bash "$tmp" --print-repo-path) && [ -n "$dir" ] || die "cannot resolve the clone folder from install.sh"
+  fi
 
   if [ ! -e "$dir" ]; then
     mkdir -p "$(dirname "$dir")"
@@ -57,18 +66,11 @@ main() {
       } >&2
       exit 1
     fi
-    before=$(git -C "$dir" rev-parse HEAD)
-    git -C "$dir" pull -q --ff-only || die "cannot fast-forward $dir. Fix it with git, then run this again"
-    after=$(git -C "$dir" rev-parse HEAD)
-    if [ "$before" = "$after" ]; then
-      echo "up to date      $dir"
-    else
-      echo "updated         $dir ${before:0:7}..${after:0:7}"
-    fi
   fi
 
   [ -f "$dir/install.sh" ] || die "$dir has no install.sh"
   export ORCH_REPO_PATH="$dir"
+  # The clone's install.sh fast-forwards the clone, refusing local commits and upstreams outside origin.
   # With curl | bash, stdin is the script; hand the installer the terminal for its questions.
   if [ ! -t 0 ] && { : </dev/tty; } 2>/dev/null; then
     exec /bin/bash "$dir/install.sh" "$@" </dev/tty
@@ -76,4 +78,5 @@ main() {
   exec /bin/bash "$dir/install.sh" "$@"
 }
 
-main "$@"
+# A cut-off download ends in an unclosed brace, a syntax error that runs nothing.
+{ main "$@"; }
