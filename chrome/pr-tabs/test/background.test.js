@@ -417,8 +417,15 @@ test("goTo opens a bare number in the picked repo and remembers the pick", async
     const multi = await import("../extension/background.js?multi-repo");
     assert.deepEqual(await multi.repoChoices(), { repos: ["webapp", "api", "docs"], selected: "webapp", show: true });
     assert.deepEqual(await multi.goTo("7", "api"), { opened: "acme/api#7" });
+    await multi.pickRepo("api");
     assert.equal(store.prTabsRepo, "api");
     assert.deepEqual(await multi.repoChoices(), { repos: ["webapp", "api", "docs"], selected: "api", show: true });
+    assert.deepEqual(await multi.goTo("11"), { opened: "acme/api#11" }, "no pick sent: the stored pick wins");
+    await multi.pickRepo("docs");
+    assert.equal(store.prTabsRepo, "docs");
+    await multi.pickRepo("unlisted");
+    assert.equal(store.prTabsRepo, "docs");
+    await multi.pickRepo("api");
     assert.deepEqual(await multi.goTo("docs#8", "api"), { opened: "acme/docs#8" });
     assert.deepEqual(await multi.goTo("9", "unlisted"), { opened: "acme/webapp#9" });
     assert.equal(store.prTabsRepo, "api");

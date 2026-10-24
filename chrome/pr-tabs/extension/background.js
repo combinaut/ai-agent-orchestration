@@ -311,13 +311,19 @@ export async function repoChoices() {
   return { repos: effectiveRepos(rules), selected: pickedRepo(rules, prTabsRepo), show: showRepoPicker(rules) };
 }
 
+// Remembers the dropdown pick when it is a listed repo.
+export async function pickRepo(repo) {
+  const rules = await loadRules();
+  if (repo && repo === pickedRepo(rules, repo)) await chrome.storage.local.set({ prTabsRepo: repo });
+}
+
 async function findOrOpen(input, repo) {
   const rules = await loadRules();
   if (!rules.org) return { error: "Set pr_tabs.org in orchestration.toml" };
   if (/^#?\d+$/.test((input || "").trim()) && !effectiveRepos(rules).length)
     return { error: "Set pr_tabs.default_repo in orchestration.toml" };
-  if (repo && repo === pickedRepo(rules, repo)) await chrome.storage.local.set({ prTabsRepo: repo });
-  const pr = parseTarget(input, rules, repo);
+  const { prTabsRepo } = await chrome.storage.local.get({ prTabsRepo: "" });
+  const pr = parseTarget(input, rules, repo || prTabsRepo);
   if (!pr) return { error: `Not a ${rules.org} PR number or URL` };
   const focused = await chrome.windows.getLastFocused().catch(() => null);
   const entry = findOpenTab(await prEntries(rules), pr.key, focused?.id);
@@ -382,7 +388,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM) poll();
 });
 
-chrome.runtime.onMessage.addListener(messageListener({ openAll, goTo: (message) => goTo(message.input, message.repo), repos: repoChoices, summary, checkNow, closeDuplicates }));
+chrome.runtime.onMessage.addListener(messageListener({ openAll, goTo: (message) => goTo(message.input, message.repo), repos: repoChoices, pickRepo: (message) => pickRepo(message.repo), summary, checkNow, closeDuplicates }));
 
 // Groups the PR tabs already open and polls soon; restored tabs may still be arriving, so the alarm is armed regardless.
 async function start() {

@@ -99,7 +99,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `workers.wait_repeat_s` | `ORCH_WAIT_REPEAT_S` | `1800` | Seconds between waiting alerts (minimum 60) |
 | `workers.idle_s` | `ORCH_WORKER_IDLE_S` | `7200` | Seconds idle or done before WORKER IDLE (no open PR) |
 | `pr_tabs.org` | `ORCH_PR_TABS_ORG` | empty | Organization the PR tabs extension manages; empty turns org actions off |
-| `pr_tabs.default_repo` | `ORCH_PR_TABS_DEFAULT_REPO` | empty | Repo name for bare PR numbers; empty turns number jumps off |
+| `pr_tabs.default_repo` | `ORCH_PR_TABS_DEFAULT_REPO` | empty | Repo name for bare PR numbers; number jumps are off when pr_tabs.repos is empty too |
 | `pr_tabs.repos` | `ORCH_PR_TABS_REPOS` | empty | Repo names in `pr_tabs.org` the popup can send a bare PR number to, besides `default_repo`; the popup shows a picker when there are two or more. The environment form is comma-separated |
 | `pr_tabs.open_all` | `ORCH_PR_TABS_OPEN_ALL` | empty | GitHub search behind the Open all button; empty turns it off |
 

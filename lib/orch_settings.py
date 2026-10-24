@@ -516,7 +516,7 @@ SETTINGS = [
         "ORCH_PR_TABS_DEFAULT_REPO",
         "str",
         "",
-        "Repo name for bare PR numbers; empty turns number jumps off",
+        "Repo name for bare PR numbers; number jumps are off when pr_tabs.repos is empty too",
     ),
     _g(
         "pr_tabs.repos",

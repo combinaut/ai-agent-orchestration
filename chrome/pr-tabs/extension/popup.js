@@ -58,6 +58,8 @@ async function loadRepos() {
   repo.hidden = false;
 }
 
+repo.addEventListener("change", () => ask({ type: "pickRepo", repo: repo.value }));
+
 target.focus();
 refresh();
 loadRepos();

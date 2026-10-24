@@ -163,7 +163,7 @@ idle_s = 7200
 [pr_tabs]
 # Organization the PR tabs extension manages; empty turns org actions off
 org = ""
-# Repo name for bare PR numbers; empty turns number jumps off
+# Repo name for bare PR numbers; number jumps are off when pr_tabs.repos is empty too
 default_repo = ""
 # Repo names in pr_tabs.org the popup can send a bare PR number to, besides default_repo; the popup shows a picker when there are two or more
 repos = []

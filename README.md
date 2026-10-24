@@ -111,7 +111,7 @@ If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`
 - [`docs/workers.md`](docs/workers.md): workers, recycles, handoffs and owner tags.
 - [`docs/heavy-slot.md`](docs/heavy-slot.md): the shared cap on heavy jobs and how slots work.
 - [`docs/bash-guard.md`](docs/bash-guard.md): what the Bash guard denies and where it logs.
-- [`docs/pr-tabs.md`](docs/pr-tabs.md): the Chrome PR tabs extension: automatic architect groups (repo fallback), install, use and troubleshooting.
+- [`docs/pr-tabs.md`](docs/pr-tabs.md): the Chrome PR tabs extension: automatic architect groups (repo fallback), a repo picker for bare numbers (`pr_tabs.repos`, or `repo#123`), install, use and troubleshooting.
 - [`env/README.md`](env/README.md): the env adapters (`herdr` and how to add one).
 - [`docs/contributing.md`](docs/contributing.md): running the tests and sending changes.
 
