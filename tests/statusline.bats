@@ -333,3 +333,32 @@ plain_remotes() {
 @test "scp-style forms without user@ that are local paths or have no dotted host stay plain" {
   plain_remotes ./a:b a/b:c c:foo
 }
+
+# Usage sensor: <session-id>.usage holds only the fields the input has.
+usage_file() { printf '%s' "$HOME/.claude/context-usage/$1.usage"; }
+
+@test "usage file holds model id, cost and the 7-day limit when present" {
+  run /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"s1","model":{"id":"claude-opus-5-5","display_name":"Opus 5.5"},"workspace":{"current_dir":"/tmp"},"cost":{"total_cost_usd":1.25},"rate_limits":{"seven_day":{"used_percentage":42.5,"resets_at":1893456000}}}
+JSON
+  [ "$status" -eq 0 ]
+  [ "$(jq -c . "$(usage_file s1)")" = '{"model":"claude-opus-5-5","cost_usd":1.25,"seven_day_pct":42.5,"seven_day_resets_at":1893456000}' ]
+  [ "$(find "$HOME/.claude/context-usage" -type f | wc -l | tr -d " ")" = 1 ]
+}
+
+@test "usage file leaves out rate_limits when the input has none, never writes 0" {
+  run /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"s2","model":{"id":"claude-sonnet-5-5"},"workspace":{"current_dir":"/tmp"},"cost":{"total_cost_usd":0}}
+JSON
+  [ "$status" -eq 0 ]
+  [ "$(jq -c 'keys' "$(usage_file s2)")" = '["cost_usd","model"]' ]
+  [ "$(jq '.cost_usd' "$(usage_file s2)")" = 0 ]
+}
+
+@test "usage file uses model.id, not display_name, and is absent when no field is present" {
+  run /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"s3","model":{"display_name":"Opus 5.5"},"workspace":{"current_dir":"/tmp"}}
+JSON
+  [ "$status" -eq 0 ]
+  [ ! -e "$(usage_file s3)" ]
+}

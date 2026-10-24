@@ -252,7 +252,7 @@ Report outcomes faithfully: if a mutation survived, say so; if a step was skippe
 
 ## Quota
 
-Treat smart-model quota as scarce. Prefer worker → worker → smart escalation over a smart model for every task. Balance work across providers so one subscription is not exhausted while useful capacity remains in the other. Keep your own replies and tool output lean.
+Treat smart-model quota as scarce. Prefer worker → worker → smart escalation over a smart model for every task. Balance work across providers so one subscription is not exhausted while useful capacity remains in the other. Keep your own replies and tool output lean. `orch-usage` prints the weekly limit % and the cost per workspace.
 
 ## Herdr, Codex and watcher specifics
 

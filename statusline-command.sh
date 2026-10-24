@@ -20,6 +20,17 @@ if [ -n "$session_id" ] && [ -n "$tokens" ]; then
     || echo "statusline: cannot write $HOME/.claude/context-usage/$session_id.tokens" >&2
 fi
 
+# Usage sensor: model id, session cost and the 7-day limit, only the fields the input has (never a 0 for a missing one).
+# cost.total_cost_usd is cumulative and resets only on /clear. Written atomically: temp file in the same dir, then mv.
+if [ -n "$session_id" ]; then
+  usage=$(echo "$input" | jq -c '{model: .model.id, cost_usd: .cost.total_cost_usd, seven_day_pct: .rate_limits.seven_day.used_percentage, seven_day_resets_at: .rate_limits.seven_day.resets_at} | with_entries(select(.value != null))' 2>/dev/null)
+  if [ -n "$usage" ] && [ "$usage" != "{}" ]; then
+    { mkdir -p "$HOME/.claude/context-usage" && tmp=$(mktemp "$HOME/.claude/context-usage/.$session_id.usage.XXXXXX") \
+      && printf '%s\n' "$usage" > "$tmp" && mv "$tmp" "$HOME/.claude/context-usage/$session_id.usage"; } 2>/dev/null \
+      || echo "statusline: cannot write $HOME/.claude/context-usage/$session_id.usage" >&2
+  fi
+fi
+
 dir_name=$(basename "$dir" 2>/dev/null)
 
 # https://host/owner/repo for an ssh, ssh:// or https remote URL, credentials dropped; fails otherwise.

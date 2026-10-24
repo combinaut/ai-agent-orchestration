@@ -109,6 +109,7 @@ sequenceDiagram
 ```
 
 - The status line writes tokens used to `~/.claude/context-usage/<session-id>.tokens`. When that file is absent the fallback is `ORCH_RECYCLE_PCT` (55) percent of context.
+- The status line also writes `~/.claude/context-usage/<session-id>.usage`: one JSON object with only the fields the input has (`model`, `cost_usd`, `seven_day_pct`, `seven_day_resets_at`). `close-pane.sh`, the one path every planned close takes, appends one line per closed agent to `~/.claude/coordinator/usage-ledger.tsv` (`closed_at`, `owner`, `workspace_label`, `agent_name`, `pane`, `session_id`, `model`, `cost_usd`). `orch-usage` prints the weekly limit % and the cost per workspace label. A session that ends without `close-pane.sh` (closed by the user, a crash) leaves no ledger line. `cost_usd` is cumulative and resets only on `/clear`, so a session resumed with `claude --resume` appears twice and `orch-usage` counts its last line.
 - The handoff is overwritten, never appended, and stays under about 4,000 characters. Architect template: open PRs (number, head SHA, state, what each waits on), workers (pane id, worktree, model), standing user decisions, open user questions, Coordinator session name.
 - The successor keeps the session name, Herdr agent name, tab name, and `owner` and `role` tags, so `ListAgents`, Radar and the user see one continuous session.
 - One architect recycles at a time, and never one that holds a heavy slot.

@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""The weekly limit read from the status line files, then session count and cost per workspace label from the ledger."""
+import csv
+import json
+import sys
+import time
+from pathlib import Path
+
+FRESH_S = 6 * 3600
+
+
+def when(epoch):
+    return time.strftime('%Y-%m-%d %H:%M', time.localtime(epoch))
+
+
+def age(seconds):
+    minutes = max(int(seconds // 60), 0)
+    return f'{minutes}m' if minutes < 60 else f'{minutes // 60}h{minutes % 60:02d}m'
+
+
+def weekly(usage_dir, now):
+    """The `weekly:` line, from the .usage file with the newest mtime within the last 6 hours."""
+    fresh = []
+    for path in Path(usage_dir).glob('*.usage'):
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if 0 <= now - mtime <= FRESH_S:
+            fresh.append((mtime, path))
+    if not fresh:
+        return 'weekly: unknown'
+    mtime, path = max(fresh)
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return 'weekly: unknown'
+    pct = data.get('seven_day_pct') if isinstance(data, dict) else None
+    resets = data.get('seven_day_resets_at')
+    if not isinstance(pct, (int, float)) or isinstance(pct, bool):
+        return 'weekly: unknown'
+    if isinstance(resets, (int, float)) and resets <= now:
+        return f'weekly: unknown (window reset at {when(resets)})'
+    until = f' resets {when(resets)}' if isinstance(resets, (int, float)) else ''
+    return f'weekly: {pct:g}%{until} (reading {age(now - mtime)} old)'
+
+
+def cost_of(text):
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def ledger_lines(ledger):
+    """One line per workspace label, highest cost first, from the last ledger line of each session id."""
+    try:
+        with open(ledger, newline='') as handle:
+            rows = list(csv.DictReader(handle, delimiter='\t'))
+    except OSError:
+        return ['ledger: none yet']
+    last = {}
+    for row in rows:
+        session = row.get('session_id')
+        if session:
+            last[session] = row
+    totals = {}
+    for row in last.values():
+        label = row.get('workspace_label') or '-'
+        count, total, unknown = totals.get(label, (0, 0.0, 0))
+        cost = cost_of(row.get('cost_usd') or '')
+        totals[label] = (count + 1, total + (cost or 0.0), unknown + (cost is None))
+    if not totals:
+        return ['ledger: no sessions yet']
+    out = []
+    for label, (count, total, unknown) in sorted(totals.items(), key=lambda item: (-item[1][1], item[0])):
+        note = f' ({unknown} without cost)' if unknown else ''
+        out.append(f'{label}: {count} {"session" if count == 1 else "sessions"} ${total:.2f}{note}')
+    return out
+
+
+def main():
+    home = Path.home()
+    print(weekly(home / '.claude/context-usage', time.time()))
+    print('\n'.join(ledger_lines(home / '.claude/coordinator/usage-ledger.tsv')))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

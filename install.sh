@@ -436,6 +436,7 @@ link_shared_files() {
   link_entry "$ORCH_REPO/ask-user-question" "$HOME/.local/bin/ask-user-question"
   link_entry "$ORCH_REPO/orch-agents" "$HOME/.local/bin/orch-agents"
   link_entry "$ORCH_REPO/orch-settings" "$HOME/.local/bin/orch-settings"
+  link_entry "$ORCH_REPO/orch-usage" "$HOME/.local/bin/orch-usage"
   case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
     *) say "PATH setup" "Add export PATH=\"\$HOME/.local/bin:\$PATH\" to your shell startup file (e.g. $(platform_shell_profile)); then open a new shell for heavy-slot commands." ;;
