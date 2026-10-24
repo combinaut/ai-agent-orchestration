@@ -36,14 +36,31 @@ async function popup(repos: string[]) {
 test("the repo dropdown shows only with two or more repos", async () => {
   for (const repos of [[], ["webapp"], ["webapp", "Webapp"]]) {
     const { wrapper } = await popup(repos);
+    await wrapper.find("#target").setValue("76");
     assert.equal(wrapper.findComponent(Select).exists(), false, JSON.stringify(repos));
     assert.equal(wrapper.text().includes("No PR tabs open"), true);
     wrapper.unmount();
   }
   const { wrapper } = await popup(["webapp", "api"]);
+  await wrapper.find("#target").setValue("76");
   const select = wrapper.findComponent(Select);
   assert.equal(select.exists(), true);
   assert.deepEqual(select.props("options"), ["webapp", "api"]);
   assert.equal(select.props("modelValue"), "webapp");
+  wrapper.unmount();
+});
+
+test("the repo dropdown shows only while the input is a bare PR number", async () => {
+  const { wrapper } = await popup(["webapp", "api"]);
+  const field = wrapper.find("#target");
+  for (const [text, shown] of [
+    ["", false],
+    ["76", true],
+    ["https://github.com/acme/webapp/pull/76", false],
+    ["sparkle#76", false],
+  ] as const) {
+    await field.setValue(text);
+    assert.equal(wrapper.findComponent(Select).exists(), shown, JSON.stringify(text));
+  }
   wrapper.unmount();
 });

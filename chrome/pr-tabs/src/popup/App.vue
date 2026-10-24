@@ -6,7 +6,7 @@ import InputGroupAddon from "primevue/inputgroupaddon";
 import InputText from "primevue/inputtext";
 import Message from "primevue/message";
 import Select from "primevue/select";
-import { onMounted, ref, useTemplateRef } from "vue";
+import { computed, onMounted, ref, useTemplateRef } from "vue";
 import { checkText, duplicateText, summaryText, type CheckResult, type GroupSummary, type Summary } from "../core";
 import { ask as askWith, type Message as Request } from "../messages";
 
@@ -34,6 +34,7 @@ const readOnly = ref(false);
 const repos = ref<string[]>([]);
 const repo = ref("");
 const showRepo = ref(false);
+const bareNumber = computed(() => /^\d+$/.test(input.value.trim()));
 const opening = ref(false);
 const checking = ref(false);
 const closing = ref(false);
@@ -140,16 +141,6 @@ onMounted(() => {
           />
         </svg>
       </InputGroupAddon>
-      <Select
-        v-if="showRepo"
-        id="repo"
-        v-model="repo"
-        :options="repos"
-        size="small"
-        class="max-w-[40%]"
-        aria-label="Repository for a bare number"
-        @change="pickRepo"
-      />
       <InputText
         id="target"
         ref="target"
@@ -166,6 +157,16 @@ onMounted(() => {
         <kbd id="target-hint" class="font-sans text-[11px]" aria-label="Press Enter">↵ Enter</kbd>
       </InputGroupAddon>
     </InputGroup>
+    <Select
+      v-if="showRepo && bareNumber"
+      id="repo"
+      v-model="repo"
+      :options="repos"
+      size="small"
+      class="mt-2 w-full"
+      aria-label="Repository for a bare number"
+      @change="pickRepo"
+    />
   </form>
   <Button
     id="open-all"
