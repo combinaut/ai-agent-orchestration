@@ -14,9 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # v5.0.0
+      - uses: actions/checkout@v7
       - id: release
-        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7
+        uses: googleapis/release-please-action@v5
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
@@ -24,7 +24,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PRS: ${{ steps.release.outputs.prs }}
-        run: |
-          jq -r '.[].headBranchName' <<<"$PRS" | while read -r branch; do
-            gh workflow run validate.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
-          done
+        run: scripts/ci/dispatch-validate.sh
