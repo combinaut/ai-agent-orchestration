@@ -18,11 +18,23 @@ def model_window(value):
     if model.startswith("gpt-"):
         try:
             cache = json.loads((Path.home() / ".codex/models_cache.json").read_text())
-            for row in cache["models"]:
-                if row.get("slug") == model and int(row["context_window"]) > 0:
-                    return int(row["context_window"])
-        except (OSError, KeyError, TypeError, ValueError):
-            pass
+        except (OSError, ValueError):
+            return None
+        rows = cache.get("models") if isinstance(cache, dict) else None
+        if not isinstance(rows, list):
+            return None
+        window = None
+        for row in rows:
+            if (
+                not isinstance(row, dict)
+                or not isinstance(row.get("slug"), str)
+                or type(row.get("context_window")) is not int
+                or row["context_window"] <= 0
+            ):
+                return None
+            if row["slug"] == model:
+                window = row["context_window"]
+        return window
     return None
 
 

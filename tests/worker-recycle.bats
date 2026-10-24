@@ -57,6 +57,9 @@ policy() { printf '%s' "$1" | python3 "$ROOT/coordinator/watchers/worker_recycle
   [ "$output" = ASK ]
   run env HOME="$model_home" python3 "$ROOT/coordinator/watchers/worker_recycle.py" <<<'{"value":{"model":"gpt-6.1-sol","tokens":120000,"window":200000}}'
   [ "$output" = HANDOFF_CALL_BOUNDARY ]
+  printf '%s\n' '{"models":[{"slug":"gpt-6.1-sol","context_window":200000}]}' >"$model_home/.codex/models_cache.json"
+  run env HOME="$model_home" python3 "$ROOT/coordinator/watchers/worker_recycle.py" <<<'{"value":{"model":"gpt-6.1-sol","tokens":180000}}'
+  [ "$output" = HANDOFF_CALL_BOUNDARY ]
   rm -rf "$model_home"
 }
 @test "percentage fallback honors configured hard below sixty percent" {
@@ -100,4 +103,32 @@ policy() { printf '%s' "$1" | python3 "$ROOT/coordinator/watchers/worker_recycle
 @test "unknown window hard cannot precede soft" {
   run env ORCH_WORKER_HARD_TOKENS=100000 python3 "$ROOT/coordinator/watchers/worker_recycle.py" <<<'{"value":{"tokens":180000}}'
   [ "$output" = ASK ]
+}
+@test "malformed Codex cache uses unclamped hard without crashing" {
+  model_home=$(mktemp -d)
+  mkdir -p "$model_home/.codex"
+  for cache in \
+    '{broken' \
+    'null' \
+    '[]' \
+    '{"models":null}' \
+    '{"models":{}}' \
+    '{"models":[null]}' \
+    '{"models":["wrong"]}' \
+    '{"models":[{"slug":"gpt-6.1-sol"}]}' \
+    '{"models":[{"slug":"gpt-6.1-sol","context_window":0}]}' \
+    '{"models":[{"slug":"gpt-6.1-sol","context_window":-1}]}' \
+    '{"models":[{"slug":"gpt-6.1-sol","context_window":true}]}' \
+    '{"models":[{"slug":"gpt-6.1-sol","context_window":"200000"}]}' \
+    '{"models":[{"slug":"gpt-6.1-sol","context_window":200000.5}]}' \
+    '{"models":[{"slug":"gpt-6.1-sol","context_window":{}}]}' \
+    '{"models":[{"slug":42,"context_window":200000}]}' \
+    '{"models":[null,{"slug":"gpt-6.1-sol","context_window":200000}]}' \
+    '{"models":[{"slug":"gpt-6.1-sol","context_window":200000},null]}'; do
+    printf '%s\n' "$cache" >"$model_home/.codex/models_cache.json"
+    run env HOME="$model_home" python3 "$ROOT/coordinator/watchers/worker_recycle.py" <<<'{"value":{"model":"gpt-6.1-sol","tokens":180000}}'
+    [ "$status" -eq 0 ] || { echo "cache=$cache: $output"; false; }
+    [ "$output" = ASK ] || { echo "cache=$cache: $output"; false; }
+  done
+  rm -rf "$model_home"
 }
