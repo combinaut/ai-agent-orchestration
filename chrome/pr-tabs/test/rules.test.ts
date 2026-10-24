@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { groupForPr, groupColor } from "../extension/core.js";
+import { test } from "vitest";
+import { groupForPr, groupColor } from "../src/core";
 
 const pr = { owner: "acme", repo: "webapp", branch: "feature" };
 test("owned branches group by architect; unknown branches use repository", () => {

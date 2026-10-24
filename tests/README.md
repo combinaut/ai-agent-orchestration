@@ -16,4 +16,4 @@ Run the full suite with `tests/run.sh`. Bats runs one test at a time, or `ORCH_T
 Bats suite setup and the Python fixture require the runner's sandbox marker.
 The Python runner installs fakes before discovery imports any test modules.
 
-`tests/run.sh` also runs the Chrome PR tabs tests with `node --test chrome/pr-tabs/test/*.test.js`.
+The Chrome PR tabs tests run with Vitest in `chrome/pr-tabs` (`pnpm test`); see [`docs/pr-tabs.md`](../docs/pr-tabs.md#-develop).

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { tabsToClose } from "../extension/core.js";
+import { test } from "vitest";
+import { tabsToClose } from "../src/core";
 
-const tab = (id, active = false) => ({ id, active });
+const tab = (id: number, active = false) => ({ id, active });
 
 test("a tab on a PR that merged or closed before the extension saw it open is closed", () => {
   const entries = [

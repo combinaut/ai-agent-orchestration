@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { ask, messageListener, NO_ANSWER } from "../extension/messages.js";
+import { test } from "vitest";
+import { ask, messageListener, NO_ANSWER, type Message } from "../src/messages";
 
 // The listener's answer, or "no answer" when sendResponse is not called within a second.
-function deliver(listener, message) {
+function deliver(listener: ReturnType<typeof messageListener>, message: Message): Promise<any> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve("no answer"), 1000);
-    listener(message, {}, (answer) => {
+    listener(message, {}, (answer: unknown) => {
       clearTimeout(timer);
       resolve(answer);
     });
@@ -16,7 +16,7 @@ function deliver(listener, message) {
 test("an async handler answers through sendResponse with the channel kept open", async () => {
   const listener = messageListener({ summary: async () => ({ prs: 2, groups: [] }) });
   let kept;
-  const answer = await new Promise((resolve) => {
+  const answer = await new Promise<unknown>((resolve) => {
     kept = listener({ type: "summary" }, {}, resolve);
   });
   assert.equal(kept, true);
@@ -55,10 +55,13 @@ test("the popup retries once when there is no answer", async () => {
 
 test("the popup shows the real error after the retry", async () => {
   let calls = 0;
-  const answer = await ask(async () => {
-    calls++;
-    throw new Error("Could not establish connection. Receiving end does not exist.");
-  }, { type: "summary" });
+  const answer = await ask(
+    async () => {
+      calls++;
+      throw new Error("Could not establish connection. Receiving end does not exist.");
+    },
+    { type: "summary" },
+  );
   assert.equal(calls, 2);
   assert.deepEqual(answer, { error: "Could not establish connection. Receiving end does not exist." });
 });
@@ -69,30 +72,39 @@ test("two silent answers name the stale service worker", async () => {
 
 test("Open all is sent once, so a lost answer cannot open a second batch", async () => {
   let calls = 0;
-  const answer = await ask(async () => {
-    calls++;
-    return undefined;
-  }, { type: "openAll" });
+  const answer = await ask(
+    async () => {
+      calls++;
+      return undefined;
+    },
+    { type: "openAll" },
+  );
   assert.equal(calls, 1);
   assert.deepEqual(answer, { error: NO_ANSWER });
 });
 
 test("Check now is sent once, so a lost answer cannot poll and close tabs twice", async () => {
   let calls = 0;
-  const answer = await ask(async () => {
-    calls++;
-    return undefined;
-  }, { type: "checkNow" });
+  const answer = await ask(
+    async () => {
+      calls++;
+      return undefined;
+    },
+    { type: "checkNow" },
+  );
   assert.equal(calls, 1);
   assert.deepEqual(answer, { error: NO_ANSWER });
 });
 
 test("closeDuplicates is not retried when no answer comes back", async () => {
   let calls = 0;
-  const answer = await ask(async () => {
-    calls++;
-    return undefined;
-  }, { type: "closeDuplicates" });
+  const answer = await ask(
+    async () => {
+      calls++;
+      return undefined;
+    },
+    { type: "closeDuplicates" },
+  );
   assert.equal(calls, 1);
   assert.deepEqual(answer, { error: NO_ANSWER });
 });

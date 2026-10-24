@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import", "vue", "vitest"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "env": { "browser": true, "node": true, "es2024": true },
+  "globals": { "chrome": "readonly" },
+  "rules": {
+    // Tab, group and host calls run one at a time on purpose.
+    "no-await-in-loop": "off",
+    "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }]
+  },
+  "ignorePatterns": ["extension/**", "node_modules/**"]
+}

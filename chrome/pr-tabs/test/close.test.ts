@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { checkText, pruneMeta, recordStates, seedOpen, shouldClose, stillShowsPr, tabsToClose } from "../extension/core.js";
+import { test } from "vitest";
+import { checkText, pruneMeta, recordStates, seedOpen, shouldClose, stillShowsPr, tabsToClose } from "../src/core";
 
 const background = { active: false };
 
@@ -56,12 +56,20 @@ test("fetched states are recorded, missing PRs keep what was known", () => {
 
 test("opening a PR seeds OPEN only where no state is recorded yet", () => {
   const opened = [
-    { hit: { title: "One", headRefName: "a", headRepository: { nameWithOwner: "fork/webapp" } }, pr: { key: "acme/webapp#1" } },
+    {
+      hit: { title: "One", headRefName: "a", headRepository: { nameWithOwner: "fork/webapp" } },
+      pr: { key: "acme/webapp#1" },
+    },
     { hit: { title: "Two", headRefName: "b" }, pr: { key: "acme/webapp#2" } },
   ];
   const next = seedOpen({ "acme/webapp#2": { state: "CLOSED", title: "Two", headRefName: "b" } }, opened);
   assert.deepEqual(next, {
-    "acme/webapp#1": { state: "OPEN", title: "One", headRefName: "a", headRepository: { nameWithOwner: "fork/webapp" } },
+    "acme/webapp#1": {
+      state: "OPEN",
+      title: "One",
+      headRefName: "a",
+      headRepository: { nameWithOwner: "fork/webapp" },
+    },
     "acme/webapp#2": { state: "CLOSED", title: "Two", headRefName: "b" },
   });
 });
@@ -82,6 +90,9 @@ test("the check result names what was closed, what stayed in view and what waits
     checkText({ tabs: 2, prs: 2, checked: 2, closed: [{ key: "a", state: "CLOSED" }], inView: ["acme/webapp#9"] }),
     "Closed 1 closed-PR tab; 1 tab in view kept (acme/webapp#9).",
   );
-  assert.equal(checkText({ tabs: 120, prs: 110, checked: 100, closed: [], inView: [] }), "No merged or closed PRs among 100 PRs checked; 10 more next time.");
+  assert.equal(
+    checkText({ tabs: 120, prs: 110, checked: 100, closed: [], inView: [] }),
+    "No merged or closed PRs among 100 PRs checked; 10 more next time.",
+  );
   assert.equal(checkText({ tabs: 0, prs: 0, checked: 0, closed: [], inView: [] }), "No PR tabs open");
 });

@@ -12,4 +12,3 @@ else
 fi
 python3 tests/guard-bash.test.py
 (cd coordinator/watchers && python3 run_tests.py)
-node --test chrome/pr-tabs/test/*.test.js

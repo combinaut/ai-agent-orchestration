@@ -3,12 +3,12 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, test } from "node:test";
+import { afterAll, test } from "vitest";
 import { fileURLToPath } from "node:url";
 
 const HOST = fileURLToPath(new URL("../host/pr_tabs_host.py", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "pr-tabs-host-"));
-after(() => rmSync(dir, { recursive: true, force: true }));
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 writeFileSync(
   join(dir, "gh"),
@@ -16,25 +16,46 @@ writeFileSync(
 );
 chmodSync(join(dir, "gh"), 0o755);
 
-function frame(body) {
+function frame(body: Buffer) {
   const header = Buffer.alloc(4);
   header.writeUInt32LE(body.length);
   return Buffer.concat([header, body]);
 }
 
-function ask(message, { reply = {}, status = 0, stderr = "", raw } = {}) {
+function ask(
+  message: unknown,
+  {
+    reply = {},
+    status = 0,
+    stderr = "",
+    raw,
+  }: { reply?: unknown; status?: number; stderr?: string; raw?: Buffer } = {},
+) {
   const calls = join(dir, `calls-${Math.random()}`);
   writeFileSync(join(dir, "reply.json"), JSON.stringify(reply));
   writeFileSync(calls, "");
   const done = spawnSync("python3", ["-I", HOST], {
     input: raw ?? frame(Buffer.from(JSON.stringify(message))),
-    env: { ...process.env, HOME: dir, PATH: `${dir}:${process.env.PATH}`, GH_CALLS: calls, GH_REPLY: join(dir, "reply.json"), GH_STATUS: String(status), GH_STDERR: stderr, ORCH_ENV: "none", PR_TABS_LOG: join(dir, "host.log") },
+    env: {
+      ...process.env,
+      HOME: dir,
+      PATH: `${dir}:${process.env.PATH}`,
+      GH_CALLS: calls,
+      GH_REPLY: join(dir, "reply.json"),
+      GH_STATUS: String(status),
+      GH_STDERR: stderr,
+      ORCH_ENV: "none",
+      PR_TABS_LOG: join(dir, "host.log"),
+    },
     timeout: 20000,
   });
   assert.equal(done.status, 0, done.stderr.toString());
   const size = done.stdout.readUInt32LE(0);
   assert.equal(done.stdout.length, 4 + size);
-  return { reply: JSON.parse(done.stdout.subarray(4).toString()), calls: readFileSync(calls, "utf8").split("\n").filter(Boolean) };
+  return {
+    reply: JSON.parse(done.stdout.subarray(4).toString()),
+    calls: readFileSync(calls, "utf8").split("\n").filter(Boolean),
+  };
 }
 
 const prs = Array.from({ length: 3 }, (_, i) => ({ owner: "acme", repo: "webapp", number: i + 1 }));
@@ -119,21 +140,14 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
     ["ORCH_PR_TABS_ORG", "org", "a".repeat(40)],
     ["ORCH_PR_TABS_DEFAULT_REPO", "default_repo", "bad/repo"],
     ["ORCH_PR_TABS_DEFAULT_REPO", "default_repo", "a".repeat(101)],
-  ]) {
+  ] as const) {
     writeFileSync(config, `[pr_tabs]\n${name} = "${value}"\n`);
     const invalidName = ask({ type: "settings" });
     assert.equal(invalidName.reply.ok, false);
     assert.match(invalidName.reply.error, new RegExp(key));
     assert.equal(invalidName.calls.length, 0);
   }
-  writeFileSync(
-    config,
-    Buffer.concat([
-      Buffer.from('[pr_tabs]\norg = "'),
-      Buffer.from([255]),
-      Buffer.from('"\n'),
-    ]),
-  );
+  writeFileSync(config, Buffer.concat([Buffer.from('[pr_tabs]\norg = "'), Buffer.from([255]), Buffer.from('"\n')]));
   const badEncoding = ask({ type: "settings" });
   assert.equal(badEncoding.reply.ok, false);
   assert.match(badEncoding.reply.error, /Cannot load PR-tabs settings/);
@@ -168,7 +182,10 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
 
 test("partial GraphQL errors still return the PRs that resolved", () => {
   const data = { p0: { pullRequest: { state: "OPEN", title: "One", headRefName: "a" } }, p1: null, p2: null };
-  const { reply } = ask({ type: "states", prs }, { reply: { data, errors: [{ message: "Could not resolve" }] }, status: 1 });
+  const { reply } = ask(
+    { type: "states", prs },
+    { reply: { data, errors: [{ message: "Could not resolve" }] }, status: 1 },
+  );
   assert.equal(reply.ok, true);
   assert.equal(reply.prs["acme/webapp#1"].state, "OPEN");
 });
@@ -202,17 +219,30 @@ test("an oversized request is refused without reading it", () => {
 test("search returns the hits, the total and the next page in one gh call", () => {
   const nodes = [{ url: "https://github.com/acme/webapp/pull/1", title: "One", headRefName: "a" }, {}];
   const search = { issueCount: 140, pageInfo: { endCursor: "Y3Vyc29yOjEwMA==", hasNextPage: true }, nodes };
-  const { reply, calls } = ask({ type: "search", query: "is:pr author:tester", limit: 100 }, { reply: { data: { search } } });
+  const { reply, calls } = ask(
+    { type: "search", query: "is:pr author:tester", limit: 100 },
+    { reply: { data: { search } } },
+  );
   assert.equal(calls.length, 1);
-  assert.doesNotMatch(calls[0], / a=/);
-  assert.match(calls[0], /author:tester/);
-  assert.deepEqual(reply, { ok: true, owners: {}, total: 140, prs: [nodes[0]], endCursor: "Y3Vyc29yOjEwMA==", hasNextPage: true });
+  assert.doesNotMatch(calls[0]!, / a=/);
+  assert.match(calls[0]!, /author:tester/);
+  assert.deepEqual(reply, {
+    ok: true,
+    owners: {},
+    total: 140,
+    prs: [nodes[0]],
+    endCursor: "Y3Vyc29yOjEwMA==",
+    hasNextPage: true,
+  });
 });
 
 test("search continues after the given cursor", () => {
   const search = { issueCount: 140, pageInfo: { endCursor: null, hasNextPage: false }, nodes: [] };
-  const { reply, calls } = ask({ type: "search", query: "is:pr", limit: 100, after: "Y3Vyc29yOjEwMA==" }, { reply: { data: { search } } });
-  assert.match(calls[0], / a=Y3Vyc29yOjEwMA==/);
+  const { reply, calls } = ask(
+    { type: "search", query: "is:pr", limit: 100, after: "Y3Vyc29yOjEwMA==" },
+    { reply: { data: { search } } },
+  );
+  assert.match(calls[0]!, / a=Y3Vyc29yOjEwMA==/);
   assert.equal(reply.hasNextPage, false);
 });
 
@@ -227,7 +257,10 @@ test("every request leaves one log line with the states it returned", () => {
   writeFileSync(join(dir, "host.log"), "");
   ask({ type: "states", prs }, { reply: { data } });
   ask({ type: "shell" });
-  const lines = readFileSync(join(dir, "host.log"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const lines = readFileSync(join(dir, "host.log"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
   assert.equal(lines.length, 2);
   assert.deepEqual(lines[0].states, { "acme/webapp#1": "MERGED", "acme/webapp#2": null, "acme/webapp#3": null });
   assert.match(lines[1].error, /unknown request type/);
