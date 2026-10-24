@@ -84,7 +84,7 @@ Every question for you gets its own pane under the to-do pane, with keys to answ
 
 ### 🔍 Review PRs
 
-`/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`, or `ORCH_CODEX_SMART_MODEL` when only that one is set) in a Herdr pane for every PR that is ready; Codex posts the review with `gh api .../reviews -f commit_id=<reviewed sha>` and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. A PR absent from one search is checked directly before it is cleared; at most 10 checks run per poll and an unconfirmed absence clears after five misses. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
+`/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`, or `ORCH_CODEX_SMART_MODEL` when only that one is set) in a Herdr pane for every PR that is ready; Codex posts a commit-pinned `review.json` with `gh api .../reviews --input review.json` and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. A PR absent from one search is checked directly before it is cleared; at most 10 checks run per poll and an unconfirmed absence clears after five misses. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
 
 ### 🐘 Heavy jobs
 

@@ -132,10 +132,10 @@ Rules:
 - Search code with rg or grep.$repo_rules
 - Do not run tests unless needed. Run any test as heavy-slot take review-$agent -- <command> (escalated if the sandbox blocks it), the narrowest spec only.
 - Do NOT use Computer Use or a browser for anything in this task. Use gh and the shell only.
-- Post the GitHub review directly via gh api repos/<owner>/<repo>/pulls/<number>/reviews -f commit_id=<reviewed sha> (not gh pr review), with the appropriate event and body; substitute the Head SHA above for <reviewed sha>. No confirmation needed from me. End the review body with *(Generated using Codex)* on its own line.
+- Write review.json with {\"commit_id\":\"$sha\",\"event\":\"APPROVE|REQUEST_CHANGES|COMMENT\",\"body\":\"...\",\"comments\":[{\"path\":\"...\",\"line\":123,\"side\":\"RIGHT\",\"body\":\"...\"}]}; use an empty comments array when there are no inline findings, and end the body with *(Generated using Codex)* on its own line. Post it with gh api repos/$repo/pulls/$num/reviews --input review.json (not gh pr review). No confirmation needed from me.
 - Never merge, close, flip ready, or assign human reviewers.
 - Never edit, create or delete any file in the repository (including AGENTS.md or other instruction files); this is a read-only review.
-- When finished, reply with one line: APPROVE|COMMENT|CHANGES_REQUESTED — $url
+- When finished, reply with one line: APPROVE|COMMENT|REQUEST_CHANGES — $url
 - After posting the review, reply with that one line and end your turn. Do not poll, sleep, or wait for CI, other reviewers or replies."
 
 prompt_out=$(herdr agent prompt "$agent" "$prompt" --wait --timeout 1800000 2>&1)

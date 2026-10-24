@@ -138,11 +138,15 @@ dispatch() {
   contains "$(cat "$TMP/review.prompt")" 'Do not poll, sleep, or wait for CI, other reviewers or replies.'
 }
 
-@test "review prompt pins the posted review to the dispatched head" {
+@test "review prompt posts a commit-pinned JSON review with inline comments" {
   stub_review_tools
   : >"$TMP/none.toml"
   dispatch
-  contains "$(cat "$TMP/review.prompt")" "gh api repos/<owner>/<repo>/pulls/<number>/reviews -f commit_id=<reviewed sha>"
+  prompt=$(cat "$TMP/review.prompt")
+  contains "$prompt" '"event":"APPROVE|REQUEST_CHANGES|COMMENT"'
+  contains "$prompt" '"comments":[{"path":"...","line":123,"side":"RIGHT","body":"..."}]'
+  contains "$prompt" 'gh api repos/acme/app/pulls/7/reviews --input review.json'
+  contains "$prompt" 'APPROVE|COMMENT|REQUEST_CHANGES'
 }
 
 @test "the skill closes panes only through close-pane.sh" {
@@ -781,6 +785,64 @@ assert nodes == [], nodes
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
+}
+
+@test "unreadable and malformed dispatched state does not break fetch" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {
+    "url": url, "number": 7, "title": "t", "isDraft": False,
+    "mergeable": "MERGEABLE", "headRefOid": "head",
+    "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
+    "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+    "myReviews": {"nodes": [{"commit": {"oid": "head"}}]},
+}
+prs.viewer_login = lambda: "reviewer"
+prs.search = lambda query, _login: [] if " review-requested:@me " in query else [pr]
+state = Path.home() / ".cache/review-prs/dispatched.json"
+state.parent.mkdir(parents=True, exist_ok=True)
+for raw in ("", "{bad", "[]"):
+    state.write_text(raw)
+    assert prs.load_dispatched() == {}, raw
+    assert prs.fetch("repo:acme/app")[0] == [], raw
+for data in ({url: []}, {url: {"heads": None}}, {url: {"heads": []}}, {url: {"heads": {"old": None}}}):
+    state.write_text(json.dumps(data))
+    assert prs.fetch("repo:acme/app")[0] == [], data
+directory = state.parent / "unreadable"
+directory.mkdir()
+prs.DISPATCH_FILE = directory
+assert prs.load_dispatched() == {}
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a manually reviewed moved head is re-queued once" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": "B",
+      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+      "myReviews": {"nodes": [{"commit": {"oid": "B"}}]}}
+dispatched = {url: {"heads": {"A": {"state": "done"}}}}
+assert prs.dispatched_done_on_other_head(pr, dispatched)
+assert prs.needs_dispatch(pr, dispatched) == (True, "re-review")
+dispatched[url]["heads"]["B"] = {"state": "pending"}
+assert prs.needs_dispatch(pr, dispatched) == (False, None)
+dispatched[url]["heads"]["B"] = {"state": "done"}
+assert not prs.dispatched_done_on_other_head(pr, dispatched)
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  grep -qF 'A manual review of a moved head is re-queued once' "$ROOT/$SKILL_DIR/SKILL.md"
 }
 
 @test "dispatch uses the configured Herdr executable for every call" {

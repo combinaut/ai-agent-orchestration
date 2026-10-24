@@ -169,7 +169,8 @@ def my_review_sha(pr):
 def dispatched_done_on_other_head(pr, dispatched):
     """Whether a completed local dispatch reviewed a SHA other than this head."""
     head = pr.get("headRefOid") or ""
-    records = heads(dispatched.get(pr["url"]) or {})
+    entry = dispatched.get(pr["url"]) if isinstance(dispatched, dict) else None
+    records = heads(entry)
     if not head or records.get(head, {}).get("state") == "done":
         return False
     return any(
@@ -319,9 +320,11 @@ def save_state(scope, snap):
 
 
 def load_dispatched():
-    if not DISPATCH_FILE.exists():
+    try:
+        data = json.loads(DISPATCH_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
         return {}
-    return json.loads(DISPATCH_FILE.read_text())
+    return data if isinstance(data, dict) else {}
 
 
 def update_dispatched(change):
@@ -402,7 +405,8 @@ def needs_dispatch(pr, dispatched):
     if bucket(pr) != "ready":
         return False, None
     sha = pr.get("headRefOid") or ""
-    known = heads(dispatched.get(pr["url"]) or {})
+    entry = dispatched.get(pr["url"]) if isinstance(dispatched, dict) else None
+    known = heads(entry)
     if sha and sha in known:
         return False, None
     kind = "re-review" if known or my_review_sha(pr) else "review"
@@ -690,8 +694,15 @@ HEADS_KEPT = 20
 
 def heads(entry):
     """sha -> {state, agent, pane, at} for one PR; a mark from before per-head records counts as done."""
-    if "heads" in entry:
-        return entry["heads"]
+    if not isinstance(entry, dict):
+        return {}
+    records = entry.get("heads")
+    if isinstance(records, dict):
+        return {
+            sha: record for sha, record in records.items() if isinstance(record, dict)
+        }
+    if records is not None:
+        return {}
     return (
         {
             entry["sha"]: {
