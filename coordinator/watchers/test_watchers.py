@@ -465,6 +465,39 @@ class WatcherTests(IsolatedTestCase):
         )
         self.assertEqual(w.reduce("context", after, raw)[1], [])
 
+    def test_worker_stage_never_downgrades_before_owner_or_session_changes(self):
+        raw = worker_context(300000)
+        before, events = w.reduce("context", None, raw)
+        self.assertEqual(events, [worker_line("300k")])
+        for tokens in (450000, 320000, 450000, 1000):
+            raw["usage"]["session-worker-001"]["tokens"] = tokens
+            before, events = w.reduce("context", before, raw)
+            if tokens == 450000 and not getattr(self, "hard_seen", False):
+                self.assertEqual(
+                    events,
+                    [
+                        worker_line("cleared"),
+                        worker_line("450k").replace("-SOFT", "-HARD"),
+                    ],
+                )
+                self.hard_seen = True
+            else:
+                self.assertEqual(events, [])
+            self.assertIn("RECYCLE-WORKER-HARD", before["session-worker-001"])
+        raw["workspaces"]["result"]["workspaces"][1]["tokens"]["owner"] = "new-owner"
+        middle, events = w.reduce("context", before, raw)
+        self.assertEqual(events, [worker_line("cleared").replace("-SOFT", "-HARD")])
+        self.assertNotIn("session-worker-001", middle)
+        raw["usage"]["session-worker-001"]["tokens"] = 320000
+        _, events = w.reduce("context", before, raw)
+        self.assertEqual(
+            events,
+            [
+                worker_line("cleared").replace("-SOFT", "-HARD"),
+                worker_line("320k", owner="new-owner"),
+            ],
+        )
+
     def test_context_worker_successor_alerts_again_and_the_old_pane_clears(self):
         raw = worker_context(310000)
         with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):

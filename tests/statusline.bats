@@ -350,3 +350,20 @@ JSON
   [ ! -e "$sensor_home/.claude/context-usage/fixture.model" ]
   rm -rf "$sensor_home"
 }
+
+@test "window metadata publication preserves an already open reader" {
+  sensor_home=$(mktemp -d)
+  mkdir -p "$sensor_home/.claude/context-usage"
+  sensor="$sensor_home/.claude/context-usage/atomic.window"
+  printf '1000000\n' >"$sensor"
+  exec 9<"$sensor"
+  run env HOME="$sensor_home" /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"atomic","context_window":{"context_window_size":200000}}
+JSON
+  [ "$status" -eq 0 ]
+  IFS= read -r old_window <&9
+  exec 9<&-
+  [ "$old_window" = 1000000 ]
+  [ "$(cat "$sensor")" = 200000 ]
+  rm -rf "$sensor_home"
+}

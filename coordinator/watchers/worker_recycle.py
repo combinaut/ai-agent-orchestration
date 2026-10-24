@@ -58,11 +58,19 @@ def stage(value):
     return None
 
 
-def decision(value, answer="", slot=False, elapsed=0, idle=False):
+def decision(
+    value,
+    answer="",
+    slot=False,
+    elapsed=0,
+    idle=False,
+    pending=False,
+    hard_pending=False,
+):
     """Called by the architect with a fresh reading and verified live slot ownership."""
     if slot:
         return "WAIT_SLOT"
-    if stage(value) == "HARD":
+    if hard_pending or stage(value) == "HARD":
         return "HANDOFF_CALL_BOUNDARY"
     if answer.strip() == "NOW":
         return "HANDOFF"
@@ -72,6 +80,8 @@ def decision(value, answer="", slot=False, elapsed=0, idle=False):
         return "WAIT_DONE" if soft + int(finish[1]) < hard else "HANDOFF_CLEAN_POINT"
     if elapsed >= int(os.environ.get("ORCH_WORKER_ASK_TIMEOUT_S", 600)):
         return "ASK" if idle else "REASK_WHEN_IDLE"
+    if not answer and (pending or elapsed > 0):
+        return "WAIT_REPLY"
     return "ASK" if not answer else "ASK_VALID_REPLY"
 
 

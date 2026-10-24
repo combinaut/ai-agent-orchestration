@@ -544,7 +544,7 @@ def workspace_failures(previous, raw):
 
 
 def worker_untagged(key, line, raw):
-    """True when a successful workspace read shows the owner tag gone from the workspace of the worker session `key`."""
+    """True when a successful workspace read shows this worker owner removed or changed."""
     if (
         not line.startswith(
             ("RECYCLE-WORKER ", "RECYCLE-WORKER-SOFT ", "RECYCLE-WORKER-HARD ")
@@ -554,7 +554,7 @@ def worker_untagged(key, line, raw):
         return False
     owners = workspace_owners(raw)
     return any(
-        not owners.get(row.get("workspace_id"))
+        owners.get(row.get("workspace_id")) != line.split()[2].removeprefix("owner=")
         for row in agents(raw["herdr"])
         if (row.get("agent_session") or {}).get("value") == key
     )
@@ -562,6 +562,17 @@ def worker_untagged(key, line, raw):
 
 def reduce_context(before, after, raw):
     previous = before or {}
+    after = dict(after)
+    for key, line in after.items():
+        old = previous.get(key, "")
+        if (
+            old.startswith("RECYCLE-WORKER-HARD ")
+            and line.startswith("RECYCLE-WORKER-SOFT ")
+            and old.split()[2] == line.split()[2]
+        ):
+            # A forced handoff can be waiting on a heavy slot. Keep it pending
+            # for this session/owner even if a later sensor reading decreases.
+            after[key] = line.replace("RECYCLE-WORKER-SOFT ", "RECYCLE-WORKER-HARD ", 1)
     moved = {
         key
         for key in after
@@ -598,7 +609,10 @@ def reduce_context(before, after, raw):
         for key in sorted(after)
         if key not in previous
         or key in moved
-        or context_step(after[key]) > context_step(previous[key])
+        or (
+            not after[key].startswith("RECYCLE-WORKER")
+            and context_step(after[key]) > context_step(previous[key])
+        )
     ]
     remembered.update(after)
     fails = workspace_failures(previous, raw)

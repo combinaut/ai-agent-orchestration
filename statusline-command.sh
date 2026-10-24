@@ -29,7 +29,11 @@ if [ -n "$session_id" ]; then
     esac
     sensor="$HOME/.claude/context-usage/$session_id.$field"
     if [ -n "$value" ]; then
-      { mkdir -p "$(dirname "$sensor")" && printf '%s\n' "$value" >"$sensor"; } 2>/dev/null || true
+      # Publish in the same directory so a watcher sees a complete old or new value.
+      sensor_tmp=
+      if mkdir -p "$(dirname "$sensor")" && sensor_tmp=$(mktemp "$sensor.tmp.XXXXXX"); then
+        { printf '%s\n' "$value" >"$sensor_tmp" && mv -f "$sensor_tmp" "$sensor"; } 2>/dev/null || rm -f "$sensor_tmp"
+      fi
     else
       rm -f "$sensor"
     fi

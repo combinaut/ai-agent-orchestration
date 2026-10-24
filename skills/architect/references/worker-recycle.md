@@ -6,7 +6,7 @@ The context watcher reads Claude's `~/.claude/context-usage/<session-id>.tokens`
 
 Workers use `recycle.worker_soft_tokens` (300000) and `recycle.worker_hard_tokens` (450000). Effective hard is `min(configured hard, floor(0.6 × model window))`, even when it falls below soft. Equal soft and hard sends HARD directly, preserving immediate handoff behavior. Sensor metadata takes precedence; the single fallback table is `coordinator/watchers/worker_recycle.py:MODEL_WINDOWS`. The architect-approved fallback is 200000 for every Claude model and for Codex when its cache is unavailable. For a new model, ask the architect before changing this table; never guess a larger window. The table covers Haiku (`claude-haiku-5-5`), Sonnet (`claude-sonnet-5-5`), Opus (`claude-opus-5-5`), Fable (`claude-fable-5-1`), Codex terra (`gpt-5.6-terra`) and sol (`gpt-6.1-sol`). Codex reads its exact model entry in `~/.codex/models_cache.json` before using the fallback. The architect must verify the model/window of existing workers before acting on an unclamped signal.
 
-The message shape remains `context: RECYCLE-WORKER-SOFT <pane> owner=<you> <name> <amount> (start). No reply needed.` (or `RECYCLE-WORKER-HARD`). Messages use `bindings/architect-$HERDR_WORKSPACE_ID.json`, wait in the existing outbox when unbound, retry every 60 seconds and expire after an hour. Each stage fires once per session/owner crossing.
+The message shape remains `context: RECYCLE-WORKER-SOFT <pane> owner=<you> <name> <amount> (start). No reply needed.` (or `RECYCLE-WORKER-HARD`). Messages use `bindings/architect-$HERDR_WORKSPACE_ID.json`, wait in the existing outbox when unbound, retry every 60 seconds and expire after an hour. Each stage fires once per session/owner crossing; HARD stays latched for that session and owner even if later readings decrease.
 
 Codex has no token sensor in this watcher: it is not automatically watched. Its architect must obtain current used tokens and the active model window from the worker's native context display, compare them at worker idle/done and before dispatching another step, and apply these same thresholds. If those readings are unavailable, ask for them over the native route and defer new work until known. Never treat missing readings as zero. The Codex model cache's `context_window` is a window fallback, not a usage sensor; do not use cumulative billing tokens. Ask Codex through `codex queue --thread <verified-session-UUID-or-exact-name> --message <text>`; use native `SendMessage` for Claude. Verify the recipient runtime first, repair a failed route, never type into a live composer. Preserve the worker name/model tier through recycle and rebind watcher destinations with a round-trip acknowledgement.
 
@@ -21,10 +21,10 @@ Codex has no token sensor in this watcher: it is not automatically watched. Its 
 Use the same tested decision helper when choosing the next action, passing fresh sensor metadata and verified live-slot ownership:
 
 ```bash
-printf '%s\n' '{"value":{"tokens":310000,"window":1000000},"answer":"FINISH 10000 checks","slot":false,"elapsed":0,"idle":false}' | python3 ~/.claude/coordinator/watchers/worker_recycle.py
+printf '%s\n' '{"value":{"tokens":310000,"window":1000000},"answer":"FINISH 10000 checks","slot":false,"elapsed":0,"idle":false,"pending":false,"hard_pending":false}' | python3 ~/.claude/coordinator/watchers/worker_recycle.py
 ```
 
-`WAIT_SLOT` waits for release; `WAIT_DONE` waits for the step report; `HANDOFF_CLEAN_POINT` orders the next clean point; `HANDOFF_CALL_BOUNDARY` orders the next call boundary; `HANDOFF` proceeds now; `REASK_WHEN_IDLE` records the pending re-ask; `ASK` / `ASK_VALID_REPLY` send the question. The helper never sends messages or recycles a process itself.
+Set `pending=true` after sending the ask (even at elapsed zero), and retain `hard_pending=true` after any HARD until the handoff completes. `WAIT_REPLY` waits for the original answer before timeout; `WAIT_SLOT` waits for release; `WAIT_DONE` waits for the step report; `HANDOFF_CLEAN_POINT` orders the next clean point; `HANDOFF_CALL_BOUNDARY` orders the next call boundary; `HANDOFF` proceeds now; `REASK_WHEN_IDLE` records the pending re-ask; `ASK` / `ASK_VALID_REPLY` send the question. The helper never sends messages or recycles a process itself.
 
 ## Procedure
 

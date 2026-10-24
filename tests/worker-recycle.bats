@@ -23,6 +23,10 @@ policy() { printf '%s' "$1" | python3 "$ROOT/coordinator/watchers/worker_recycle
   [ "$output" = WAIT_SLOT ]
   run policy '{"value":{"tokens":450000}}'
   [ "$output" = HANDOFF_CALL_BOUNDARY ]
+  run policy '{"value":{"tokens":320000,"window":1000000},"slot":true,"hard_pending":true}'
+  [ "$output" = WAIT_SLOT ]
+  run policy '{"value":{"tokens":320000,"window":1000000},"hard_pending":true}'
+  [ "$output" = HANDOFF_CALL_BOUNDARY ]
 }
 @test "small model window clamps hard before soft" {
   run policy '{"value":{"tokens":120000,"window":200000}}'
@@ -65,4 +69,10 @@ policy() { printf '%s' "$1" | python3 "$ROOT/coordinator/watchers/worker_recycle
   run env -u ORCH_WORKER_SOFT_TOKENS -u ORCH_WORKER_HARD_TOKENS ORCH_CONFIG="$config_file" python3 "$ROOT/coordinator/watchers/worker_recycle.py" <<<'{"value":{"tokens":200,"window":1000000}}'
   [ "$output" = HANDOFF_CALL_BOUNDARY ]
   rm -f "$config_file"
+}
+@test "pending unanswered ask waits until timeout" {
+  run policy '{"value":{"tokens":310000,"window":1000000},"elapsed":300}'
+  [ "$output" = WAIT_REPLY ]
+  run policy '{"value":{"tokens":310000,"window":1000000},"elapsed":0,"pending":true}'
+  [ "$output" = WAIT_REPLY ]
 }
