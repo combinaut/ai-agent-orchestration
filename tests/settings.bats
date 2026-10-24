@@ -75,6 +75,7 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
 }
 
 @test "an exported variable wins over both repo files for every repo setting" {
+  : >"$ORCH_CONFIG"
   mkdir -p "$TMP/repo/sub"
   git -C "$TMP/repo" init -q
   every_value repo >"$TMP/repo/.orchestration.toml"
@@ -96,6 +97,7 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
 }
 
 @test "outside a checkout every repo setting has its built-in default" {
+  : >"$ORCH_CONFIG"
   run load_settings "$TMP"
 
   [ "$status" -eq 0 ]
