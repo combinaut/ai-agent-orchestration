@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 
@@ -51,7 +52,9 @@ def used_tokens(value):
         return int(value["tokens"])
     window = model_window(value)
     if window is not None and value.get("remaining") is not None:
-        return (100 - float(value["remaining"])) * window / 100
+        remaining = Decimal(str(value["remaining"]))
+        if remaining.is_finite():
+            return (100 - remaining) * window / 100
     return None
 
 
@@ -90,11 +93,10 @@ def decision(
     if finish:
         soft, hard = limits(value)
         needed = int(finish[1]) * (1000 if finish[2] else 1)
-        return (
-            "WAIT_DONE"
-            if max(soft, used_tokens(value) or 0) + needed < hard
-            else "HANDOFF_CLEAN_POINT"
-        )
+        current = used_tokens(value)
+        base = soft if current is None else max(soft, current)
+        projected = base + needed
+        return "WAIT_DONE" if projected < hard else "HANDOFF_CLEAN_POINT"
     if elapsed >= int(os.environ.get("ORCH_WORKER_ASK_TIMEOUT_S", 600)):
         return "ASK" if idle else "REASK_WHEN_IDLE"
     if not answer and (pending or elapsed > 0):

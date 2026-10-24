@@ -99,6 +99,10 @@ policy() { printf '%s' "$1" | python3 "$ROOT/coordinator/watchers/worker_recycle
 @test "FINISH exact hard boundary requires handoff" {
   run policy '{"value":{"tokens":300000,"window":1000000},"answer":"FINISH 150000 checks"}'
   [ "$output" = HANDOFF_CLEAN_POINT ]
+  run policy '{"value":{"tokens":420000,"window":1000000},"answer":"FINISH 30000 checks"}'
+  [ "$output" = HANDOFF_CLEAN_POINT ]
+  run policy '{"value":{},"answer":"FINISH 150000 checks"}'
+  [ "$output" = HANDOFF_CLEAN_POINT ]
 }
 @test "unknown window hard cannot precede soft" {
   run env ORCH_WORKER_HARD_TOKENS=100000 python3 "$ROOT/coordinator/watchers/worker_recycle.py" <<<'{"value":{"tokens":180000}}'
@@ -131,4 +135,19 @@ policy() { printf '%s' "$1" | python3 "$ROOT/coordinator/watchers/worker_recycle
     [ "$output" = ASK ] || { echo "cache=$cache: $output"; false; }
   done
   rm -rf "$model_home"
+}
+
+@test "FINISH with unknown current tokens uses soft as base" {
+  for value in '{}' '{"tokens":null,"window":1000000}' '{"remaining":40}'; do
+    run policy "{\"value\":$value,\"answer\":\"FINISH 200000 checks\"}"
+    [ "$output" = HANDOFF_CLEAN_POINT ]
+    run policy "{\"value\":$value,\"answer\":\"FINISH 100000 checks\"}"
+    [ "$output" = WAIT_DONE ]
+  done
+}
+@test "FINISH percentage equality requires handoff without rounding below hard" {
+  run policy '{"value":{"remaining":66.7,"window":1000000},"answer":"FINISH 117000 checks"}'
+  [ "$output" = HANDOFF_CLEAN_POINT ]
+  run policy '{"value":{"remaining":66.7,"window":1000000},"answer":"FINISH 116999 checks"}'
+  [ "$output" = WAIT_DONE ]
 }
