@@ -13,7 +13,7 @@ This skill sweeps every comment **added or modified on the current branch** and 
 
 ## Input
 
-`$ARGUMENTS` (optional): a base ref to diff against (default: merge-base with the default branch), followed by file paths to limit the sweep to. If both are given, the ref comes first: `/finalize-code-comments <ref> <path> [<path>…]`. A token that `git rev-parse --verify --quiet <token>^{commit}` resolves is the base ref; anything else (or anything that exists on disk) is a path. At most one ref is accepted.
+`$ARGUMENTS` (optional): a base ref to diff against (default: merge-base with `origin/<base>`, where `<base>` is the current PR's base from `gh pr view --json baseRefName`; the repo default branch only when no PR exists), followed by file paths to limit the sweep to. If both are given, the ref comes first: `/finalize-code-comments <ref> <path> [<path>…]`. A token that `git rev-parse --verify --quiet <token>^{commit}` resolves is the base ref; anything else (or anything that exists on disk) is a path. At most one ref is accepted.
 
 ## The two tests
 
@@ -60,7 +60,7 @@ For each comment, ask — in this order:
 
 ## Process
 
-1. Determine the diff scope with a single command that covers committed, staged, **and** unstaged changes: `git diff $(git merge-base HEAD <base>) -- <paths>` (base defaults to the default branch; ref and paths from `$ARGUMENTS`). The scope is the complete PR diff, not the last commit. Also run `git ls-files --others --exclude-standard -- <paths>` to pick up untracked files, which `git diff` misses.
+1. Determine the diff scope with a single command that covers committed, staged, **and** unstaged changes: `git diff $(git merge-base HEAD <base>) -- <paths>` (base as in Input; ref and paths from `$ARGUMENTS`). The scope is the complete PR diff, not the last commit. Also run `git ls-files --others --exclude-standard -- <paths>` to pick up untracked files, which `git diff` misses.
 2. For each changed file, read the diff and identify every added or modified **syntactic comment** — text the language's parser treats as a comment (including HTML `<!-- -->`, `//`, `#`, and block comments whose body changed). A comment marker inside a non-comment context is out of scope: `#` in a string literal, URL, or scalar value; `//` in a URL or regex; heredoc content. When in doubt, read the surrounding file context — never edit anything that isn't unambiguously a comment.
 3. Apply the tests above to each and present the findings as a table; wait for approval before changing anything:
 

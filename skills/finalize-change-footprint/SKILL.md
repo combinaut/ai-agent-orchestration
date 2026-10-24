@@ -15,7 +15,7 @@ Comments are out of scope here; `/finalize-code-comments` covers them.
 
 ## Input
 
-`$ARGUMENTS` (optional): a base ref to diff against (default: merge-base with the default branch), followed by file paths to limit the sweep to. If both are given, the ref comes first: `/finalize-change-footprint <ref> <path> [<path>…]`. A token that `git rev-parse --verify --quiet <token>^{commit}` resolves is the base ref; anything else (or anything that exists on disk) is a path. At most one ref is accepted.
+`$ARGUMENTS` (optional): a base ref to diff against (default: merge-base with `origin/<base>`, where `<base>` is the current PR's base from `gh pr view --json baseRefName`; the repo default branch only when no PR exists), followed by file paths to limit the sweep to. If both are given, the ref comes first: `/finalize-change-footprint <ref> <path> [<path>…]`. A token that `git rev-parse --verify --quiet <token>^{commit}` resolves is the base ref; anything else (or anything that exists on disk) is a path. At most one ref is accepted.
 
 ## The test
 
@@ -49,7 +49,7 @@ For each added or changed piece, ask:
 
 ## Process
 
-1. Determine the scope: `git diff $(git merge-base HEAD <base>) -- <paths>` (committed, staged, and unstaged), `git ls-files --others --exclude-standard -- <paths>`, and `git log --oneline <base>..HEAD`. The scope is the complete PR diff, not the last commit.
+1. Determine the scope with the base from Input: `git diff $(git merge-base HEAD <base>) -- <paths>` (committed, staged, and unstaged), `git ls-files --others --exclude-standard -- <paths>`, and `git log --oneline <base>..HEAD`. The scope is the complete PR diff, not the last commit.
 2. Read every changed file's diff, every untracked file from step 1 in full (they have no diff), and every touched test file in full.
 3. For each candidate, verify before proposing: search for usages, name the test that covers a duplicate, name the callers checked for an unexercised case.
 4. Present the findings as a table and wait for approval before changing anything:
