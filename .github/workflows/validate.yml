@@ -15,15 +15,23 @@ jobs:
     permissions:
       pull-requests: read
     outputs:
-      macos: ${{ steps.scope.outputs.macos }}
+      macos: ${{ github.event_name != 'pull_request' || steps.filter.outputs.macos == 'true' || steps.filter.outputs.validate == 'true' }}
     steps:
       - uses: actions/checkout@v7
-      - id: scope
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT: ${{ github.event_name }}
-          PR: ${{ github.event.pull_request.number }}
-        run: scripts/ci/macos-scope.sh >>"$GITHUB_OUTPUT"
+      - uses: dorny/paths-filter@v4
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          predicate-quantifier: every
+          filters: |
+            macos:
+              - '**'
+              - '!**/*.md'
+              - '!LICENSE'
+              - '!docs/**'
+              - '!.github/**'
+            validate:
+              - '.github/workflows/validate.yml'
 
   macos:
     name: Validate (macos-latest)
