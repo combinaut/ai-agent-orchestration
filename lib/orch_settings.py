@@ -870,10 +870,10 @@ def as_env(values):
 
 def resolved_global(path, environ):
     """Every global ORCH_* setting as the scripts see it: default < the file < an exported variable."""
-    file = load_global(path)
+    file = {**load_global(path), **as_env(shared_values(path))}
     values = {
         s.env: environ.get(s.env, file.get(s.env, env_value(s, s.default)))
-        for s in scoped("global")
+        for s in listed("global")
     }
     values[BY_KEY["providers.enabled"].env] = ",".join(enabled_providers(values))
     values[BY_KEY["providers.claude"].env] = ",".join(claude_tiers(values))
@@ -916,12 +916,16 @@ def load_global(path):
     return as_env({s: v for s, v in read_file(path, "global").items() if not s.shared})
 
 
-def global_layer(environ):
-    """Shared settings the global file sets; they sit under every repo layer."""
-    path = config_path(environ)
+def shared_values(path):
+    """Shared settings the global file sets; a missing file sets none."""
     if not Path(path).is_file():
         return {}
     return {s: v for s, v in read_file(path, "global").items() if s.shared}
+
+
+def global_layer(environ):
+    """The shared settings of the selected global file; they sit under every repo layer."""
+    return shared_values(config_path(environ))
 
 
 def repo_root(start):
@@ -1896,7 +1900,8 @@ def main(argv):
                 )
             )
         elif command == "repo" and len(argv) == 3:
-            sys.stdout.write(shell_lines(load_repo(argv[2], {})))
+            selected = {k: v for k, v in os.environ.items() if k == "ORCH_CONFIG"}
+            sys.stdout.write(shell_lines(load_repo(argv[2], selected)))
         elif command == "migrate" and len(argv) == 5:
             print("\n".join(migrate(*argv[2:])))
         elif command == "upgrade" and len(argv) >= 3:

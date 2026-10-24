@@ -1022,6 +1022,38 @@ class ProvidersTest(SettingsTest):
             self.assertEqual(s.tier_model(values, "ORCH_CODEX_WORKER_MODEL"), model)
             self.assertEqual(s.tier_model(values, "ORCH_CODEX_SMART_MODEL"), model)
 
+    def test_print_shows_the_shared_review_settings_from_default_file_and_environment(
+        self,
+    ):
+        defaults = self.resolve()
+        self.assertEqual(
+            defaults["ORCH_REVIEW_FINALIZE_COMMANDS"],
+            "/finalize-change-footprint|/finalize-code-comments",
+        )
+        self.assertEqual(defaults["ORCH_REVIEW_FINALIZE_COMMENT"], "1")
+        text = "[review]\nfinalize_commands = []\nfinalize_comment = false\n"
+        filed = self.resolve(text)
+        self.assertEqual(filed["ORCH_REVIEW_FINALIZE_COMMANDS"], "")
+        self.assertEqual(filed["ORCH_REVIEW_FINALIZE_COMMENT"], "0")
+        self.assertEqual(
+            self.resolve(text, ORCH_REVIEW_FINALIZE_COMMENT="1")[
+                "ORCH_REVIEW_FINALIZE_COMMENT"
+            ],
+            "1",
+        )
+
+    def test_the_repo_command_reads_the_global_file_ORCH_CONFIG_selects(self):
+        root = self.repo()
+        config = self.write("sel.toml", "[review]\nfinalize_comment = false\n")
+        out = subprocess.run(
+            [sys.executable, str(REPO / "lib/orch_settings.py"), "repo", str(root)],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**os.environ, "ORCH_CONFIG": str(config)},
+        ).stdout
+        self.assertIn("orch_set_default ORCH_REVIEW_FINALIZE_COMMENT 0\n", out)
+
     def test_print_shows_the_set_codex_model_for_an_unset_tier(self):
         for text, model in (
             ('[models]\ncodex_smart = "only-smart"\n', "only-smart"),
