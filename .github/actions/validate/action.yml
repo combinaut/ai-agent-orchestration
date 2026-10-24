@@ -1,5 +1,5 @@
 name: Validate
-description: ShellCheck, Ruff and the test suites
+description: ShellCheck, Ruff, the PR tabs extension and the test suites
 runs:
   using: composite
   steps:
@@ -9,6 +9,22 @@ runs:
     - name: Ruff
       shell: bash
       run: scripts/ci/ruff.sh
+    - name: Set up pnpm for the PR tabs extension
+      if: runner.os == 'Linux'
+      uses: pnpm/action-setup@v6
+      with:
+        package_json_file: chrome/pr-tabs/package.json
+    - name: Set up Node for the PR tabs extension
+      if: runner.os == 'Linux'
+      uses: actions/setup-node@v7
+      with:
+        node-version: 24
+        cache: pnpm
+        cache-dependency-path: chrome/pr-tabs/pnpm-lock.yaml
+    - name: PR tabs extension lint, types, tests and build check
+      if: runner.os == 'Linux'
+      shell: bash
+      run: scripts/ci/pr-tabs.sh
     - name: Prove Linux runner systemctl tripwire
       if: runner.os == 'Linux'
       shell: bash

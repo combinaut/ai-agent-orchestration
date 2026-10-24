@@ -4,25 +4,11 @@
     <meta charset="utf-8" />
     <meta name="color-scheme" content="light dark" />
     <title>PR tabs</title>
-    <link rel="stylesheet" href="popup.css" />
+    <script type="module" crossorigin src="./popup.js"></script>
+    <link rel="modulepreload" crossorigin href="./shared.js">
+    <link rel="stylesheet" crossorigin href="./popup.css">
   </head>
-  <body>
-    <form id="go" class="field">
-      <label for="target">Go to a PR</label>
-      <div class="input">
-        <svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-          <path d="M10.68 11.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06ZM11.5 7a4.5 4.5 0 1 0-9 0 4.5 4.5 0 0 0 9 0Z" />
-        </svg>
-        <select id="repo" hidden aria-label="Repository for a bare number"></select>
-        <input id="target" autofocus autocomplete="off" spellcheck="false" placeholder="2972 or a PR URL" aria-describedby="target-hint" />
-        <kbd id="target-hint" aria-label="Press Enter">↵ Enter</kbd>
-      </div>
-    </form>
-    <button id="open-all" class="primary" type="button">Open all my open PRs</button>
-    <button id="check-now" class="secondary" type="button">Close merged PRs</button>
-    <button id="close-duplicates" class="secondary" type="button">Close duplicate tabs</button>
-    <p id="status" class="status" role="status" aria-live="polite"></p>
-    <ul id="groups" class="groups" aria-label="PR tab groups"></ul>
-    <script src="popup.js" type="module"></script>
+  <body class="m-0 w-popup bg-popup p-4 font-popup text-body leading-popup text-popup-text">
+    <div id="app"></div>
   </body>
 </html>

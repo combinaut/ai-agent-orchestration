@@ -1,0 +1,38 @@
+/* The popup's own design tokens, for what the Aura preset (--p-*) lacks. */
+:root {
+  --pr-tabs-popup-width: 300px;
+  --pr-tabs-font-family: ui-sans-serif, system-ui, sans-serif;
+  --pr-tabs-font-size: 13px;
+  --pr-tabs-label-font-weight: 600;
+  --pr-tabs-line-height: 1.4;
+  --pr-tabs-hint-font-size: 11px;
+  --pr-tabs-status-min-height: 1.4em;
+  --pr-tabs-group-row-padding: 3px;
+  --pr-tabs-dot-size: 10px;
+  --pr-tabs-dot-radius: 50%;
+  --pr-tabs-dot-ring: inset 0 0 0 1px rgb(0 0 0 / 0.3);
+  --pr-tabs-group-grey: #5f6368;
+  --pr-tabs-group-blue: #1a73e8;
+  --pr-tabs-group-red: #d93025;
+  --pr-tabs-group-yellow: #f9ab00;
+  --pr-tabs-group-green: #1e8e3e;
+  --pr-tabs-group-pink: #d01884;
+  --pr-tabs-group-purple: #a142f4;
+  --pr-tabs-group-cyan: #007b83;
+  --pr-tabs-group-orange: #fa903e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --pr-tabs-dot-ring: inset 0 0 0 0 transparent;
+    --pr-tabs-group-grey: #dadce0;
+    --pr-tabs-group-blue: #8ab4f8;
+    --pr-tabs-group-red: #f28b82;
+    --pr-tabs-group-yellow: #fdd663;
+    --pr-tabs-group-green: #81c995;
+    --pr-tabs-group-pink: #ff8bcb;
+    --pr-tabs-group-purple: #d7aefb;
+    --pr-tabs-group-cyan: #78d9ec;
+    --pr-tabs-group-orange: #fcad70;
+  }
+}

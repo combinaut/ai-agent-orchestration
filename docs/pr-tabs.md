@@ -5,7 +5,7 @@ A Chrome extension for PR tabs in `ORCH_PR_TABS_ORG`. It sorts PR tabs into name
 ## ✨ What it does
 
 - **Groups** every unpinned PR tab by the architect owning its checked-out head branch, or by repository name when no owner is available. Group colours are a stable hash of the name. Ownership changes are picked up on the existing check cadence. New tabs sort themselves when they load.
-- **Go to a PR**: paste a PR number or URL and press Enter. A number uses `ORCH_PR_TABS_ORG` and the repo picked in the dropdown next to the field (`ORCH_PR_TABS_DEFAULT_REPO` until you pick; the dropdown shows when `ORCH_PR_TABS_REPOS` plus the default make two or more, and remembers your last pick); `repo#123` goes to a listed repo; a URL decides the repo, but only when its owner is `ORCH_PR_TABS_ORG`; a PR URL of another owner is rejected. An open tab for that PR is focused (its window comes forward, its group expands); otherwise the PR opens in its group.
+- **Go to a PR**: paste a PR number or URL and press Enter. A number uses `ORCH_PR_TABS_ORG` and the repo picked in the dropdown below the field (`ORCH_PR_TABS_DEFAULT_REPO` until you pick; the dropdown shows while the input is a bare number and `ORCH_PR_TABS_REPOS` plus the default make two or more, and remembers your last pick); `repo#123` goes to a listed repo; a URL decides the repo, but only when its owner is `ORCH_PR_TABS_ORG`; a PR URL of another owner is rejected. An open tab for that PR is focused (its window comes forward, its group expands); otherwise the PR opens in its group.
 - **Open all my open PRs** opens up to 30 PRs matching `ORCH_PR_TABS_OPEN_ALL`, in the order defined by that query, skipping ones already open. Over 30, the badge shows how many are left (`+N`), or an estimate (`~N`, "about N more") when not every search result was fetched. Click again for the next batch.
 - **Close merged PRs** runs the merged/closed check at once. The popup says what it closed, which merged tab stayed because it is in view, or the error.
 - **Close duplicate tabs** keeps one tab per PR and closes the rest, across all normal windows (incognito is skipped). It keeps the tab in view in the focused window if it is one of them, else a tab in view in another window, else the oldest (lowest tab ID). The popup says how many it closed. Two tabs are the same PR when owner, repo (any case) and number match, whatever the sub-page (`/files`, `/commits`), query or `#fragment`. Go to a PR and Open all my open PRs use the same match, so they focus or skip an open tab instead of adding a double.
@@ -41,6 +41,23 @@ The native host asks the selected env adapter, through shared open-work discover
 - A failed scan keeps the last good owner map until a check succeeds. A successful scan with no owners restores repo grouping.
 - Pinned tabs stay untouched.
 - The installer removes retired topic rules from existing personal config and prints one migration line.
+
+## 🛠 Develop
+
+The extension is Vue 3 with PrimeVue 4 (Aura theme, dark mode from the system) and TypeScript. Sources live in `chrome/pr-tabs/src`: `background.ts` (service worker), `core.ts` (pure logic), `messages.ts` (typed popup ↔ worker messages), `types.ts` (every shared type), `popup/` (`App.vue`, `components/`, `tokens.css` for the `--pr-tabs-*` design tokens) and `composables/` (popup logic on VueUse). Static files in `chrome/pr-tabs/public` (`manifest.json`, `rules.json`). Vite builds them into `chrome/pr-tabs/extension`, the folder Chrome loads. The build is committed, so installing needs no Node.
+
+Needs Node 22.12+, 24 or 26+ (the range Vite and Vitest support) and pnpm (the version `packageManager` in `package.json` pins). In `chrome/pr-tabs`:
+
+| Command | Does |
+|---|---|
+| `pnpm install` | Installs the pinned dependencies from `pnpm-lock.yaml`. |
+| `pnpm build` | Builds `extension/` with fixed file names. Commit the result. |
+| `pnpm test` | Runs the Vitest suite with v8 coverage; under 80 % lines or branches fails. Component specs use happy-dom, the host tests need `python3`. For one file: `pnpm exec vitest run --coverage.enabled=false test/<file>`. |
+| `pnpm lint` | oxlint (braces, no nested ternaries, no `any` or `!`, short functions) and Prettier (`pnpm format` rewrites). `test/templates.test.ts` keeps templates to plain variables and `handle*` handlers; `test/tokens.test.ts` bans literal colours and lengths; `test/layout.test.ts` wants a blank line before every closing `return`. |
+| `pnpm typecheck` | `vue-tsc --noEmit` in strict mode. |
+| `pnpm check` | All of the above in that order, build last. |
+
+After `pnpm build`, click the reload icon on the extension card at `chrome://extensions`. CI runs `scripts/ci/pr-tabs.sh` on Ubuntu: lint, types, tests, then a rebuild that fails when `extension/` differs from the commit.
 
 ## 🩺 Troubleshooting
 

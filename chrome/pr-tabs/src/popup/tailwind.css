@@ -1,0 +1,29 @@
+@layer theme, base, primevue, components, utilities;
+@import "tailwindcss" source("..");
+@import "tailwindcss-primeui";
+@import "./tokens.css";
+
+@theme inline {
+  --color-popup: var(--p-content-background);
+  --color-popup-text: var(--p-text-color);
+  --color-group-grey: var(--pr-tabs-group-grey);
+  --color-group-blue: var(--pr-tabs-group-blue);
+  --color-group-red: var(--pr-tabs-group-red);
+  --color-group-yellow: var(--pr-tabs-group-yellow);
+  --color-group-green: var(--pr-tabs-group-green);
+  --color-group-pink: var(--pr-tabs-group-pink);
+  --color-group-purple: var(--pr-tabs-group-purple);
+  --color-group-cyan: var(--pr-tabs-group-cyan);
+  --color-group-orange: var(--pr-tabs-group-orange);
+  --spacing-popup: var(--pr-tabs-popup-width);
+  --spacing-status: var(--pr-tabs-status-min-height);
+  --spacing-group-row: var(--pr-tabs-group-row-padding);
+  --spacing-dot: var(--pr-tabs-dot-size);
+  --font-popup: var(--pr-tabs-font-family);
+  --font-weight-label: var(--pr-tabs-label-font-weight);
+  --radius-dot: var(--pr-tabs-dot-radius);
+  --text-body: var(--pr-tabs-font-size);
+  --text-hint: var(--pr-tabs-hint-font-size);
+  --leading-popup: var(--pr-tabs-line-height);
+  --shadow-dot-ring: var(--pr-tabs-dot-ring);
+}

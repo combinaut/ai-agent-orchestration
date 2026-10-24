@@ -1,0 +1,46 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "import", "vue", "vitest"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "env": { "browser": true, "node": true, "es2024": true },
+  "globals": { "chrome": "readonly" },
+  "rules": {
+    // Tab, group and host calls run one at a time on purpose.
+    "no-await-in-loop": "off",
+    "curly": ["error", "all"],
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          { "regex": "^\\.\\./", "message": "Import through a # alias from package.json imports." }
+        ]
+      }
+    ],
+    "no-nested-ternary": "error",
+    "max-lines-per-function": [
+      "error",
+      { "max": 30, "skipBlankLines": true, "skipComments": true }
+    ],
+    "max-depth": ["error", 2],
+    "max-params": ["error", 3],
+    "complexity": ["error", 8],
+    "vitest/expect-expect": [
+      "error",
+      { "assertFunctionNames": ["assert", "assert.*", "assertRefused"] }
+    ],
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/consistent-type-imports": "error",
+    "vue/define-props-declaration": ["error", "type-based"],
+    "vue/define-emits-declaration": ["error", "type-based"],
+    "vue/require-typed-ref": "error",
+    "vue/no-arrow-functions-in-watch": "error",
+    "vue/prefer-import-from-vue": "error",
+    "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }]
+  },
+  "ignorePatterns": ["extension/**", "node_modules/**"]
+}

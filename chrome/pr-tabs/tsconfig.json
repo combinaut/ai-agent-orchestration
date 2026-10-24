@@ -1,0 +1,18 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": ["chrome", "node", "vite/client"],
+    "noEmit": true,
+    "paths": {
+      "#/*": ["./src/*"],
+      "#popup/*": ["./src/popup/*"],
+      "#test/*": ["./test/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "test/**/*.ts", "vite.config.ts"]
+}
