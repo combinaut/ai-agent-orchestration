@@ -166,12 +166,26 @@ def my_review_sha(pr):
     return ((nodes[-1].get("commit") or {}).get("oid")) if nodes else None
 
 
+def dispatched_records(pr, dispatched):
+    """The valid per-head records for a PR from locally dispatched state."""
+    entry = dispatched.get(pr["url"]) if isinstance(dispatched, dict) else None
+    return heads(entry)
+
+
+def dispatched_current_head_done(pr, dispatched):
+    """Whether a completed local dispatch already covers this PR head."""
+    head = pr.get("headRefOid") or ""
+    return (
+        bool(head)
+        and dispatched_records(pr, dispatched).get(head, {}).get("state") == "done"
+    )
+
+
 def dispatched_done_on_other_head(pr, dispatched):
     """Whether a completed local dispatch reviewed a SHA other than this head."""
     head = pr.get("headRefOid") or ""
-    entry = dispatched.get(pr["url"]) if isinstance(dispatched, dict) else None
-    records = heads(entry)
-    if not head or records.get(head, {}).get("state") == "done":
+    records = dispatched_records(pr, dispatched)
+    if not head or dispatched_current_head_done(pr, dispatched):
         return False
     return any(
         sha != head and record.get("state") == "done" for sha, record in records.items()
@@ -193,8 +207,11 @@ def fetch(scope):
     moved = [
         n
         for n in reviewed
-        if (my_review_sha(n) and my_review_sha(n) != n.get("headRefOid"))
-        or dispatched_done_on_other_head(n, dispatched)
+        if not dispatched_current_head_done(n, dispatched)
+        and (
+            (my_review_sha(n) and my_review_sha(n) != n.get("headRefOid"))
+            or dispatched_done_on_other_head(n, dispatched)
+        )
     ]
     seen = set()
     nodes = []

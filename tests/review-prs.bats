@@ -784,6 +784,10 @@ assert prs.needs_dispatch(nodes[0], dispatched) == (True, "re-review")
 dispatched[url]["heads"][new] = {"state": "done"}
 nodes, _login = prs.fetch("repo:acme/app")
 assert nodes == [], nodes
+# Reviews can complete in reverse order, leaving the latest GitHub review on A.
+pr["myReviews"] = {"nodes": [{"commit": {"oid": old}}]}
+nodes, _login = prs.fetch("repo:acme/app")
+assert nodes == [], nodes
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
