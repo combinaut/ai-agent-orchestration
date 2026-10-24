@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, test, vi } from "vitest";
 import { fileURLToPath } from "node:url";
+import type { FakeGh, HostAnswer } from "#test/types";
 
 const HOST = fileURLToPath(new URL("../host/pr_tabs_host.py", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "pr-tabs-host-"));
@@ -27,26 +28,14 @@ const FAKE_GH = [
 writeFileSync(join(dir, "gh"), FAKE_GH);
 chmodSync(join(dir, "gh"), 0o755);
 
-interface HostAnswer {
-  ok?: boolean;
-  error?: string;
-  [field: string]: unknown;
-}
-
-interface Fake {
-  reply?: unknown;
-  status?: number;
-  stderr?: string;
-  raw?: Buffer;
-}
-
 function frame(body: Buffer) {
   const header = Buffer.alloc(4);
   header.writeUInt32LE(body.length);
+
   return Buffer.concat([header, body]);
 }
 
-function hostEnv(calls: string, fake: Fake): NodeJS.ProcessEnv {
+function hostEnv(calls: string, fake: FakeGh): NodeJS.ProcessEnv {
   const { status = 0, stderr = "" } = fake;
 
   return {
@@ -74,7 +63,7 @@ function errorOf(reply: HostAnswer): string {
   return String(reply.error);
 }
 
-function ask(message: unknown, fake: Fake = {}) {
+function ask(message: unknown, fake: FakeGh = {}) {
   const calls = join(dir, `calls-${Math.random()}`);
 
   writeFileSync(join(dir, "reply.json"), JSON.stringify(fake.reply ?? {}));
@@ -100,6 +89,7 @@ function ask(message: unknown, fake: Fake = {}) {
 function settingsFor(body: string | Buffer) {
   writeFileSync(config, body);
   vi.stubEnv("ORCH_CONFIG", config);
+
   return ask({ type: "settings" });
 }
 

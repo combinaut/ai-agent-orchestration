@@ -28,6 +28,7 @@ export function useGoTo(
 
     if (failed(result)) {
       status.error(result.error);
+
       return;
     }
 

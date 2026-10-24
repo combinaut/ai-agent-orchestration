@@ -3,9 +3,12 @@ import type {
   CheckResult,
   Entry,
   GroupColor,
+  GroupCount,
+  GroupId,
   GroupLike,
   GroupPlacement,
   GroupSummary,
+  GroupTitle,
   Meta,
   OpenAllPlan,
   OpenAllResult,
@@ -21,24 +24,17 @@ import type {
   PrRef,
   PrStateName,
   RepoName,
+  RepoRules,
   Rules,
   SearchResult,
   States,
   Summary,
+  TabChange,
   TabId,
   TabLike,
+  UrlTab,
   WindowId,
 } from "#/types";
-
-type RepoRules = Pick<Rules, "defaultRepo" | "repos">;
-type TabChange = Pick<chrome.tabs.OnUpdatedInfo, "url" | "status" | "title" | "groupId">;
-type UrlTab = Pick<chrome.tabs.Tab, "url">;
-
-interface GroupCount {
-  title: string;
-  color?: GroupColor;
-  keys: Set<PrKey>;
-}
 
 export const POLL_SECONDS = 240;
 export const FIRST_POLL_SECONDS = 30;
@@ -136,7 +132,7 @@ export function effectiveRepos(rules: RepoRules): RepoName[] {
 }
 
 // The repo in the list matching name (any case), else null.
-function listedRepo(rules: RepoRules, name: string | undefined): RepoName | null {
+function listedRepo(rules: RepoRules, name: RepoName | undefined): RepoName | null {
   return (
     effectiveRepos(rules).find((repo) => repo.toLowerCase() === (name || "").toLowerCase()) || null
   );
@@ -260,7 +256,7 @@ export function isGroupColor(name: string | undefined): name is GroupColor {
 }
 
 // FNV-1a over the group name, independent of tab order and ownership refreshes.
-export function groupColor(name: string): GroupColor {
+export function groupColor(name: GroupTitle): GroupColor {
   let hash = 2166136261;
 
   for (const char of name) {
@@ -392,8 +388,8 @@ function byCountThenTitle(a: GroupSummary, b: GroupSummary): number {
 }
 
 // Open PR count and, per tab group holding PR tabs, its title, colour and PR count.
-export function summarize(entries: Entry[], groups: Map<number | undefined, GroupLike>): Summary {
-  const byGroup = new Map<number | undefined, GroupCount>();
+export function summarize(entries: Entry[], groups: Map<GroupId | undefined, GroupLike>): Summary {
+  const byGroup = new Map<GroupId | undefined, GroupCount>();
 
   for (const entry of entries) {
     const { tab, pr } = entry;

@@ -16,6 +16,7 @@ function deliver(listener: ReturnType<typeof messageListener>, message: unknown)
 
 function errorOf(answer: unknown): string {
   assert.ok(typeof answer === "object" && answer !== null && "error" in answer);
+
   return String(answer.error);
 }
 
@@ -88,6 +89,7 @@ test("Open all is sent once, so a lost answer cannot open a second batch", async
   const answer = await ask(
     async () => {
       calls++;
+
       return undefined;
     },
     { type: "openAll" },
@@ -102,6 +104,7 @@ test("Check now is sent once, so a lost answer cannot poll and close tabs twice"
   const answer = await ask(
     async () => {
       calls++;
+
       return undefined;
     },
     { type: "checkNow" },
@@ -116,6 +119,7 @@ test("closeDuplicates is not retried when no answer comes back", async () => {
   const answer = await ask(
     async () => {
       calls++;
+
       return undefined;
     },
     { type: "closeDuplicates" },

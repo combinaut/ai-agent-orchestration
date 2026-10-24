@@ -25,6 +25,8 @@ export interface Rules {
   repos?: RepoName[];
 }
 
+export type RepoRules = Pick<Rules, "defaultRepo" | "repos">;
+
 export interface PrRef {
   owner: OrgName;
   repo: RepoName;
@@ -35,6 +37,9 @@ export interface Pr extends PrRef {
   key: PrKey;
   url: PrUrl;
 }
+
+export type UrlTab = Pick<Tab, "url">;
+export type TabChange = Pick<chrome.tabs.OnUpdatedInfo, "url" | "status" | "title" | "groupId">;
 
 export type TabLike = Partial<Pick<Tab, "url" | "active" | "windowId" | "groupId">> & {
   id: TabId;
@@ -110,6 +115,12 @@ export interface GroupPlacement {
 }
 
 export type GroupLike = Partial<Pick<TabGroup, "title" | "color">>;
+
+export interface GroupCount {
+  title: GroupTitle;
+  color?: GroupColor;
+  keys: Set<PrKey>;
+}
 
 export interface GroupSummary {
   title: GroupTitle;

@@ -27,6 +27,7 @@ function messageOf(error: unknown): unknown {
 
 export function errorText(error: unknown): string {
   const message = messageOf(error);
+
   return (typeof message === "string" && message) || String(error);
 }
 
@@ -47,6 +48,7 @@ function handlerFor(handlers: Handlers, type: unknown): UntypedHandler | undefin
 
 function unknownType(type: unknown): Failure {
   const name = JSON.stringify(type);
+
   return { error: `Unknown message type ${name}. Reload the extension at chrome://extensions.` };
 }
 
@@ -78,6 +80,7 @@ export function messageListener(handlers: Handlers): RuntimeListener {
 
     if (!handler) {
       respond(unknownType(type));
+
       return false;
     }
 
@@ -93,6 +96,7 @@ const NOT_RETRIED: ReadonlySet<RequestType> = new Set(["openAll", "checkNow", "c
 async function sendOnce(send: Send, message: Request): Promise<Delivered | Failure> {
   try {
     const reply = await send(message);
+
     return reply === undefined || reply === null ? { error: NO_ANSWER } : { reply };
   } catch (error) {
     return { error: errorText(error) };

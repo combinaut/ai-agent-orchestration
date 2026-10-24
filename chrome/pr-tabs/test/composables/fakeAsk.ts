@@ -1,8 +1,7 @@
-import type { Ask, Reply, Request, RequestType } from "#/types";
+import type { Reply, Request, RequestType } from "#/types";
+import type { FakeAsk, FakeReplies } from "#test/types";
 
-export type FakeReplies = { [K in RequestType]?: Reply<K> };
-
-export function fakeAsk(replies: FakeReplies) {
+export function fakeAsk(replies: FakeReplies): FakeAsk {
   const sent: Request[] = [];
 
   function replyFor<K extends RequestType>(type: K): Reply<K> {
@@ -11,8 +10,9 @@ export function fakeAsk(replies: FakeReplies) {
 
   async function ask<M extends Request>(message: M): Promise<Reply<M["type"]>> {
     sent.push(message);
+
     return replyFor<M["type"]>(message.type);
   }
 
-  return { ask: ask satisfies Ask, sent };
+  return { ask, sent };
 }

@@ -10,6 +10,7 @@ export function useSummary(ask: Ask, status: Pick<Status, "info" | "error">): Su
 
     if (failed(summary)) {
       status.error(summary.error);
+
       return groups.value;
     }
 

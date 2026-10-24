@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "vitest";
 import type * as Background from "#/background";
-import { CONFIGURED, fakeChrome, installFakeChrome, world, type FakeTab } from "./fakeChrome";
+import type { Meta } from "#/types";
+import type { FakeTab } from "#test/types";
+import { CONFIGURED, fakeChrome, installFakeChrome, world } from "./fakeChrome";
 
 installFakeChrome();
 
@@ -40,6 +42,7 @@ function fakeClock() {
 function tabWithId(id: number): FakeTab {
   const tab = world.tabs.find((candidate) => candidate.id === id);
   assert.ok(tab);
+
   return tab;
 }
 
@@ -180,6 +183,7 @@ test("a PR opened by goTo while Open all searches is not opened a second time", 
 
   world.nativeHandler = async () => {
     await goTo("7");
+
     return { ok: true, total: 1, prs: [{ url, title: "t", headRefName: "b" }], hasNextPage: false };
   };
 
@@ -213,6 +217,30 @@ test("Open all skips a PR that is open on a sub-page", async () => {
 
   assert.deepEqual(await openAll(), { opened: 0, remaining: 0, estimated: false });
   assert.deepEqual(ids(), [1]);
+});
+
+test("Open all opens PRs in background tabs and goTo opens one in front", async () => {
+  world.tabs = [];
+  world.store = {};
+  world.created = [];
+  world.nativeHandler = async () => ({
+    ok: true,
+    total: 2,
+    prs: [`${PR}/7`, `${PR}/8`].map((url) => ({ url, title: "t", headRefName: "b" })),
+    hasNextPage: false,
+  });
+
+  await openAll();
+  await goTo("9");
+
+  assert.deepEqual(
+    world.created.map((created) => [created.url, created.active]),
+    [
+      [`${PR}/7`, false],
+      [`${PR}/8`, false],
+      [`${PR}/9`, true],
+    ],
+  );
 });
 
 test("Close duplicate tabs closes the extras of a PR across windows and reports the count", async () => {
@@ -468,7 +496,7 @@ function watchOwnersWrite(title: string) {
   return { fresh, restore };
 }
 
-const OPEN_FEATURE = { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } };
+const OPEN_FEATURE: Meta = { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } };
 
 test("a delayed persisted restore cannot overwrite fresh ownership from a check", async () => {
   world.tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];

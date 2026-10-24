@@ -7,6 +7,7 @@ test("by default ask goes through chrome.runtime.sendMessage", async () => {
   const runtime = {
     async sendMessage(message: unknown) {
       sent.push(message);
+
       return { closed: 0 };
     },
   };

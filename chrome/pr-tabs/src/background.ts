@@ -31,6 +31,7 @@ import type {
   FetchedStates,
   GroupId,
   GroupPlacement,
+  GroupTitle,
   HostReplies,
   HostOk,
   HostReply,
@@ -83,6 +84,7 @@ const FINISHED: ReadonlySet<PrStateName> = new Set(["MERGED", "CLOSED"]);
 
 async function readStored<K extends keyof StoredState>(key: K): Promise<StoredState[K]> {
   const stored = await chrome.storage.local.get<Partial<StoredState>>(key);
+
   return stored[key] ?? STORED_DEFAULTS[key];
 }
 
@@ -122,6 +124,7 @@ function handleRulesFailed(error: unknown): never {
 function loadRules(): Promise<Rules> {
   expireRules();
   rulesPromise ||= fetchRules().catch(handleRulesFailed);
+
   return rulesPromise;
 }
 
@@ -137,6 +140,7 @@ async function configure(rules: Rules): Promise<Rules> {
   try {
     const settings = await askHost({ type: "settings" });
     await writeStored({ prTabsSettings: settings });
+
     return { ...rules, ...settings };
   } catch (error) {
     return cachedRules(rules, error);
@@ -174,11 +178,13 @@ function askHost<M extends HostRequest>(message: M): Promise<HostOk<HostReplies[
 
       if (lastError) {
         reject(new Error(lastError.message));
+
         return;
       }
 
       if (!reply?.ok) {
         reject(new Error(reply?.error || "empty reply from native host"));
+
         return;
       }
 
@@ -198,11 +204,12 @@ let chain: Promise<unknown> = Promise.resolve();
 function serial<T>(task: () => Promise<T>): Promise<T> {
   const run = chain.then(task, task);
   chain = run.catch(warn);
+
   return run;
 }
 
 // Tab IDs that showed a PR at the last scan.
-const prTabIds = new Set<number>();
+const prTabIds = new Set<TabId>();
 
 function isOpenPrTab(tab: Tab): tab is IdTab {
   return hasId(tab) && !tab.incognito;
@@ -220,6 +227,7 @@ async function openPrTabs(): Promise<IdTab[]> {
 
 function entryOf(tab: IdTab, org: OrgName): PrEntry[] {
   const pr = parsePrUrl(tab.url, org);
+
   return pr ? [{ tab, pr }] : [];
 }
 
@@ -239,6 +247,7 @@ export async function prEntries(rules: Pick<Rules, "org">): Promise<PrEntry[]> {
 async function findTab(id: TabId): Promise<IdTab | null> {
   try {
     const tab = await chrome.tabs.get(id);
+
     return tab && hasId(tab) ? tab : null;
   } catch {
     return null;
@@ -248,12 +257,14 @@ async function findTab(id: TabId): Promise<IdTab | null> {
 async function prTab(id: TabId, org: OrgName): Promise<PrEntry | null> {
   const tab = await findTab(id);
   const [entry] = tab ? entryOf(tab, org) : [];
+
   return entry ?? null;
 }
 
 async function removeTab(id: TabId): Promise<boolean> {
   try {
     await chrome.tabs.remove(id);
+
     return true;
   } catch {
     return false;
@@ -302,8 +313,9 @@ function updateMeta(change: (meta: Meta) => Meta | Promise<Meta>): Promise<void>
   return run;
 }
 
-async function groupFor(windowId: WindowId, name: string): Promise<TabGroup | null> {
+async function groupFor(windowId: WindowId, name: GroupTitle): Promise<TabGroup | null> {
   const [group] = await chrome.tabGroups.query({ windowId, title: name });
+
   return group ?? null;
 }
 
@@ -334,6 +346,7 @@ async function moveIntoGroup(tab: IdTab, placement: GroupPlacement): Promise<voi
 
   if (!group) {
     await createGroup(tab, placement);
+
     return;
   }
 
@@ -380,6 +393,7 @@ async function groupTabId(tabId: TabId): Promise<void> {
 function pruneClosedTabs(rules: Rules): Promise<void> {
   async function pruneWithoutTab(meta: Meta): Promise<Meta> {
     const keys = new Set((await prEntries(rules)).map((entry) => entry.pr.key));
+
     return pruneMeta(meta, keys);
   }
 
@@ -395,6 +409,7 @@ async function ensureAlarm(): Promise<void> {
 
   if (!entries.length) {
     await chrome.alarms.clear(ALARM);
+
     return;
   }
 
@@ -423,6 +438,7 @@ function handleCheckSettled(): void {
   if (pollAgain) {
     pollAgain = false;
     void poll();
+
     return;
   }
 
@@ -433,6 +449,7 @@ function handleCheckSettled(): void {
 function poll(): Promise<Reply<"checkNow">> {
   if (current) {
     pollAgain = true;
+
     return current;
   }
 
@@ -452,6 +469,7 @@ export async function checkNow(): Promise<Reply<"checkNow">> {
 function prRefs(batch: PrKey[], byKey: Map<PrKey, Pr>): PrRef[] {
   return batch.flatMap((key) => {
     const pr = byKey.get(key);
+
     return pr ? [{ owner: pr.owner, repo: pr.repo, number: pr.number }] : [];
   });
 }
@@ -475,6 +493,7 @@ async function fetchStates(entries: PrEntry[]): Promise<FetchedStates | Failure>
   try {
     const reply = await askHost({ type: "states", prs: prRefs(batch, byKey) });
     await recordOwners(reply.owners);
+
     return { states: reply.prs, prs: byKey.size, checked: batch.length, nextCursor };
   } catch (error) {
     return pollFailed(failures, error);
@@ -560,6 +579,7 @@ async function checkOnce(): Promise<Reply<"checkNow">> {
 
   if (!entries.length) {
     await chrome.alarms.clear(ALARM);
+
     return noTabsChecked();
   }
 
@@ -817,10 +837,11 @@ async function groupsById(entries: PrEntry[]): Promise<Map<GroupId, TabGroup>> {
 
 async function summary(): Promise<Summary> {
   const entries = await prEntries(await loadRules());
+
   return summarize(entries, await groupsById(entries));
 }
 
-const pending = new Map<number, ReturnType<typeof setTimeout>>();
+const pending = new Map<TabId, ReturnType<typeof setTimeout>>();
 
 function handleTabSettled(tabId: TabId): void {
   pending.delete(tabId);

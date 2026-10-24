@@ -23,6 +23,7 @@ function useTabAction<K extends TabActionType>(
 
     if (failed(result)) {
       status.error(result.error);
+
       return;
     }
 

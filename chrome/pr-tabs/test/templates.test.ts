@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vitest";
 import { parse } from "vue/compiler-sfc";
+import type { TemplateDirective, TemplateElement, TemplateNode } from "#test/types";
 
 const SRC = fileURLToPath(new URL("../src", import.meta.url));
 const ELEMENT = 1;
@@ -13,26 +14,21 @@ const VARIABLE = /^[A-Za-z_$][\w$]*$/;
 const HANDLER = /^handle[A-Z][\w$]*$/;
 const V_FOR = /^\s*(?:\([^)]*\)|[\w$]+)\s+(?:in|of)\s+(.+?)\s*$/;
 
-interface Directive {
-  type: number;
-  name: string;
-  rawName?: string;
-  exp?: unknown;
-}
-
-interface TemplateNode {
-  type: number;
-  content?: unknown;
-  props?: readonly Directive[];
-  children?: readonly unknown[];
-}
-
 function isNode(value: unknown): value is TemplateNode {
   return typeof value === "object" && value !== null && "type" in value;
 }
 
+function isElement(node: TemplateNode): node is TemplateElement {
+  return node.type === ELEMENT;
+}
+
+function isDirective(prop: TemplateElement["props"][number]): prop is TemplateDirective {
+  return prop.type === DIRECTIVE;
+}
+
 function expressionText(value: unknown): string | null {
   const isSimple = typeof value === "object" && value !== null && "content" in value;
+
   return isSimple && typeof value.content === "string" ? value.content : null;
 }
 
@@ -57,7 +53,7 @@ function bound(name: string, content: string): string {
   return V_FOR.exec(content)?.[1] ?? content;
 }
 
-function directiveProblems(prop: Directive): string[] {
+function directiveProblems(prop: TemplateDirective): string[] {
   const text = expressionText(prop.exp);
 
   if (text === null) {
@@ -70,22 +66,26 @@ function directiveProblems(prop: Directive): string[] {
 }
 
 function interpolationProblems(node: TemplateNode): string[] {
-  const text = node.type === INTERPOLATION ? expressionText(node.content) : null;
+  const isInterpolation = node.type === INTERPOLATION && "content" in node;
+  const text = isInterpolation ? expressionText(node.content) : null;
+
   return text === null || VARIABLE.test(text.trim()) ? [] : [`{{${text}}}`];
 }
 
 // Every handler that is not a handle<Thing><Event> name and every binding that is more than a
 // variable.
 function problems(node: TemplateNode): string[] {
-  const props = node.type === ELEMENT ? (node.props ?? []) : [];
-  const directives = props.filter((prop) => prop.type === DIRECTIVE).flatMap(directiveProblems);
-  const children = (node.children ?? []).filter(isNode).flatMap(problems);
+  const props = isElement(node) ? node.props : [];
+  const directives = props.filter(isDirective).flatMap(directiveProblems);
+  const nested: readonly unknown[] = "children" in node ? node.children : [];
+  const children = nested.filter(isNode).flatMap(problems);
 
   return [...interpolationProblems(node), ...directives, ...children];
 }
 
 function templateProblems(source: string): string[] {
   const ast = parse(source).descriptor.template?.ast;
+
   return ast ? problems(ast) : [];
 }
 

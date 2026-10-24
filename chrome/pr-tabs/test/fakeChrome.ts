@@ -1,64 +1,19 @@
 import { readFileSync } from "node:fs";
+import type { HostOk, HostRequest, Rules } from "#/types";
+import type {
+  FakeAction,
+  FakeAlarms,
+  FakeChrome,
+  FakeRuntime,
+  FakeStorage,
+  FakeTab,
+  FakeTabGroups,
+  FakeTabs,
+  FakeWindows,
+  World,
+} from "#test/types";
 
-export interface FakeTab {
-  id: number;
-  url: string;
-  windowId?: number;
-  groupId?: number;
-  title?: string;
-  active?: boolean;
-  incognito?: boolean;
-  windowType?: string;
-}
-
-interface Store {
-  prTabsSettings?: Record<string, unknown>;
-  owners?: Record<string, string>;
-  meta?: Record<string, { state?: string; title?: string; headRefName?: string }>;
-  failures?: number;
-  cursor?: number;
-  prTabsRepo?: string;
-}
-
-interface GroupProps {
-  title?: string;
-  color?: string;
-}
-
-interface CreatedAlarm {
-  name: string;
-  options: chrome.alarms.AlarmCreateInfo;
-}
-
-type FiredAlarm = Pick<chrome.alarms.Alarm, "name">;
-
-interface FakeQuery {
-  url: string;
-  windowType?: string;
-}
-
-interface FakeCreate {
-  url: string;
-}
-
-interface HostMessage {
-  type: string;
-}
-
-interface World {
-  tabs: FakeTab[];
-  store: Store;
-  grouped: GroupProps[];
-  createdAlarms: CreatedAlarm[];
-  settingsCalls: number;
-  hostSettings: Record<string, unknown>;
-  nativeHandler: (message: HostMessage) => Promise<unknown>;
-  nextId: number;
-  alarmListener: (alarm: FiredAlarm) => void;
-  installedListener: () => Promise<void>;
-}
-
-export const CONFIGURED: Readonly<Record<string, unknown>> = {
+export const CONFIGURED: Readonly<HostOk<Partial<Rules>>> = {
   ok: true,
   org: "acme",
   defaultRepo: "webapp",
@@ -76,6 +31,7 @@ function noListener(): never {
 // What the fake browser holds; tests set and read it directly.
 export const world: World = {
   tabs: [],
+  created: [],
   store: {},
   grouped: [],
   createdAlarms: [],
@@ -91,14 +47,18 @@ const ignored = { addListener() {} };
 
 function matches(pattern: string, url: string): boolean {
   const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+
   return new RegExp(`^${escaped}$`).test(url);
 }
 
-function inWindowType(tab: FakeTab, windowType: string | undefined): boolean {
-  return !windowType || (tab.windowType ?? "normal") === windowType;
+function matchesQuery(tab: FakeTab, query: chrome.tabs.QueryInfo): boolean {
+  const patterns = [query.url ?? "*"].flat();
+  const inWindowType = !query.windowType || (tab.windowType ?? "normal") === query.windowType;
+
+  return inWindowType && patterns.some((pattern) => matches(pattern, tab.url));
 }
 
-function hostAnswer(message: HostMessage): Promise<unknown> {
+function hostAnswer(message: HostRequest): Promise<unknown> {
   if (message.type !== "settings") {
     return world.nativeHandler(message);
   }
@@ -108,80 +68,92 @@ function hostAnswer(message: HostMessage): Promise<unknown> {
   return Promise.resolve(world.hostSettings);
 }
 
+function createTab(properties: chrome.tabs.CreateProperties): FakeTab {
+  const { url = "", active = true } = properties;
+  const tab = { id: world.nextId++, url, active, windowId: 1, groupId: -1, title: "" };
+
+  world.created.push(properties);
+  world.tabs.push(tab);
+
+  return tab;
+}
+
 const tabs = {
-  query: async (query: FakeQuery): Promise<FakeTab[]> =>
-    world.tabs.filter((tab) => matches(query.url, tab.url) && inWindowType(tab, query.windowType)),
-  get: async (id: number): Promise<FakeTab | undefined> => world.tabs.find((tab) => tab.id === id),
-  create: async (properties: FakeCreate): Promise<FakeTab> => {
-    const tab = { id: world.nextId++, url: properties.url, windowId: 1, groupId: -1, title: "" };
-    world.tabs.push(tab);
-    return tab;
-  },
-  update: async (id: number, props: Partial<FakeTab>) =>
-    Object.assign(world.tabs.find((tab) => tab.id === id) ?? {}, props),
-  remove: async (id: number) => {
+  query: async (query) => world.tabs.filter((tab) => matchesQuery(tab, query)),
+  get: async (id) => world.tabs.find((tab) => tab.id === id),
+  create: async (properties) => createTab(properties),
+  update: async (id, properties) =>
+    Object.assign(world.tabs.find((tab) => tab.id === id) ?? { id, url: "" }, properties),
+  remove: async (id) => {
     world.tabs = world.tabs.filter((tab) => tab.id !== id);
   },
   group: async () => 1,
   onUpdated: ignored,
   onRemoved: ignored,
-};
+} satisfies FakeTabs;
 
 const tabGroups = {
   TAB_GROUP_ID_NONE: -1,
-  query: async (): Promise<unknown[]> => [],
-  update: async (_id: number, properties: GroupProps) => {
+  query: async () => [],
+  update: async (_id, properties) => {
     world.grouped.push(properties);
   },
   get: async () => ({}),
-};
+} satisfies FakeTabGroups;
+
+function handleAlarmListen(listener: World["alarmListener"]): void {
+  world.alarmListener = listener;
+}
 
 const alarms = {
-  onAlarm: {
-    addListener(listener: World["alarmListener"]) {
-      world.alarmListener = listener;
-    },
-  },
-  get: async () => null,
-  create: async (name: string, options: CreatedAlarm["options"]) => {
+  onAlarm: { addListener: handleAlarmListen },
+  get: async () => undefined,
+  create: async (name, options) => {
     world.createdAlarms.push({ name, options });
   },
-  clear: async () => {},
-};
+  clear: async () => true,
+} satisfies FakeAlarms;
 
 const storage = {
   local: {
-    get: async (key: keyof Store): Promise<Store> => ({ [key]: world.store[key] }),
-    set: async (values: Store): Promise<void> => {
+    get: async (key) => ({ [key]: world.store[key] }),
+    set: async (values) => {
       Object.assign(world.store, values);
     },
   },
-};
+} satisfies FakeStorage;
+
+function handleInstalledListen(listener: World["installedListener"]): void {
+  world.installedListener = listener;
+}
 
 const runtime = {
   onMessage: ignored,
   onStartup: ignored,
-  onInstalled: {
-    addListener(listener: World["installedListener"]) {
-      world.installedListener = listener;
-    },
-  },
-  getURL: (path: string) => path,
+  onInstalled: { addListener: handleInstalledListen },
+  getURL: (path) => path,
   lastError: undefined,
-  sendNativeMessage(_host: string, message: HostMessage, callback: (reply: unknown) => void) {
+  sendNativeMessage(_host, message, callback) {
     void hostAnswer(message).then(callback);
   },
-};
+} satisfies FakeRuntime;
+
+const windows = {
+  getLastFocused: async () => ({ id: 1 }),
+  update: async () => {},
+} satisfies FakeWindows;
+
+const action = { setBadgeText: async () => {} } satisfies FakeAction;
 
 export const fakeChrome = {
   tabs,
   tabGroups,
-  windows: { getLastFocused: async () => ({ id: 1 }), update: async () => {} },
+  windows,
   alarms,
-  action: { setBadgeText: async () => {} },
+  action,
   storage,
   runtime,
-};
+} satisfies FakeChrome;
 
 async function readRules(): Promise<unknown> {
   return JSON.parse(readFileSync(new URL("../public/rules.json", import.meta.url), "utf8"));

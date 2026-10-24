@@ -70,6 +70,7 @@ test("a second Enter while one request runs sends nothing more", async () => {
   async function ask<M extends Request>(message: M): Promise<Reply<M["type"]>> {
     sent.push(message);
     await new Promise<void>(waitForRelease);
+
     return { error: "released" };
   }
 

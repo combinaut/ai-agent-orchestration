@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { useStatus } from "#/composables/useStatus";
 import { useTabActions } from "#/composables/useTabActions";
-import { fakeAsk, type FakeReplies } from "./fakeAsk";
+import type { FakeReplies } from "#test/types";
+import { fakeAsk } from "./fakeAsk";
 
 function actions(replies: FakeReplies) {
   const status = useStatus();
