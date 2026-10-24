@@ -33,10 +33,8 @@ useFocus(useTemplateRef("field"), { initialValue: true });
       aria-describedby="target-hint"
       :readonly="readonly"
     />
-    <InputIcon v-if="isSubmitHintVisible">
-      <kbd id="target-hint" class="font-popup text-hint text-muted-color" aria-label="Press Enter"
-        >↵</kbd
-      >
+    <InputIcon v-if="isSubmitHintVisible" class="text-hint text-muted-color">
+      <kbd id="target-hint" class="font-popup" aria-label="Press Enter">↵</kbd>
     </InputIcon>
   </IconField>
 </template>

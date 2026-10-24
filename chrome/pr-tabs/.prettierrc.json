@@ -1,5 +1,6 @@
 {
   "printWidth": 100,
+  "htmlWhitespaceSensitivity": "ignore",
   "plugins": ["prettier-plugin-tailwindcss"],
   "tailwindStylesheet": "./src/popup/tailwind.css"
 }

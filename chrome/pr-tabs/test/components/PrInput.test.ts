@@ -42,7 +42,7 @@ test("the search icon and the Enter hint sit inside one field, the hint only wit
 
   await wrapper.setProps({ modelValue: "76" });
 
-  assert.equal(field.find("#target-hint").text(), "↵");
+  assert.equal(field.find("#target-hint").element.textContent, "↵");
 });
 
 test("a busy popup makes the field read-only", () => {
