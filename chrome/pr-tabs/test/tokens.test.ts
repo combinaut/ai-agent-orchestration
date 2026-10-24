@@ -58,3 +58,21 @@ test("the checks catch what they ban", () => {
     ["300px", 'width="1', "3px"],
   );
 });
+
+// The utility a @theme token makes, e.g. --text-body -> text-body, --color-popup-text -> text-popup-text.
+function utilities(css: string): string[] {
+  const prefixes: Record<string, string[]> = { color: ["bg", "text"], text: ["text"] };
+  return [...css.matchAll(/--(color|text)-([\w-]+):/g)].flatMap(([, kind = "", name]) =>
+    (prefixes[kind] ?? []).map((prefix) => `${prefix}-${name}`),
+  );
+}
+
+function duplicates(names: string[]): string[] {
+  return names.filter((name, index) => names.indexOf(name) !== index);
+}
+
+test("no two @theme tokens claim the same Tailwind utility", () => {
+  const theme = readFileSync(join(SRC, "popup/tailwind.css"), "utf8");
+  assert.deepEqual(duplicates(utilities(theme)), []);
+  assert.deepEqual(duplicates(utilities("--color-popup: a; --text-popup: b;")), ["text-popup"]);
+});
