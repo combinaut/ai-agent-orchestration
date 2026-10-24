@@ -1304,7 +1304,8 @@ PY
   install_ok
   [ "$(printf '%s\n' "$output" | grep -c '^dropped ')" = 1 ]
   contains "$output" "dropped         $cfg: pr.repos audit.git_watch_repos focus.skip_architects (repos and architects come from the open work)"
-  not_contains "$(cat "$cfg")" 'repos = '
+  not_contains "$(cat "$cfg")" 'acme/web'
+  not_contains "$(cat "$cfg")" 'git_watch_repos'
   not_contains "$(cat "$cfg")" 'skip_architects'
   not_contains "$(cat "$cfg")" 'Architect names left out'
   contains "$(cat "$cfg")" 'author = '
