@@ -1,13 +1,12 @@
 // @vitest-environment happy-dom
 import assert from "node:assert/strict";
-import { flushPromises, mount } from "@vue/test-utils";
-import PrimeVue from "primevue/config";
+import { flushPromises } from "@vue/test-utils";
 import Select from "primevue/select";
 import { afterEach, test, vi } from "vitest";
 import type { RepoName, Request, Rules } from "#/types";
 import { effectiveRepos, pickedRepo, showRepoPicker } from "#/core";
 import App from "#popup/App.vue";
-import { primeVueConfiguration } from "#popup/primevue";
+import { mountPopup } from "#test/components/mountPopup";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -40,10 +39,7 @@ async function popup(repos: RepoName[]) {
     },
   });
 
-  const wrapper = mount(App, {
-    attachTo: document.body,
-    global: { plugins: [[PrimeVue, primeVueConfiguration]] },
-  });
+  const wrapper = mountPopup(App, { attachTo: document.body });
 
   await flushPromises();
 

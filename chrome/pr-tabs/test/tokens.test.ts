@@ -25,8 +25,8 @@ function code(path: string): string {
 }
 
 // Every finding of pattern in src/, outside the tokens file, as "file: match".
-export function literals(pattern: RegExp, files = sources(SRC), only = /./): string[] {
-  return files
+function literals(pattern: RegExp, only = /./): string[] {
+  return sources(SRC)
     .filter((path) => relative(SRC, path) !== TOKENS && only.test(path))
     .flatMap((path) =>
       [...code(path).matchAll(pattern)].map((match) => `${relative(SRC, path)}: ${match[0]}`),
@@ -38,8 +38,8 @@ test("no literal colour in src/ outside the tokens file", () => {
 });
 
 test("no Tailwind arbitrary values or literal lengths in the popup markup and styles", () => {
-  assert.deepEqual(literals(ARBITRARY, undefined, /\.(?:vue|html|css)$|composables/), []);
-  assert.deepEqual(literals(LENGTH, undefined, /\.(?:vue|html|css)$/), []);
+  assert.deepEqual(literals(ARBITRARY, /\.(?:vue|html|css)$|composables/), []);
+  assert.deepEqual(literals(LENGTH, /\.(?:vue|html|css)$/), []);
 });
 
 test("the checks catch what they ban", () => {

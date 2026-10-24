@@ -50,7 +50,7 @@ export const MAX_SEARCH_PAGES = 10;
 const PR_URL =
   /^(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9_.-]{1,100})\/pull\/(\d{1,9})(?:[/?#]|$)/i;
 
-// The owner, repo and number a PR URL names, as written; else null.
+// Keeps the URL's case.
 function matchPrUrl(url: string | null | undefined): PrRef | null {
   const match = PR_URL.exec((url || "").trim());
 
