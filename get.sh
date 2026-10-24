@@ -40,6 +40,7 @@ main() {
 
   url=${ORCH_REPO_URL:-https://github.com/$REPO_SLUG.git}
   dir=${ORCH_INSTALL_DIR:-}
+  case "$dir" in \~/*) dir="$HOME/${dir#\~/}" ;; esac
   if [ -z "$dir" ]; then
     command -v curl >/dev/null 2>&1 || die "curl not found. Install curl, then run this again"
     tmp=$(mktemp "${TMPDIR:-/tmp}/ao-install.XXXXXX")

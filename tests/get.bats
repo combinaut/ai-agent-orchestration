@@ -208,3 +208,14 @@ contains() { printf '%s' "$1" | grep -F -- "$2" >/dev/null; }
   [ "$status" -ne 0 ]
   [ -z "$(ls "$TMPDIR")" ]
 }
+
+@test "a leading ~/ in ORCH_INSTALL_DIR means the home folder" {
+  # shellcheck disable=SC2088 # the literal tilde is the input under test
+  export ORCH_INSTALL_DIR="~/orch"
+  cd "$TMP"
+  run /bin/bash "$ROOT/get.sh"
+  [ "$status" -eq 0 ]
+  [ -f "$HOME/orch/install.sh" ]
+  [ ! -e "$TMP/~" ]
+  contains "$(cat "$STUB_OUT")" "repo=$HOME/orch"
+}
