@@ -647,6 +647,13 @@ def apply(state, alerts, now, cfg=None, trace=None):
             if entry and entry["active"] and not item["terminal"]:
                 entry.pop("clearing_at", None)
                 entry.update(seen_at=now, value=item["value"])
+                if (
+                    mode == "context"
+                    and item["text"].startswith("RECYCLE-WORKER-HARD ")
+                    and not entry["text"].startswith("RECYCLE-WORKER-HARD ")
+                ):
+                    entry["text"] = item["text"]
+                    emit(item["key"], mode, item["text"], "start")
                 if mode == "pulls" and pull_owner(item["text"]) not in (
                     None,
                     "?",

@@ -9,12 +9,11 @@ from pathlib import Path
 
 
 def model_window(value):
-    try:
-        window = int(value.get("window", 0))
-        if window > 0:
-            return window
-    except (TypeError, ValueError):
-        pass
+    window = value.get("window")
+    if isinstance(window, str) and window.isascii() and window.isdecimal():
+        window = int(window)
+    if type(window) is int and window > 0:
+        return window
     model = value.get("model", "")
     if model.startswith("gpt-"):
         try:

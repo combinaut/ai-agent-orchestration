@@ -151,3 +151,11 @@ policy() { printf '%s' "$1" | python3 "$ROOT/coordinator/watchers/worker_recycle
   run policy '{"value":{"remaining":66.7,"window":1000000},"answer":"FINISH 116999 checks"}'
   [ "$output" = WAIT_DONE ]
 }
+
+@test "malformed active windows do not clamp hard" {
+  for window in true false 200000.5 null '"bad"' 0 -1; do
+    run policy "{\"value\":{\"tokens\":180000,\"window\":$window}}"
+    [ "$status" -eq 0 ]
+    [ "$output" = ASK ]
+  done
+}

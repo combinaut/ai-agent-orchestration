@@ -1963,6 +1963,32 @@ class DeliveryTest(IsolatedTestCase):
         )
         self.assertEqual(self.feed_lines(), [soft, hard])
 
+    def test_hard_recovery_snapshot_promotes_delivered_soft(self):
+        now = self.context_cycle("wMS", worker=310000)
+        soft = self.WORKER_LINE.format("wMS")
+        self.assertEqual(
+            self.deliver(now, modes=("host", "context")),
+            [("architect-wMS.json", soft + ". No reply needed.")],
+        )
+        w.cycle(
+            self.base, "context", lambda before: worker_context(460000, owner="wMS")
+        )
+        path = self.base / "context.json"
+        state = json.loads(path.read_text())
+        state["events"] = [
+            {"seq": n, "line": json.dumps({"mode": "context", "events": []})}
+            for n in range(200, 300)
+        ]
+        path.write_text(json.dumps(state))
+        hard = soft.replace("-SOFT", "-HARD").replace("310k", "460k")
+        self.assertEqual(
+            self.deliver(now + 1, modes=("host", "context")),
+            [("architect-wMS.json", hard + ". No reply needed.")],
+        )
+        self.assertEqual(self.feed_lines(), [soft, hard])
+        self.assertEqual(self.deliver(now + 2, modes=("host", "context")), [])
+        self.assertEqual(self.feed_lines(), [soft, hard])
+
     def test_worker_hard_stage_reaches_owner(self):
         sent = self.deliver(
             self.context_cycle("wMS", worker=450000), modes=("host", "context")
