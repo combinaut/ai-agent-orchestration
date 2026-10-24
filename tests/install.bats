@@ -1636,6 +1636,8 @@ TOML
     [ -f "$skill/SKILL.md" ]
     [ "$(readlink "$HOME/.claude/skills/$name")" = "$skill" ]
     grep -qx "name: $name" "$HOME/.claude/skills/$name/SKILL.md"
+    [ "$(readlink "$HOME/.agents/skills/$name")" = "$skill" ]
+    grep -qx "name: $name" "$HOME/.agents/skills/$name/SKILL.md"
   done
 }
 
