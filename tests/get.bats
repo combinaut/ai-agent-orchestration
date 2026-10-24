@@ -243,6 +243,12 @@ contains() { printf '%s' "$1" | grep -F -- "$2" >/dev/null; }
   contains "$(cat "$STUB_OUT")" "args=--links-only"
 }
 
+@test "a piped script on a terminal hands the terminal over under the PATH bash too" {
+  run env PTY_ANSWERS="" python3 "$ROOT/tests/pty_run.py" /bin/bash -c 'cat "$1" | bash -s' _ "$ROOT/get.sh"
+  [ "$status" -eq 0 ]
+  contains "$(cat "$STUB_OUT")" "stdin=tty"
+}
+
 @test "a piped script with no terminal keeps stdin and still succeeds" {
   run python3 -c '
 import os, sys
