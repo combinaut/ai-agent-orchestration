@@ -81,3 +81,9 @@ Unavailable status files retain the answer. The legacy answer editor ignores who
 key sequences, including arrows, so they cannot cancel or insert text into an answer.
 Incomplete CSI sequences stay buffered across reads, including modifier sequences
 split after `ESC[1;`.
+
+Each answer editor captures the item's `first_seen` generation when it opens. Submit
+validates that captured generation, queues the answer, and dismisses the item while
+holding the queue and to-do state locks (queue first). If an identical wait was
+removed and re-added, it rejects the stale answer with one visible error line and
+leaves the replacement decision visible. Escape and reopen Answer to respond to it.

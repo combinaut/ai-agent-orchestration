@@ -642,3 +642,115 @@ class TodoAnswerTests(IsolatedTestCase):
             lambda item, answer, *_: received.append(answer) or "queued",
         )
         self.assertEqual(received, ["beforeafter"])
+
+    def answer_replacement_race(self, view, during_submit):
+        import contextlib
+        import io
+
+        module = w.todo_module()
+        output, state = self.base / "todo.md", self.base / "todo.state.json"
+        state.unlink(missing_ok=True)
+        for path in a.directory().glob("*.json"):
+            path.unlink()
+        source = self.base / "status" / f"{OWNER}.md"
+        module.merge(self.base / "status", output, state, now=100)
+        original = source.read_text()
+        replaced = []
+
+        def replace():
+            if replaced:
+                return
+            replaced.append(True)
+            source.write_text("## Waits on the user\n")
+            module.merge(self.base / "status", output, state, now=101)
+            source.write_text(original)
+            module.merge(self.base / "status", output, state, now=102)
+
+        queue_lock = a.queue_lock
+
+        @contextlib.contextmanager
+        def interleaved_lock():
+            if during_submit:
+                replace()
+            with queue_lock():
+                yield
+
+        with patch.dict(os.environ, ORCH_USER_TODO_STATE=str(state)):
+            if view == "buttons":
+                app, _ = self.view_app()
+                app.feed("at")
+                if not during_submit:
+                    replace()
+                with patch.object(a, "queue_lock", interleaved_lock):
+                    app.feed("old decision\n")
+                visible_error = app.status
+            else:
+                keys = iter([b"at", b"old decision\n", b""])
+
+                def read(*_):
+                    data = next(keys)
+                    if data == b"old decision\n" and not during_submit:
+                        replace()
+                    return data
+
+                stream = io.StringIO()
+                with (
+                    contextlib.redirect_stdout(stream),
+                    patch.object(module.os, "isatty", return_value=False),
+                    patch.object(a, "queue_lock", interleaved_lock),
+                ):
+                    module.follow(
+                        argparse.Namespace(output=output, state=state, pane=None),
+                        wait=lambda *_: ([0], [], []),
+                        read=read,
+                        run_jump=lambda *_: self.fail("stale input must not jump"),
+                        report=lambda *_: None,
+                    )
+                visible_error = stream.getvalue()
+        self.assertTrue(replaced)
+        self.assertEqual(a.records(), [])
+        self.assertEqual(
+            json.loads(state.read_text())["first_seen"][a.item_id(OWNER, TEXT)], 102
+        )
+        self.assertEqual(json.loads(state.read_text())["dismissed"], [])
+        self.assertEqual(len(module.rendered_items(output, state)), 1)
+        self.assertIn("stale answer", visible_error)
+        if during_submit:
+            import fcntl
+
+            writes = []
+            write = a.write
+
+            def checked_write(path, value):
+                if path.parent == a.directory():
+                    with state.with_suffix(state.suffix + ".lock").open("a") as lock:
+                        with self.assertRaises(BlockingIOError):
+                            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    questions = self.base / "questions"
+                    with (questions / ".answers.lock").open("a") as lock:
+                        with self.assertRaises(BlockingIOError):
+                            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    writes.append(value["generation"])
+                return write(path, value)
+
+            with (
+                patch.dict(os.environ, ORCH_USER_TODO_STATE=str(state)),
+                patch.object(a, "write", checked_write),
+            ):
+                module.answer_item(
+                    module.rendered_items(output, state)[0],
+                    "fresh decision",
+                    state,
+                    output,
+                )
+            self.assertEqual(writes, [102])
+
+    def test_answer_editor_rejects_identical_replacement_in_both_views(self):
+        for view in ("buttons", "legacy"):
+            with self.subTest(view=view):
+                self.answer_replacement_race(view, during_submit=False)
+
+    def test_answer_submit_revalidates_under_the_dismissal_lock_in_both_views(self):
+        for view in ("buttons", "legacy"):
+            with self.subTest(view=view):
+                self.answer_replacement_race(view, during_submit=True)

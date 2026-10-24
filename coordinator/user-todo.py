@@ -359,52 +359,78 @@ def rendered_items(output, state_path=None):
     return [item for item in items if item["id"] not in dismissed]
 
 
+def dismiss_locked(item, state_path, output, state):
+    visible = rendered_items(output, state_path) if output else None
+    dismissed = set(state.get("dismissed", []))
+    dismissed.add(item["id"])
+    state["dismissed"] = sorted(dismissed)
+    atomic_write(state_path, json.dumps(state, sort_keys=True))
+    if output:
+        render(
+            output,
+            [candidate for candidate in visible if candidate["id"] != item["id"]],
+        )
+
+
 def dismiss_item(item, state_path, output=None):
     state_path = Path(state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     with state_path.with_suffix(state_path.suffix + ".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        visible = rendered_items(output, state_path) if output else None
         try:
             state = json.loads(state_path.read_text())
         except (OSError, ValueError):
             state = {"first_seen": {}, "items": {}}
-        dismissed = set(state.get("dismissed", []))
-        dismissed.add(item["id"])
-        state["dismissed"] = sorted(dismissed)
-        atomic_write(state_path, json.dumps(state, sort_keys=True))
-        if output:
-            render(
-                output,
-                [candidate for candidate in visible if candidate["id"] != item["id"]],
-            )
+        dismiss_locked(item, state_path, output, state)
     return True
 
 
-def answer_item(item, answer, state_path, output):
-    owner = item["source"].removesuffix(".md")
-    try:
-        generation = (
-            json.loads(Path(state_path).read_text())
-            .get("first_seen", {})
-            .get(item["id"])
-        )
-    except (OSError, ValueError):
-        generation = None
-    todo_answers.submit(owner, item["text"], answer, generation)
-    dismiss_item(item, state_path, output)
-    return "answer queued (removed)"
+CURRENT_GENERATION = object()
+STALE_ANSWER = "stale answer: item changed; refresh and answer again"
 
 
-def answer_from_view(owner, text, answer, output):
-    state = Path(
+def answer_state_path():
+    return Path(
         todo_answers.setting(
             "ORCH_USER_TODO_STATE",
             Path.home() / ".claude/coordinator/user-todo.state.json",
         )
     )
+
+
+def answer_generation(owner, text, state_path=None):
+    try:
+        state = json.loads(Path(state_path or answer_state_path()).read_text())
+        return state.get("first_seen", {}).get(todo_answers.item_id(owner, text))
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def answer_item(item, answer, state_path, output, generation=CURRENT_GENERATION):
+    owner = item["source"].removesuffix(".md")
+    state_path = Path(state_path)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    # Queue -> state matches pruning's lock order; the producer cannot replace a generation in between.
+    with todo_answers.queue_lock():
+        existing = todo_answers.prune(time.time())
+        with state_path.with_suffix(state_path.suffix + ".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                state = json.loads(state_path.read_text())
+                current = state.get("first_seen", {}).get(item["id"])
+            except (OSError, ValueError, AttributeError):
+                raise ValueError(STALE_ANSWER) from None
+            expected = current if generation is CURRENT_GENERATION else generation
+            if current is None or expected != current:
+                raise ValueError(STALE_ANSWER)
+            todo_answers.submit_locked(owner, item["text"], answer, expected, existing)
+            dismiss_locked(item, state_path, output, state)
+    return "answer queued (removed)"
+
+
+def answer_from_view(owner, text, answer, output, generation=CURRENT_GENERATION):
     item = dict(source=owner + ".md", text=text, id=todo_answers.item_id(owner, text))
-    return answer_item(item, answer, state, output)
+    return answer_item(item, answer, answer_state_path(), output, generation)
 
 
 def item_display(item):
@@ -631,7 +657,11 @@ def follow(
                         elif action == "answer":
                             try:
                                 footer = answer_item(
-                                    answering["item"], answer, state_path, args.output
+                                    answering["item"],
+                                    answer,
+                                    state_path,
+                                    args.output,
+                                    answering["generation"],
                                 )
                                 items = rendered_items(args.output, state_path)
                                 answering = None
@@ -649,6 +679,11 @@ def follow(
                                 selected = choice
                                 answering = {
                                     "item": dict(items[choice]),
+                                    "generation": answer_generation(
+                                        items[choice]["source"].removesuffix(".md"),
+                                        items[choice]["text"],
+                                        state_path,
+                                    ),
                                     "editor": todo_answers.AnswerInput(options),
                                 }
                         continue

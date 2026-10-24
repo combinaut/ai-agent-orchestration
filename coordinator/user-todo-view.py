@@ -445,8 +445,8 @@ def jump(text):
     return generator().jump({"text": text})
 
 
-def answer_item(owner, text, answer):
-    return generator().answer_from_view(owner, text, answer, TODO)
+def answer_item(owner, text, answer, generation):
+    return generator().answer_from_view(owner, text, answer, TODO, generation)
 
 
 def report_count(pane, count):
@@ -679,7 +679,9 @@ class App:
                     self.status = "that item is gone"
                 else:
                     try:
-                        self.status = self.run_answer(owner, text, value)
+                        self.status = self.run_answer(
+                            owner, text, value, self.picker["generation"]
+                        )
                         self.picker = None
                     except (ValueError, OSError) as error:
                         self.status = str(error)
@@ -695,6 +697,7 @@ class App:
                     self.picker = {
                         "key": self.selected_key,
                         "mode": "answer",
+                        "generation": generator().answer_generation(*self.selected_key),
                         "answer": todo_answers.AnswerInput(options),
                     }
                 else:

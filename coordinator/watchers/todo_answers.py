@@ -200,6 +200,13 @@ def mark_delivered(text, owner=None):
 
 
 def submit(owner, text, answer, generation=None):
+    with queue_lock():
+        existing = prune(time.time())
+        return submit_locked(owner, text, answer, generation, existing)
+
+
+def submit_locked(owner, text, answer, generation, existing):
+    """Caller holds the queue lock; prune before acquiring a to-do state lock."""
     from watchers import todo_module
 
     if not owner or Path(owner).name != owner or owner in (".", ".."):
@@ -215,32 +222,28 @@ def submit(owner, text, answer, generation=None):
         raise ValueError(
             "item changed or its status file is unreadable; refresh the list"
         )
-    with queue_lock():
-        now = time.time()
-        existing = prune(now)
-        if any(
-            record["item_id"] == identifier and record.get("generation") == generation
-            for record in existing
-        ):
-            raise ValueError("an answer is already queued for this item")
-        if len(existing) >= PENDING_MAX:
-            raise ValueError(
-                "to-do answer capacity reached; try after delivery or a status change"
-            )
-        record = dict(
-            id="todo-" + uuid.uuid4().hex,
-            key=hashlib.sha256(
-                (identifier + "\0" + str(generation)).encode()
-            ).hexdigest(),
-            item_id=identifier,
-            generation=generation,
-            architect=owner,
-            text=text,
-            answer=answer,
-            at=now,
+    now = time.time()
+    if any(
+        record["item_id"] == identifier and record.get("generation") == generation
+        for record in existing
+    ):
+        raise ValueError("an answer is already queued for this item")
+    if len(existing) >= PENDING_MAX:
+        raise ValueError(
+            "to-do answer capacity reached; try after delivery or a status change"
         )
-        write(directory() / (record["key"] + ".json"), record)
-        return record
+    record = dict(
+        id="todo-" + uuid.uuid4().hex,
+        key=hashlib.sha256((identifier + "\0" + str(generation)).encode()).hexdigest(),
+        item_id=identifier,
+        generation=generation,
+        architect=owner,
+        text=text,
+        answer=answer,
+        at=now,
+    )
+    write(directory() / (record["key"] + ".json"), record)
+    return record
 
 
 def collect(command):
