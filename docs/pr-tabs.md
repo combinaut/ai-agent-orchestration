@@ -44,7 +44,7 @@ The native host asks the selected env adapter, through shared open-work discover
 
 ## 🛠 Develop
 
-The extension is Vue 3 with PrimeVue 4 (Aura theme, dark mode from the system) and TypeScript. Sources live in `chrome/pr-tabs/src`: `background.ts` (service worker), `core.ts` (pure logic), `messages.ts` (typed popup ↔ worker messages), `popup/` (`App.vue`, `components/`, `tokens.css` for the `--pr-tabs-*` design tokens) and `composables/` (popup logic on VueUse). Static files in `chrome/pr-tabs/public` (`manifest.json`, `rules.json`). Vite builds them into `chrome/pr-tabs/extension`, the folder Chrome loads. The build is committed, so installing needs no Node.
+The extension is Vue 3 with PrimeVue 4 (Aura theme, dark mode from the system) and TypeScript. Sources live in `chrome/pr-tabs/src`: `background.ts` (service worker), `core.ts` (pure logic), `messages.ts` (typed popup ↔ worker messages), `types.ts` (every shared type), `popup/` (`App.vue`, `components/`, `tokens.css` for the `--pr-tabs-*` design tokens) and `composables/` (popup logic on VueUse). Static files in `chrome/pr-tabs/public` (`manifest.json`, `rules.json`). Vite builds them into `chrome/pr-tabs/extension`, the folder Chrome loads. The build is committed, so installing needs no Node.
 
 Needs Node 22.12+, 24 or 26+ (the range Vite and Vitest support) and pnpm (the version `packageManager` in `package.json` pins). In `chrome/pr-tabs`:
 

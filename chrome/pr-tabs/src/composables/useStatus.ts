@@ -1,7 +1,6 @@
-import { computed, readonly, ref } from "vue";
+import { computed, ref } from "vue";
 import type { Status, StatusLine } from "#/types";
 
-// The popup's one status line: a plain text or an error.
 export function useStatus(): Status {
   const status = ref<StatusLine>({ kind: "info", text: "" });
   const statusText = computed(() => status.value.text);
@@ -15,5 +14,5 @@ export function useStatus(): Status {
     status.value = { kind: "error", text };
   }
 
-  return { status: readonly(status), statusText, isStatusError, info, error };
+  return { statusText, isStatusError, info, error };
 }

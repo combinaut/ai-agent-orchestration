@@ -31,7 +31,6 @@ function isNode(value: unknown): value is TemplateNode {
   return typeof value === "object" && value !== null && "type" in value;
 }
 
-// The source text of a simple expression, else null.
 function expressionText(value: unknown): string | null {
   const isSimple = typeof value === "object" && value !== null && "content" in value;
   return isSimple && typeof value.content === "string" ? value.content : null;

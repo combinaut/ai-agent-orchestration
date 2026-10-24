@@ -53,10 +53,8 @@ test("an error stays in the popup", async () => {
 
   await flow.go();
 
-  assert.deepEqual(flow.status.status.value, {
-    kind: "error",
-    text: "Not a acme PR number or URL",
-  });
+  assert.equal(flow.status.statusText.value, "Not a acme PR number or URL");
+  assert.equal(flow.status.isStatusError.value, true);
   assert.equal(flow.closes(), 0);
   assert.equal(flow.busy.value, false);
 });

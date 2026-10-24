@@ -133,7 +133,6 @@ async function fetchRules(): Promise<Rules> {
   return configure(rules);
 }
 
-// The packaged rules with the host's settings on top; the cached settings when the host fails.
 async function configure(rules: Rules): Promise<Rules> {
   try {
     const settings = await askHost({ type: "settings" });
@@ -246,7 +245,6 @@ async function findTab(id: TabId): Promise<IdTab | null> {
   }
 }
 
-// The tab with its PR, or null when it is gone or shows no PR of org.
 async function prTab(id: TabId, org: OrgName): Promise<PrEntry | null> {
   const tab = await findTab(id);
   const [entry] = tab ? entryOf(tab, org) : [];
@@ -468,7 +466,6 @@ async function pollFailed(failures: number, error: unknown): Promise<Failure> {
   return { error: `GitHub check failed: ${message}` };
 }
 
-// The states of the next batch of PRs in one host call.
 async function fetchStates(entries: PrEntry[]): Promise<FetchedStates | Failure> {
   const byKey = new Map(entries.map((entry) => [entry.pr.key, entry.pr]));
   const failures = await readStored("failures");
@@ -494,7 +491,6 @@ async function closeIfFinished(id: TabId, key: PrKey, org: OrgName): Promise<boo
   return removeTab(id);
 }
 
-// Closes background tabs of merged or closed PRs that still show their PR.
 async function closeFinished(rules: Rules, entries: PrEntry[], states: States): Promise<Closed[]> {
   const keyById = new Map(entries.map((entry) => [entry.tab.id, entry.pr.key]));
   const closed: Closed[] = [];
@@ -610,7 +606,6 @@ function hasEnough(search: SearchResult, openKeys: Set<PrKey>, rules: Rules): bo
   return planOpenAll(search, openKeys, rules.org).open.length >= OPEN_ALL_CAP;
 }
 
-// Search pages until there are none left or enough PRs to open.
 async function searchOpenPrs(rules: Rules, openKeys: Set<PrKey>): Promise<SearchResult> {
   const search: SearchResult = { total: 0, prs: [] };
   let after: string | undefined;

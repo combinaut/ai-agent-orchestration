@@ -4,8 +4,6 @@ import { isBareNumber } from "#/core";
 import { failed } from "#/messages";
 import type { Ask, RepoChoices, RepoName, RepoPicker } from "#/types";
 
-// The repo dropdown: available with two or more listed repos, visible while the input is a bare PR
-// number.
 export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPicker {
   const repo = ref<RepoName>("");
 

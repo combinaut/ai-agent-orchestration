@@ -15,7 +15,7 @@ function actions(replies: FakeReplies) {
 
   const all = useTabActions({ ask: fakeAsk(replies).ask, status, refresh });
 
-  return { ...all, status: status.status, refreshes: () => refreshes };
+  return { ...all, status, refreshes: () => refreshes };
 }
 
 test("Open all says what is left, or adds the refreshed summary when nothing is", async () => {
@@ -23,13 +23,13 @@ test("Open all says what is left, or adds the refreshed summary when nothing is"
   const running = more.openAll.run();
 
   assert.equal(more.openAll.busy.value, true);
-  assert.equal(more.status.value.text, "Opening…");
+  assert.equal(more.status.statusText.value, "Opening…");
 
   await running;
 
   assert.equal(more.openAll.busy.value, false);
   assert.equal(
-    more.status.value.text,
+    more.status.statusText.value,
     "Opened 30. about 12 more not opened; click again for the next batch.",
   );
 
@@ -37,7 +37,7 @@ test("Open all says what is left, or adds the refreshed summary when nothing is"
 
   await done.openAll.run();
 
-  assert.equal(done.status.value.text, "Opened 2. 3 PRs in 2 groups");
+  assert.equal(done.status.statusText.value, "Opened 2. 3 PRs in 2 groups");
 });
 
 test("Close merged PRs and Close duplicate tabs report their result after a refresh", async () => {
@@ -54,11 +54,11 @@ test("Close merged PRs and Close duplicate tabs report their result after a refr
 
   await all.checkNow.run();
 
-  assert.equal(all.status.value.text, "Closed 1 merged tab.");
+  assert.equal(all.status.statusText.value, "Closed 1 merged tab.");
 
   await all.closeDuplicates.run();
 
-  assert.equal(all.status.value.text, "Closed 3 duplicate PR tabs.");
+  assert.equal(all.status.statusText.value, "Closed 3 duplicate PR tabs.");
   assert.equal(all.refreshes(), 2);
 });
 
@@ -67,10 +67,8 @@ test("a failed action shows its error without a refresh", async () => {
 
   await all.checkNow.run();
 
-  assert.deepEqual(all.status.value, {
-    kind: "error",
-    text: "GitHub check failed: gh: not logged in",
-  });
+  assert.equal(all.status.statusText.value, "GitHub check failed: gh: not logged in");
+  assert.equal(all.status.isStatusError.value, true);
   assert.equal(all.checkNow.busy.value, false);
   assert.equal(all.refreshes(), 0);
 });

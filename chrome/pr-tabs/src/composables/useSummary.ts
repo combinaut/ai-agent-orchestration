@@ -3,8 +3,7 @@ import { summaryText } from "#/core";
 import { failed } from "#/messages";
 import type { Ask, GroupSummary, Status, SummaryList } from "#/types";
 
-// The open PR count in the status line and the PR tab groups below it; a failed refresh keeps the
-// groups.
+// A failed refresh keeps the groups it had.
 export function useSummary(ask: Ask, status: Pick<Status, "info" | "error">): SummaryList {
   async function loadGroups(): Promise<GroupSummary[]> {
     const summary = await ask({ type: "summary" });

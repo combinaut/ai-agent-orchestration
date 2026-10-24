@@ -2,7 +2,6 @@ import type { Ask, Reply, Request, RequestType } from "#/types";
 
 export type FakeReplies = { [K in RequestType]?: Reply<K> };
 
-// An Ask that records every request and answers from replies by request type.
 export function fakeAsk(replies: FakeReplies) {
   const sent: Request[] = [];
 

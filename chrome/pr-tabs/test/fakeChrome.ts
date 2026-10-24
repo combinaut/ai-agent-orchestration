@@ -11,7 +11,7 @@ export interface FakeTab {
   windowType?: string;
 }
 
-export interface Store {
+interface Store {
   prTabsSettings?: Record<string, unknown>;
   owners?: Record<string, string>;
   meta?: Record<string, { state?: string; title?: string; headRefName?: string }>;
@@ -41,7 +41,7 @@ interface FakeCreate {
   url: string;
 }
 
-export interface HostMessage {
+interface HostMessage {
   type: string;
 }
 
@@ -173,7 +173,6 @@ const runtime = {
   },
 };
 
-// The chrome APIs background.ts calls, backed by world.
 export const fakeChrome = {
   tabs,
   tabGroups,

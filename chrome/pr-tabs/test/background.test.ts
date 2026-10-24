@@ -25,7 +25,6 @@ afterEach(() => {
   world.hostSettings = CONFIGURED;
 });
 
-// Freezes Date.now until advance moves it.
 function fakeClock() {
   let now = realNow();
 

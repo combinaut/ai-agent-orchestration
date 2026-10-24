@@ -289,7 +289,6 @@ export interface StatusLine {
 }
 
 export interface Status {
-  status: Readonly<Ref<StatusLine>>;
   statusText: ComputedRef<string>;
   isStatusError: ComputedRef<boolean>;
   info: (text: string) => void;

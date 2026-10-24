@@ -147,7 +147,6 @@ export function pickedRepo(rules: RepoRules, stored?: RepoName): RepoName {
   return listedRepo(rules, stored) || effectiveRepos(rules)[0] || "";
 }
 
-// Popup input that is digits only, the one case the repo dropdown applies to.
 export function isBareNumber(input: string): boolean {
   return /^\d+$/.test(input.trim());
 }
@@ -160,7 +159,6 @@ export function showRepoPicker(rules: RepoRules): boolean {
 const BARE_NUMBER = /^#?(\d{1,9})$/;
 const REPO_NUMBER = /^([A-Za-z0-9_.-]{1,100})#(\d{1,9})$/;
 
-// The PR number in repo, or null without a repo or for 0.
 function prIn(org: OrgName, repo: RepoName | null, digits: string | undefined): Pr | null {
   const number = Number(digits);
 
@@ -245,7 +243,7 @@ export function duplicateText(closed: number | undefined): string {
   return `Closed ${closed} duplicate PR tab${closed === 1 ? "" : "s"}.`;
 }
 
-export const GROUP_COLORS: readonly GroupColor[] = [
+const GROUP_COLORS: readonly GroupColor[] = [
   "grey",
   "blue",
   "red",
@@ -300,7 +298,6 @@ export function tabsToClose(entries: Entry[], states: States): TabId[] {
     .map((entry) => entry.tab.id);
 }
 
-// The PR keys of a record keyed by PR.
 function keysOf(record: Partial<Record<PrKey, unknown>>): PrKey[] {
   // Every key of a PrKey record is a PrKey.
   return Object.keys(record) as PrKey[];
@@ -467,7 +464,6 @@ export function checkText(result: CheckResult): string {
   return `${text}.`;
 }
 
-// The popup line after Open all: what is left, else the refreshed summary.
 export function openAllText(result: OpenAllResult, summary: string): string {
   const { opened, remaining, estimated } = result;
   const done = `Opened ${opened}.`;

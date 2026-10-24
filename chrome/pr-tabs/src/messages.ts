@@ -15,7 +15,6 @@ import type {
 export const NO_ANSWER =
   "No answer from the PR tabs service worker. Reload the extension at chrome://extensions.";
 
-// A reply failed when it carries an error text.
 export function failed<T extends object>(reply: T | Failure): reply is Failure {
   return "error" in reply && Boolean(reply.error);
 }
@@ -26,7 +25,6 @@ function messageOf(error: unknown): unknown {
     : undefined;
 }
 
-// The error's message, else the error as text.
 export function errorText(error: unknown): string {
   const message = messageOf(error);
   return (typeof message === "string" && message) || String(error);
@@ -52,7 +50,6 @@ function unknownType(type: unknown): Failure {
   return { error: `Unknown message type ${name}. Reload the extension at chrome://extensions.` };
 }
 
-// Runs the handler and answers with its result, {} for none, or { error }.
 function answer(handler: UntypedHandler, message: unknown, respond: Respond): void {
   function run() {
     return handler(message);
@@ -91,13 +88,8 @@ export function messageListener(handlers: Handlers): RuntimeListener {
 }
 
 // Messages whose handler has side effects a second delivery would repeat.
-export const NOT_RETRIED: ReadonlySet<RequestType> = new Set([
-  "openAll",
-  "checkNow",
-  "closeDuplicates",
-]);
+const NOT_RETRIED: ReadonlySet<RequestType> = new Set(["openAll", "checkNow", "closeDuplicates"]);
 
-// The reply to one send, or the failure text when there is none.
 async function sendOnce(send: Send, message: Request): Promise<Delivered | Failure> {
   try {
     const reply = await send(message);

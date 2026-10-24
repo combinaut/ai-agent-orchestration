@@ -1,5 +1,5 @@
 import { useAsyncState } from "@vueuse/core";
-import { computed, ref, type Ref } from "vue";
+import { computed, type Ref } from "vue";
 import { failed } from "#/messages";
 import type { GoTo, GoToContext, GoToRequest } from "#/types";
 
@@ -7,7 +7,6 @@ function closePopup(): void {
   window.close();
 }
 
-// The picked repo goes along only while the dropdown is available.
 function goToRequest(input: string, picker: GoToContext["picker"]): GoToRequest {
   if (picker.available.value) {
     return { type: "goTo", input, repo: picker.repo.value };
@@ -16,11 +15,9 @@ function goToRequest(input: string, picker: GoToContext["picker"]): GoToRequest 
   return { type: "goTo", input };
 }
 
-// Go to a PR: sends the input, with the picked repo while the dropdown is available, and closes the
-// popup on success.
 export function useGoTo(
   context: GoToContext,
-  input: Ref<string> = ref(""),
+  input: Ref<string>,
   close: () => void = closePopup,
 ): GoTo {
   const { ask, status, picker } = context;

@@ -62,7 +62,6 @@ function hostEnv(calls: string, fake: Fake): NodeJS.ProcessEnv {
   };
 }
 
-// The own property key of value, else undefined.
 function field(value: unknown, key: string): unknown {
   if (typeof value !== "object" || value === null) {
     return undefined;
@@ -98,7 +97,6 @@ function ask(message: unknown, fake: Fake = {}) {
   return { reply, calls: readFileSync(calls, "utf8").split("\n").filter(Boolean) };
 }
 
-// The settings reply for a config file holding body.
 function settingsFor(body: string | Buffer) {
   writeFileSync(config, body);
   vi.stubEnv("ORCH_CONFIG", config);

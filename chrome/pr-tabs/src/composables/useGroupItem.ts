@@ -18,7 +18,6 @@ function dotFor(color: string | undefined): string {
   return isGroupColor(color) ? DOTS[color] : DOTS.grey;
 }
 
-// One group row: its title, count, colour dot's class (unknown colours are grey) and count label.
 export function useGroupItem(group: MaybeRefOrGetter<GroupSummary>): GroupRow {
   const title = computed(() => toValue(group).title);
   const count = computed(() => toValue(group).count);

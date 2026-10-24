@@ -14,7 +14,8 @@ test("refresh shows the PR count and lists the groups", async () => {
 
   await summary.refresh();
 
-  assert.deepEqual(status.status.value, { kind: "info", text: "2 PRs in 1 group" });
+  assert.equal(status.statusText.value, "2 PRs in 1 group");
+  assert.equal(status.isStatusError.value, false);
   assert.deepEqual(summary.groups.value, groups);
 });
 
@@ -27,6 +28,7 @@ test("a failed refresh shows the error and keeps the groups it had", async () =>
   replies.summary = { error: "No answer" };
   await summary.refresh();
 
-  assert.deepEqual(status.status.value, { kind: "error", text: "No answer" });
+  assert.equal(status.statusText.value, "No answer");
+  assert.equal(status.isStatusError.value, true);
   assert.deepEqual(summary.groups.value, groups);
 });

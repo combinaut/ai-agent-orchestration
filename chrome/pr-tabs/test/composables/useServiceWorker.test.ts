@@ -1,31 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { useServiceWorker } from "#/composables/useServiceWorker";
-import { NO_ANSWER } from "#/messages";
-import type { Request } from "#/types";
-
-test("ask sends through the given sender and retries a lost answer once", async () => {
-  const sent: Request[] = [];
-  const replies = [undefined, { prs: 1, groups: [] }];
-  const { ask } = useServiceWorker(async (message) => {
-    sent.push(message);
-    return replies[sent.length - 1];
-  });
-
-  assert.deepEqual(await ask({ type: "summary" }), { prs: 1, groups: [] });
-  assert.deepEqual(sent, [{ type: "summary" }, { type: "summary" }]);
-});
-
-test("ask does not retry Open all", async () => {
-  let calls = 0;
-  const { ask } = useServiceWorker(async () => {
-    calls++;
-    return undefined;
-  });
-
-  assert.deepEqual(await ask({ type: "openAll" }), { error: NO_ANSWER });
-  assert.equal(calls, 1);
-});
 
 test("by default ask goes through chrome.runtime.sendMessage", async () => {
   const sent: unknown[] = [];

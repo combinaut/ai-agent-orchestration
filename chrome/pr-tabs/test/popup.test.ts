@@ -14,7 +14,6 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-// Mounts the popup against a service worker whose settings list repos.
 async function popup(repos: RepoName[]) {
   const rules: Rules = { org: "acme", defaultRepo: "", openAll: "", repos };
   const sent: Request[] = [];

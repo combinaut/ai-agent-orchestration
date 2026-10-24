@@ -10,7 +10,6 @@ import type {
   TabActionType,
 } from "#/types";
 
-// One button: disabled while it runs, then refreshes the summary and reports its result.
 function useTabAction<K extends TabActionType>(
   context: TabActionContext,
   spec: TabActionSpec<K>,
@@ -46,7 +45,6 @@ function reportDuplicates(result: Replies["closeDuplicates"]): string {
   return duplicateText(result.closed);
 }
 
-// The three buttons: Open all, Close merged PRs and Close duplicate tabs.
 export function useTabActions(context: TabActionContext): TabActions {
   function reportOpenAll(result: Replies["openAll"]): string {
     return openAllText(result, context.status.statusText.value);
