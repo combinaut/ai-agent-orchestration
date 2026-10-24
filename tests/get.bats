@@ -182,7 +182,7 @@ contains() { printf '%s' "$1" | grep -F -- "$2" >/dev/null; }
   mkdir "$TMP/curlbin"
   printf '#!/bin/sh\nhead -n 20 "%s"\nexit 18\n' "$ROOT/get.sh" >"$TMP/curlbin/curl"
   chmod +x "$TMP/curlbin/curl"
-  run env PATH="$TMP/curlbin:$PATH" /bin/bash -c 's=$(curl -fsSL https://example.invalid/get.sh) && bash -c "${s:?empty download}" _ --links-only'
+  run env PATH="$TMP/curlbin:$PATH" /bin/bash -c 'curl -fsSL https://example.invalid/get.sh | bash -s -- --links-only'
   [ "$status" -ne 0 ]
   [ ! -e "$DIR" ]
   [ ! -e "$STUB_OUT" ]
@@ -223,6 +223,35 @@ contains() { printf '%s' "$1" | grep -F -- "$2" >/dev/null; }
 
 @test "a redirected stdin stays as it is, even on a terminal" {
   run env PTY_ANSWERS="" python3 "$ROOT/tests/pty_run.py" /bin/bash -c 'exec /bin/bash "$1" </dev/null' _ "$ROOT/get.sh"
+  [ "$status" -eq 0 ]
+  contains "$(cat "$STUB_OUT")" "stdin=other"
+}
+
+@test "a truncated script fed through a pipe runs nothing" {
+  last=$(tail -n 1 "$ROOT/get.sh")
+  printf '%s\n%s' "$(sed '$d' "$ROOT/get.sh")" "${last:0:4}" >"$TMP/cut.sh"
+  run /bin/bash -c 'cat "$1" | /bin/bash -s -- --links-only' _ "$TMP/cut.sh"
+  [ "$status" -ne 0 ]
+  [ ! -e "$DIR" ]
+  [ ! -e "$STUB_OUT" ]
+}
+
+@test "a piped script on a terminal hands the terminal to install.sh" {
+  run env PTY_ANSWERS="" python3 "$ROOT/tests/pty_run.py" /bin/bash -c 'cat "$1" | /bin/bash -s -- --links-only' _ "$ROOT/get.sh"
+  [ "$status" -eq 0 ]
+  contains "$(cat "$STUB_OUT")" "stdin=tty"
+  contains "$(cat "$STUB_OUT")" "args=--links-only"
+}
+
+@test "a piped script with no terminal keeps stdin and still succeeds" {
+  run python3 -c '
+import os, sys
+pid = os.fork()
+if pid == 0:
+    os.setsid()
+    os.execvp(sys.argv[1], sys.argv[1:])
+sys.exit(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))
+' /bin/bash -c 'cat "$1" | /bin/bash -s' _ "$ROOT/get.sh"
   [ "$status" -eq 0 ]
   contains "$(cat "$STUB_OUT")" "stdin=other"
 }

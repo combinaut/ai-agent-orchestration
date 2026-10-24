@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # One-line installer: clones the repo if missing, then runs its install.sh, which updates the clone.
-# Runs nothing unless the whole download arrived (curl's exit status gates bash):
-#   s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/get.sh) && bash -c "${s:?empty download}" _
-# Installer arguments follow the final _:  ... _ --env herdr
+#   curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/get.sh | bash
+# Installer arguments:  ... | bash -s -- --env herdr
+# A cut-off download ends in an unclosed brace, so it runs nothing.
+# When the script itself arrives on stdin, install.sh reads its answers from /dev/tty if one can be opened.
 # ORCH_INSTALL_DIR sets the clone folder; otherwise install.sh decides (ORCH_REPO_PATH, the config's repo_path, ~/.claude/ai-agent-orchestration).
 set -euo pipefail
 
@@ -75,8 +76,10 @@ main() {
   [ -f "$dir/install.sh" ] || die "$dir has no install.sh"
   export ORCH_REPO_PATH="$dir"
   # The clone's install.sh fast-forwards the clone, refusing local commits and upstreams outside origin.
+  if [ -z "${BASH_SOURCE[0]:-}" ] && { : </dev/tty; } 2>/dev/null; then
+    exec /bin/bash "$dir/install.sh" "$@" </dev/tty
+  fi
   exec /bin/bash "$dir/install.sh" "$@"
 }
 
-# A cut-off download ends in an unclosed brace, a syntax error that runs nothing.
 { main "$@"; }
