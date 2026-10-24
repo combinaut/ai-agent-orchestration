@@ -58,6 +58,14 @@ function hostEnv(calls: string, { status = 0, stderr = "" }: Fake) {
   };
 }
 
+// The own property key of value, else undefined.
+function field(value: unknown, key: string): unknown {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  return Object.getOwnPropertyDescriptor(value, key)?.value;
+}
+
 function errorOf(reply: HostAnswer): string {
   return String(reply.error);
 }
@@ -202,7 +210,7 @@ test("partial GraphQL errors still return the PRs that resolved", () => {
     { reply: { data, errors: [{ message: "Could not resolve" }] }, status: 1 },
   );
   assert.equal(reply.ok, true);
-  assert.partialDeepStrictEqual(reply, { prs: { "acme/webapp#1": { state: "OPEN" } } });
+  assert.equal(field(field(reply.prs, "acme/webapp#1"), "state"), "OPEN");
 });
 
 test("gh failure becomes an error reply", () => {
