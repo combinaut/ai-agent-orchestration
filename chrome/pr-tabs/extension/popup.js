@@ -4,6 +4,7 @@ import { ask as askWith } from "./messages.js";
 const COLOURS = new Set(["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"]);
 const status = document.getElementById("status");
 const target = document.getElementById("target");
+const repo = document.getElementById("repo");
 const openAll = document.getElementById("open-all");
 const groups = document.getElementById("groups");
 const checkNow = document.getElementById("check-now");
@@ -42,14 +43,30 @@ async function refresh() {
   );
 }
 
+async function loadRepos() {
+  const choices = await ask({ type: "repos" });
+  if (choices.error || !choices.show) return;
+  repo.replaceChildren(
+    ...choices.repos.map((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      return option;
+    }),
+  );
+  repo.value = choices.selected;
+  repo.hidden = false;
+}
+
 target.focus();
 refresh();
+loadRepos();
 
 document.getElementById("go").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!target.value.trim() || target.readOnly) return;
   target.readOnly = true;
-  const result = await ask({ type: "goTo", input: target.value });
+  const result = await ask({ type: "goTo", input: target.value, ...(!repo.hidden && { repo: repo.value }) });
   target.readOnly = false;
   if (result.error) {
     show(result.error, true);

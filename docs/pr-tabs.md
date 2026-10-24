@@ -5,7 +5,7 @@ A Chrome extension for PR tabs in `ORCH_PR_TABS_ORG`. It sorts PR tabs into name
 ## ✨ What it does
 
 - **Groups** every unpinned PR tab by the architect owning its checked-out head branch, or by repository name when no owner is available. Group colours are a stable hash of the name. Ownership changes are picked up on the existing check cadence. New tabs sort themselves when they load.
-- **Go to a PR**: paste a PR number or URL and press Enter. A number uses `ORCH_PR_TABS_ORG` and `ORCH_PR_TABS_DEFAULT_REPO`; a URL decides the repo, but only when its owner is `ORCH_PR_TABS_ORG`; a PR URL of another owner is rejected. An open tab for that PR is focused (its window comes forward, its group expands); otherwise the PR opens in its group.
+- **Go to a PR**: paste a PR number or URL and press Enter. A number uses `ORCH_PR_TABS_ORG` and the repo picked in the dropdown next to the field (`ORCH_PR_TABS_DEFAULT_REPO` until you pick; the dropdown shows when `ORCH_PR_TABS_REPOS` plus the default make two or more, and remembers your last pick); `repo#123` goes to a listed repo; a URL decides the repo, but only when its owner is `ORCH_PR_TABS_ORG`; a PR URL of another owner is rejected. An open tab for that PR is focused (its window comes forward, its group expands); otherwise the PR opens in its group.
 - **Open all my open PRs** opens up to 30 PRs matching `ORCH_PR_TABS_OPEN_ALL`, in the order defined by that query, skipping ones already open. Over 30, the badge shows how many are left (`+N`), or an estimate (`~N`, "about N more") when not every search result was fetched. Click again for the next batch.
 - **Close merged PRs** runs the merged/closed check at once. The popup says what it closed, which merged tab stayed because it is in view, or the error.
 - **Close duplicate tabs** keeps one tab per PR and closes the rest, across all normal windows (incognito is skipped). It keeps the tab in view in the focused window if it is one of them, else a tab in view in another window, else the oldest (lowest tab ID). The popup says how many it closed. Two tabs are the same PR when owner, repo (any case) and number match, whatever the sub-page (`/files`, `/commits`), query or `#fragment`. Go to a PR and Open all my open PRs use the same match, so they focus or skip an open tab instead of adding a double.
@@ -32,7 +32,7 @@ After an update, run the install command, then click the reload icon on the exte
 
 ## 🔩 Settings and ownership
 
-`pr_tabs.org` selects the organization, `pr_tabs.default_repo` is the repo for bare numbers, and `pr_tabs.open_all` is the GitHub search behind the button. Their environment overrides are `ORCH_PR_TABS_ORG`, `ORCH_PR_TABS_DEFAULT_REPO` and `ORCH_PR_TABS_OPEN_ALL`. Reload the extension after changing settings.
+`pr_tabs.org` selects the organization, `pr_tabs.default_repo` is the repo for bare numbers, `pr_tabs.repos` adds more repos to pick from (environment form: comma-separated `ORCH_PR_TABS_REPOS`), and `pr_tabs.open_all` is the GitHub search behind the button. Their environment overrides are `ORCH_PR_TABS_ORG`, `ORCH_PR_TABS_DEFAULT_REPO`, `ORCH_PR_TABS_REPOS` and `ORCH_PR_TABS_OPEN_ALL`. Reload the extension after changing settings.
 
 The native host asks the selected env adapter, through shared open-work discovery, for checked-out branches and their workspace owners. It caches the results for 30 seconds. Herdr resolves the worker workspace's `owner` token to the architect workspace label.
 

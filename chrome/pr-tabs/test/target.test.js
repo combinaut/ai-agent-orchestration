@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { duplicateTabIds, duplicateText, findOpenTab, isPrUrl, prKey, tabUpdateMatters, parsePrUrl, parseTarget, summarize, summaryText } from "../extension/core.js";
+import { effectiveRepos, pickedRepo, showRepoPicker, duplicateTabIds, duplicateText, findOpenTab, isPrUrl, prKey, tabUpdateMatters, parsePrUrl, parseTarget, summarize, summaryText } from "../extension/core.js";
 import { rules } from "./helpers.js";
 
 test("a bare number means acme/webapp", () => {
@@ -142,4 +142,40 @@ test("duplicateTabIds keeps the active tab of the focused window over another wi
   const tabs = [{ id: 1, url, windowId: 1, active: true }, { id: 2, url, windowId: 2, active: true }];
   assert.deepEqual(duplicateTabIds(tabs, 2), [1]);
   assert.deepEqual(duplicateTabIds(tabs, 1), [2]);
+});
+
+const multi = { ...rules, repos: ["api", "Webapp", "docs"] };
+
+test("defaultRepo is first in the effective repos, without repeats", () => {
+  assert.deepEqual(effectiveRepos(multi), ["webapp", "api", "docs"]);
+  assert.deepEqual(effectiveRepos({ ...rules, defaultRepo: "", repos: ["api"] }), ["api"]);
+  assert.deepEqual(effectiveRepos(rules), ["webapp"]);
+});
+
+test("the dropdown shows only with two or more repos", () => {
+  assert.equal(showRepoPicker(rules), false);
+  assert.equal(showRepoPicker({ ...rules, repos: ["Webapp"] }), false);
+  assert.equal(showRepoPicker(multi), true);
+});
+
+test("the selected repo is the last pick while listed, else defaultRepo", () => {
+  assert.equal(pickedRepo(multi, "docs"), "docs");
+  assert.equal(pickedRepo(multi, "gone"), "webapp");
+  assert.equal(pickedRepo(multi, ""), "webapp");
+});
+
+test("a bare number goes to the picked repo", () => {
+  assert.equal(parseTarget("5", multi, "api").key, "acme/api#5");
+  assert.equal(parseTarget("#5", multi, "docs").url, "https://github.com/acme/docs/pull/5");
+  assert.equal(parseTarget("5", multi).key, "acme/webapp#5");
+  assert.equal(parseTarget("5", multi, "unlisted").key, "acme/webapp#5");
+});
+
+test("<repo>#<number> is accepted for listed repos only", () => {
+  assert.equal(parseTarget("api#12", multi, "docs").key, "acme/api#12");
+  assert.equal(parseTarget(" DOCS#3 ", multi).key, "acme/docs#3");
+  assert.equal(parseTarget("webapp#9", rules).key, "acme/webapp#9");
+  for (const input of ["other#1", "api#0", "api#", "#api", "api#1x", "api #1"]) assert.equal(parseTarget(input, multi), null, input);
+  assert.equal(parseTarget("api#1", rules), null);
+  assert.equal(parseTarget("api#1", { ...multi, org: "" }), null);
 });

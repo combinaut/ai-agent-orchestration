@@ -165,5 +165,7 @@ idle_s = 7200
 org = ""
 # Repo name for bare PR numbers; empty turns number jumps off
 default_repo = ""
+# Repo names in pr_tabs.org the popup can send a bare PR number to, besides default_repo; the popup shows a picker when there are two or more
+repos = []
 # GitHub search behind the Open all button; empty turns it off
 open_all = ""

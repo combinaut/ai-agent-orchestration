@@ -408,3 +408,25 @@ test("failed scans preserve the last good map for checks and Open all, including
   assert.equal(grouped.at(-1).title, "Finder");
   assert.deepEqual(store.owners, good);
 });
+
+test("goTo opens a bare number in the picked repo and remembers the pick", async () => {
+  const configured = hostSettings;
+  try {
+    tabs = []; store = {};
+    hostSettings = { ...configured, repos: ["webapp", "api", "docs"] };
+    const multi = await import("../extension/background.js?multi-repo");
+    assert.deepEqual(await multi.repoChoices(), { repos: ["webapp", "api", "docs"], selected: "webapp", show: true });
+    assert.deepEqual(await multi.goTo("7", "api"), { opened: "acme/api#7" });
+    assert.equal(store.prTabsRepo, "api");
+    assert.deepEqual(await multi.repoChoices(), { repos: ["webapp", "api", "docs"], selected: "api", show: true });
+    assert.deepEqual(await multi.goTo("docs#8", "api"), { opened: "acme/docs#8" });
+    assert.deepEqual(await multi.goTo("9", "unlisted"), { opened: "acme/webapp#9" });
+    assert.equal(store.prTabsRepo, "api");
+    assert.deepEqual(await multi.goTo("other#1"), { error: "Not a acme PR number or URL" });
+    hostSettings = { ...configured, repos: ["webapp"] };
+    const single = await import("../extension/background.js?single-repo");
+    assert.equal((await single.repoChoices()).show, false);
+  } finally {
+    hostSettings = configured; store = {}; tabs = [];
+  }
+});

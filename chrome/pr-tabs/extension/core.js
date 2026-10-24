@@ -46,11 +46,44 @@ export function parsePrUrl(url, org) {
   return pr(org, match[2], Number(match[3]));
 }
 
-// The PR named by popup input: a number (#123 or 123) in rules.defaultRepo, or a PR URL.
-export function parseTarget(input, rules) {
+// Repos a bare number can go to: defaultRepo first, then rules.repos, without case-insensitive repeats.
+export function effectiveRepos(rules) {
+  const repos = [];
+  for (const name of [rules.defaultRepo, ...(rules.repos || [])]) {
+    if (name && !repos.some((seen) => seen.toLowerCase() === name.toLowerCase())) repos.push(name);
+  }
+  return repos;
+}
+
+// The repo in the list matching name (any case), else null.
+function listedRepo(rules, name) {
+  return effectiveRepos(rules).find((repo) => repo.toLowerCase() === (name || "").toLowerCase()) || null;
+}
+
+// The repo the popup selects: the last pick while it is still listed, else the first (defaultRepo).
+export function pickedRepo(rules, stored) {
+  return listedRepo(rules, stored) || effectiveRepos(rules)[0] || "";
+}
+
+// The popup shows a repo dropdown only when there is a choice.
+export function showRepoPicker(rules) {
+  return effectiveRepos(rules).length >= 2;
+}
+
+// The PR named by popup input: a number (#123 or 123) in the picked repo (default: pickedRepo), <repo>#<number> for a listed repo, or a PR URL.
+export function parseTarget(input, rules, picked) {
   const text = (input || "").trim();
+  if (!rules.org) return null;
   const number = /^#?(\d{1,9})$/.exec(text);
-  if (number) return rules.org && rules.defaultRepo && Number(number[1]) > 0 ? pr(rules.org, rules.defaultRepo, Number(number[1])) : null;
+  if (number) {
+    const repo = listedRepo(rules, picked) || pickedRepo(rules);
+    return repo && Number(number[1]) > 0 ? pr(rules.org, repo, Number(number[1])) : null;
+  }
+  const named = /^([A-Za-z0-9_.-]{1,100})#(\d{1,9})$/.exec(text);
+  if (named) {
+    const repo = listedRepo(rules, named[1]);
+    return repo && Number(named[2]) > 0 ? pr(rules.org, repo, Number(named[2])) : null;
+  }
   return parsePrUrl(text, rules.org);
 }
 

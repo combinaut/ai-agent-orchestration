@@ -19,6 +19,9 @@ import {
   POLL_SECONDS,
   tabsToClose,
   groupForPr,
+  effectiveRepos,
+  pickedRepo,
+  showRepoPicker,
 } from "./core.js";
 import { messageListener } from "./messages.js";
 
@@ -299,14 +302,22 @@ export async function openAll() {
 }
 
 // Focuses the PR's open tab (window, group, tab) or opens it in its architect group, one request at a time.
-export const goTo = (input) => serial(() => findOrOpen(input));
+export const goTo = (input, repo) => serial(() => findOrOpen(input, repo));
 
-async function findOrOpen(input) {
+// What the popup needs for the repo dropdown: the listed repos, the selected one, and whether to show it.
+export async function repoChoices() {
+  const rules = await loadRules();
+  const { prTabsRepo } = await chrome.storage.local.get({ prTabsRepo: "" });
+  return { repos: effectiveRepos(rules), selected: pickedRepo(rules, prTabsRepo), show: showRepoPicker(rules) };
+}
+
+async function findOrOpen(input, repo) {
   const rules = await loadRules();
   if (!rules.org) return { error: "Set pr_tabs.org in orchestration.toml" };
-  if (/^#?\d+$/.test((input || "").trim()) && !rules.defaultRepo)
+  if (/^#?\d+$/.test((input || "").trim()) && !effectiveRepos(rules).length)
     return { error: "Set pr_tabs.default_repo in orchestration.toml" };
-  const pr = parseTarget(input, rules);
+  if (repo && repo === pickedRepo(rules, repo)) await chrome.storage.local.set({ prTabsRepo: repo });
+  const pr = parseTarget(input, rules, repo);
   if (!pr) return { error: `Not a ${rules.org} PR number or URL` };
   const focused = await chrome.windows.getLastFocused().catch(() => null);
   const entry = findOpenTab(await prEntries(rules), pr.key, focused?.id);
@@ -371,7 +382,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM) poll();
 });
 
-chrome.runtime.onMessage.addListener(messageListener({ openAll, goTo: (message) => goTo(message.input), summary, checkNow, closeDuplicates }));
+chrome.runtime.onMessage.addListener(messageListener({ openAll, goTo: (message) => goTo(message.input, message.repo), repos: repoChoices, summary, checkNow, closeDuplicates }));
 
 // Groups the PR tabs already open and polls soon; restored tabs may still be arriving, so the alarm is armed regardless.
 async function start() {

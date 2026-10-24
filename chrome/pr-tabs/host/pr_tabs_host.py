@@ -179,7 +179,7 @@ def project_settings():
             "/bin/bash",
             "-e",
             "-c",
-            '. "$1"; orch_load_config; printf "%s\\0" "$ORCH_PR_TABS_ORG" "$ORCH_PR_TABS_DEFAULT_REPO" "$ORCH_PR_TABS_OPEN_ALL"',
+            '. "$1"; orch_load_config; printf "%s\\0" "$ORCH_PR_TABS_ORG" "$ORCH_PR_TABS_DEFAULT_REPO" "$ORCH_PR_TABS_REPOS" "$ORCH_PR_TABS_OPEN_ALL"',
             "orch-config",
             str(library),
         ],
@@ -188,12 +188,12 @@ def project_settings():
         timeout=2,
         check=True,
     )
-    return result.stdout.split("\0")[:3]
+    return result.stdout.split("\0")[:4]
 
 
 def settings(request):
     try:
-        org, repo, query = project_settings()
+        org, repo, extra, query = project_settings()
     except (OSError, subprocess.SubprocessError, UnicodeError) as error:
         config = os.environ.get(
             "ORCH_CONFIG", str(Path.home() / ".claude/orchestration.toml")
@@ -209,10 +209,20 @@ def settings(request):
         raise RequestError(
             "ORCH_PR_TABS_DEFAULT_REPO must be a GitHub repository name (1-100 letters, digits, underscores, dots, or hyphens)"
         )
+    names = [name.strip() for name in extra.split(",") if name.strip()]
+    if any(not NAME.fullmatch(name) for name in names):
+        raise RequestError(
+            "ORCH_PR_TABS_REPOS must be comma-separated GitHub repository names (1-100 letters, digits, underscores, dots, or hyphens each)"
+        )
+    repos = []
+    for name in ([repo] if repo else []) + names:
+        if name.lower() not in (seen.lower() for seen in repos):
+            repos.append(name)
     return {
         "ok": True,
         "org": org,
         "defaultRepo": repo,
+        "repos": repos,
         "openAll": query,
     }
 

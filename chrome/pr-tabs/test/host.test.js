@@ -59,6 +59,37 @@ test("settings rejects an explicitly selected missing or non-file config", () =>
   }
 });
 
+test("pr_tabs.repos joins default_repo, which stays first, without repeats", () => {
+  const config = join(dir, "orchestration.toml");
+  const saved = process.env.ORCH_CONFIG;
+  process.env.ORCH_CONFIG = config;
+  try {
+    writeFileSync(config, '[pr_tabs]\norg = "acme"\ndefault_repo = "webapp"\nrepos = ["api", "Webapp", "docs"]\n');
+    assert.deepEqual(ask({ type: "settings" }).reply.repos, ["webapp", "api", "docs"]);
+    process.env.ORCH_PR_TABS_REPOS = " tools , api,,";
+    assert.deepEqual(ask({ type: "settings" }).reply.repos, ["webapp", "tools", "api"]);
+    delete process.env.ORCH_PR_TABS_REPOS;
+    writeFileSync(config, '[pr_tabs]\norg = "acme"\nrepos = ["api"]\n');
+    assert.deepEqual(ask({ type: "settings" }).reply.repos, ["api"]);
+    for (const bad of ["bad/repo", "a".repeat(101), "a b"]) {
+      writeFileSync(config, `[pr_tabs]\norg = "acme"\nrepos = ["api", "${bad}"]\n`);
+      const refused = ask({ type: "settings" });
+      assert.equal(refused.reply.ok, false, bad);
+      assert.match(refused.reply.error, /ORCH_PR_TABS_REPOS/);
+      assert.equal(refused.calls.length, 0);
+    }
+    writeFileSync(config, '[pr_tabs]\norg = "acme"\n');
+    process.env.ORCH_PR_TABS_REPOS = "api,bad/repo";
+    const envBad = ask({ type: "settings" });
+    assert.equal(envBad.reply.ok, false);
+    assert.match(envBad.reply.error, /ORCH_PR_TABS_REPOS/);
+  } finally {
+    delete process.env.ORCH_PR_TABS_REPOS;
+    if (saved === undefined) delete process.env.ORCH_CONFIG;
+    else process.env.ORCH_CONFIG = saved;
+  }
+});
+
 test("states for many PRs take one gh call and come back keyed by PR", () => {
   const config = join(dir, "orchestration.toml");
   const tabs = 'org = "acme"\ndefault_repo = "webapp"\n';
@@ -69,6 +100,7 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
     ok: true,
     org: "acme",
     defaultRepo: "webapp",
+    repos: ["webapp"],
     openAll: "",
   });
   process.env.ORCH_PR_TABS_DEFAULT_REPO = "";
@@ -79,6 +111,7 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
     ok: true,
     org: "",
     defaultRepo: "",
+    repos: [],
     openAll: "",
   });
   for (const [key, name, value] of [
