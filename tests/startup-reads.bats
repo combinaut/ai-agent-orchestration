@@ -35,11 +35,12 @@ teardown() {
 }
 
 @test "orch-settings prints the built-in default of every global setting when no file exists" {
-  want=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import orch_settings as s; print(len(s.scoped("global")))' "$ROOT/lib")
+  want=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import orch_settings as s; print(len(s.listed("global")))' "$ROOT/lib")
   run env -u ORCH_CONFIG "$ROOT/orch-settings"
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c .)" -eq "$want" ]
   has_line ORCH_RECYCLE_TOKENS=300000
+  has_line ORCH_REVIEW_FINALIZE_COMMENT=1
 }
 
 @test "orch-settings resolves default, then the file, then an exported variable" {
