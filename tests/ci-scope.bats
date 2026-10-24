@@ -23,6 +23,36 @@ scope() { run /bin/bash "$BATS_TEST_DIRNAME/../scripts/ci/macos-scope.sh"; }
   [ "$output" = macos=false ]
 }
 
+@test "workflow-only changes skip macOS" {
+  GH_JSON='[{"filename":".github/workflows/test.yml"}]' scope
+  [ "$output" = macos=false ]
+}
+
+@test "other GitHub files skip macOS" {
+  GH_JSON='[{"filename":".github/dependabot.yml"}]' scope
+  [ "$output" = macos=false ]
+}
+
+@test "validate workflow changes run macOS" {
+  GH_JSON='[{"filename":".github/workflows/validate.yml"}]' scope
+  [ "$output" = macos=true ]
+}
+
+@test "docs and a workflow skip macOS" {
+  GH_JSON='[{"filename":"docs/a.md"},{"filename":".github/workflows/test.yml"}]' scope
+  [ "$output" = macos=false ]
+}
+
+@test "a workflow and code run macOS" {
+  GH_JSON='[{"filename":".github/workflows/test.yml"},{"filename":"install.sh"}]' scope
+  [ "$output" = macos=true ]
+}
+
+@test "a rename from validate workflow runs macOS" {
+  GH_JSON='[{"filename":".github/workflows/test.yml","previous_filename":".github/workflows/validate.yml"}]' scope
+  [ "$output" = macos=true ]
+}
+
 @test "a code file runs macOS" {
   GH_JSON='[{"filename":"README.md"},{"filename":"install.sh"}]' scope
   [ "$output" = macos=true ]
