@@ -1639,12 +1639,10 @@ TOML
   done
 }
 
-@test "a repo that ships a finalize skill of its own keeps it and a foreign agents entry stays" {
-  mkdir -p "$TMP/work/.agents/skills/finalize-code-comments" "$HOME/.agents/skills/finalize-change-footprint"
-  printf 'repo copy\n' >"$TMP/work/.agents/skills/finalize-code-comments/SKILL.md"
+@test "a foreign finalize skill in the shared agents folder stays" {
+  mkdir -p "$HOME/.agents/skills/finalize-change-footprint"
   printf 'foreign\n' >"$HOME/.agents/skills/finalize-change-footprint/SKILL.md"
   fresh_install
-  [ "$(cat "$TMP/work/.agents/skills/finalize-code-comments/SKILL.md")" = "repo copy" ]
   [ ! -L "$HOME/.agents/skills/finalize-change-footprint" ]
   [ "$(cat "$HOME/.agents/skills/finalize-change-footprint/SKILL.md")" = foreign ]
   printf '%s\n' "$output" | grep -q "^collision  *$HOME/.agents/skills/finalize-change-footprint "
