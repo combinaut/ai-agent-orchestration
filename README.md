@@ -27,10 +27,16 @@ The installer puts the skills, watchers, hooks and status line into `~/.claude`.
 You need macOS or Linux, [Claude Code](https://claude.com/claude-code) with the `ListAgents`, `SendMessage` and `Monitor` tools, `git`, `jq`, Python 3.11 or newer and `curl`. `gh` (logged in with `gh auth login`) is needed for the PR watchers. Codex CLI is optional.
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/get.sh | bash
+```
+
+Installer options go after `bash -s --`, for example `... | bash -s -- --env herdr`. `get.sh` clones the repo (or fast-forwards an existing clone, refusing one with local edits) and runs its `install.sh`. Set `ORCH_INSTALL_DIR` to pick the clone folder. Without `get.sh`, run the installer directly:
+
+```bash
 s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) && bash -c "${s:?empty download}" _
 ```
 
-It clones this repo to `~/.claude/ai-agent-orchestration`, links the files into `~/.claude`, adds the hooks and status line to `~/.claude/settings.json`, and runs the env adapter, which for `herdr` installs [Herdr](https://herdr.dev) 0.9 or newer with the Radar plugin. Pick another env with `--env <name>` after the final `_`, or skip the env step with `env = "none"` under `[install]` in `~/.claude/orchestration.toml`. If it prints `PATH setup`, add the line it shows to your shell startup file and open a new shell.
+It clones this repo to `~/.claude/ai-agent-orchestration`, links the files into `~/.claude`, adds the hooks and status line to `~/.claude/settings.json`, and runs the env adapter, which for `herdr` installs [Herdr](https://herdr.dev) 0.9 or newer with the Radar plugin. Pick another env with `--env <name>` (after `bash -s --`, or after the final `_` in the direct command), or skip the env step with `env = "none"` under `[install]` in `~/.claude/orchestration.toml`. If it prints `PATH setup`, add the line it shows to your shell startup file and open a new shell.
 
 The installer adds a marked orchestration block to `~/.claude/CLAUDE.md`. Later runs replace the text between those markers. If you already pasted the older unmarked sections, it leaves them alone and tells you how to wrap them once with the markers from [`snippets/CLAUDE.md.snippet`](snippets/CLAUDE.md.snippet); any custom text inside the markers will be replaced on the next run.
 
