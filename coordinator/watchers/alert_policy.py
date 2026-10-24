@@ -50,6 +50,7 @@ PULL_KINDS = (
     "CHANGES",
     "THREADS",
     "COPILOT",
+    "COMMENTED",
 )
 YOUNG_MARK = ",new)"
 READFAIL_LABELS = {"workers": "WORKER"}

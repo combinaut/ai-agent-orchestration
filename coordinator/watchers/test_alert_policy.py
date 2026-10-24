@@ -3291,6 +3291,7 @@ class QuietFeedTest(IsolatedTestCase):
         for kind in (
             "THREADS",
             "COPILOT",
+            "COMMENTED",
             "CHANGES",
             "APPROVED",
             "APPROVED-OLDHEAD",
@@ -3298,6 +3299,9 @@ class QuietFeedTest(IsolatedTestCase):
         ):
             with self.subTest(kind=kind):
                 self.assert_fyi(f"audit: {kind} o/r#7 Fix (start)")
+
+    def test_pulls_commented_is_an_action(self):
+        self.assert_action("pulls: COMMENTED o/r#7 owner=wA Fix [by sleistner] (start)")
 
     def test_the_audit_machine_kinds_stay_action(self):
         for line in (

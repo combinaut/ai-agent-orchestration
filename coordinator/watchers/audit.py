@@ -18,12 +18,12 @@ from watcher_platform import MissingMetric, herdr_bin, read_slots
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
 import orch_settings
 
-SELECTION = """number title state isDraft mergeable baseRefName headRefName headRefOid headRepository{nameWithOwner}
+SELECTION = """number title state isDraft author{login} mergeable baseRefName headRefName headRefOid headRepository{nameWithOwner}
 repository{nameWithOwner defaultBranchRef{name}}
 latestOpinionatedReviews(first:10){nodes{state commit{oid}}}
 reviewDecision reviewRequests(first:3){totalCount}
 reviewThreads(first:$ni){pageInfo{hasNextPage} nodes{isResolved}}
-reviews(last:6){nodes{author{login} body}}
+reviews(last:6){nodes{author{login __typename} state body comments{totalCount}}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:$ni){pageInfo{hasNextPage}
 nodes{... on CheckRun{name conclusion startedAt} ... on StatusContext{context state}}}}}}}"""
 QUERY = (
@@ -458,6 +458,29 @@ def legacy_line(label, hits, kinds):
     )
 
 
+def commented_reviews(pr, bot):
+    """Every human COMMENTED review with a body and no inline comments, not by the PR author or the bot."""
+    owner = (pr.get("author") or {}).get("login")
+    return [
+        review
+        for review in pr["reviews"]["nodes"]
+        if review.get("state") == "COMMENTED"
+        and (review.get("body") or "").strip()
+        and not (review.get("comments") or {}).get("totalCount")
+        and (review.get("author") or {}).get("__typename") != "Bot"
+        and not (
+            (review.get("author") or {}).get("login")
+            and review["author"]["login"] in (owner, bot)
+        )
+    ]
+
+
+def commented_review(pr, bot):
+    """The latest of them."""
+    found = commented_reviews(pr, bot)
+    return found[-1] if found else None
+
+
 def pr_lines(pr, page_nodes=100, settings=None):
     if pr["state"] != "OPEN":
         return []
@@ -508,6 +531,12 @@ def pr_lines(pr, page_nodes=100, settings=None):
     if "Needs a closer look" in body:
         summary = re.search(r"Needs a closer look\s*\n+([^\n]+)", body)
         emit("COPILOT", summary[1] if summary else "see overview")
+    commented = commented_review(pr, bot)
+    if commented:
+        emit(
+            "COMMENTED",
+            "by " + ((commented.get("author") or {}).get("login") or "unknown"),
+        )
     if pr["mergeable"] == "CONFLICTING":
         emit("CONFLICT", "conflicts with " + pr["baseRefName"])
     decision = pr["reviewDecision"]

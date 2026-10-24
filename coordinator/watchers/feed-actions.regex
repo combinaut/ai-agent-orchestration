@@ -1,6 +1,6 @@
 ^[^ ]+ context: RECYCLE .* \(start\)$
 ^[^ ]+ host: HOST .* \(danger\)$
-^[^ ]+ pulls: (APPROVED[A-Z-]*|RED|CHANGES|THREADS|COPILOT|MERGED) .* \(start\)$
+^[^ ]+ pulls: (APPROVED[A-Z-]*|RED|CHANGES|THREADS|COPILOT|COMMENTED|MERGED) .* \(start\)$
 ^[^ ]+ workers: WORKER [^ ]+ (blocked|error|dead/disappeared) \(start\)$
 ^[^ ]+ [a-z]+: STATE RESET .* \(start\)$
 ^[^ ]+ [a-z]+: [a-z]+ HEARTBEAT STALE \(start\)$

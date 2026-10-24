@@ -1,5 +1,5 @@
 ^[^ ]+ (?!.*(READFAIL|read failed)).*\(clear\)$
 ^[^ ]+ balance: BALANCE READFAIL .*\((start|clear)\)$
 ^[^ ]+ workers: WORKER WAITING (?!.* ESCALATE ).*\(start\)$
-^[^ ]+ audit: (RED|THREADS|COPILOT|CHANGES|APPROVED[A-Z-]*) .*\(start\)$
+^[^ ]+ audit: (RED|THREADS|COPILOT|COMMENTED|CHANGES|APPROVED[A-Z-]*) .*\(start\)$
 ^[^ ]+ watchers: Watcher digest, .*\(digest\)$

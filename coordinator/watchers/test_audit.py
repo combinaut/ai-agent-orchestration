@@ -93,6 +93,63 @@ class AuditTests(IsolatedTestCase):
         ]
         self.assertEqual(self.lines(), [f"COPILOT {LABEL} [see overview]"])
 
+    def review(self, id, login, body, state="COMMENTED"):
+        return dict(id=id, author=dict(login=login), state=state, body=body)
+
+    def test_commented_review_with_body_names_the_reviewer(self):
+        self.pr["author"] = dict(login="author")
+        self.pr["reviews"]["nodes"] = [self.review("R1", "sleistner", "Two findings")]
+        self.assertEqual(self.lines(), [f"COMMENTED {LABEL} [by sleistner]"])
+
+    def test_commented_ignores_other_states_empty_bodies_author_and_bot(self):
+        self.pr["author"] = dict(login="author")
+        for review in (
+            self.review("R1", "sleistner", "Looks fine", state="APPROVED"),
+            self.review("R2", "sleistner", "Please change", state="CHANGES_REQUESTED"),
+            self.review("R3", "sleistner", "", state="COMMENTED"),
+            self.review("R4", "sleistner", " \n\t ", state="COMMENTED"),
+            self.review("R5", "sleistner", None, state="COMMENTED"),
+            self.review("R6", "author", "My own reply"),
+            self.review("R7", "robot", "Bot summary"),
+            dict(
+                self.review("R8", "sleistner", "See inline"),
+                comments=dict(totalCount=2),
+            ),
+            dict(
+                self.review("R9", "other-bot", "Automated"),
+                author=dict(login="other-bot", __typename="Bot"),
+            ),
+        ):
+            with self.subTest(review=review["id"]):
+                self.pr["reviews"]["nodes"] = [review]
+                self.assertEqual(self.lines(), [])
+
+    def test_commented_takes_the_latest_qualifying_review(self):
+        self.pr["author"] = dict(login="author")
+        self.pr["reviews"]["nodes"] = [
+            self.review("R1", "first", "Old"),
+            self.review("R2", "second", "New"),
+            self.review("R3", "author", "Reply"),
+        ]
+        self.assertEqual(self.lines(), [f"COMMENTED {LABEL} [by second]"])
+
+    def test_commented_review_with_zero_inline_comments_and_a_user_author_fires(self):
+        self.pr["reviews"]["nodes"] = [
+            dict(
+                self.review("R1", "sleistner", "Findings"),
+                author=dict(login="sleistner", __typename="User"),
+                comments=dict(totalCount=0),
+            )
+        ]
+        self.assertEqual(self.lines(), [f"COMMENTED {LABEL} [by sleistner]"])
+
+    def test_commented_review_from_a_deleted_author(self):
+        self.pr["author"] = None
+        self.pr["reviews"]["nodes"] = [
+            dict(id="R1", author=None, state="COMMENTED", body="Gone")
+        ]
+        self.assertEqual(self.lines(), [f"COMMENTED {LABEL} [by unknown]"])
+
     def test_conflict(self):
         self.pr["mergeable"] = "CONFLICTING"
         self.assertEqual(self.lines(), [f"CONFLICT {LABEL} [conflicts with main]"])

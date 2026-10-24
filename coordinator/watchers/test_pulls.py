@@ -1720,10 +1720,150 @@ class PullsTest(IsolatedTestCase):
             w.PULLS_SELECTION,
         )
         self.assertIn(
-            "recentReviews:reviews(last:6){nodes{id author{login} body}}",
+            "recentReviews:reviews(last:6){nodes{id author{login __typename} state body comments{totalCount}}}",
             w.PULLS_SELECTION,
         )
         self.assertEqual(w.PULLS_SELECTION.count(" body"), 1)
+
+    def commented_row(self, *reviews):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        row["author"] = {"login": "alexsavio"}
+        row["reviews"] = {"nodes": [], "pageInfo": {"hasPreviousPage": False}}
+        row["recentReviews"] = {"nodes": list(reviews)}
+        return row
+
+    @staticmethod
+    def review(id, login, body, state="COMMENTED"):
+        return {"id": id, "author": {"login": login}, "state": state, "body": body}
+
+    def test_commented_review_fires_once_to_the_owner(self):
+        mine = [self.review("E1", "alexsavio", ""), self.review("E2", "alexsavio", "")]
+        row = self.commented_row(*mine)
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        self.assertNotIn("COMMENTED", state["prs"]["owner/product#7"]["lines"])
+        row = self.commented_row(*mine, self.review("R1", "sleistner", "Two findings"))
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(
+            events,
+            [f"COMMENTED owner/product#7 owner=wArch {PR['title']} [by sleistner]"],
+        )
+        self.assertEqual(
+            state["prs"]["owner/product#7"]["identities"]["COMMENTED"], "R1"
+        )
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+
+    def test_commented_review_leaving_the_window_clears_and_never_refires(self):
+        first = self.review("R1", "sleistner", "Findings")
+        state, _ = w.reduce_pulls(
+            None, w.collect_pulls(self.command([self.commented_row()]), None)
+        )
+        row = self.commented_row(first)
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(len(events), 1)
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([self.commented_row()]), state)
+        )
+        self.assertEqual(events, ["COMMENTED owner/product#7 cleared"])
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+
+    def test_state_saved_by_the_old_code_fires_an_old_qualifying_review_once(self):
+        old = self.review("R1", "sleistner", "Findings")
+        state, _ = w.reduce_pulls(
+            None, w.collect_pulls(self.command([self.commented_row()]), None)
+        )
+        saved = state["prs"]["owner/product#7"]
+        saved["seen_reviews"] = ["B1"]
+        self.assertNotIn("COMMENTED", saved["lines"])
+        row = self.commented_row(old)
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(
+            events,
+            [f"COMMENTED owner/product#7 owner=wArch {PR['title']} [by sleistner]"],
+        )
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, [])
+
+    def test_legacy_snapshot_without_seen_reviews_seeds_commented_silently(self):
+        state, _ = w.reduce_pulls(
+            None, w.collect_pulls(self.command([self.commented_row()]), None)
+        )
+        state["prs"]["owner/product#7"].pop("seen_reviews")
+        row = self.commented_row(self.review("R1", "sleistner", "Findings"))
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+        self.assertIn("R1", state["prs"]["owner/product#7"]["seen_reviews"])
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, [])
+
+    def two_reviews(self, emptied=False):
+        return self.commented_row(
+            self.review("R1", "sleistner", "First findings"),
+            self.review("R2", "sleistner", "" if emptied else "Second findings"),
+        )
+
+    def poll(self, state, row):
+        return w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+
+    def test_emptied_latest_review_does_not_resurface_an_older_one_after_baseline(
+        self,
+    ):
+        state, _ = self.poll(None, self.two_reviews())
+        self.assertEqual(state["prs"]["owner/product#7"]["seen_reviews"], ["R1", "R2"])
+        _, events = self.poll(state, self.two_reviews(emptied=True))
+        self.assertEqual(events, [])
+
+    def test_emptied_latest_review_does_not_resurface_an_older_one_after_migration(
+        self,
+    ):
+        state, _ = self.poll(None, self.commented_row())
+        state["prs"]["owner/product#7"].pop("seen_reviews")
+        state, events = self.poll(state, self.two_reviews())
+        self.assertEqual(events, [])
+        _, events = self.poll(state, self.two_reviews(emptied=True))
+        self.assertEqual(events, [])
+
+    def test_emptied_latest_review_does_not_resurface_an_older_one_after_update(
+        self,
+    ):
+        state, _ = self.poll(None, self.commented_row())
+        state["prs"]["owner/product#7"]["seen_reviews"] = ["B1"]
+        state, events = self.poll(state, self.two_reviews())
+        self.assertEqual(
+            events,
+            [f"COMMENTED owner/product#7 owner=wArch {PR['title']} [by sleistner]"],
+        )
+        _, events = self.poll(state, self.two_reviews(emptied=True))
+        self.assertEqual(events, [])
+
+    def test_a_new_commented_review_fires_again(self):
+        row = self.commented_row(self.review("R1", "sleistner", "Findings"))
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        row = self.commented_row(
+            self.review("R1", "sleistner", "Findings"),
+            self.review("R2", "sleistner", "More findings"),
+        )
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(
+            events,
+            [
+                "COMMENTED owner/product#7 cleared",
+                f"COMMENTED owner/product#7 owner=wArch {PR['title']} [by sleistner]",
+            ],
+        )
 
     def test_new_review_and_owner_in_same_poll_reaches_start_feed(self):
         row = pr(7, decision="REVIEW_REQUIRED")
