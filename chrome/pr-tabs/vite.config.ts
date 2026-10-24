@@ -27,5 +27,12 @@ export default defineConfig({
   test: {
     root: path("."),
     include: ["test/**/*.test.ts"],
+    coverage: {
+      enabled: true,
+      provider: "v8",
+      include: ["src/**/*.{ts,vue}"],
+      reporter: ["text-summary"],
+      thresholds: { lines: 80, branches: 80 },
+    },
   },
 });

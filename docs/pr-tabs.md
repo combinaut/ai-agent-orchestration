@@ -44,7 +44,7 @@ The native host asks the selected env adapter, through shared open-work discover
 
 ## 🛠 Develop
 
-The extension is Vue 3 with PrimeVue 4 (Aura theme, dark mode from the system) and TypeScript. Sources live in `chrome/pr-tabs/src` (`background.ts`, `core.ts`, `messages.ts`, `popup/App.vue`), static files in `chrome/pr-tabs/public` (`manifest.json`, `rules.json`). Vite builds them into `chrome/pr-tabs/extension`, the folder Chrome loads. The build is committed, so installing needs no Node.
+The extension is Vue 3 with PrimeVue 4 (Aura theme, dark mode from the system) and TypeScript. Sources live in `chrome/pr-tabs/src`: `background.ts` (service worker), `core.ts` (pure logic), `messages.ts` (typed popup ↔ worker messages), `popup/` (`App.vue`, `components/`, `tokens.css` for the `--pr-tabs-*` design tokens) and `composables/` (popup logic on VueUse). Static files in `chrome/pr-tabs/public` (`manifest.json`, `rules.json`). Vite builds them into `chrome/pr-tabs/extension`, the folder Chrome loads. The build is committed, so installing needs no Node.
 
 Needs Node 22 or newer and pnpm (the version `packageManager` in `package.json` pins). In `chrome/pr-tabs`:
 
@@ -52,8 +52,8 @@ Needs Node 22 or newer and pnpm (the version `packageManager` in `package.json` 
 |---|---|
 | `pnpm install` | Installs the pinned dependencies from `pnpm-lock.yaml`. |
 | `pnpm build` | Builds `extension/` with fixed file names. Commit the result. |
-| `pnpm test` | Runs the Vitest suite (`test/`, the popup test uses happy-dom; the host tests need `python3`). |
-| `pnpm lint` | oxlint and Prettier (`pnpm format` rewrites). |
+| `pnpm test` | Runs the Vitest suite with v8 coverage; under 80 % lines or branches fails. Component specs use happy-dom, the host tests need `python3`. For one file: `pnpm exec vitest run --coverage.enabled=false test/<file>`. |
+| `pnpm lint` | oxlint (braces, no nested ternaries, no `any` or `!`, short functions) and Prettier (`pnpm format` rewrites). `test/templates.test.ts` keeps templates to plain variables and `handle*` handlers; `test/tokens.test.ts` bans literal colours and lengths. |
 | `pnpm typecheck` | `vue-tsc --noEmit` in strict mode. |
 | `pnpm check` | All of the above in that order, build last. |
 
