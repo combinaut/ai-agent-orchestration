@@ -166,6 +166,15 @@ def my_review_sha(pr):
     return ((nodes[-1].get("commit") or {}).get("oid")) if nodes else None
 
 
+def dispatched_done_on_other_head(pr, dispatched):
+    """Whether a completed local dispatch reviewed a SHA other than this head."""
+    head = pr.get("headRefOid") or ""
+    return bool(head) and any(
+        sha != head and record.get("state") == "done"
+        for sha, record in heads(dispatched.get(pr["url"]) or {}).items()
+    )
+
+
 def fetch(scope):
     login = viewer_login()
     me = login.lower()
@@ -177,10 +186,12 @@ def fetch(scope):
         f"is:pr is:open reviewed-by:@me -review-requested:@me archived:false {scope}".strip(),
         login,
     )
+    dispatched = load_dispatched()
     moved = [
         n
         for n in reviewed
-        if my_review_sha(n) and my_review_sha(n) != n.get("headRefOid")
+        if (my_review_sha(n) and my_review_sha(n) != n.get("headRefOid"))
+        or dispatched_done_on_other_head(n, dispatched)
     ]
     seen = set()
     nodes = []

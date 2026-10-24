@@ -132,7 +132,7 @@ Rules:
 - Search code with rg or grep.$repo_rules
 - Do not run tests unless needed. Run any test as heavy-slot take review-$agent -- <command> (escalated if the sandbox blocks it), the narrowest spec only.
 - Do NOT use Computer Use or a browser for anything in this task. Use gh and the shell only.
-- Post the GitHub review directly via gh api, no confirmation needed from me (approve / comment / request changes as appropriate). End the review body with *(Generated using Codex)* on its own line.
+- Post the GitHub review directly via gh api repos/<owner>/<repo>/pulls/<number>/reviews -f commit_id=<reviewed sha> (not gh pr review), with the appropriate event and body; substitute the Head SHA above for <reviewed sha>. No confirmation needed from me. End the review body with *(Generated using Codex)* on its own line.
 - Never merge, close, flip ready, or assign human reviewers.
 - Never edit, create or delete any file in the repository (including AGENTS.md or other instruction files); this is a read-only review.
 - When finished, reply with one line: APPROVE|COMMENT|CHANGES_REQUESTED — $url

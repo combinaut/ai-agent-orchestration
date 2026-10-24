@@ -138,6 +138,13 @@ dispatch() {
   contains "$(cat "$TMP/review.prompt")" 'Do not poll, sleep, or wait for CI, other reviewers or replies.'
 }
 
+@test "review prompt pins the posted review to the dispatched head" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  dispatch
+  contains "$(cat "$TMP/review.prompt")" "gh api repos/<owner>/<repo>/pulls/<number>/reviews -f commit_id=<reviewed sha>"
+}
+
 @test "the skill closes panes only through close-pane.sh" {
   run grep -rn 'herdr pane close' "$ROOT/$SKILL_DIR"
   [ "$status" -eq 1 ]
@@ -740,6 +747,38 @@ pr = {"url": "u", "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": "new
       "commits": {"nodes": []}, "myReviews": {"nodes": [{"commit": {"oid": "old"}}]}}
 assert prs.needs_dispatch(pr, {}) == (True, "re-review"), prs.needs_dispatch(pr, {})
 assert "os.replace" in inspect.getsource(prs.save_state)
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a new head pushed mid-review is found from the dispatched record and queued" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+old, new = "reviewed-sha", "new-head"
+pr = {
+    "url": url, "number": 7, "title": "t", "isDraft": False,
+    "mergeable": "MERGEABLE", "headRefOid": new,
+    "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
+    "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+    # GitHub incorrectly reports the new head when a review was posted after it moved.
+    "myReviews": {"nodes": [{"commit": {"oid": new}}]},
+}
+dispatched = {url: {"heads": {old: {"state": "done"}}}}
+prs.viewer_login = lambda: "reviewer"
+prs.search = lambda query, _login: [] if " review-requested:@me " in query else [pr]
+prs.load_dispatched = lambda: dispatched
+nodes, _login = prs.fetch("repo:acme/app")
+assert nodes == [pr], nodes
+assert prs.needs_dispatch(nodes[0], dispatched) == (True, "re-review")
+pr["headRefOid"] = old
+pr["myReviews"] = {"nodes": [{"commit": {"oid": old}}]}
+nodes, _login = prs.fetch("repo:acme/app")
+assert nodes == [], nodes
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
