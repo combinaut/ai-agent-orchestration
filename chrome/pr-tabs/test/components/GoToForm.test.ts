@@ -11,7 +11,7 @@ function form(showRepo: boolean) {
   });
 }
 
-test("Enter submits the form as go", async () => {
+test("submitting the form emits go", async () => {
   const wrapper = form(false);
 
   assert.match(wrapper.find("label").text(), /Go to a PR/);

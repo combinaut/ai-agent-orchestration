@@ -17,6 +17,7 @@ import type {
   Tab,
   TabActionType,
   TabId,
+  WindowId,
 } from "#/types";
 
 // The fake browser.
@@ -115,7 +116,7 @@ export type FakeRuntime = Known<
 export type FakeWindows = Known<
   {
     getLastFocused: () => Promise<Pick<chrome.windows.Window, "id">>;
-    update: (id: number, info: chrome.windows.UpdateInfo) => Promise<void>;
+    update: (id: WindowId, info: chrome.windows.UpdateInfo) => Promise<void>;
   },
   typeof chrome.windows
 >;

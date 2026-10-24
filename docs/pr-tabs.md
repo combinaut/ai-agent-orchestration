@@ -53,7 +53,7 @@ Needs Node 22.12+, 24 or 26+ (the range Vite and Vitest support) and pnpm (the v
 | `pnpm install` | Installs the pinned dependencies from `pnpm-lock.yaml`. |
 | `pnpm build` | Builds `extension/` with fixed file names. Commit the result. |
 | `pnpm test` | Runs the Vitest suite with v8 coverage; under 80 % lines or branches fails. Component specs use happy-dom, the host tests need `python3`. For one file: `pnpm exec vitest run --coverage.enabled=false test/<file>`. |
-| `pnpm lint` | oxlint (braces, no nested ternaries, no `any` or `!`, short functions) and Prettier (`pnpm format` rewrites). `test/templates.test.ts` keeps templates to plain variables and `handle*` handlers; `test/tokens.test.ts` bans literal colours and lengths. |
+| `pnpm lint` | oxlint (braces, no nested ternaries, no `any` or `!`, short functions) and Prettier (`pnpm format` rewrites). `test/templates.test.ts` keeps templates to plain variables and `handle*` handlers; `test/tokens.test.ts` bans literal colours and lengths; `test/layout.test.ts` wants a blank line before every closing `return`. |
 | `pnpm typecheck` | `vue-tsc --noEmit` in strict mode. |
 | `pnpm check` | All of the above in that order, build last. |
 
