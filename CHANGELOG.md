@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/combinaut/ai-agent-orchestration/compare/v1.0.0...v1.1.0) (2026-10-24)
+
+
+### Features
+
+* **skills:** finalize skills in every repo ([#89](https://github.com/combinaut/ai-agent-orchestration/issues/89)) ([fc4ad88](https://github.com/combinaut/ai-agent-orchestration/commit/fc4ad885967fa633b4e01b0706355a62e705f03b))
+* **watchers:** COMMENTED event for a review whose findings are only in its body ([#88](https://github.com/combinaut/ai-agent-orchestration/issues/88)) ([0760a72](https://github.com/combinaut/ai-agent-orchestration/commit/0760a72249d9649a541c03842b9c9cf04470a171))
+
 ## 1.0.0 (2026-10-24)
 
 
