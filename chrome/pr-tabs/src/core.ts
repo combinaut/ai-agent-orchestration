@@ -104,16 +104,20 @@ function matchPrUrl(
   url: string | null | undefined,
 ): { owner: string; repo: string; number: number } | null {
   const match = PR_URL.exec((url || "").trim());
+
   if (!match) {
     return null;
   }
+
   const [, owner = "", repo = "", number = ""] = match;
+
   return { owner, repo, number: Number(number) };
 }
 
 function makePr(ownerName: string, repoName: string, number: number): Pr {
   const owner = ownerName.toLowerCase();
   const repo = repoName.toLowerCase();
+
   return {
     owner,
     repo,
@@ -127,9 +131,11 @@ function makePr(ownerName: string, repoName: string, number: number): Pr {
 // query or fragment; else null.
 export function prKey(url: string | null | undefined): string | null {
   const match = matchPrUrl(url);
+
   if (!match || match.number < 1) {
     return null;
   }
+
   return `${match.owner.toLowerCase()}/${match.repo.toLowerCase()}#${match.number}`;
 }
 
@@ -147,18 +153,22 @@ export function tabUpdateMatters(
   if (change.url) {
     return true;
   }
+
   if (change.status !== "complete" && !change.title) {
     return false;
   }
+
   return isPrUrl(tab?.url) || knownPrTab;
 }
 
 // The PR a URL points at when it belongs to org, else null.
 export function parsePrUrl(url: string | null | undefined, org: string | undefined): Pr | null {
   const match = matchPrUrl(url);
+
   if (!org || !match || match.number < 1 || match.owner.toLowerCase() !== org.toLowerCase()) {
     return null;
   }
+
   return makePr(org, match.repo, match.number);
 }
 
@@ -166,11 +176,13 @@ export function parsePrUrl(url: string | null | undefined, org: string | undefin
 // repeats.
 export function effectiveRepos(rules: Pick<Rules, "defaultRepo" | "repos">): string[] {
   const repos: string[] = [];
+
   for (const name of [rules.defaultRepo, ...(rules.repos || [])]) {
     if (name && !repos.some((seen) => seen.toLowerCase() === name.toLowerCase())) {
       repos.push(name);
     }
   }
+
   return repos;
 }
 
@@ -216,17 +228,23 @@ export function parseTarget(
   picked?: string,
 ): Pr | null {
   const text = (input || "").trim();
+
   if (!rules.org) {
     return null;
   }
+
   const bare = BARE_NUMBER.exec(text);
+
   if (bare) {
     return prIn(rules.org, listedRepo(rules, picked) || pickedRepo(rules), bare[1]);
   }
+
   const named = REPO_NUMBER.exec(text);
+
   if (named) {
     return prIn(rules.org, listedRepo(rules, named[1]), named[2]);
   }
+
   return parsePrUrl(text, rules.org);
 }
 
@@ -244,23 +262,30 @@ export function findOpenTab<E extends Entry>(
 // tab, else the lowest ID (the oldest). Non-PR tabs are never listed.
 export function duplicateTabIds(tabs: TabLike[], focusedWindowId?: number): number[] {
   const byKey = new Map<string, TabLike[]>();
+
   for (const tab of tabs) {
     const key = prKey(tab.url);
+
     if (key) {
       byKey.set(key, [...(byKey.get(key) || []), tab]);
     }
   }
+
   const rank = (tab: TabLike) => {
     if (!tab.active) {
       return 0;
     }
+
     return tab.windowId === focusedWindowId ? 2 : 1;
   };
+
   const ids: number[] = [];
+
   for (const group of byKey.values()) {
     const [keep] = group.toSorted((a, b) => rank(b) - rank(a) || a.id - b.id);
     ids.push(...group.filter((tab) => tab !== keep).map((tab) => tab.id));
   }
+
   return ids;
 }
 
@@ -268,6 +293,7 @@ export function duplicateText(closed: number | undefined): string {
   if (!closed) {
     return "No duplicate PR tabs.";
   }
+
   return `Closed ${closed} duplicate PR tab${closed === 1 ? "" : "s"}.`;
 }
 
@@ -282,6 +308,7 @@ export const GROUP_COLORS = [
   "cyan",
   "orange",
 ] as const;
+
 export type GroupColor = (typeof GROUP_COLORS)[number];
 
 export function isGroupColor(name: string | undefined): name is GroupColor {
@@ -291,9 +318,11 @@ export function isGroupColor(name: string | undefined): name is GroupColor {
 // FNV-1a over the group name, independent of tab order and ownership refreshes.
 export function groupColor(name: string): GroupColor {
   let hash = 2166136261;
+
   for (const char of name) {
     hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 16777619) >>> 0;
   }
+
   return GROUP_COLORS[hash % GROUP_COLORS.length] ?? "grey";
 }
 
@@ -334,17 +363,20 @@ export function tabsToClose(entries: Entry[], states: States): number[] {
 // Metadata with each fetched state recorded.
 export function recordStates(meta: Meta, states: States): Meta {
   const next = { ...meta };
+
   for (const [key, info] of Object.entries(states)) {
     if (info) {
       next[key] = info;
     }
   }
+
   return next;
 }
 
 // Metadata with an OPEN state for each opened PR that has none yet.
 export function seedOpen(meta: Meta, opened: Opened[]): Meta {
   const next = { ...meta };
+
   for (const { hit, pr } of opened) {
     next[pr.key] ??= {
       state: "OPEN",
@@ -353,6 +385,7 @@ export function seedOpen(meta: Meta, opened: Opened[]): Meta {
       headRepository: hit.headRepository,
     };
   }
+
   return next;
 }
 
@@ -365,7 +398,9 @@ export function nextDelaySeconds(failures: number, random: () => number = Math.r
   if (failures <= 0) {
     return POLL_SECONDS;
   }
+
   const ceiling = Math.min(MAX_BACKOFF_SECONDS, POLL_SECONDS * 2 ** failures);
+
   return Math.round(ceiling / 2 + (random() * ceiling) / 2);
 }
 
@@ -374,8 +409,10 @@ export function pollBatch(keys: string[], cursor: number): { batch: string[]; ne
   if (keys.length <= MAX_PRS_PER_POLL) {
     return { batch: keys, nextCursor: 0 };
   }
+
   const start = cursor % keys.length;
   const batch = [...keys.slice(start), ...keys.slice(0, start)].slice(0, MAX_PRS_PER_POLL);
+
   return { batch, nextCursor: (start + MAX_PRS_PER_POLL) % keys.length };
 }
 
@@ -391,6 +428,7 @@ export function planOpenAll(
     .filter((planned): planned is Planned => !!planned.pr && !openKeys.has(planned.pr.key));
   const open = fresh.slice(0, OPEN_ALL_CAP);
   const unfetched = Math.max(0, search.total - search.prs.length);
+
   return { open, remaining: fresh.length - open.length + unfetched, estimated: unfetched > 0 };
 }
 
@@ -400,19 +438,24 @@ export function summarize(entries: Entry[], groups: Map<number | undefined, Grou
     number | undefined,
     { title: string; color?: string; keys: Set<string> }
   >();
+
   for (const { tab, pr } of entries) {
     const group = groups.get(tab.groupId);
+
     if (!group) {
       continue;
     }
+
     const counted = byGroup.get(tab.groupId) ?? {
       title: group.title || "Untitled",
       color: group.color,
       keys: new Set(),
     };
+
     counted.keys.add(pr.key);
     byGroup.set(tab.groupId, counted);
   }
+
   const list = [...byGroup.values()]
     .map(({ title, color, keys }) => ({ title, color, count: keys.size }))
     .toSorted((a, b) => b.count - a.count || a.title.localeCompare(b.title));
@@ -425,6 +468,7 @@ export function summaryText({ prs, groups }: { prs: number; groups: unknown[] })
   if (!prs) {
     return "No PR tabs open";
   }
+
   return `${plural(prs, "PR")} in ${plural(groups.length, "group")}`;
 }
 
@@ -433,23 +477,29 @@ export function checkText({ tabs, prs, checked, closed, inView }: CheckResult): 
   if (!tabs) {
     return "No PR tabs open";
   }
+
   const merged = closed.filter(({ state }) => state === "MERGED").length;
   const parts = [];
+
   if (merged) {
     parts.push(`${plural(merged, "merged tab")}`);
   }
+
   if (closed.length - merged) {
     parts.push(`${plural(closed.length - merged, "closed-PR tab")}`);
   }
+
   let text = parts.length
     ? `Closed ${parts.join(" and ")}`
     : `No merged or closed PRs among ${plural(checked, "PR")} checked`;
   if (inView.length) {
     text += `; ${plural(inView.length, "tab")} in view kept (${inView.join(", ")})`;
   }
+
   if (checked < prs) {
     text += `; ${prs - checked} more next time`;
   }
+
   return `${text}.`;
 }
 
@@ -465,9 +515,12 @@ export function openAllText(
   summary: string,
 ): string {
   const done = `Opened ${opened}.`;
+
   if (!remaining) {
     return `${done} ${summary}`;
   }
+
   const about = estimated ? "about " : "";
+
   return `${done} ${about}${remaining} more not opened; click again for the next batch.`;
 }

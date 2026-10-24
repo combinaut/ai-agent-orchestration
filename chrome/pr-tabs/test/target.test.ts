@@ -15,12 +15,13 @@ import {
   summarize,
   summaryText,
   type Entry,
-} from "../src/core";
+} from "#/core";
 import { rules } from "./helpers";
 
 test("a bare number means acme/webapp", () => {
   assert.equal(parseTarget("7", { org: "", defaultRepo: "" }), null);
   assert.equal(parseTarget("7", { org: "acme", defaultRepo: "" }), null);
+
   for (const input of ["2972", " 2972 ", "#2972"]) {
     const pr = parseTarget(input, rules);
     assert.equal(pr?.key, "acme/webapp#2972");
@@ -88,6 +89,7 @@ test("an open tab for the PR is found, preferring the focused window", () => {
     entry(2, 20, "acme/webapp#2"),
     entry(3, 30, "acme/webapp#2"),
   ];
+
   assert.equal(findOpenTab(entries, "acme/webapp#2", 30)?.tab.id, 3);
   assert.equal(findOpenTab(entries, "acme/webapp#2", 10)?.tab.id, 2);
   assert.equal(findOpenTab(entries, "acme/webapp#1", undefined)?.tab.id, 1);
@@ -105,16 +107,20 @@ test("the summary counts distinct PRs and the PRs in each group", () => {
     entry(4, 10, "acme/webapp#3"),
     entry(5, 10, "acme/webapp#4"),
   ];
+
   for (const [i, groupId] of [7, 7, 7, 8, -1].entries()) {
     const tab = entries[i]?.tab;
     assert.ok(tab);
     tab.groupId = groupId;
   }
+
   const groups = new Map([
     [7, { title: "Search", color: "blue" }],
     [8, { title: "Infra", color: "red" }],
   ]);
+
   const result = summarize(entries, groups);
+
   assert.deepEqual(result, {
     prs: 4,
     groups: [
@@ -129,6 +135,7 @@ test("the summary counts distinct PRs and the PRs in each group", () => {
 
 test("only PR pages count as PR tab updates", () => {
   assert.equal(isPrUrl("https://github.com/acme/webapp/pull/1/files"), true);
+
   for (const url of [
     "https://example.com/",
     "https://github.com/acme/webapp",
@@ -141,6 +148,7 @@ test("only PR pages count as PR tab updates", () => {
 
 test("an unrelated tab's load or title change skips the grouping and alarm path", () => {
   const other = { url: "https://example.com/" };
+
   assert.equal(tabUpdateMatters({ status: "complete" }, other, false), false);
   assert.equal(tabUpdateMatters({ title: "News" }, other, false), false);
   assert.equal(tabUpdateMatters({ status: "complete" }, {}, false), false);
@@ -168,6 +176,7 @@ test("PR tabs, tabs known as PR tabs and URL changes take the grouping and alarm
 
 test("prKey is one key per PR: owner and repo lowercased, sub-page, query and fragment ignored, any owner", () => {
   const key = "acme/webapp#7";
+
   for (const url of [
     "https://github.com/acme/webapp/pull/7",
     "https://github.com/Acme/Webapp/pull/7/files",
@@ -176,7 +185,9 @@ test("prKey is one key per PR: owner and repo lowercased, sub-page, query and fr
   ]) {
     assert.equal(prKey(url), key, url);
   }
+
   assert.equal(prKey("https://github.com/other/repo/pull/12"), "other/repo#12");
+
   for (const url of [
     "",
     null,
@@ -228,6 +239,7 @@ test("duplicateTabIds keeps the active tab of the focused window over another wi
     { id: 1, url, windowId: 1, active: true },
     { id: 2, url, windowId: 2, active: true },
   ];
+
   assert.deepEqual(duplicateTabIds(tabs, 2), [1]);
   assert.deepEqual(duplicateTabIds(tabs, 1), [2]);
 });
@@ -263,9 +275,11 @@ test("<repo>#<number> is accepted for listed repos only", () => {
   assert.equal(parseTarget("api#12", multi, "docs")?.key, "acme/api#12");
   assert.equal(parseTarget(" DOCS#3 ", multi)?.key, "acme/docs#3");
   assert.equal(parseTarget("webapp#9", rules)?.key, "acme/webapp#9");
+
   for (const input of ["other#1", "api#0", "api#", "#api", "api#1x", "api #1"]) {
     assert.equal(parseTarget(input, multi), null, input);
   }
+
   assert.equal(parseTarget("api#1", rules), null);
   assert.equal(parseTarget("api#1", { ...multi, org: "" }), null);
 });

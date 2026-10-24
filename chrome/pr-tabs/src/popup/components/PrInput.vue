@@ -7,7 +7,9 @@ import { useTemplateRef } from "vue";
 import SearchIcon from "./SearchIcon.vue";
 
 defineProps<{ readonly: boolean }>();
+
 const text = defineModel<string>({ required: true });
+
 useFocus(useTemplateRef("field"), { initialValue: true });
 </script>
 

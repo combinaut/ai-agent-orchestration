@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import SearchIcon from "../../src/popup/components/SearchIcon.vue";
+import SearchIcon from "#popup/components/SearchIcon.vue";
 import { mountPopup } from "./mountPopup";
 
 test("the icon is decoration, hidden from screen readers", () => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { GroupSummary } from "../../core";
+import type { GroupSummary } from "#/core";
 import GroupItem from "./GroupItem.vue";
 
 defineProps<{ groups: GroupSummary[] }>();

@@ -19,6 +19,7 @@ interface Directive {
   rawName?: string;
   exp?: unknown;
 }
+
 interface TemplateNode {
   type: number;
   content?: unknown;
@@ -39,9 +40,11 @@ function expressionText(value: unknown): string | null {
 function vueFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
+
     if (entry.isDirectory()) {
       return vueFiles(path);
     }
+
     return path.endsWith(".vue") ? [path] : [];
   });
 }
@@ -51,15 +54,19 @@ function bound(name: string, content: string): string {
   if (name !== "for") {
     return content.trim();
   }
+
   return V_FOR.exec(content)?.[1] ?? content;
 }
 
 function directiveProblems(prop: Directive): string[] {
   const text = expressionText(prop.exp);
+
   if (text === null) {
     return [];
   }
+
   const rule = prop.name === "on" ? HANDLER : VARIABLE;
+
   return rule.test(bound(prop.name, text)) ? [] : [`${prop.rawName ?? prop.name}="${text}"`];
 }
 
@@ -74,6 +81,7 @@ function problems(node: TemplateNode): string[] {
   const props = node.type === ELEMENT ? (node.props ?? []) : [];
   const directives = props.filter((prop) => prop.type === DIRECTIVE).flatMap(directiveProblems);
   const children = (node.children ?? []).filter(isNode).flatMap(problems);
+
   return [...interpolationProblems(node), ...directives, ...children];
 }
 
@@ -88,6 +96,7 @@ test("templates bind variables only and name every handler handle<Thing><Event>"
       (problem) => `${relative(SRC, path)}: ${problem}`,
     ),
   );
+
   assert.deepEqual(found, []);
 });
 

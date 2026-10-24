@@ -91,7 +91,9 @@ function hostAnswer(message: HostMessage): Promise<unknown> {
   if (message.type !== "settings") {
     return world.nativeHandler(message);
   }
+
   world.settingsCalls++;
+
   return Promise.resolve(world.hostSettings);
 }
 

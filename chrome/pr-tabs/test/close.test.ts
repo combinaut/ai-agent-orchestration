@@ -8,7 +8,7 @@ import {
   shouldClose,
   stillShowsPr,
   tabsToClose,
-} from "../src/core";
+} from "#/core";
 
 const background = { active: false };
 
@@ -35,17 +35,20 @@ test("every background tab of a merged or closed PR is closed, nothing else", ()
     { tab: { id: 5, active: false }, pr: { key: "acme/webapp#4" } },
     { tab: { id: 6, active: true }, pr: { key: "acme/webapp#3" } },
   ];
+
   const states = {
     "acme/webapp#1": { state: "MERGED" },
     "acme/webapp#2": { state: "OPEN" },
     "acme/webapp#3": { state: "CLOSED" },
     "acme/webapp#4": null,
   };
+
   assert.deepEqual(tabsToClose(entries, states), [1, 2, 4]);
 });
 
 test("a tab that moved to another page since the poll started is not closed", () => {
   const key = "acme/webapp#1";
+
   assert.equal(
     stillShowsPr({ url: "https://github.com/acme/webapp/pull/1/files" }, key, "acme"),
     true,
@@ -62,6 +65,7 @@ test("fetched states are recorded, missing PRs keep what was known", () => {
     "acme/webapp#2": { state: "OPEN" },
     "acme/webapp#3": null,
   };
+
   assert.deepEqual(recordStates(meta, states), {
     "acme/webapp#1": { state: "MERGED" },
     "acme/webapp#2": { state: "OPEN" },
@@ -77,10 +81,12 @@ test("opening a PR seeds OPEN only where no state is recorded yet", () => {
     },
     { hit: { title: "Two", headRefName: "b" }, pr: { key: "acme/webapp#2" } },
   ];
+
   const next = seedOpen(
     { "acme/webapp#2": { state: "CLOSED", title: "Two", headRefName: "b" } },
     opened,
   );
+
   assert.deepEqual(next, {
     "acme/webapp#1": {
       state: "OPEN",
@@ -94,6 +100,7 @@ test("opening a PR seeds OPEN only where no state is recorded yet", () => {
 
 test("pruning keeps only PRs that still have a tab", () => {
   const meta = { "acme/webapp#1": { state: "OPEN" }, "acme/webapp#2": { state: "OPEN" } };
+
   assert.deepEqual(pruneMeta(meta, new Set(["acme/webapp#2"])), {
     "acme/webapp#2": { state: "OPEN" },
   });
@@ -105,6 +112,7 @@ test("the check result names what was closed, what stayed in view and what waits
     { key: "acme/webapp#3284", state: "MERGED" },
     { key: "acme/ai-agent-orchestration#17", state: "MERGED" },
   ];
+
   assert.equal(
     checkText({ tabs: 5, prs: 5, checked: 5, closed, inView: [] }),
     "Closed 3 merged tabs.",

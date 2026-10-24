@@ -2,6 +2,7 @@
 import Select from "primevue/select";
 
 defineProps<{ repos: string[] }>();
+
 const repo = defineModel<string>({ required: true });
 const emit = defineEmits<{ pick: [] }>();
 

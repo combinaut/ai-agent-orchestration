@@ -62,6 +62,7 @@ test("the checks catch what they ban", () => {
 // The utility a @theme token makes, e.g. --text-body -> text-body, --color-popup-text -> text-popup-text.
 function utilities(css: string): string[] {
   const prefixes: Record<string, string[]> = { color: ["bg", "text"], text: ["text"] };
+
   return [...css.matchAll(/--(color|text)-([\w-]+):/g)].flatMap(([, kind = "", name]) =>
     (prefixes[kind] ?? []).map((prefix) => `${prefix}-${name}`),
   );

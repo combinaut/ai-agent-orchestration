@@ -4,16 +4,29 @@ import type { CheckResult, OpenAllResult, Summary } from "./core";
 export const NO_ANSWER =
   "No answer from the PR tabs service worker. Reload the extension at chrome://extensions.";
 
-export type Request =
-  | { readonly type: "summary" }
-  | { readonly type: "repos" }
-  | { readonly type: "pickRepo"; readonly repo: string }
-  | { readonly type: "goTo"; readonly input: string; readonly repo?: string }
-  | { readonly type: "openAll" }
-  | { readonly type: "checkNow" }
-  | { readonly type: "closeDuplicates" };
+// Requests that carry nothing but their type.
+export type PlainRequestType = "summary" | "repos" | "openAll" | "checkNow" | "closeDuplicates";
+
+export interface PlainRequest<K extends PlainRequestType = PlainRequestType> {
+  readonly type: K;
+}
+
+export interface PickRepoRequest {
+  readonly type: "pickRepo";
+  readonly repo: string;
+}
+
+export interface GoToRequest {
+  readonly type: "goTo";
+  readonly input: string;
+  readonly repo?: string;
+}
+
+export type Request = PlainRequest | PickRepoRequest | GoToRequest;
 export type RequestType = Request["type"];
-export type RequestOf<K extends RequestType> = Extract<Request, { readonly type: K }>;
+export type RequestOf<K extends RequestType> = K extends PlainRequestType
+  ? PlainRequest<K>
+  : Extract<Request, { readonly type: K }>;
 
 export interface Failure {
   readonly error: string;
@@ -36,12 +49,15 @@ export interface Replies {
   readonly checkNow: CheckResult;
   readonly closeDuplicates: { readonly closed: number };
 }
+
 export type Reply<K extends RequestType> = Replies[K] | Failure;
 
 type Answer<K extends RequestType> = Reply<K> | void;
+
 export type Handler<K extends RequestType> = (
   message: RequestOf<K>,
 ) => Answer<K> | Promise<Answer<K>>;
+
 export type Handlers = { readonly [K in RequestType]?: Handler<K> };
 export type Send = (message: Request) => Promise<unknown>;
 type Respond = (answer: unknown) => void;
@@ -76,6 +92,7 @@ function handlerFor(handlers: Handlers, type: unknown): AnyHandler | undefined {
   if (!Object.hasOwn(handlers, type as PropertyKey)) {
     return undefined;
   }
+
   return handlers[type as RequestType] as AnyHandler | undefined;
 }
 
@@ -89,12 +106,15 @@ function answer(handler: AnyHandler, message: unknown, respond: Respond): void {
   function run() {
     return handler(message);
   }
+
   function handleResult(result: unknown) {
     respond(result ?? {});
   }
+
   function handleError(error: unknown) {
     respond({ error: errorText(error) });
   }
+
   Promise.resolve().then(run).then(handleResult, handleError);
 }
 
@@ -107,11 +127,14 @@ export function messageListener(handlers: Handlers) {
   ): boolean {
     const type = typeOf(message);
     const handler = handlerFor(handlers, type);
+
     if (!handler) {
       respond(unknownType(type));
       return false;
     }
+
     answer(handler, message, respond);
+
     return true;
   };
 }
@@ -138,13 +161,17 @@ async function sendOnce(send: Send, message: Request): Promise<{ reply: unknown 
 export async function ask<M extends Request>(send: Send, message: M): Promise<Reply<M["type"]>> {
   const attempts = NOT_RETRIED.has(message.type) ? 1 : 2;
   let failure: Failure = { error: NO_ANSWER };
+
   for (let attempt = 0; attempt < attempts; attempt++) {
     const outcome = await sendOnce(send, message);
+
     if ("reply" in outcome) {
       // The service worker answers each request type with its reply shape.
       return outcome.reply as Reply<M["type"]>;
     }
+
     failure = outcome;
   }
+
   return failure;
 }

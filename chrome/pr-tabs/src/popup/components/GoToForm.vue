@@ -3,6 +3,7 @@ import PrInput from "./PrInput.vue";
 import RepoSelect from "./RepoSelect.vue";
 
 defineProps<{ busy: boolean; repos: string[]; showRepo: boolean }>();
+
 const input = defineModel<string>("input", { required: true });
 const repo = defineModel<string>("repo", { required: true });
 const emit = defineEmits<{ go: []; pick: [] }>();

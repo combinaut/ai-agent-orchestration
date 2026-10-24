@@ -1,5 +1,5 @@
 import { computed, toValue, type MaybeRefOrGetter } from "vue";
-import { isGroupColor, type GroupColor, type GroupSummary } from "../core";
+import { isGroupColor, type GroupColor, type GroupSummary } from "#/core";
 
 const DOTS: Readonly<Record<GroupColor, string>> = {
   grey: "bg-group-grey",
@@ -23,5 +23,6 @@ export function useGroupItem(group: MaybeRefOrGetter<GroupSummary>) {
   const count = computed(() => toValue(group).count);
   const dotClass = computed(() => dotFor(toValue(group).color));
   const countLabel = computed(() => `${count.value} PR${count.value === 1 ? "" : "s"}`);
+
   return { title, count, dotClass, countLabel };
 }

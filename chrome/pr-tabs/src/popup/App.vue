@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { useGoTo } from "../composables/useGoTo";
-import { useRepoPicker } from "../composables/useRepoPicker";
-import { useServiceWorker } from "../composables/useServiceWorker";
-import { useStatus } from "../composables/useStatus";
-import { useSummary } from "../composables/useSummary";
-import { useTabActions } from "../composables/useTabActions";
+import { useGoTo } from "#/composables/useGoTo";
+import { useRepoPicker } from "#/composables/useRepoPicker";
+import { useServiceWorker } from "#/composables/useServiceWorker";
+import { useStatus } from "#/composables/useStatus";
+import { useSummary } from "#/composables/useSummary";
+import { useTabActions } from "#/composables/useTabActions";
 import ActionButton from "./components/ActionButton.vue";
 import GoToForm from "./components/GoToForm.vue";
 import GroupList from "./components/GroupList.vue";

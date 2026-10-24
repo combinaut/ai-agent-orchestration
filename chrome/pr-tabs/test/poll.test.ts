@@ -9,7 +9,7 @@ import {
   planOpenAll,
   POLL_SECONDS,
   pollBatch,
-} from "../src/core";
+} from "#/core";
 
 test("the first poll after load or startup comes within a minute", () => {
   assert.ok(FIRST_POLL_SECONDS >= 30 && FIRST_POLL_SECONDS <= 60);
@@ -34,6 +34,7 @@ test("failures back off exponentially with jitter, capped", () => {
     POLL_SECONDS * 4,
   );
   assert.ok(nextDelaySeconds(2, () => 0.5) < nextDelaySeconds(2, () => 0.9));
+
   for (const failures of [5, 10, 50]) {
     assert.equal(
       nextDelaySeconds(failures, () => 1),
@@ -50,12 +51,16 @@ test("one poll asks for at most the cap and rotates through every key", () => {
   const keys = Array.from({ length: 250 }, (_, i) => `acme/webapp#${i}`);
   const seen = new Set();
   let cursor = 0;
+
   for (let round = 0; round < 3; round++) {
     const { batch, nextCursor } = pollBatch(keys, cursor);
+
     assert.equal(batch.length, MAX_PRS_PER_POLL);
+
     batch.forEach((key: string) => seen.add(key));
     cursor = nextCursor;
   }
+
   assert.equal(seen.size, keys.length);
   assert.deepEqual(pollBatch(keys.slice(0, 3), 7).batch, keys.slice(0, 3));
 });
@@ -69,6 +74,7 @@ const hit = (repo: string, n: number) => ({
 test("open all skips open PRs, opens at most the cap and counts the rest", () => {
   const prs = Array.from({ length: 40 }, (_, i) => hit("webapp", i + 1));
   const plan = planOpenAll({ total: 45, prs }, new Set(["acme/webapp#1", "acme/webapp#2"]), "acme");
+
   assert.equal(plan.open.length, OPEN_ALL_CAP);
   assert.equal(plan.open[0]?.pr.key, "acme/webapp#3");
   assert.equal(plan.remaining, 38 - OPEN_ALL_CAP + 5);
@@ -81,6 +87,7 @@ test("open all under the cap opens everything new and leaves nothing", () => {
     new Set(),
     "acme",
   );
+
   assert.deepEqual(
     plan.open.map(({ pr }) => pr.key),
     ["acme/webapp#1", "acme/other#2"],
@@ -92,6 +99,7 @@ test("open all under the cap opens everything new and leaves nothing", () => {
 test("a remainder counted from every result is exact, not an estimate", () => {
   const prs = Array.from({ length: 35 }, (_, i) => hit("webapp", i + 1));
   const plan = planOpenAll({ total: 35, prs }, new Set(["acme/webapp#34"]), "acme");
+
   assert.equal(plan.remaining, 4);
   assert.equal(plan.estimated, false);
 });

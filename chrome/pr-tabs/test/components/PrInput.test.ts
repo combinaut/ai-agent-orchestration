@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { nextTick } from "vue";
 import { afterEach, test } from "vitest";
-import PrInput from "../../src/popup/components/PrInput.vue";
+import PrInput from "#popup/components/PrInput.vue";
 import { mountPopup } from "./mountPopup";
 
 afterEach(() => {
@@ -14,12 +14,17 @@ test("the field is focused on open, shows the hint and updates its model", async
     attachTo: document.body,
     props: { modelValue: "", readonly: false },
   });
+
   await nextTick();
+
   const field = wrapper.find("#target");
+
   assert.equal(document.activeElement, field.element);
   assert.equal(field.attributes("placeholder"), "2972 or a PR URL");
   assert.equal(wrapper.find("#target-hint").text(), "↵ Enter");
+
   await field.setValue("76");
+
   assert.deepEqual(wrapper.emitted("update:modelValue")?.at(-1), ["76"]);
 });
 

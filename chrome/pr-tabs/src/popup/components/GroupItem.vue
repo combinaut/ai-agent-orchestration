@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Badge from "primevue/badge";
-import type { GroupSummary } from "../../core";
-import { useGroupItem } from "../../composables/useGroupItem";
+import type { GroupSummary } from "#/core";
+import { useGroupItem } from "#/composables/useGroupItem";
 
 const props = defineProps<{ group: GroupSummary }>();
 const { title, count, dotClass, countLabel } = useGroupItem(() => props.group);

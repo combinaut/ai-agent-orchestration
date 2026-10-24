@@ -7,7 +7,12 @@
     "noFallthroughCasesInSwitch": true,
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "types": ["chrome", "node", "vite/client"],
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "#/*": ["./src/*"],
+      "#popup/*": ["./src/popup/*"],
+      "#test/*": ["./test/*"]
+    }
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "test/**/*.ts", "vite.config.ts"]
 }

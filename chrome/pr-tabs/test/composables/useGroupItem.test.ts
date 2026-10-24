@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { useGroupItem } from "../../src/composables/useGroupItem";
+import { useGroupItem } from "#/composables/useGroupItem";
 
 test("a Chrome colour gets its dot; unknown and inherited names are grey", () => {
   const grey = useGroupItem({ title: "a", color: "grey", count: 1 }).dotClass.value;
+
   assert.equal(
     useGroupItem({ title: "a", color: "blue", count: 1 }).dotClass.value,
     "bg-group-blue",
   );
+
   for (const color of [undefined, "magenta", "constructor"]) {
     assert.equal(useGroupItem({ title: "a", color, count: 1 }).dotClass.value, grey, String(color));
   }

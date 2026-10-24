@@ -1,4 +1,4 @@
-import { ask as askWith, type Reply, type Request, type Send } from "../messages";
+import { ask as askWith, type Reply, type Request, type Send } from "#/messages";
 
 export type Ask = <M extends Request>(message: M) => Promise<Reply<M["type"]>>;
 
@@ -11,5 +11,6 @@ export function useServiceWorker(send: Send = sendToServiceWorker): { ask: Ask }
   function ask<M extends Request>(message: M): Promise<Reply<M["type"]>> {
     return askWith(send, message);
   }
+
   return { ask };
 }
