@@ -319,12 +319,23 @@ def save_state(scope, snap):
     os.replace(tmp, path)
 
 
-def load_dispatched():
+def read_dispatched():
+    """Reads valid dispatch state; only a missing file is an empty ledger."""
     try:
         data = json.loads(DISPATCH_FILE.read_text())
-    except (OSError, json.JSONDecodeError):
+    except FileNotFoundError:
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        raise ValueError("dispatched state must be a JSON object")
+    return data
+
+
+def load_dispatched():
+    """Best-effort dispatch state for discovery; invalid state means no fallback."""
+    try:
+        return read_dispatched()
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
 
 
 def update_dispatched(change):
@@ -332,7 +343,7 @@ def update_dispatched(change):
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     with open(STATE_DIR / "dispatched.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        data = load_dispatched()
+        data = read_dispatched()
         change(data)
         tmp = DISPATCH_FILE.with_suffix(f".{os.getpid()}.tmp")
         tmp.write_text(json.dumps(data, indent=1))

@@ -132,7 +132,7 @@ Rules:
 - Search code with rg or grep.$repo_rules
 - Do not run tests unless needed. Run any test as heavy-slot take review-$agent -- <command> (escalated if the sandbox blocks it), the narrowest spec only.
 - Do NOT use Computer Use or a browser for anything in this task. Use gh and the shell only.
-- Write review.json with {\"commit_id\":\"$sha\",\"event\":\"APPROVE|REQUEST_CHANGES|COMMENT\",\"body\":\"...\",\"comments\":[{\"path\":\"...\",\"line\":123,\"side\":\"RIGHT\",\"body\":\"...\"}]}; use an empty comments array when there are no inline findings, and end the body with *(Generated using Codex)* on its own line. Post it with gh api repos/$repo/pulls/$num/reviews --input review.json (not gh pr review). No confirmation needed from me.
+- Create a fresh payload directory outside this checkout: review_dir=\$(mktemp -d \"\${TMPDIR:-/tmp}/review-pr.XXXXXX\"); review_json=\"\$review_dir/review.json\". Write review.json there with {\"commit_id\":\"$sha\",\"event\":\"APPROVE|REQUEST_CHANGES|COMMENT\",\"body\":\"...\",\"comments\":[{\"path\":\"...\",\"line\":123,\"side\":\"RIGHT\",\"body\":\"...\"}]}; use an empty comments array when there are no inline findings, and end the body with *(Generated using Codex)* on its own line. Post it with gh api repos/$repo/pulls/$num/reviews --input \"\$review_json\" (not gh pr review), then remove the payload directory. No confirmation needed from me.
 - Never merge, close, flip ready, or assign human reviewers.
 - Never edit, create or delete any file in the repository (including AGENTS.md or other instruction files); this is a read-only review.
 - When finished, reply with one line: APPROVE|COMMENT|REQUEST_CHANGES — $url

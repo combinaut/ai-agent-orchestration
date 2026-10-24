@@ -145,7 +145,9 @@ dispatch() {
   prompt=$(cat "$TMP/review.prompt")
   contains "$prompt" '"event":"APPROVE|REQUEST_CHANGES|COMMENT"'
   contains "$prompt" '"comments":[{"path":"...","line":123,"side":"RIGHT","body":"..."}]'
-  contains "$prompt" 'gh api repos/acme/app/pulls/7/reviews --input review.json'
+  contains "$prompt" 'mktemp -d'
+  contains "$prompt" 'review.json'
+  contains "$prompt" "gh api repos/acme/app/pulls/7/reviews --input \"\$review_json\""
   contains "$prompt" 'APPROVE|COMMENT|REQUEST_CHANGES'
 }
 
@@ -810,6 +812,13 @@ for raw in ("", "{bad", "[]"):
     state.write_text(raw)
     assert prs.load_dispatched() == {}, raw
     assert prs.fetch("repo:acme/app")[0] == [], raw
+    try:
+        prs.update_dispatched(lambda data: data.update({url: {}}))
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+    else:
+        raise AssertionError(f"mutation accepted {raw!r}")
+    assert state.read_text() == raw
 for data in ({url: []}, {url: {"heads": None}}, {url: {"heads": []}}, {url: {"heads": {"old": None}}}):
     state.write_text(json.dumps(data))
     assert prs.fetch("repo:acme/app")[0] == [], data
@@ -817,6 +826,12 @@ directory = state.parent / "unreadable"
 directory.mkdir()
 prs.DISPATCH_FILE = directory
 assert prs.load_dispatched() == {}
+try:
+    prs.update_dispatched(lambda data: data.update({url: {}}))
+except OSError:
+    pass
+else:
+    raise AssertionError("mutation accepted unreadable state")
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
