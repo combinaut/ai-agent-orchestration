@@ -117,11 +117,35 @@ def prune(now):
 
     items, unreadable = todo_module().status_items(status_directory())
     present = {item["id"] for item in items}
+    try:
+        state = (
+            read(
+                Path(
+                    setting(
+                        "ORCH_USER_TODO_STATE",
+                        Path.home() / ".claude/coordinator/user-todo.state.json",
+                    )
+                )
+            )
+            or {}
+        )
+        generations = state.get("first_seen", {})
+        if not isinstance(generations, dict):
+            generations = {}
+    except (OSError, ValueError, AttributeError):
+        generations = {}
     current = []
     for record in records():
         source = status_directory() / (record["architect"] + ".md")
         changed = (
-            record["item_id"] not in present
+            (
+                record["item_id"] not in present
+                or (
+                    record.get("generation") is not None
+                    and record["item_id"] in generations
+                    and record["generation"] != generations[record["item_id"]]
+                )
+            )
             and str(status_directory()) not in unreadable
             and str(source) not in unreadable
         )

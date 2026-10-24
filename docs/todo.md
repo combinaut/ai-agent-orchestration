@@ -71,8 +71,13 @@ from submitting the same item again. The ordinary dismissal state preserves
 removal after that window. No choices means no new buttons or answer mode.
 
 Undelivered answers retry through the same notifier after its outbox retention window.
+A status-item change includes a new `first_seen` generation when an identical line
+is removed and re-added. Pruning compares the saved generation with the existing
+to-do state and preserves records when that state is unreadable.
 Dropping an undelivered answer after a status-item change also removes its dismissal
 and emits one `TODO READFAIL answer discarded:` notice with the affected item and answer.
 Pending discard notices share the existing 200-record queue cap and leave the queue on collection.
 Unavailable status files retain the answer. The legacy answer editor ignores whole CSI
 key sequences, including arrows, so they cannot cancel or insert text into an answer.
+Incomplete CSI sequences stay buffered across reads, including modifier sequences
+split after `ESC[1;`.

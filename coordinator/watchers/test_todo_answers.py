@@ -418,6 +418,7 @@ class TodoAnswerTests(IsolatedTestCase):
                 wait=lambda *_: ([0], [], []),
                 read=lambda *_: next(keys),
                 report=lambda *_: None,
+                run_jump=lambda *_: self.fail("answer input must not jump"),
             )
         return stream.getvalue().split("\033[2J\033[H")
 
@@ -596,3 +597,48 @@ class TodoAnswerTests(IsolatedTestCase):
         _, repeated = w.reduce_todo(after, w.collect_todo(after))
         self.assertFalse(any("discarded" in line for line in repeated))
         self.assertEqual(a.records(), [])
+
+    def test_changed_generation_discards_only_the_obsolete_answer(self):
+        module = w.todo_module()
+        output = self.base / "todo.md"
+        state = self.base / ".claude/coordinator/user-todo.state.json"
+        source = self.base / "status" / f"{OWNER}.md"
+        module.merge(self.base / "status", output, state, now=100)
+        module.answer_item(
+            module.rendered_items(output, state)[0], "now", state, output
+        )
+        obsolete = a.records()[0]
+        original = source.read_text()
+        source.write_text("## Waits on the user\n")
+        module.merge(self.base / "status", output, state, now=101)
+        source.write_text(original)
+        module.merge(self.base / "status", output, state, now=102)
+        # An unreadable state cannot establish a generation change: preserve the answer.
+        saved = state.read_text()
+        state.write_text("{")
+        ready, notices = a.collect(w.command)
+        self.assertEqual([record["id"] for record in ready], [obsolete["id"]])
+        self.assertEqual(notices, [])
+        state.write_text(saved)
+        module.answer_item(
+            module.rendered_items(output, state)[0], "later", state, output
+        )
+        ready, notices = a.collect(w.command)
+        self.assertEqual([record["answer"] for record in ready], ["later"])
+        self.assertEqual(ready[0]["generation"], 102)
+        self.assertEqual(len(notices), 1)
+        self.assertIn("discarded", notices[0])
+        self.assertIn(
+            a.item_id(OWNER, TEXT), json.loads(state.read_text())["dismissed"]
+        )
+        self.assertEqual(
+            a.filter_canceled(a.event_line(dict(obsolete, owner="workspace"))), ""
+        )
+
+    def test_legacy_split_modifier_csi_keeps_answer_and_never_jumps(self):
+        received = []
+        self.follow_screens(
+            [b"atbefore", b"\x1b[1;", b"5Dafter\n"],
+            lambda item, answer, *_: received.append(answer) or "queued",
+        )
+        self.assertEqual(received, ["beforeafter"])
