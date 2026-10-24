@@ -72,7 +72,7 @@ When `remote_control.architects` is on (the default), start with `claude --remot
 /architect Move the acme/webapp billing page to the new API
 ```
 
-The architect splits the work into tasks. It does not edit code. For each task it opens a Herdr workspace with its own git worktree, starts a worker (Claude or Codex, picked per task on the lightest allowed tier; Haiku is a Claude tier), tags the worker with `owner`, and pastes `~/.claude/worker-reports/machine-rules.md` into the brief. Edit the project-specific list at the end of that file first. The architect verifies every report, and merges only a PR you name. Details: [`skills/architect/SKILL.md`](skills/architect/SKILL.md).
+The architect splits the work into tasks. It does not edit code. For each task it opens a Herdr workspace with its own git worktree, starts a worker (Claude or Codex, picked per task on the lightest allowed tier; Haiku is a Claude tier), tags the worker with `owner`, and pastes `~/.claude/worker-reports/machine-rules.md` into the brief. Edit the project-specific list at the end of that file first. Every worker runs `/finalize-change-footprint` and `/finalize-code-comments` over its complete PR diff before the PR is done, and posts the findings as one PR comment (`review.finalize_commands`, `review.finalize_comment`; a repo file overrides, `[]` opts out). The architect verifies every report, and merges only a PR you name. Details: [`skills/architect/SKILL.md`](skills/architect/SKILL.md).
 
 Workers, recycles and handoffs: [`docs/workers.md`](docs/workers.md).
 

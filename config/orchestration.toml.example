@@ -169,3 +169,9 @@ default_repo = ""
 repos = []
 # GitHub search behind the Open all button; empty turns it off
 open_all = ""
+
+[review]
+# Slash commands workers run before calling a PR done or ready; empty skips this step. The global file sets it for every repo; a repo file overrides it
+finalize_commands = ["/finalize-change-footprint", "/finalize-code-comments"]
+# After the approved findings are applied and pushed, the worker posts one PR comment with every finding. The global file sets it for every repo; a repo file overrides it
+finalize_comment = true

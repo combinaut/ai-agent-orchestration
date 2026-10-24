@@ -1580,11 +1580,8 @@ EOF
 
 @test "installer drops retired multiline topic rules once and preserves personal settings" {
   fresh_install
-  cat >>"$HOME/.claude/orchestration.toml" <<'TOML'
-topics = [
-  { name = "Old", color = "blue", repo = ["webapp"] },
-]
-TOML
+  awk '{ print } /^\[pr_tabs\]$/ { print "topics = ["; print "  { name = \"Old\", color = \"blue\", repo = [\"webapp\"] },"; print "]" }' "$HOME/.claude/orchestration.toml" >"$TMP/global.toml"
+  mv "$TMP/global.toml" "$HOME/.claude/orchestration.toml"
   install_ok
   contains "$output" 'removed pr_tabs.topics (architect grouping is automatic)'
   run grep '^topics' "$HOME/.claude/orchestration.toml"
@@ -1630,4 +1627,30 @@ TOML
   run /bin/bash "$SRC/install.sh" --print-repo-path
   [ "$status" -eq 0 ]
   [ "$output" = "$HOME/.claude/ai-agent-orchestration" ]
+}
+
+@test "install links both finalize skills for Claude and the shared agents folder" {
+  fresh_install
+  for name in finalize-change-footprint finalize-code-comments; do
+    skill="$(cd "$CLONE" && pwd -P)/skills/$name"
+    [ -f "$skill/SKILL.md" ]
+    [ "$(readlink "$HOME/.claude/skills/$name")" = "$skill" ]
+    grep -qx "name: $name" "$HOME/.claude/skills/$name/SKILL.md"
+  done
+}
+
+@test "a repo that ships a finalize skill of its own keeps it and a foreign agents entry stays" {
+  mkdir -p "$TMP/work/.agents/skills/finalize-code-comments" "$HOME/.agents/skills/finalize-change-footprint"
+  printf 'repo copy\n' >"$TMP/work/.agents/skills/finalize-code-comments/SKILL.md"
+  printf 'foreign\n' >"$HOME/.agents/skills/finalize-change-footprint/SKILL.md"
+  fresh_install
+  [ "$(cat "$TMP/work/.agents/skills/finalize-code-comments/SKILL.md")" = "repo copy" ]
+  [ ! -L "$HOME/.agents/skills/finalize-change-footprint" ]
+  [ "$(cat "$HOME/.agents/skills/finalize-change-footprint/SKILL.md")" = foreign ]
+  printf '%s\n' "$output" | grep -q "^collision  *$HOME/.agents/skills/finalize-change-footprint "
+}
+
+@test "the finalize skills carry no repo-specific names" {
+  run grep -rniE 'sparkle|combinaut|sleistner|stagehand|rubocop|mise run|\.ai/' "$ROOT/skills/finalize-change-footprint" "$ROOT/skills/finalize-code-comments"
+  [ "$status" -eq 1 ]
 }

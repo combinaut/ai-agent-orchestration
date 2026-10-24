@@ -28,6 +28,9 @@ class SettingsTest(IsolatedTestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
+        home = patch.dict(os.environ, {"HOME": str(self.base / "home")})
+        home.start()
+        self.addCleanup(home.stop)
 
     def write(self, name, text):
         path = self.base / name
@@ -228,24 +231,70 @@ class RepoFileTest(SettingsTest):
         )
         self.assertEqual(s.load_repo(self.base, {})["ORCH_BIG_REPO"], "0")
 
-    def test_finalize_commands_read_from_toml_and_environment_with_an_empty_default(
-        self,
-    ):
+    def test_finalize_commands_default_to_both_skills_and_a_repo_file_overrides(self):
+        both = "/finalize-change-footprint|/finalize-code-comments"
         root = self.repo()
-        self.assertEqual(s.load_repo(root, {})["ORCH_REVIEW_FINALIZE_COMMANDS"], "")
+        self.assertEqual(
+            s.load_repo(root, {"ORCH_CONFIG": str(self.write("empty.toml", ""))})[
+                "ORCH_REVIEW_FINALIZE_COMMANDS"
+            ],
+            both,
+        )
         (root / s.REPO_FILE).write_text(
-            '[review]\nfinalize_commands = ["/finalize-change-footprint", "/finalize-code-comments --fix"]\n'
+            '[review]\nfinalize_commands = ["/finalize-code-comments --fix"]\n'
         )
         self.assertEqual(
             s.load_repo(root, {})["ORCH_REVIEW_FINALIZE_COMMANDS"],
-            "/finalize-change-footprint|/finalize-code-comments --fix",
+            "/finalize-code-comments --fix",
         )
+        (root / s.REPO_FILE).write_text("[review]\nfinalize_commands = []\n")
+        self.assertEqual(s.load_repo(root, {})["ORCH_REVIEW_FINALIZE_COMMANDS"], "")
         self.assertEqual(
             s.load_repo(
                 root, {"ORCH_REVIEW_FINALIZE_COMMANDS": "/finalize-code-comments"}
             )["ORCH_REVIEW_FINALIZE_COMMANDS"],
             "/finalize-code-comments",
         )
+
+    def test_the_global_file_sets_the_finalize_defaults_for_every_repo(self):
+        root = self.repo()
+        config = self.write(
+            "global.toml",
+            '[review]\nfinalize_commands = ["/only-this"]\nfinalize_comment = false\n',
+        )
+        environ = {"ORCH_CONFIG": str(config)}
+        values = s.load_repo(root, environ)
+        self.assertEqual(values["ORCH_REVIEW_FINALIZE_COMMANDS"], "/only-this")
+        self.assertEqual(values["ORCH_REVIEW_FINALIZE_COMMENT"], "0")
+        (root / s.REPO_FILE).write_text(
+            "[review]\nfinalize_commands = []\nfinalize_comment = true\n"
+        )
+        values = s.load_repo(root, environ)
+        self.assertEqual(values["ORCH_REVIEW_FINALIZE_COMMANDS"], "")
+        self.assertEqual(values["ORCH_REVIEW_FINALIZE_COMMENT"], "1")
+        remote = s.load_remote("acme/app", "main", None, environ=environ)
+        self.assertEqual(remote["ORCH_REVIEW_FINALIZE_COMMANDS"], "/only-this")
+
+    def test_finalize_comment_is_on_by_default_and_reads_from_the_repo_file(self):
+        root = self.repo()
+        self.assertEqual(
+            s.load_repo(root, {"ORCH_CONFIG": str(self.write("empty.toml", ""))})[
+                "ORCH_REVIEW_FINALIZE_COMMENT"
+            ],
+            "1",
+        )
+        (root / s.REPO_FILE).write_text("[review]\nfinalize_comment = false\n")
+        self.assertEqual(s.load_repo(root, {})["ORCH_REVIEW_FINALIZE_COMMENT"], "0")
+        self.assertEqual(
+            s.load_repo(root, {"ORCH_REVIEW_FINALIZE_COMMENT": "1"})[
+                "ORCH_REVIEW_FINALIZE_COMMENT"
+            ],
+            "1",
+        )
+
+    def test_the_global_loader_leaves_the_shared_review_keys_to_the_repo_loader(self):
+        config = self.write("global.toml", "[review]\nfinalize_comment = false\n")
+        self.assertEqual(s.load_global(config), {})
 
     def test_the_repo_file_is_found_from_a_subdirectory(self):
         root = self.repo()

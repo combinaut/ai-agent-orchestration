@@ -10,8 +10,10 @@ big_repo = false
 merge_gate_checks = []
 
 [review]
-# Slash commands workers run before calling a PR done or ready; empty skips this step
-finalize_commands = []
+# Slash commands workers run before calling a PR done or ready; empty skips this step. The global file sets it for every repo; a repo file overrides it
+finalize_commands = ["/finalize-change-footprint", "/finalize-code-comments"]
+# After the approved findings are applied and pushed, the worker posts one PR comment with every finding. The global file sets it for every repo; a repo file overrides it
+finalize_comment = true
 
 [legacy]
 # Open PRs of this repo are scanned for added lines that legacy.rules count (LEGACY line)

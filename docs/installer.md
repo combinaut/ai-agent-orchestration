@@ -60,6 +60,8 @@ macOS or Linux, Bash 3.2 or newer; `git`, `jq`, `python3`, `curl`; `gh` for the 
 | `skills/coordinate/` | `~/.claude/skills/coordinate` (directory link) | `/coordinate`: the Coordinator's operating model |
 | `skills/architect/` | `~/.claude/skills/architect` (directory link) | `/architect`: the architect's operating model |
 | `skills/review-prs/` | `~/.claude/skills/review-prs` (directory link) | `/review-prs`: the PRs that request your review, and Codex reviews of the ready ones |
+| `skills/finalize-change-footprint/` | `~/.claude/skills/finalize-change-footprint` (directory link) | `/finalize-change-footprint`: the PR diff swept for duplicated tests, leftovers and dead code |
+| `skills/finalize-code-comments/` | `~/.claude/skills/finalize-code-comments` (directory link) | `/finalize-code-comments`: the PR diff's comments swept for narration and noise |
 | `coordinator/watchers/coord-audit-watch.sh` | `~/.claude/coordinator/watchers/` | PR problems, blocked workers, stale heavy slots, git pile-ups |
 | `coordinator/watchers/context-watch.sh` | `~/.claude/coordinator/watchers/` | Writes context alerts for the inbox notifier |
 | `coordinator/watchers/coord-host-watch.sh` | `~/.claude/coordinator/watchers/` | Host pressure: memory, swap, processes, open files, load (macOS and Linux) |
