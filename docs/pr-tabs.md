@@ -42,6 +42,23 @@ The native host asks the selected env adapter, through shared open-work discover
 - Pinned tabs stay untouched.
 - The installer removes retired topic rules from existing personal config and prints one migration line.
 
+## 🛠 Develop
+
+The extension is Vue 3 with PrimeVue 4 (Aura theme, dark mode from the system) and TypeScript. Sources live in `chrome/pr-tabs/src` (`background.ts`, `core.ts`, `messages.ts`, `popup/App.vue`), static files in `chrome/pr-tabs/public` (`manifest.json`, `rules.json`). Vite builds them into `chrome/pr-tabs/extension`, the folder Chrome loads. The build is committed, so installing needs no Node.
+
+Needs Node 22 or newer and pnpm (the version `packageManager` in `package.json` pins). In `chrome/pr-tabs`:
+
+| Command | Does |
+|---|---|
+| `pnpm install` | Installs the pinned dependencies from `pnpm-lock.yaml`. |
+| `pnpm build` | Builds `extension/` with fixed file names. Commit the result. |
+| `pnpm test` | Runs the Vitest suite (`test/`, the popup test uses happy-dom; the host tests need `python3`). |
+| `pnpm lint` | oxlint and Prettier (`pnpm format` rewrites). |
+| `pnpm typecheck` | `vue-tsc --noEmit` in strict mode. |
+| `pnpm check` | All of the above in that order, build last. |
+
+After `pnpm build`, click the reload icon on the extension card at `chrome://extensions`. CI runs `scripts/ci/pr-tabs.sh` on Ubuntu: lint, types, tests, then a rebuild that fails when `extension/` differs from the commit.
+
 ## 🩺 Troubleshooting
 
 These are the common red errors in the popup. **Close merged PRs** puts `GitHub check failed: ` in front of a host error; **Open all my open PRs** shows it bare.
