@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import type { PrKey } from "#/types";
 import {
   FIRST_POLL_SECONDS,
   MAX_BACKOFF_SECONDS,
@@ -48,7 +49,7 @@ test("failures back off exponentially with jitter, capped", () => {
 });
 
 test("one poll asks for at most the cap and rotates through every key", () => {
-  const keys = Array.from({ length: 250 }, (_, i) => `acme/webapp#${i}`);
+  const keys: PrKey[] = Array.from({ length: 250 }, (_, i) => `acme/webapp#${i}` as const);
   const seen = new Set();
   let cursor = 0;
 
@@ -57,7 +58,7 @@ test("one poll asks for at most the cap and rotates through every key", () => {
 
     assert.equal(batch.length, MAX_PRS_PER_POLL);
 
-    batch.forEach((key: string) => seen.add(key));
+    batch.forEach((key) => seen.add(key));
     cursor = nextCursor;
   }
 
@@ -89,7 +90,7 @@ test("open all under the cap opens everything new and leaves nothing", () => {
   );
 
   assert.deepEqual(
-    plan.open.map(({ pr }) => pr.key),
+    plan.open.map((planned) => planned.pr.key),
     ["acme/webapp#1", "acme/other#2"],
   );
   assert.equal(plan.remaining, 0);

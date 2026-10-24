@@ -1,5 +1,4 @@
-import type { Reply, Request, RequestType } from "#/messages";
-import type { Ask } from "#/composables/useServiceWorker";
+import type { Ask, Reply, Request, RequestType } from "#/types";
 
 export type FakeReplies = { [K in RequestType]?: Reply<K> };
 

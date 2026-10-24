@@ -27,7 +27,18 @@ interface GroupProps {
 
 interface CreatedAlarm {
   name: string;
-  options: { delayInMinutes?: number };
+  options: chrome.alarms.AlarmCreateInfo;
+}
+
+type FiredAlarm = Pick<chrome.alarms.Alarm, "name">;
+
+interface FakeQuery {
+  url: string;
+  windowType?: string;
+}
+
+interface FakeCreate {
+  url: string;
 }
 
 export interface HostMessage {
@@ -43,7 +54,7 @@ interface World {
   hostSettings: Record<string, unknown>;
   nativeHandler: (message: HostMessage) => Promise<unknown>;
   nextId: number;
-  alarmListener: (alarm: { name: string }) => void;
+  alarmListener: (alarm: FiredAlarm) => void;
   installedListener: () => Promise<void>;
 }
 
@@ -98,11 +109,11 @@ function hostAnswer(message: HostMessage): Promise<unknown> {
 }
 
 const tabs = {
-  query: async ({ url, windowType }: { url: string; windowType?: string }) =>
-    world.tabs.filter((tab) => matches(url, tab.url) && inWindowType(tab, windowType)),
+  query: async (query: FakeQuery): Promise<FakeTab[]> =>
+    world.tabs.filter((tab) => matches(query.url, tab.url) && inWindowType(tab, query.windowType)),
   get: async (id: number): Promise<FakeTab | undefined> => world.tabs.find((tab) => tab.id === id),
-  create: async ({ url }: { url: string }): Promise<FakeTab> => {
-    const tab = { id: world.nextId++, url, windowId: 1, groupId: -1, title: "" };
+  create: async (properties: FakeCreate): Promise<FakeTab> => {
+    const tab = { id: world.nextId++, url: properties.url, windowId: 1, groupId: -1, title: "" };
     world.tabs.push(tab);
     return tab;
   },

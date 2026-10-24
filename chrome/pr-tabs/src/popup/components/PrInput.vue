@@ -5,8 +5,9 @@ import InputText from "primevue/inputtext";
 import { useFocus } from "@vueuse/core";
 import { useTemplateRef } from "vue";
 import SearchIcon from "./SearchIcon.vue";
+import type { PrInputProps } from "#/types";
 
-defineProps<{ readonly: boolean }>();
+defineProps<PrInputProps>();
 
 const text = defineModel<string>({ required: true });
 

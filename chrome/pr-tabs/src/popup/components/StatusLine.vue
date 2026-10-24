@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import Message from "primevue/message";
+import type { StatusLineProps } from "#/types";
 
-defineProps<{ text: string; error: boolean }>();
+defineProps<StatusLineProps>();
 </script>
 
 <template>

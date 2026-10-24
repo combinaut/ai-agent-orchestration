@@ -1,4 +1,44 @@
 // Pure PR tabs logic; background.ts owns every chrome.* call.
+import type {
+  CheckResult,
+  Entry,
+  GroupColor,
+  GroupLike,
+  GroupPlacement,
+  GroupSummary,
+  Meta,
+  OpenAllPlan,
+  OpenAllResult,
+  Opened,
+  OrgName,
+  Owners,
+  Planned,
+  PollBatch,
+  Pr,
+  PrBranch,
+  PrKey,
+  PrNumber,
+  PrRef,
+  PrStateName,
+  RepoName,
+  Rules,
+  SearchResult,
+  States,
+  Summary,
+  TabId,
+  TabLike,
+  WindowId,
+} from "#/types";
+
+type RepoRules = Pick<Rules, "defaultRepo" | "repos">;
+type TabChange = Pick<chrome.tabs.OnUpdatedInfo, "url" | "status" | "title" | "groupId">;
+type UrlTab = Pick<chrome.tabs.Tab, "url">;
+
+interface GroupCount {
+  title: string;
+  color?: GroupColor;
+  keys: Set<PrKey>;
+}
 
 export const POLL_SECONDS = 240;
 export const FIRST_POLL_SECONDS = 30;
@@ -7,102 +47,11 @@ export const MAX_PRS_PER_POLL = 100;
 export const OPEN_ALL_CAP = 30;
 export const MAX_SEARCH_PAGES = 10;
 
-export interface Rules {
-  org: string;
-  defaultRepo: string;
-  openAll: string;
-  repos?: string[];
-}
-
-export interface Pr {
-  owner: string;
-  repo: string;
-  number: number;
-  key: string;
-  url: string;
-}
-
-export interface TabLike {
-  id: number;
-  url?: string;
-  active?: boolean;
-  windowId?: number;
-  groupId?: number;
-}
-
-export interface Entry<T extends TabLike = TabLike> {
-  tab: T;
-  pr: Pick<Pr, "key">;
-}
-
-export interface HeadRepository {
-  nameWithOwner?: string;
-}
-
-export interface PrState {
-  state?: string;
-  title?: string;
-  headRefName?: string;
-  headRepository?: HeadRepository | null;
-}
-
-export type States = Record<string, PrState | null | undefined>;
-export type Meta = Record<string, PrState>;
-export type Owners = Record<string, string>;
-
-export interface SearchHit {
-  url: string;
-  title?: string;
-  headRefName?: string;
-  headRepository?: HeadRepository | null;
-}
-
-export interface Planned {
-  hit: SearchHit;
-  pr: Pr;
-}
-
-export interface Opened {
-  hit: Omit<SearchHit, "url">;
-  pr: Pick<Pr, "key">;
-}
-
-export interface GroupLike {
-  title?: string;
-  color?: string;
-}
-
-export interface GroupSummary {
-  title: string;
-  color?: string;
-  count: number;
-}
-
-export interface Summary {
-  prs: number;
-  groups: GroupSummary[];
-}
-
-export interface Closed {
-  key: string;
-  state?: string;
-}
-
-export interface CheckResult {
-  tabs: number;
-  prs: number;
-  checked: number;
-  closed: Closed[];
-  inView: string[];
-}
-
 const PR_URL =
   /^(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9_.-]{1,100})\/pull\/(\d{1,9})(?:[/?#]|$)/i;
 
 // The owner, repo and number a PR URL names, as written; else null.
-function matchPrUrl(
-  url: string | null | undefined,
-): { owner: string; repo: string; number: number } | null {
+function matchPrUrl(url: string | null | undefined): PrRef | null {
   const match = PR_URL.exec((url || "").trim());
 
   if (!match) {
@@ -114,7 +63,7 @@ function matchPrUrl(
   return { owner, repo, number: Number(number) };
 }
 
-function makePr(ownerName: string, repoName: string, number: number): Pr {
+function makePr(ownerName: OrgName, repoName: RepoName, number: PrNumber): Pr {
   const owner = ownerName.toLowerCase();
   const repo = repoName.toLowerCase();
 
@@ -129,7 +78,7 @@ function makePr(ownerName: string, repoName: string, number: number): Pr {
 
 // The PR a github.com URL points at, any owner: lowercase owner/repo#number, whatever the sub-page,
 // query or fragment; else null.
-export function prKey(url: string | null | undefined): string | null {
+export function prKey(url: string | null | undefined): PrKey | null {
   const match = matchPrUrl(url);
 
   if (!match || match.number < 1) {
@@ -146,8 +95,8 @@ export function isPrUrl(url: string | null | undefined): boolean {
 // A tab update needs the grouping and alarm path: a URL change, or a load or title change on a PR
 // tab or a tab known as one.
 export function tabUpdateMatters(
-  change: { url?: string; status?: string; title?: string; groupId?: number },
-  tab: { url?: string } | undefined,
+  change: TabChange,
+  tab: UrlTab | undefined,
   knownPrTab: boolean,
 ): boolean {
   if (change.url) {
@@ -162,7 +111,7 @@ export function tabUpdateMatters(
 }
 
 // The PR a URL points at when it belongs to org, else null.
-export function parsePrUrl(url: string | null | undefined, org: string | undefined): Pr | null {
+export function parsePrUrl(url: string | null | undefined, org: OrgName | undefined): Pr | null {
   const match = matchPrUrl(url);
 
   if (!org || !match || match.number < 1 || match.owner.toLowerCase() !== org.toLowerCase()) {
@@ -174,8 +123,8 @@ export function parsePrUrl(url: string | null | undefined, org: string | undefin
 
 // Repos a bare number can go to: defaultRepo first, then rules.repos, without case-insensitive
 // repeats.
-export function effectiveRepos(rules: Pick<Rules, "defaultRepo" | "repos">): string[] {
-  const repos: string[] = [];
+export function effectiveRepos(rules: RepoRules): RepoName[] {
+  const repos: RepoName[] = [];
 
   for (const name of [rules.defaultRepo, ...(rules.repos || [])]) {
     if (name && !repos.some((seen) => seen.toLowerCase() === name.toLowerCase())) {
@@ -187,17 +136,14 @@ export function effectiveRepos(rules: Pick<Rules, "defaultRepo" | "repos">): str
 }
 
 // The repo in the list matching name (any case), else null.
-function listedRepo(
-  rules: Pick<Rules, "defaultRepo" | "repos">,
-  name: string | undefined,
-): string | null {
+function listedRepo(rules: RepoRules, name: string | undefined): RepoName | null {
   return (
     effectiveRepos(rules).find((repo) => repo.toLowerCase() === (name || "").toLowerCase()) || null
   );
 }
 
 // The repo the popup selects: the last pick while it is still listed, else the first (defaultRepo).
-export function pickedRepo(rules: Pick<Rules, "defaultRepo" | "repos">, stored?: string): string {
+export function pickedRepo(rules: RepoRules, stored?: RepoName): RepoName {
   return listedRepo(rules, stored) || effectiveRepos(rules)[0] || "";
 }
 
@@ -207,7 +153,7 @@ export function isBareNumber(input: string): boolean {
 }
 
 // The popup shows a repo dropdown only when there is a choice.
-export function showRepoPicker(rules: Pick<Rules, "defaultRepo" | "repos">): boolean {
+export function showRepoPicker(rules: RepoRules): boolean {
   return effectiveRepos(rules).length >= 2;
 }
 
@@ -215,8 +161,9 @@ const BARE_NUMBER = /^#?(\d{1,9})$/;
 const REPO_NUMBER = /^([A-Za-z0-9_.-]{1,100})#(\d{1,9})$/;
 
 // The PR number in repo, or null without a repo or for 0.
-function prIn(org: string, repo: string | null, digits: string | undefined): Pr | null {
+function prIn(org: OrgName, repo: RepoName | null, digits: string | undefined): Pr | null {
   const number = Number(digits);
+
   return repo && number > 0 ? makePr(org, repo, number) : null;
 }
 
@@ -225,7 +172,7 @@ function prIn(org: string, repo: string | null, digits: string | undefined): Pr 
 export function parseTarget(
   input: string | undefined,
   rules: Pick<Rules, "org" | "defaultRepo" | "repos">,
-  picked?: string,
+  picked?: RepoName,
 ): Pr | null {
   const text = (input || "").trim();
 
@@ -251,17 +198,18 @@ export function parseTarget(
 // The open tab for key, preferring one in the focused window.
 export function findOpenTab<E extends Entry>(
   entries: E[],
-  key: string,
-  focusedWindowId: number | undefined,
+  key: PrKey,
+  focusedWindowId: WindowId | undefined,
 ): E | null {
   const matches = entries.filter((entry) => entry.pr.key === key);
+
   return matches.find((entry) => entry.tab.windowId === focusedWindowId) || matches[0] || null;
 }
 
 // Tab IDs to close so each PR keeps one tab: the active tab in the focused window, else any active
 // tab, else the lowest ID (the oldest). Non-PR tabs are never listed.
-export function duplicateTabIds(tabs: TabLike[], focusedWindowId?: number): number[] {
-  const byKey = new Map<string, TabLike[]>();
+export function duplicateTabIds(tabs: TabLike[], focusedWindowId?: WindowId): TabId[] {
+  const byKey = new Map<PrKey, TabLike[]>();
 
   for (const tab of tabs) {
     const key = prKey(tab.url);
@@ -279,7 +227,7 @@ export function duplicateTabIds(tabs: TabLike[], focusedWindowId?: number): numb
     return tab.windowId === focusedWindowId ? 2 : 1;
   };
 
-  const ids: number[] = [];
+  const ids: TabId[] = [];
 
   for (const group of byKey.values()) {
     const [keep] = group.toSorted((a, b) => rank(b) - rank(a) || a.id - b.id);
@@ -297,7 +245,7 @@ export function duplicateText(closed: number | undefined): string {
   return `Closed ${closed} duplicate PR tab${closed === 1 ? "" : "s"}.`;
 }
 
-export const GROUP_COLORS = [
+export const GROUP_COLORS: readonly GroupColor[] = [
   "grey",
   "blue",
   "red",
@@ -307,9 +255,7 @@ export const GROUP_COLORS = [
   "purple",
   "cyan",
   "orange",
-] as const;
-
-export type GroupColor = (typeof GROUP_COLORS)[number];
+];
 
 export function isGroupColor(name: string | undefined): name is GroupColor {
   return GROUP_COLORS.some((color) => color === name);
@@ -326,47 +272,49 @@ export function groupColor(name: string): GroupColor {
   return GROUP_COLORS[hash % GROUP_COLORS.length] ?? "grey";
 }
 
-export function groupForPr(
-  owners: Owners,
-  {
-    owner,
-    repo,
-    branch = "",
-    headRepository,
-  }: { owner: string; repo: string; branch?: string; headRepository?: HeadRepository | null },
-): { name: string; color: GroupColor } {
+export function groupForPr(owners: Owners, pr: PrBranch): GroupPlacement {
+  const { owner, repo, branch = "", headRepository } = pr;
   const repository = (headRepository?.nameWithOwner || `${owner}/${repo}`).toLowerCase();
   const name = (headRepository !== null && owners[`${repository}:${branch}`]) || repo;
+
   return { name, color: groupColor(name) };
 }
 
 // A PR tab closes once its PR is merged or closed, unless it is the tab in view.
-export function shouldClose(tab: { active?: boolean }, state: string | undefined): boolean {
+export function shouldClose(tab: Pick<TabLike, "active">, state: PrStateName | undefined): boolean {
   return (state === "MERGED" || state === "CLOSED") && !tab.active;
 }
 
 // The tab still shows the PR it showed when the poll started.
 export function stillShowsPr(
-  tab: { url?: string } | null | undefined,
-  key: string | undefined,
-  org: string,
+  tab: UrlTab | null | undefined,
+  key: PrKey | undefined,
+  org: OrgName,
 ): boolean {
   return parsePrUrl(tab?.url, org)?.key === key;
 }
 
-export function tabsToClose(entries: Entry[], states: States): number[] {
+export function tabsToClose(entries: Entry[], states: States): TabId[] {
   return entries
-    .filter(({ tab, pr: { key } }) => shouldClose(tab, states[key]?.state))
-    .map(({ tab }) => tab.id);
+    .filter((entry) => shouldClose(entry.tab, states[entry.pr.key]?.state))
+    .map((entry) => entry.tab.id);
+}
+
+// The PR keys of a record keyed by PR.
+function keysOf(record: Partial<Record<PrKey, unknown>>): PrKey[] {
+  // Every key of a PrKey record is a PrKey.
+  return Object.keys(record) as PrKey[];
 }
 
 // Metadata with each fetched state recorded.
 export function recordStates(meta: Meta, states: States): Meta {
   const next = { ...meta };
 
-  for (const [key, info] of Object.entries(states)) {
-    if (info) {
-      next[key] = info;
+  for (const key of keysOf(states)) {
+    const state = states[key];
+
+    if (state) {
+      next[key] = state;
     }
   }
 
@@ -377,7 +325,9 @@ export function recordStates(meta: Meta, states: States): Meta {
 export function seedOpen(meta: Meta, opened: Opened[]): Meta {
   const next = { ...meta };
 
-  for (const { hit, pr } of opened) {
+  for (const entry of opened) {
+    const { hit, pr } = entry;
+
     next[pr.key] ??= {
       state: "OPEN",
       title: hit.title,
@@ -389,8 +339,16 @@ export function seedOpen(meta: Meta, opened: Opened[]): Meta {
   return next;
 }
 
-export function pruneMeta(meta: Meta, keys: Set<string>): Meta {
-  return Object.fromEntries(Object.entries(meta).filter(([key]) => keys.has(key)));
+export function pruneMeta(meta: Meta, keys: Set<PrKey>): Meta {
+  const next: Meta = {};
+
+  for (const key of keysOf(meta)) {
+    if (keys.has(key)) {
+      next[key] = meta[key];
+    }
+  }
+
+  return next;
 }
 
 // Seconds to the next poll: POLL_SECONDS when healthy, else capped exponential backoff with jitter.
@@ -405,7 +363,7 @@ export function nextDelaySeconds(failures: number, random: () => number = Math.r
 }
 
 // At most MAX_PRS_PER_POLL keys, rotating from cursor so every key is checked in turn.
-export function pollBatch(keys: string[], cursor: number): { batch: string[]; nextCursor: number } {
+export function pollBatch(keys: PrKey[], cursor: number): PollBatch {
   if (keys.length <= MAX_PRS_PER_POLL) {
     return { batch: keys, nextCursor: 0 };
   }
@@ -418,11 +376,7 @@ export function pollBatch(keys: string[], cursor: number): { batch: string[]; ne
 
 // The search hits to open (not already open, at most cap) and how many stay unopened; an estimate
 // when results were left unfetched.
-export function planOpenAll(
-  search: { total: number; prs: SearchHit[] },
-  openKeys: Set<string>,
-  org: string,
-): { open: Planned[]; remaining: number; estimated: boolean } {
+export function planOpenAll(search: SearchResult, openKeys: Set<PrKey>, org: OrgName): OpenAllPlan {
   const fresh = search.prs
     .map((hit) => ({ hit, pr: parsePrUrl(hit.url, org) }))
     .filter((planned): planned is Planned => !!planned.pr && !openKeys.has(planned.pr.key));
@@ -432,14 +386,20 @@ export function planOpenAll(
   return { open, remaining: fresh.length - open.length + unfetched, estimated: unfetched > 0 };
 }
 
+function groupSummary(counted: GroupCount): GroupSummary {
+  return { title: counted.title, color: counted.color, count: counted.keys.size };
+}
+
+function byCountThenTitle(a: GroupSummary, b: GroupSummary): number {
+  return b.count - a.count || a.title.localeCompare(b.title);
+}
+
 // Open PR count and, per tab group holding PR tabs, its title, colour and PR count.
 export function summarize(entries: Entry[], groups: Map<number | undefined, GroupLike>): Summary {
-  const byGroup = new Map<
-    number | undefined,
-    { title: string; color?: string; keys: Set<string> }
-  >();
+  const byGroup = new Map<number | undefined, GroupCount>();
 
-  for (const { tab, pr } of entries) {
+  for (const entry of entries) {
+    const { tab, pr } = entry;
     const group = groups.get(tab.groupId);
 
     if (!group) {
@@ -456,30 +416,33 @@ export function summarize(entries: Entry[], groups: Map<number | undefined, Grou
     byGroup.set(tab.groupId, counted);
   }
 
-  const list = [...byGroup.values()]
-    .map(({ title, color, keys }) => ({ title, color, count: keys.size }))
-    .toSorted((a, b) => b.count - a.count || a.title.localeCompare(b.title));
-  return { prs: new Set(entries.map(({ pr }) => pr.key)).size, groups: list };
+  const list = [...byGroup.values()].map(groupSummary).toSorted(byCountThenTitle);
+
+  return { prs: new Set(entries.map((entry) => entry.pr.key)).size, groups: list };
 }
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
 
-export function summaryText({ prs, groups }: { prs: number; groups: unknown[] }): string {
-  if (!prs) {
+export function summaryText(summary: Summary): string {
+  if (!summary.prs) {
     return "No PR tabs open";
   }
 
-  return `${plural(prs, "PR")} in ${plural(groups.length, "group")}`;
+  return `${plural(summary.prs, "PR")} in ${plural(summary.groups.length, "group")}`;
 }
 
 // The popup line for a check result.
-export function checkText({ tabs, prs, checked, closed, inView }: CheckResult): string {
+export function checkText(result: CheckResult): string {
+  const { tabs, prs, checked, closed, inView } = result;
+
   if (!tabs) {
     return "No PR tabs open";
   }
 
-  const merged = closed.filter(({ state }) => state === "MERGED").length;
-  const parts = [];
+  const merged = closed.filter((one) => one.state === "MERGED").length;
+  const parts: string[] = [];
 
   if (merged) {
     parts.push(`${plural(merged, "merged tab")}`);
@@ -492,6 +455,7 @@ export function checkText({ tabs, prs, checked, closed, inView }: CheckResult): 
   let text = parts.length
     ? `Closed ${parts.join(" and ")}`
     : `No merged or closed PRs among ${plural(checked, "PR")} checked`;
+
   if (inView.length) {
     text += `; ${plural(inView.length, "tab")} in view kept (${inView.join(", ")})`;
   }
@@ -503,17 +467,9 @@ export function checkText({ tabs, prs, checked, closed, inView }: CheckResult): 
   return `${text}.`;
 }
 
-export interface OpenAllResult {
-  opened: number;
-  remaining: number;
-  estimated: boolean;
-}
-
 // The popup line after Open all: what is left, else the refreshed summary.
-export function openAllText(
-  { opened, remaining, estimated }: OpenAllResult,
-  summary: string,
-): string {
+export function openAllText(result: OpenAllResult, summary: string): string {
+  const { opened, remaining, estimated } = result;
   const done = `Opened ${opened}.`;
 
   if (!remaining) {

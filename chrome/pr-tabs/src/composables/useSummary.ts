@@ -1,12 +1,11 @@
 import { useAsyncState } from "@vueuse/core";
-import { summaryText, type GroupSummary } from "#/core";
+import { summaryText } from "#/core";
 import { failed } from "#/messages";
-import type { Ask } from "./useServiceWorker";
-import type { Status } from "./useStatus";
+import type { Ask, GroupSummary, Status, SummaryList } from "#/types";
 
 // The open PR count in the status line and the PR tab groups below it; a failed refresh keeps the
 // groups.
-export function useSummary(ask: Ask, status: Pick<Status, "info" | "error">) {
+export function useSummary(ask: Ask, status: Pick<Status, "info" | "error">): SummaryList {
   async function loadGroups(): Promise<GroupSummary[]> {
     const summary = await ask({ type: "summary" });
 
@@ -25,7 +24,7 @@ export function useSummary(ask: Ask, status: Pick<Status, "info" | "error">) {
     resetOnExecute: false,
   });
 
-  async function refresh() {
+  async function refresh(): Promise<void> {
     await executeImmediate();
   }
 

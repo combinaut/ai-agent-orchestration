@@ -1,34 +1,33 @@
 import { useAsyncState } from "@vueuse/core";
 import { computed, ref, type Ref } from "vue";
-import { failed, type RequestOf } from "#/messages";
-import type { Ask } from "./useServiceWorker";
-import type { Status } from "./useStatus";
+import { failed } from "#/messages";
+import type { GoTo, GoToContext, GoToRequest } from "#/types";
 
-export interface GoToDeps {
-  ask: Ask;
-  status: Pick<Status, "error">;
-  picker: { available: Readonly<Ref<boolean>>; repo: Ref<string> };
+function closePopup(): void {
+  window.close();
 }
 
-function closePopup() {
-  window.close();
+// The picked repo goes along only while the dropdown is available.
+function goToRequest(input: string, picker: GoToContext["picker"]): GoToRequest {
+  if (picker.available.value) {
+    return { type: "goTo", input, repo: picker.repo.value };
+  }
+
+  return { type: "goTo", input };
 }
 
 // Go to a PR: sends the input, with the picked repo while the dropdown is available, and closes the
 // popup on success.
-export function useGoTo({ ask, status, picker }: GoToDeps, input = ref(""), close = closePopup) {
+export function useGoTo(
+  context: GoToContext,
+  input: Ref<string> = ref(""),
+  close: () => void = closePopup,
+): GoTo {
+  const { ask, status, picker } = context;
   const isBlank = computed(() => !input.value.trim());
 
-  function request(): RequestOf<"goTo"> {
-    if (picker.available.value) {
-      return { type: "goTo", input: input.value, repo: picker.repo.value };
-    }
-
-    return { type: "goTo", input: input.value };
-  }
-
-  async function send() {
-    const result = await ask(request());
+  async function send(): Promise<void> {
+    const result = await ask(goToRequest(input.value, picker));
 
     if (failed(result)) {
       status.error(result.error);
@@ -42,7 +41,7 @@ export function useGoTo({ ask, status, picker }: GoToDeps, input = ref(""), clos
     immediate: false,
   });
 
-  async function go() {
+  async function go(): Promise<void> {
     if (isBlank.value || busy.value) {
       return;
     }

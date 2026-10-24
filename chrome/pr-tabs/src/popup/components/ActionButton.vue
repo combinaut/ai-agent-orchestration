@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import Button from "primevue/button";
 import { computed } from "vue";
+import type { ActionButtonEmits, ActionButtonProps } from "#/types";
 
-const props = defineProps<{ label: string; busy: boolean; primary?: boolean }>();
-const emit = defineEmits<{ run: [] }>();
+const props = defineProps<ActionButtonProps>();
+const emit = defineEmits<ActionButtonEmits>();
 const spacingClass = computed(() => (props.primary ? "mt-3" : "mt-2"));
 const severity = computed(() => (props.primary ? undefined : "secondary"));
 
-function handleButtonClick() {
+function handleButtonClick(): void {
   emit("run");
 }
 </script>

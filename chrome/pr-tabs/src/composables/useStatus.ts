@@ -1,25 +1,17 @@
 import { computed, readonly, ref } from "vue";
-
-export type StatusKind = "info" | "error";
-
-export interface StatusLine {
-  readonly kind: StatusKind;
-  readonly text: string;
-}
-
-export type Status = ReturnType<typeof useStatus>;
+import type { Status, StatusLine } from "#/types";
 
 // The popup's one status line: a plain text or an error.
-export function useStatus() {
+export function useStatus(): Status {
   const status = ref<StatusLine>({ kind: "info", text: "" });
   const statusText = computed(() => status.value.text);
   const isStatusError = computed(() => status.value.kind === "error");
 
-  function info(text: string) {
+  function info(text: string): void {
     status.value = { kind: "info", text };
   }
 
-  function error(text: string) {
+  function error(text: string): void {
     status.value = { kind: "error", text };
   }
 

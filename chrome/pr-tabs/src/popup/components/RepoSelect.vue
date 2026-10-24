@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import Select from "primevue/select";
+import type { RepoName, RepoSelectEmits, RepoSelectProps } from "#/types";
 
-defineProps<{ repos: string[] }>();
+defineProps<RepoSelectProps>();
 
-const repo = defineModel<string>({ required: true });
-const emit = defineEmits<{ pick: [] }>();
+const repo = defineModel<RepoName>({ required: true });
+const emit = defineEmits<RepoSelectEmits>();
 
-function handleRepoChange() {
+function handleRepoChange(): void {
   emit("pick");
 }
 </script>

@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import PrInput from "./PrInput.vue";
 import RepoSelect from "./RepoSelect.vue";
+import type { GoToFormEmits, GoToFormProps, RepoName } from "#/types";
 
-defineProps<{ busy: boolean; repos: string[]; showRepo: boolean }>();
+defineProps<GoToFormProps>();
 
 const input = defineModel<string>("input", { required: true });
-const repo = defineModel<string>("repo", { required: true });
-const emit = defineEmits<{ go: []; pick: [] }>();
+const repo = defineModel<RepoName>("repo", { required: true });
+const emit = defineEmits<GoToFormEmits>();
 
-function handleFormSubmit() {
+function handleFormSubmit(): void {
   emit("go");
 }
 
-function handleRepoPick() {
+function handleRepoPick(): void {
   emit("pick");
 }
 </script>

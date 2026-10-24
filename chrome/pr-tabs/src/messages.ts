@@ -1,66 +1,19 @@
 // The runtime message contract between the popup and background.ts.
-import type { CheckResult, OpenAllResult, Summary } from "./core";
+import type {
+  Delivered,
+  Failure,
+  Handlers,
+  Reply,
+  Request,
+  RequestType,
+  Respond,
+  RuntimeListener,
+  Send,
+  UntypedHandler,
+} from "#/types";
 
 export const NO_ANSWER =
   "No answer from the PR tabs service worker. Reload the extension at chrome://extensions.";
-
-// Requests that carry nothing but their type.
-export type PlainRequestType = "summary" | "repos" | "openAll" | "checkNow" | "closeDuplicates";
-
-export interface PlainRequest<K extends PlainRequestType = PlainRequestType> {
-  readonly type: K;
-}
-
-export interface PickRepoRequest {
-  readonly type: "pickRepo";
-  readonly repo: string;
-}
-
-export interface GoToRequest {
-  readonly type: "goTo";
-  readonly input: string;
-  readonly repo?: string;
-}
-
-export type Request = PlainRequest | PickRepoRequest | GoToRequest;
-export type RequestType = Request["type"];
-export type RequestOf<K extends RequestType> = K extends PlainRequestType
-  ? PlainRequest<K>
-  : Extract<Request, { readonly type: K }>;
-
-export interface Failure {
-  readonly error: string;
-}
-
-export interface RepoChoices {
-  readonly repos: readonly string[];
-  readonly selected: string;
-  readonly show: boolean;
-}
-
-export type GoToResult = { readonly opened: string } | { readonly focused: string };
-
-export interface Replies {
-  readonly summary: Summary;
-  readonly repos: RepoChoices;
-  readonly pickRepo: Readonly<Record<string, never>>;
-  readonly goTo: GoToResult;
-  readonly openAll: OpenAllResult;
-  readonly checkNow: CheckResult;
-  readonly closeDuplicates: { readonly closed: number };
-}
-
-export type Reply<K extends RequestType> = Replies[K] | Failure;
-
-type Answer<K extends RequestType> = Reply<K> | void;
-
-export type Handler<K extends RequestType> = (
-  message: RequestOf<K>,
-) => Answer<K> | Promise<Answer<K>>;
-
-export type Handlers = { readonly [K in RequestType]?: Handler<K> };
-export type Send = (message: Request) => Promise<unknown>;
-type Respond = (answer: unknown) => void;
 
 // A reply failed when it carries an error text.
 export function failed<T extends object>(reply: T | Failure): reply is Failure {
@@ -85,15 +38,13 @@ function typeOf(message: unknown): unknown {
     : undefined;
 }
 
-type AnyHandler = (request: unknown) => unknown;
-
 // Each handler takes the request of its own type; the map type cannot express that pairing.
-function handlerFor(handlers: Handlers, type: unknown): AnyHandler | undefined {
+function handlerFor(handlers: Handlers, type: unknown): UntypedHandler | undefined {
   if (!Object.hasOwn(handlers, type as PropertyKey)) {
     return undefined;
   }
 
-  return handlers[type as RequestType] as AnyHandler | undefined;
+  return handlers[type as RequestType] as UntypedHandler | undefined;
 }
 
 function unknownType(type: unknown): Failure {
@@ -102,7 +53,7 @@ function unknownType(type: unknown): Failure {
 }
 
 // Runs the handler and answers with its result, {} for none, or { error }.
-function answer(handler: AnyHandler, message: unknown, respond: Respond): void {
+function answer(handler: UntypedHandler, message: unknown, respond: Respond): void {
   function run() {
     return handler(message);
   }
@@ -119,7 +70,7 @@ function answer(handler: AnyHandler, message: unknown, respond: Respond): void {
 }
 
 // An onMessage listener that answers every message through sendResponse and keeps the channel open.
-export function messageListener(handlers: Handlers) {
+export function messageListener(handlers: Handlers): RuntimeListener {
   return function handleRuntimeMessage(
     message: unknown,
     _sender: unknown,
@@ -147,7 +98,7 @@ export const NOT_RETRIED: ReadonlySet<RequestType> = new Set([
 ]);
 
 // The reply to one send, or the failure text when there is none.
-async function sendOnce(send: Send, message: Request): Promise<{ reply: unknown } | Failure> {
+async function sendOnce(send: Send, message: Request): Promise<Delivered | Failure> {
   try {
     const reply = await send(message);
     return reply === undefined || reply === null ? { error: NO_ANSWER } : { reply };

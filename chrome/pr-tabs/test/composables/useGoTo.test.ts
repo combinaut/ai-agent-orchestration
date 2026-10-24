@@ -3,8 +3,7 @@ import { ref } from "vue";
 import { test } from "vitest";
 import { useGoTo } from "#/composables/useGoTo";
 import { useStatus } from "#/composables/useStatus";
-import type { Ask } from "#/composables/useServiceWorker";
-import type { Reply, Request } from "#/messages";
+import type { Ask, Reply, Request } from "#/types";
 import { fakeAsk } from "./fakeAsk";
 
 function noop() {}

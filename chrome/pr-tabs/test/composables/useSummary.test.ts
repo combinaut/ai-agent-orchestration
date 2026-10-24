@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { useStatus } from "#/composables/useStatus";
 import { useSummary } from "#/composables/useSummary";
+import type { GroupSummary } from "#/types";
 import { fakeAsk, type FakeReplies } from "./fakeAsk";
 
-const groups = [{ title: "Finder", color: "yellow", count: 2 }];
+const groups: GroupSummary[] = [{ title: "Finder", color: "yellow", count: 2 }];
 
 test("refresh shows the PR count and lists the groups", async () => {
   const status = useStatus();

@@ -24,30 +24,32 @@ const { busy: isOpeningAll } = openAll;
 const { busy: isCheckingNow } = checkNow;
 const { busy: isClosingDuplicates } = closeDuplicates;
 
-function handleGoToSubmit() {
+function handleGoToSubmit(): void {
   void go();
 }
 
-function handleRepoPick() {
+function handleRepoPick(): void {
   picker.pick();
 }
 
-function handleOpenAllRun() {
+function handleOpenAllRun(): void {
   void openAll.run();
 }
 
-function handleCheckNowRun() {
+function handleCheckNowRun(): void {
   void checkNow.run();
 }
 
-function handleCloseDuplicatesRun() {
+function handleCloseDuplicatesRun(): void {
   void closeDuplicates.run();
 }
 
-onMounted(() => {
+function handlePopupMounted(): void {
   void refresh();
   void picker.load();
-});
+}
+
+onMounted(handlePopupMounted);
 </script>
 
 <template>

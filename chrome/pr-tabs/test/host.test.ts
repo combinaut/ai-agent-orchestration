@@ -46,7 +46,9 @@ function frame(body: Buffer) {
   return Buffer.concat([header, body]);
 }
 
-function hostEnv(calls: string, { status = 0, stderr = "" }: Fake) {
+function hostEnv(calls: string, fake: Fake): NodeJS.ProcessEnv {
+  const { status = 0, stderr = "" } = fake;
+
   return {
     ...process.env,
     HOME: dir,

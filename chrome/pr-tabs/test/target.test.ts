@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import type { Entry, GroupLike, PrKey, TabId, WindowId } from "#/types";
 import {
   effectiveRepos,
   pickedRepo,
@@ -14,7 +15,6 @@ import {
   parseTarget,
   summarize,
   summaryText,
-  type Entry,
 } from "#/core";
 import { rules } from "./helpers";
 
@@ -78,10 +78,9 @@ test("PR identities ignore owner and repo casing", () => {
   assert.equal(pr?.url, "https://github.com/acme/webapp/pull/1");
 });
 
-const entry = (id: number, windowId: number, key: string): Entry => ({
-  tab: { id, windowId },
-  pr: { key },
-});
+function entry(id: TabId, windowId: WindowId, key: PrKey): Entry {
+  return { tab: { id, windowId }, pr: { key } };
+}
 
 test("an open tab for the PR is found, preferring the focused window", () => {
   const entries = [
@@ -114,7 +113,7 @@ test("the summary counts distinct PRs and the PRs in each group", () => {
     tab.groupId = groupId;
   }
 
-  const groups = new Map([
+  const groups = new Map<number | undefined, GroupLike>([
     [7, { title: "Search", color: "blue" }],
     [8, { title: "Infra", color: "red" }],
   ]);
@@ -129,7 +128,7 @@ test("the summary counts distinct PRs and the PRs in each group", () => {
     ],
   });
   assert.equal(summaryText(result), "4 PRs in 2 groups");
-  assert.equal(summaryText({ prs: 1, groups: [{}] }), "1 PR in 1 group");
+  assert.equal(summaryText({ prs: 1, groups: [{ title: "Search", count: 1 }] }), "1 PR in 1 group");
   assert.equal(summaryText({ prs: 0, groups: [] }), "No PR tabs open");
 });
 

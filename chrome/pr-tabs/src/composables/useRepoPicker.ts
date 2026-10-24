@@ -1,15 +1,13 @@
 import { useAsyncState } from "@vueuse/core";
 import { computed, ref, toValue, type MaybeRefOrGetter } from "vue";
 import { isBareNumber } from "#/core";
-import { failed, type RepoChoices } from "#/messages";
-import type { Ask } from "./useServiceWorker";
-
-export type RepoPicker = ReturnType<typeof useRepoPicker>;
+import { failed } from "#/messages";
+import type { Ask, RepoChoices, RepoName, RepoPicker } from "#/types";
 
 // The repo dropdown: available with two or more listed repos, visible while the input is a bare PR
 // number.
-export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>) {
-  const repo = ref("");
+export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPicker {
+  const repo = ref<RepoName>("");
 
   async function loadChoices(): Promise<RepoChoices | null> {
     const reply = await ask({ type: "repos" });
@@ -21,7 +19,7 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>) {
     return reply;
   }
 
-  function handleChoicesLoaded(loaded: RepoChoices | null) {
+  function handleChoicesLoaded(loaded: RepoChoices | null): void {
     if (loaded) {
       repo.value = loaded.selected;
     }
@@ -36,11 +34,11 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>) {
   const available = computed(() => choices.value !== null);
   const visible = computed(() => available.value && isBareNumber(toValue(input)));
 
-  async function load() {
+  async function load(): Promise<void> {
     await executeImmediate();
   }
 
-  function pick() {
+  function pick(): void {
     void ask({ type: "pickRepo", repo: repo.value });
   }
 

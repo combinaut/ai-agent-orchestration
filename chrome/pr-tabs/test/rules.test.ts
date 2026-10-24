@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import type { Owners, PrBranch } from "#/types";
 import { groupForPr, groupColor } from "#/core";
 
-const pr = { owner: "acme", repo: "webapp", branch: "feature" };
+const pr: PrBranch = { owner: "acme", repo: "webapp", branch: "feature" };
 
 test("owned branches group by architect; unknown branches use repository", () => {
-  const owners = { "acme/webapp:feature": "Finder", "acme/docs:feature": "Tooling" };
+  const owners: Owners = { "acme/webapp:feature": "Finder", "acme/docs:feature": "Tooling" };
 
   assert.equal(groupForPr(owners, pr).name, "Finder");
   assert.equal(groupForPr(owners, { ...pr, repo: "docs" }).name, "Tooling");
@@ -20,7 +21,7 @@ test("owned branches group by architect; unknown branches use repository", () =>
 test("name hash produces stable Chrome colours independent of repository", () => {
   assert.equal(groupColor("Finder"), "yellow");
 
-  const owners = { "acme/webapp:feature": "Finder", "acme/docs:feature": "Finder" };
+  const owners: Owners = { "acme/webapp:feature": "Finder", "acme/docs:feature": "Finder" };
 
   assert.equal(groupForPr(owners, pr).color, groupForPr(owners, { ...pr, repo: "docs" }).color);
 

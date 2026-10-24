@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import GroupItem from "#popup/components/GroupItem.vue";
 import GroupList from "#popup/components/GroupList.vue";
+import type { GroupSummary } from "#/types";
 import { mountPopup } from "./mountPopup";
 
 test("one row per group, in the given order", () => {
-  const groups = [
+  const groups: GroupSummary[] = [
     { title: "Finder", color: "yellow", count: 2 },
     { title: "webapp", count: 1 },
   ];

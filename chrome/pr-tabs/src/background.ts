@@ -21,75 +21,47 @@ import {
   effectiveRepos,
   pickedRepo,
   showRepoPicker,
-  type CheckResult,
-  type Closed,
-  type Meta,
-  type OpenAllResult,
-  type Owners,
-  type Planned,
-  type Pr,
-  type PrState,
-  type Rules,
-  type SearchHit,
-  type States,
-  type Summary,
-} from "./core";
-import {
-  errorText,
-  messageListener,
-  type Failure,
-  type RepoChoices,
-  type Reply,
-  type RequestOf,
-} from "./messages";
-
-type Tab = chrome.tabs.Tab;
-type TabGroup = chrome.tabGroups.TabGroup;
-type IdTab = Tab & { id: number };
-type GroupInfo = ReturnType<typeof groupForPr>;
-
-interface PrEntry {
-  tab: IdTab;
-  pr: Pr;
-}
-
-interface Ownership {
-  owners?: Owners | null;
-}
-
-interface StatesData extends Ownership {
-  prs: States;
-}
-
-interface SearchData extends Ownership {
-  prs: SearchHit[];
-  total: number;
-  hasNextPage?: boolean;
-  endCursor?: string;
-}
-
-interface HostData {
-  settings: Partial<Rules>;
-  states: StatesData;
-  search: SearchData;
-}
-
-type PrRef = Pick<Pr, "owner" | "repo" | "number">;
-type HostRequest =
-  | { type: "settings" }
-  | { type: "states"; prs: PrRef[] }
-  | { type: "search"; query: string; limit: number; after?: string };
-type HostOk<T> = { ok: true } & T;
-type HostReply<T> = HostOk<T> | { ok: false; error?: string };
-
-interface StoredState {
-  prTabsSettings: HostOk<Partial<Rules>> | null;
-  owners: Owners;
-  meta: Meta;
-  failures: number;
-  cursor: number;
-  prTabsRepo: string;
-}
+} from "#/core";
+import { errorText, messageListener } from "#/messages";
+import type {
+  CheckResult,
+  Closed,
+  DuplicatesClosed,
+  Failure,
+  FetchedStates,
+  GroupId,
+  GroupPlacement,
+  HostReplies,
+  HostOk,
+  HostReply,
+  HostRequest,
+  IdTab,
+  Meta,
+  OpenAllPlan,
+  OrgName,
+  Owners,
+  Planned,
+  Pr,
+  PrEntry,
+  PrKey,
+  PrRef,
+  PrState,
+  PrStateName,
+  RepoChoices,
+  RepoName,
+  Reply,
+  RequestOf,
+  Rules,
+  SearchReply,
+  SearchResult,
+  States,
+  StoredState,
+  Summary,
+  Tab,
+  TabGroup,
+  TabId,
+  WindowId,
+} from "#/types";
 
 const STORED_DEFAULTS: StoredState = {
   prTabsSettings: null,
@@ -107,7 +79,7 @@ const GROUP_DEBOUNCE_MS = 400;
 const POLL_SOON_MS = 5000;
 const SEARCH_LIMIT = 100;
 const SETTINGS_RETRY_MS = 60000;
-const FINISHED = new Set(["MERGED", "CLOSED"]);
+const FINISHED: ReadonlySet<PrStateName> = new Set(["MERGED", "CLOSED"]);
 
 async function readStored<K extends keyof StoredState>(key: K): Promise<StoredState[K]> {
   const stored = await chrome.storage.local.get<Partial<StoredState>>(key);
@@ -188,15 +160,15 @@ async function cachedRules(rules: Rules, error: unknown): Promise<Rules> {
 }
 
 // One native host process per request; the host exits after replying.
-function askHost<M extends HostRequest>(message: M): Promise<HostOk<HostData[M["type"]]>> {
+function askHost<M extends HostRequest>(message: M): Promise<HostOk<HostReplies[M["type"]]>> {
   return new Promise((resolve, reject) => {
-    function handleHostTimeout() {
+    function handleHostTimeout(): void {
       reject(new Error("native host timed out"));
     }
 
     const timer = setTimeout(handleHostTimeout, HOST_TIMEOUT_MS);
 
-    function handleHostReply(reply?: HostReply<HostData[M["type"]]>) {
+    function handleHostReply(reply?: HostReply<HostReplies[M["type"]]>): void {
       clearTimeout(timer);
 
       const lastError = chrome.runtime.lastError;
@@ -247,7 +219,7 @@ async function openPrTabs(): Promise<IdTab[]> {
   return tabs.filter(isOpenPrTab);
 }
 
-function entryOf(tab: IdTab, org: string): PrEntry[] {
+function entryOf(tab: IdTab, org: OrgName): PrEntry[] {
   const pr = parsePrUrl(tab.url, org);
   return pr ? [{ tab, pr }] : [];
 }
@@ -265,7 +237,7 @@ export async function prEntries(rules: Pick<Rules, "org">): Promise<PrEntry[]> {
   return entries;
 }
 
-async function findTab(id: number): Promise<IdTab | null> {
+async function findTab(id: TabId): Promise<IdTab | null> {
   try {
     const tab = await chrome.tabs.get(id);
     return tab && hasId(tab) ? tab : null;
@@ -275,13 +247,13 @@ async function findTab(id: number): Promise<IdTab | null> {
 }
 
 // The tab with its PR, or null when it is gone or shows no PR of org.
-async function prTab(id: number, org: string): Promise<PrEntry | null> {
+async function prTab(id: TabId, org: OrgName): Promise<PrEntry | null> {
   const tab = await findTab(id);
   const [entry] = tab ? entryOf(tab, org) : [];
   return entry ?? null;
 }
 
-async function removeTab(id: number): Promise<boolean> {
+async function removeTab(id: TabId): Promise<boolean> {
   try {
     await chrome.tabs.remove(id);
     return true;
@@ -290,7 +262,7 @@ async function removeTab(id: number): Promise<boolean> {
   }
 }
 
-async function focusedId(): Promise<number | undefined> {
+async function focusedId(): Promise<WindowId | undefined> {
   try {
     return (await chrome.windows.getLastFocused()).id;
   } catch {
@@ -320,7 +292,7 @@ let metaChain: Promise<unknown> = Promise.resolve();
 
 // Every metadata write runs here, one at a time: read, change, write.
 function updateMeta(change: (meta: Meta) => Meta | Promise<Meta>): Promise<void> {
-  async function rewrite() {
+  async function rewrite(): Promise<void> {
     const meta = await readMeta();
     await writeStored({ meta: await change(meta) });
   }
@@ -332,7 +304,7 @@ function updateMeta(change: (meta: Meta) => Meta | Promise<Meta>): Promise<void>
   return run;
 }
 
-async function groupFor(windowId: number, name: string): Promise<TabGroup | null> {
+async function groupFor(windowId: WindowId, name: string): Promise<TabGroup | null> {
   const [group] = await chrome.tabGroups.query({ windowId, title: name });
   return group ?? null;
 }
@@ -350,25 +322,25 @@ async function knownOwners(): Promise<Owners> {
   return owners;
 }
 
-async function createGroup(tab: IdTab, info: GroupInfo): Promise<void> {
+async function createGroup(tab: IdTab, placement: GroupPlacement): Promise<void> {
   const groupId = await chrome.tabs.group({
     tabIds: [tab.id],
     createProperties: { windowId: tab.windowId },
   });
 
-  await chrome.tabGroups.update(groupId, { title: info.name, color: info.color });
+  await chrome.tabGroups.update(groupId, { title: placement.name, color: placement.color });
 }
 
-async function moveIntoGroup(tab: IdTab, info: GroupInfo): Promise<void> {
-  const group = await groupFor(tab.windowId, info.name);
+async function moveIntoGroup(tab: IdTab, placement: GroupPlacement): Promise<void> {
+  const group = await groupFor(tab.windowId, placement.name);
 
   if (!group) {
-    await createGroup(tab, info);
+    await createGroup(tab, placement);
     return;
   }
 
-  if (group.color !== info.color) {
-    await chrome.tabGroups.update(group.id, { color: info.color });
+  if (group.color !== placement.color) {
+    await chrome.tabGroups.update(group.id, { color: placement.color });
   }
 
   if (tab.groupId !== group.id) {
@@ -383,13 +355,13 @@ async function groupTab(tab: IdTab, pr: Pr, meta: Meta): Promise<void> {
   }
 
   const known = await knownOwners();
-  const info: PrState = meta[pr.key] ?? {};
-  const head = { branch: info.headRefName, headRepository: info.headRepository };
+  const recorded: PrState = meta[pr.key] ?? {};
+  const head = { branch: recorded.headRefName, headRepository: recorded.headRepository };
 
   await moveIntoGroup(tab, groupForPr(known, { ...pr, ...head }));
 }
 
-async function groupTabId(tabId: number): Promise<void> {
+async function groupTabId(tabId: TabId): Promise<void> {
   const rules = await loadRules();
   const entry = await prTab(tabId, rules.org);
 
@@ -408,8 +380,8 @@ async function groupTabId(tabId: number): Promise<void> {
 
 // Drops metadata of PRs without a tab.
 function pruneClosedTabs(rules: Rules): Promise<void> {
-  async function pruneWithoutTab(meta: Meta) {
-    const keys = new Set((await prEntries(rules)).map(({ pr }) => pr.key));
+  async function pruneWithoutTab(meta: Meta): Promise<Meta> {
+    const keys = new Set((await prEntries(rules)).map((entry) => entry.pr.key));
     return pruneMeta(meta, keys);
   }
 
@@ -444,9 +416,7 @@ function pollSoon(): void {
   pollTimer = setTimeout(handlePollSoonTimer, POLL_SOON_MS);
 }
 
-type CheckReply = Reply<"checkNow">;
-
-let current: Promise<CheckReply> | null = null;
+let current: Promise<Reply<"checkNow">> | null = null;
 let pollAgain = false;
 
 function handleCheckSettled(): void {
@@ -462,7 +432,7 @@ function handleCheckSettled(): void {
 }
 
 // One check at a time; a check requested during one runs once after it.
-function poll(): Promise<CheckReply> {
+function poll(): Promise<Reply<"checkNow">> {
   if (current) {
     pollAgain = true;
     return current;
@@ -473,7 +443,7 @@ function poll(): Promise<CheckReply> {
   return current;
 }
 
-export async function checkNow(): Promise<CheckReply> {
+export async function checkNow(): Promise<Reply<"checkNow">> {
   if (current) {
     await current;
   }
@@ -481,14 +451,7 @@ export async function checkNow(): Promise<CheckReply> {
   return poll();
 }
 
-interface Fetched {
-  states: States;
-  prs: number;
-  checked: number;
-  nextCursor: number;
-}
-
-function prRefs(batch: string[], byKey: Map<string, Pr>): PrRef[] {
+function prRefs(batch: PrKey[], byKey: Map<PrKey, Pr>): PrRef[] {
   return batch.flatMap((key) => {
     const pr = byKey.get(key);
     return pr ? [{ owner: pr.owner, repo: pr.repo, number: pr.number }] : [];
@@ -506,8 +469,8 @@ async function pollFailed(failures: number, error: unknown): Promise<Failure> {
 }
 
 // The states of the next batch of PRs in one host call.
-async function fetchStates(entries: PrEntry[]): Promise<Fetched | Failure> {
-  const byKey = new Map(entries.map(({ pr }) => [pr.key, pr]));
+async function fetchStates(entries: PrEntry[]): Promise<FetchedStates | Failure> {
+  const byKey = new Map(entries.map((entry) => [entry.pr.key, entry.pr]));
   const failures = await readStored("failures");
   const cursor = await readStored("cursor");
   const { batch, nextCursor } = pollBatch([...byKey.keys()].toSorted(), cursor);
@@ -521,7 +484,7 @@ async function fetchStates(entries: PrEntry[]): Promise<Fetched | Failure> {
   }
 }
 
-async function closeIfFinished(id: number, key: string, org: string): Promise<boolean> {
+async function closeIfFinished(id: TabId, key: PrKey, org: OrgName): Promise<boolean> {
   const tab = await findTab(id);
 
   if (!tab || tab.active || !stillShowsPr(tab, key, org)) {
@@ -533,7 +496,7 @@ async function closeIfFinished(id: number, key: string, org: string): Promise<bo
 
 // Closes background tabs of merged or closed PRs that still show their PR.
 async function closeFinished(rules: Rules, entries: PrEntry[], states: States): Promise<Closed[]> {
-  const keyById = new Map(entries.map(({ tab, pr }) => [tab.id, pr.key]));
+  const keyById = new Map(entries.map((entry) => [entry.tab.id, entry.pr.key]));
   const closed: Closed[] = [];
 
   for (const id of tabsToClose(entries, states)) {
@@ -547,10 +510,14 @@ async function closeFinished(rules: Rules, entries: PrEntry[], states: States): 
   return closed;
 }
 
-function activeFinished(entries: PrEntry[], states: States): string[] {
-  return entries
-    .filter(({ tab, pr }) => tab.active && FINISHED.has(states[pr.key]?.state ?? ""))
-    .map(({ pr }) => pr.key);
+function isFinished(entry: PrEntry, states: States): boolean {
+  const state = states[entry.pr.key]?.state;
+
+  return entry.tab.active && state !== undefined && FINISHED.has(state);
+}
+
+function activeFinished(entries: PrEntry[], states: States): PrKey[] {
+  return entries.filter((entry) => isFinished(entry, states)).map((entry) => entry.pr.key);
 }
 
 async function groupEntries(rules: Rules, entries: PrEntry[], meta: Meta): Promise<void> {
@@ -568,7 +535,11 @@ async function regroup(rules: Rules, entries: PrEntry[]): Promise<void> {
   await serial(() => groupEntries(rules, entries, meta));
 }
 
-async function applyStates(rules: Rules, entries: PrEntry[], fetched: Fetched) {
+async function applyStates(
+  rules: Rules,
+  entries: PrEntry[],
+  fetched: FetchedStates,
+): Promise<CheckResult> {
   const { states, prs, checked, nextCursor } = fetched;
   const closed = await closeFinished(rules, entries, states);
   const inView = activeFinished(entries, states);
@@ -587,7 +558,7 @@ function noTabsChecked(): CheckResult {
 
 // Fetches the PR states in one host call, closes background tabs of merged or closed PRs and
 // reports what happened.
-async function checkOnce(): Promise<CheckReply> {
+async function checkOnce(): Promise<Reply<"checkNow">> {
   const rules = await loadRules();
   const entries = await prEntries(rules);
 
@@ -607,8 +578,10 @@ async function checkOnce(): Promise<CheckReply> {
 
 // Re-checks the open tabs inside the serial chain, so a tab opened since the search is not
 // duplicated.
-function openPr({ hit, pr }: Planned, rules: Rules): Promise<boolean> {
-  async function openIfMissing() {
+function openPr(planned: Planned, rules: Rules): Promise<boolean> {
+  const { hit, pr } = planned;
+
+  async function openIfMissing(): Promise<boolean> {
     if ((await prEntries(rules)).some((entry) => entry.pr.key === pr.key)) {
       return false;
     }
@@ -624,7 +597,7 @@ function openPr({ hit, pr }: Planned, rules: Rules): Promise<boolean> {
   return serial(openIfMissing);
 }
 
-function searchPage(query: string, after: string | undefined) {
+function searchPage(query: string, after: string | undefined): Promise<HostOk<SearchReply>> {
   return askHost({
     type: "search",
     query,
@@ -633,18 +606,13 @@ function searchPage(query: string, after: string | undefined) {
   });
 }
 
-interface Search {
-  total: number;
-  prs: SearchHit[];
-}
-
-function hasEnough(search: Search, openKeys: Set<string>, rules: Rules): boolean {
+function hasEnough(search: SearchResult, openKeys: Set<PrKey>, rules: Rules): boolean {
   return planOpenAll(search, openKeys, rules.org).open.length >= OPEN_ALL_CAP;
 }
 
 // Search pages until there are none left or enough PRs to open.
-async function searchOpenPrs(rules: Rules, openKeys: Set<string>): Promise<Search> {
-  const search: Search = { total: 0, prs: [] };
+async function searchOpenPrs(rules: Rules, openKeys: Set<PrKey>): Promise<SearchResult> {
+  const search: SearchResult = { total: 0, prs: [] };
   let after: string | undefined;
 
   for (let page = 0; page < MAX_SEARCH_PAGES; page++) {
@@ -676,12 +644,12 @@ async function openPlanned(plan: Planned[], rules: Rules): Promise<Planned[]> {
   return opened;
 }
 
-function badgeText({ remaining, estimated }: Pick<OpenAllResult, "remaining" | "estimated">) {
-  if (!remaining) {
+function badgeText(plan: OpenAllPlan): string {
+  if (!plan.remaining) {
     return "";
   }
 
-  return `${estimated ? "~" : "+"}${remaining}`;
+  return `${plan.estimated ? "~" : "+"}${plan.remaining}`;
 }
 
 export async function openAll(): Promise<Reply<"openAll">> {
@@ -691,7 +659,7 @@ export async function openAll(): Promise<Reply<"openAll">> {
     return { error: "Set pr_tabs.org and pr_tabs.open_all in orchestration.toml" };
   }
 
-  const openKeys = new Set((await prEntries(rules)).map(({ pr }) => pr.key));
+  const openKeys = new Set((await prEntries(rules)).map((entry) => entry.pr.key));
   const plan = planOpenAll(await searchOpenPrs(rules, openKeys), openKeys, rules.org);
   const opened = await openPlanned(plan.open, rules);
 
@@ -704,7 +672,7 @@ export async function openAll(): Promise<Reply<"openAll">> {
 
 // Focuses the PR's open tab (window, group, tab) or opens it in its architect group, one request at
 // a time.
-export function goTo(input?: string, repo?: string): Promise<Reply<"goTo">> {
+export function goTo(input?: string, repo?: RepoName): Promise<Reply<"goTo">> {
   return serial(() => findOrOpen(input, repo));
 }
 
@@ -722,7 +690,7 @@ export async function repoChoices(): Promise<RepoChoices> {
 }
 
 // Remembers the dropdown pick when it is a listed repo.
-export async function pickRepo(repo?: string): Promise<void> {
+export async function pickRepo(repo?: RepoName): Promise<void> {
   const rules = await loadRules();
 
   if (repo && repo === pickedRepo(rules, repo)) {
@@ -751,7 +719,7 @@ async function openTarget(pr: Pr): Promise<Reply<"goTo">> {
   return { opened: pr.key };
 }
 
-async function expandGroup(groupId: number): Promise<void> {
+async function expandGroup(groupId: GroupId): Promise<void> {
   if (groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) {
     return;
   }
@@ -769,7 +737,7 @@ async function focusTab(tab: IdTab): Promise<void> {
   await chrome.tabs.update(tab.id, { active: true });
 }
 
-async function findOrOpen(input?: string, repo?: string): Promise<Reply<"goTo">> {
+async function findOrOpen(input?: string, repo?: RepoName): Promise<Reply<"goTo">> {
   const rules = await loadRules();
   const problem = configProblem(rules, input);
 
@@ -797,7 +765,7 @@ async function findOrOpen(input?: string, repo?: string): Promise<Reply<"goTo">>
 }
 
 // Closes id when it is still a duplicate of the PR it showed at the first scan.
-async function closeDuplicate(id: number, key: string | null | undefined): Promise<boolean> {
+async function closeDuplicate(id: TabId, key: PrKey | null | undefined): Promise<boolean> {
   const fresh = await openPrTabs();
   const tab = fresh.find((candidate) => candidate.id === id);
 
@@ -812,7 +780,7 @@ async function closeDuplicate(id: number, key: string | null | undefined): Promi
   return removeTab(id);
 }
 
-async function closeEachDuplicate(): Promise<{ closed: number }> {
+async function closeEachDuplicate(): Promise<DuplicatesClosed> {
   let closed = 0;
   const first = await openPrTabs();
   const keys = new Map(first.map((tab) => [tab.id, prKey(tab.url)]));
@@ -828,7 +796,7 @@ async function closeEachDuplicate(): Promise<{ closed: number }> {
 
 // Keeps one tab per PR (the active one, else the oldest) and closes the rest; each close is re-
 // decided from the current tabs.
-export function closeDuplicates(): Promise<{ closed: number }> {
+export function closeDuplicates(): Promise<DuplicatesClosed> {
   return serial(closeEachDuplicate);
 }
 
@@ -836,7 +804,7 @@ function isGroup(group: TabGroup | null): group is TabGroup {
   return group !== null;
 }
 
-async function findGroup(id: number): Promise<TabGroup | null> {
+async function findGroup(id: GroupId): Promise<TabGroup | null> {
   try {
     return await chrome.tabGroups.get(id);
   } catch {
@@ -844,9 +812,9 @@ async function findGroup(id: number): Promise<TabGroup | null> {
   }
 }
 
-async function groupsById(entries: PrEntry[]): Promise<Map<number, TabGroup>> {
+async function groupsById(entries: PrEntry[]): Promise<Map<GroupId, TabGroup>> {
   const none = chrome.tabGroups.TAB_GROUP_ID_NONE;
-  const ids = [...new Set(entries.map(({ tab }) => tab.groupId))].filter((id) => id !== none);
+  const ids = [...new Set(entries.map((entry) => entry.tab.groupId))].filter((id) => id !== none);
   const groups = await Promise.all(ids.map(findGroup));
 
   return new Map(groups.filter(isGroup).map((group) => [group.id, group]));
@@ -859,12 +827,12 @@ async function summary(): Promise<Summary> {
 
 const pending = new Map<number, ReturnType<typeof setTimeout>>();
 
-function handleTabSettled(tabId: number): void {
+function handleTabSettled(tabId: TabId): void {
   pending.delete(tabId);
   void serial(() => groupTabId(tabId)).then(ensureAlarm);
 }
 
-function handleTabUpdated(tabId: number, change: chrome.tabs.OnUpdatedInfo, tab: Tab): void {
+function handleTabUpdated(tabId: TabId, change: chrome.tabs.OnUpdatedInfo, tab: Tab): void {
   if (!tabUpdateMatters(change, tab, prTabIds.has(tabId))) {
     return;
   }
@@ -873,7 +841,7 @@ function handleTabUpdated(tabId: number, change: chrome.tabs.OnUpdatedInfo, tab:
   pending.set(tabId, setTimeout(handleTabSettled, GROUP_DEBOUNCE_MS, tabId));
 }
 
-function handleTabRemoved(tabId: number): void {
+function handleTabRemoved(tabId: TabId): void {
   clearTimeout(pending.get(tabId));
   pending.delete(tabId);
   ensureAlarm().catch(warn);
@@ -885,31 +853,31 @@ function handleAlarmFired(alarm: chrome.alarms.Alarm): void {
   }
 }
 
-function handleOpenAllMessage() {
+function handleOpenAllMessage(): Promise<Reply<"openAll">> {
   return openAll();
 }
 
-function handleGoToMessage(message: RequestOf<"goTo">) {
+function handleGoToMessage(message: RequestOf<"goTo">): Promise<Reply<"goTo">> {
   return goTo(message.input, message.repo);
 }
 
-function handleReposMessage() {
+function handleReposMessage(): Promise<RepoChoices> {
   return repoChoices();
 }
 
-function handlePickRepoMessage(message: RequestOf<"pickRepo">) {
+function handlePickRepoMessage(message: RequestOf<"pickRepo">): Promise<void> {
   return pickRepo(message.repo);
 }
 
-function handleSummaryMessage() {
+function handleSummaryMessage(): Promise<Summary> {
   return summary();
 }
 
-function handleCheckNowMessage() {
+function handleCheckNowMessage(): Promise<Reply<"checkNow">> {
   return checkNow();
 }
 
-function handleCloseDuplicatesMessage() {
+function handleCloseDuplicatesMessage(): Promise<DuplicatesClosed> {
   return closeDuplicates();
 }
 

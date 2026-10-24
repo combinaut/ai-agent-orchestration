@@ -1,7 +1,7 @@
 import Aura from "@primeuix/themes/aura";
 import type { PrimeVueConfiguration } from "primevue/config";
 
-export const primeVueOptions: PrimeVueConfiguration = {
+export const primeVueConfiguration: PrimeVueConfiguration = {
   theme: {
     preset: Aura,
     options: {

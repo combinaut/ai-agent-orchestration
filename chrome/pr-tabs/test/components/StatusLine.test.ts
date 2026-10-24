@@ -6,10 +6,10 @@ import StatusLine from "#popup/components/StatusLine.vue";
 import { mountPopup } from "./mountPopup";
 
 test("plain text shows as muted text, an error as an error message", () => {
-  const info = mountPopup(StatusLine, { props: { text: "2 PRs in 1 group", error: false } });
+  const plain = mountPopup(StatusLine, { props: { text: "2 PRs in 1 group", error: false } });
 
-  assert.equal(info.findComponent(Message).exists(), false);
-  assert.equal(info.find("p").text(), "2 PRs in 1 group");
+  assert.equal(plain.findComponent(Message).exists(), false);
+  assert.equal(plain.find("p").text(), "2 PRs in 1 group");
 
   const error = mountPopup(StatusLine, { props: { text: "gh: not logged in", error: true } });
   const message = error.findComponent(Message);

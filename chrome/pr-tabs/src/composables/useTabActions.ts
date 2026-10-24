@@ -1,29 +1,23 @@
 import { useAsyncState } from "@vueuse/core";
 import { checkText, duplicateText, openAllText } from "#/core";
-import { failed, type PlainRequest, type Replies } from "#/messages";
-import type { Ask } from "./useServiceWorker";
-import type { Status } from "./useStatus";
-
-type ActionType = "openAll" | "checkNow" | "closeDuplicates";
-
-export interface TabActionDeps {
-  ask: Ask;
-  status: Pick<Status, "statusText" | "info" | "error">;
-  refresh: () => Promise<void>;
-}
-
-interface ActionSpec<K extends ActionType> {
-  request: PlainRequest<K>;
-  pending: string;
-  report: (result: Replies[K]) => string;
-}
+import { failed } from "#/messages";
+import type {
+  Replies,
+  TabAction,
+  TabActionContext,
+  TabActions,
+  TabActionSpec,
+  TabActionType,
+} from "#/types";
 
 // One button: disabled while it runs, then refreshes the summary and reports its result.
-function useTabAction<K extends ActionType>(
-  { ask, status, refresh }: TabActionDeps,
-  spec: ActionSpec<K>,
-) {
-  async function perform() {
+function useTabAction<K extends TabActionType>(
+  context: TabActionContext,
+  spec: TabActionSpec<K>,
+): TabAction {
+  const { ask, status, refresh } = context;
+
+  async function perform(): Promise<void> {
     status.info(spec.pending);
 
     const result = await ask(spec.request);
@@ -41,36 +35,36 @@ function useTabAction<K extends ActionType>(
     immediate: false,
   });
 
-  async function run() {
+  async function run(): Promise<void> {
     await executeImmediate();
   }
 
   return { busy, run };
 }
 
-function reportDuplicates({ closed }: Replies["closeDuplicates"]) {
-  return duplicateText(closed);
+function reportDuplicates(result: Replies["closeDuplicates"]): string {
+  return duplicateText(result.closed);
 }
 
 // The three buttons: Open all, Close merged PRs and Close duplicate tabs.
-export function useTabActions(deps: TabActionDeps) {
-  function reportOpenAll(result: Replies["openAll"]) {
-    return openAllText(result, deps.status.statusText.value);
+export function useTabActions(context: TabActionContext): TabActions {
+  function reportOpenAll(result: Replies["openAll"]): string {
+    return openAllText(result, context.status.statusText.value);
   }
 
-  const openAll = useTabAction(deps, {
+  const openAll = useTabAction(context, {
     request: { type: "openAll" },
     pending: "Opening…",
     report: reportOpenAll,
   });
 
-  const checkNow = useTabAction(deps, {
+  const checkNow = useTabAction(context, {
     request: { type: "checkNow" },
     pending: "Checking…",
     report: checkText,
   });
 
-  const closeDuplicates = useTabAction(deps, {
+  const closeDuplicates = useTabAction(context, {
     request: { type: "closeDuplicates" },
     pending: "Closing…",
     report: reportDuplicates,

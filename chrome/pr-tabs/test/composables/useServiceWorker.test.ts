@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { useServiceWorker } from "#/composables/useServiceWorker";
-import { NO_ANSWER, type Request } from "#/messages";
+import { NO_ANSWER } from "#/messages";
+import type { Request } from "#/types";
 
 test("ask sends through the given sender and retries a lost answer once", async () => {
   const sent: Request[] = [];

@@ -4,9 +4,10 @@ import { flushPromises, mount } from "@vue/test-utils";
 import PrimeVue from "primevue/config";
 import Select from "primevue/select";
 import { afterEach, test, vi } from "vitest";
+import type { RepoName, Request, Rules } from "#/types";
 import { effectiveRepos, pickedRepo, showRepoPicker } from "#/core";
 import App from "#popup/App.vue";
-import { primeVueOptions } from "#popup/primevue";
+import { primeVueConfiguration } from "#popup/primevue";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -14,13 +15,13 @@ afterEach(() => {
 });
 
 // Mounts the popup against a service worker whose settings list repos.
-async function popup(repos: string[]) {
-  const rules = { org: "acme", defaultRepo: "", openAll: "", repos };
-  const sent: { type: string; repo?: string }[] = [];
+async function popup(repos: RepoName[]) {
+  const rules: Rules = { org: "acme", defaultRepo: "", openAll: "", repos };
+  const sent: Request[] = [];
 
   vi.stubGlobal("chrome", {
     runtime: {
-      sendMessage: async (message: { type: string; repo?: string }) => {
+      sendMessage: async (message: Request): Promise<unknown> => {
         sent.push(message);
 
         if (message.type === "repos") {
@@ -42,7 +43,7 @@ async function popup(repos: string[]) {
 
   const wrapper = mount(App, {
     attachTo: document.body,
-    global: { plugins: [[PrimeVue, primeVueOptions]] },
+    global: { plugins: [[PrimeVue, primeVueConfiguration]] },
   });
 
   await flushPromises();

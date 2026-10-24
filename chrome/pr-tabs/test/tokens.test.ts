@@ -63,9 +63,11 @@ test("the checks catch what they ban", () => {
 function utilities(css: string): string[] {
   const prefixes: Record<string, string[]> = { color: ["bg", "text"], text: ["text"] };
 
-  return [...css.matchAll(/--(color|text)-([\w-]+):/g)].flatMap(([, kind = "", name]) =>
-    (prefixes[kind] ?? []).map((prefix) => `${prefix}-${name}`),
-  );
+  return [...css.matchAll(/--(color|text)-([\w-]+):/g)].flatMap((match) => {
+    const [, kind = "", name] = match;
+
+    return (prefixes[kind] ?? []).map((prefix) => `${prefix}-${name}`);
+  });
 }
 
 function duplicates(names: string[]): string[] {

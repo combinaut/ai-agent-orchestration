@@ -144,7 +144,7 @@ test("PR tabs whose URL differs from the org in case are kept; other orgs are dr
   const entries = await prEntries({ org: "acme" });
 
   assert.deepEqual(
-    entries.map(({ tab }) => tab.id),
+    entries.map((entry) => entry.tab.id),
     [1, 2],
   );
 });
@@ -274,12 +274,12 @@ function changeAfterScan(change: () => void) {
   const query = fakeChrome.tabs.query;
   let calls = 0;
 
-  fakeChrome.tabs.query = async (args) => {
+  fakeChrome.tabs.query = async (tabQuery) => {
     if (++calls === 2) {
       change();
     }
 
-    return query(args);
+    return query(tabQuery);
   };
 
   return () => {
