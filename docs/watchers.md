@@ -6,7 +6,7 @@ The watchers write alerts to files. One notifier turns them into a feed at `~/.c
 |---|---|
 | audit | Your open PRs in the repos of the open workspaces (red CI, open threads, a review comment, conflicts, missing reviewer, approved), blocked workers, stale heavy slots, git pile-ups in those clones |
 | pulls | PR events (`APPROVED`, `RED`, `CHANGES`, `THREADS`, `COPILOT`, `COMMENTED`, `MERGED`, `CLOSED`), sent straight to the owning architect |
-| context | Session token use; sends `RECYCLE` (architect, to the Coordinator) and `RECYCLE-WORKER` (worker, to the owning architect) |
+| context | Session token use; sends `RECYCLE` (architect, to the Coordinator) and `RECYCLE-WORKER-SOFT` / `RECYCLE-WORKER-HARD` (worker, to the owning architect) |
 | host | Memory, swap, processes, open files, load |
 | hog | Big processes and long or big `git` processes |
 | balance | Worktree CPU and memory against the heavy-slot cap |

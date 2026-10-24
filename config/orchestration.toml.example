@@ -65,6 +65,12 @@ architects = true
 [recycle]
 # Tokens used at which RECYCLE fires
 tokens = 300000
+# Worker tokens at which the architect asks for a clean point
+worker_soft_tokens = 300000
+# Worker hard limit: known window clamps to 60 percent; unknown window uses at least soft
+worker_hard_tokens = 450000
+# Seconds before deferring a worker re-ask until idle or done
+worker_ask_timeout_s = 600
 # Context percentage used when the token sensor is absent
 pct = 55
 # Park architects that have no open PR, worker or watcher

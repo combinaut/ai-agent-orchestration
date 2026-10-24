@@ -1,14 +1,42 @@
 # Worker recycle
 
-Read this file before you act on a `RECYCLE-WORKER` message. A worker never recycles itself; you run this procedure.
+Read this file before acting on `RECYCLE-WORKER-SOFT` or `RECYCLE-WORKER-HARD`. A worker never recycles itself; its owning architect runs this procedure.
 
-**The signal.** The context watcher reads each Claude pane's `~/.claude/context-usage/<session-id>.tokens`. When a worker in a workspace tagged `owner=$HERDR_WORKSPACE_ID` reaches `$ORCH_RECYCLE_TOKENS` tokens (`$ORCH_RECYCLE_PCT` percent without that file), you get one native message per session: `context: RECYCLE-WORKER <pane> owner=<you> <name> <amount> (start). No reply needed.` It is sent through your binding `bindings/architect-$HERDR_WORKSPACE_ID.json`; before you have bound, or while the binding is dead, it waits in the outbox (retried every 60 seconds, dropped after an hour) and stays in the Coordinator feed. Codex workers have no sensor and are not watched.
+The context watcher reads Claude's `~/.claude/context-usage/<session-id>.tokens`, with `.window` and `.model` written by the status line from `context_window.context_window_size` and `model.id`. A known window converts a remaining-percentage reading to tokens, using the worker soft and hard thresholds. Only with an unknown window does `recycle.pct` supply a percentage-only SOFT fallback; percentage alone cannot establish a hard token limit. Architects retain `recycle.tokens` and `recycle.pct` unchanged.
+
+Workers use `recycle.worker_soft_tokens` (300000) and `recycle.worker_hard_tokens` (450000). With a known positive model window, effective hard is `min(configured hard, floor(0.6 × model window))`, even when it falls below soft. The actual session `.window` is the truth for every Claude tier; Opus 5.5 can report 1000000. There is no Claude model-window table. If the window is missing, unreadable or invalid, there is no clamp: hard is `max(soft, configured hard)`. The watcher logs this once per live session and prunes that warning record when the session leaves. No invented window can produce a HARD or latch one. Equal soft and hard sends HARD directly at the crossing.
+
+For Codex, `worker_recycle.py` reads the exact model's positive `context_window` in `~/.codex/models_cache.json` when the architect has no active window reading. If the cache is missing, corrupt or lacks the model, its fallback is also no clamp. Obtain actual windows before choosing different model assumptions; never guess one.
+
+The message shape remains `context: RECYCLE-WORKER-SOFT <pane> owner=<you> <name> <amount> (start). No reply needed.` (or `RECYCLE-WORKER-HARD`). Messages use `bindings/architect-$HERDR_WORKSPACE_ID.json`, wait in the existing outbox when unbound, retry every 60 seconds and expire after an hour. Each stage fires once per session/owner crossing; HARD stays latched for that session and owner even if later readings decrease.
+
+Codex has no token sensor in this watcher: it is not automatically watched. Its architect must obtain current used tokens and the active model window from the worker's native context display, compare them at worker idle/done and before dispatching another step, and apply these same thresholds. If those readings are unavailable, ask for them over the native route and defer new work until known. Never treat missing readings as zero. The Codex model cache's `context_window` is a window fallback, not a usage sensor; do not use cumulative billing tokens. Ask Codex through `codex queue --thread <verified-session-UUID-or-exact-name> --message <text>`; use native `SendMessage` for Claude. Verify the recipient runtime first, repair a failed route, never type into a live composer. Preserve the worker name/model tier through recycle and rebind watcher destinations with a round-trip acknowledgement.
+
+## Soft/hard decision
+
+1. Verify ownership and whether the PR has merged (procedure step 1). Check live slot ownership (step 2) before every ask or handoff, including HARD and NOW. A held slot always wins: record the pending stage, wait, and recheck immediately after release; never interrupt a heavy run.
+2. On SOFT, ask natively: **At a clean point? Reply NOW, or FINISH <tokens needed> <what is left>**. Record the ask time and session, current reading and effective hard in your status file so a recycle preserves the pending decision. Estimates are in tokens, never time; `100k` means 100000 tokens. NOW is case-insensitive and may end with a dot. FINISH still includes what is left.
+3. NOW runs the normal handoff procedure below. For FINISH, set `base = max(soft, current used tokens)`, or soft when current consumption is unknown (never zero). Continue only when `base + needed < effective hard`: wait for the worker's step-done report, then hand off. Otherwise order the next clean-point handoff, including equality. Percentage-to-token conversion uses decimal arithmetic so rounding cannot admit equality. Recheck slots at the clean point.
+4. Silence for `recycle.worker_ask_timeout_s` (600) is never NOW. Record a pending re-ask and ask again only when the worker next goes idle/done. Invalid replies need a valid token estimate; they do not authorize a forced recycle.
+5. HARD is the only forced stop: no ask; once any live slot releases, order handoff at the next call boundary. A HARD message supersedes a pending SOFT question or FINISH allowance.
+
+Use the same tested decision helper when choosing the next action, passing fresh sensor metadata and verified live-slot ownership:
+
+```bash
+printf '%s\n' '{"value":{"tokens":310000,"window":1000000},"answer":"FINISH 10000 checks","slot":false,"elapsed":0,"idle":false,"pending":false,"hard_pending":false}' | python3 ~/.claude/coordinator/watchers/worker_recycle.py
+```
+
+Set `pending=true` after sending the ask (even at elapsed zero), and retain `hard_pending=true` after any HARD until the handoff completes. `WAIT_REPLY` waits for the original answer before timeout; `WAIT_SLOT` waits for release; `WAIT_DONE` waits for the step report; `HANDOFF_CLEAN_POINT` orders the next clean point; `HANDOFF_CALL_BOUNDARY` orders the next call boundary; `HANDOFF` proceeds now; `REASK_WHEN_IDLE` records the pending re-ask; `ASK` / `ASK_VALID_REPLY` send the question. The helper never sends messages or recycles a process itself.
 
 ## Procedure
 
 1. **Check.** `herdr agent get <name>` gives the pane and `workspace_id`; `herdr workspace get <ws>` must show `tokens.owner` equal to `$HERDR_WORKSPACE_ID` (agent rows carry no owner tag). A worker whose PR has merged is closed (step 6), not recycled.
 2. **Heavy slot.** `heavy-slot list`. While a `live` slot is the worker's, wait: never order a handoff mid-run. A slot is the worker's when its name carries the worker's name, or when its `pid` is the worker's process or a child of it (match the pid, because slot names follow no fixed rule). Check again at the worker's next status change.
-3. **Order the handoff** through the worker's native message route (`SendMessage` to its verified session; the Messages rule in `SKILL.md`), never `herdr agent prompt`: workers are user-interactive and a person may have text in the composer. Run `touch <report dir>/<name>-order.marker` just before you send it: *Finish your current call and start nothing new. Overwrite (never append) `<report dir>/<name>-handoff.md`, under 4,000 characters, with the worker handoff template in `~/.claude/skills/architect/references/worker-recycle.md`. Reply with only its path, then stop.*
+3. **Order the handoff after the decision above permits it** through the worker's native message route (`SendMessage` for Claude, `codex queue --thread <verified-session> --message <text>` for Codex; the Messages rule in `SKILL.md`), never `herdr agent prompt`: workers are user-interactive and a person may have text in the composer. Run `touch <report dir>/<name>-order.marker` just before sending. Select the order prefix for the helper's action:
+   - `HANDOFF_CLEAN_POINT`: *Reach your next clean point, making only the calls needed to get there. At that point, start no new work.* This permits additional calls while usage remains below HARD; a HARD event supersedes this order after any live heavy slot releases.
+   - `HANDOFF_CALL_BOUNDARY`: *Finish your current call and start nothing new.* Use this forced stop only for current or pending HARD.
+   - `HANDOFF` (NOW): *At the clean point you reported, start no new work.*
+   - Append the same handoff-file requirement to the selected prefix: *Overwrite (never append) `<report dir>/<name>-handoff.md`, under 4,000 characters, with the worker handoff template in `~/.claude/skills/architect/references/worker-recycle.md`. Reply with only its path, then stop.*
    - If the native route fails, repair it; do not fall back to typing into the pane. Check `herdr agent get <name>` before resending, or you will double-order.
    - Wait for the reply with `herdr agent wait <name> --timeout <ms>` (no `--until`: it matches idle, done or blocked; a Claude worker that ends its turn shows `done`, so `--until idle` can hang) and read the handoff after it returns. Step 4 guards against an early match.
    - On `agent_blocked` the worker waits on a permission or a question and takes no prompt. Do not force it: tell the user in your user-facing line which pane is blocked, and retry from step 3 when its status changes.
@@ -16,11 +44,12 @@ Read this file before you act on a `RECYCLE-WORKER` message. A worker never recy
 5. **Start the successor** in the same workspace and worktree, on the model in the handoff's `Model:` field:
    - `herdr pane split <old pane> --direction down --cwd <worktree> --no-focus`; the new pane is `result.pane.pane_id`. Never `herdr worktree open` the worktree again: on an open path it renames the workspace.
    - `herdr agent start <name>-next --kind claude --pane <new pane> -- --model <model> --strict-mcp-config` (the same choice as the first start: leave the flag out when the worker's brief needs an MCP tool) (any free name of at most 32 characters). Never `--resume` the old session: that loads its whole context again.
+   - For a Codex successor, start a fresh Codex session on the saved model, preserving the configured routine/smart tier and reasoning effort; never resume the exhausted transcript. Deliver the brief through `codex queue`, then rebind native watcher destinations and verify a round-trip acknowledgement.
    - Prompt it once: *Read `<handoff path>` and only that, not the old transcript; it names your brief and rules. You own the review cycle of PR <n> from here. Write your report to `<report path>`. Do not call the `advisor` tool: each call re-reads the whole transcript uncached on the advisor model.*
    - With "no PR yet" in the handoff, say instead: *Continue the task from the handoff; no PR is open yet.* in place of the PR sentence.
    - Wait until `herdr agent get <name>-next` shows it working from the handoff.
 6. **Close the old pane** with `~/.claude/coordinator/watchers/close-pane.sh <old pane>`, then `herdr agent rename <name>-next <name>`, so slot names, reports and the Radar keep one name.
-7. **Record** the new pane id in your status file and handoff. The workspace and its `owner` tag stay the same, so PR events and the next `RECYCLE-WORKER` still come to you. The feed gets `RECYCLE-WORKER <old pane> … cleared` when the old session leaves.
+7. **Record** the new pane id in your status file and handoff. The workspace and its `owner` tag stay the same, so PR events and the next worker threshold signal still come to you. The feed gets `RECYCLE-WORKER-SOFT <old pane> … cleared` (or HARD) when the old session leaves.
 
 ## Worker handoff template
 

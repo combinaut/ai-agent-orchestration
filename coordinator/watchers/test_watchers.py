@@ -60,7 +60,7 @@ def worker_context(tokens, owner="wArch"):
     """The recorded context read with its worker session at `tokens` and the worker's workspace tagged `owner`
     (None: no tag)."""
     raw = fixture("context")
-    raw["usage"]["session-worker-001"] = {"tokens": tokens}
+    raw["usage"]["session-worker-001"] = {"tokens": tokens, "window": 1000000}
     for row in raw["workspaces"]["result"]["workspaces"]:
         if row["workspace_id"] == "workspace-task":
             row["tokens"] = {"owner": owner} if owner else {}
@@ -68,13 +68,18 @@ def worker_context(tokens, owner="wArch"):
 
 
 def worker_line(amount, owner="wArch", pane="workspace-task:p1"):
-    return f"RECYCLE-WORKER {pane} owner={owner} fixture-worker {amount}"
+    return f"RECYCLE-WORKER-SOFT {pane} owner={owner} fixture-worker {amount}"
 
 
 class WatcherTests(IsolatedTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=w.ROOT)
         self.base = Path(self.tmp.name)
+        self.signal_directory = patch.object(
+            w.worker_signals, "directory", return_value=self.base / "worker-signals"
+        )
+        self.signal_directory.start()
+        self.addCleanup(self.signal_directory.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -448,6 +453,89 @@ class WatcherTests(IsolatedTestCase):
             raw["usage"]["session-worker-001"]["tokens"] = 440000
             self.assertEqual(self.events(raw), [])
 
+    def test_missing_worker_window_does_not_force_handoff_or_latch(self):
+        raw = worker_context(180000)
+        raw["usage"]["session-worker-001"].pop("window")
+        before, events = w.reduce("context", None, raw)
+        self.assertEqual(events, [])
+        raw["usage"]["session-worker-001"]["window"] = 1000000
+        after, events = w.reduce("context", before, raw)
+        self.assertEqual(events, [])
+        self.assertFalse(any("RECYCLE-WORKER-HARD" in v for v in after.values()))
+
+    def test_missing_window_warning_is_once_per_live_session(self):
+        raw = worker_context(180000)
+        raw["usage"]["session-worker-001"].pop("window")
+        with patch("sys.stderr", new_callable=io.StringIO) as log:
+            before, _ = w.reduce("context", None, raw)
+            before, _ = w.reduce("context", before, raw)
+            raw["usage"]["session-worker-001"]["window"] = 1000000
+            before, _ = w.reduce("context", before, raw)
+            raw["usage"]["session-worker-001"].pop("window")
+            before, _ = w.reduce("context", before, raw)
+        self.assertEqual(log.getvalue().count("model window unavailable"), 1)
+        self.assertIn("450000", log.getvalue())
+        raw["herdr"]["result"]["agents"].pop()
+        after, _ = w.reduce("context", before, raw)
+        self.assertFalse(any(k.startswith("window-warning:") for k in after))
+
+    def test_worker_sensor_reads_window_and_model_from_disk(self):
+        raw = worker_context(310000)
+        sid = "session-worker-001"
+        sensor_dir = self.base / ".claude/context-usage"
+        sensor_dir.mkdir(parents=True)
+        (sensor_dir / (sid + ".tokens")).write_text("310000")
+        (sensor_dir / (sid + ".model")).write_text("claude-opus-5-5")
+        for window in ("1000000", "corrupt"):
+            with (
+                self.subTest(window=window),
+                patch.object(Path, "home", return_value=self.base),
+            ):
+                (sensor_dir / (sid + ".window")).write_text(window)
+                value = w.session_usage(sid)
+            self.assertEqual(value["tokens"], 310000)
+            self.assertEqual(value["model"], "claude-opus-5-5")
+            self.assertEqual(
+                value.get("window"), 1000000 if window == "1000000" else None
+            )
+            raw["usage"][sid] = value
+            self.assertEqual(
+                list(w.conditions("context", raw).values()), [worker_line("310k")]
+            )
+
+    def test_worker_stage_never_downgrades_before_owner_or_session_changes(self):
+        raw = worker_context(300000)
+        before, events = w.reduce("context", None, raw)
+        self.assertEqual(events, [worker_line("300k")])
+        for tokens in (450000, 450000, 320000, 450000, 1000):
+            raw["usage"]["session-worker-001"]["tokens"] = tokens
+            before, events = w.reduce("context", before, raw)
+            if tokens == 450000 and not getattr(self, "hard_seen", False):
+                self.assertEqual(
+                    events,
+                    [
+                        worker_line("cleared"),
+                        worker_line("450k").replace("-SOFT", "-HARD"),
+                    ],
+                )
+                self.hard_seen = True
+            else:
+                self.assertEqual(events, [])
+            self.assertIn("RECYCLE-WORKER-HARD", before["session-worker-001"])
+        raw["workspaces"]["result"]["workspaces"][1]["tokens"]["owner"] = "new-owner"
+        middle, events = w.reduce("context", before, raw)
+        self.assertEqual(events, [worker_line("cleared").replace("-SOFT", "-HARD")])
+        self.assertNotIn("session-worker-001", middle)
+        raw["usage"]["session-worker-001"]["tokens"] = 320000
+        _, events = w.reduce("context", before, raw)
+        self.assertEqual(
+            events,
+            [
+                worker_line("cleared").replace("-SOFT", "-HARD"),
+                worker_line("320k", owner="new-owner"),
+            ],
+        )
+
     def test_context_worker_successor_alerts_again_and_the_old_pane_clears(self):
         raw = worker_context(310000)
         with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
@@ -457,7 +545,7 @@ class WatcherTests(IsolatedTestCase):
                 pane_id="workspace-task:p2",
                 agent_session={"value": "session-worker-002"},
             )
-            raw["usage"]["session-worker-002"] = {"tokens": 300000}
+            raw["usage"]["session-worker-002"] = {"tokens": 300000, "window": 1000000}
             self.assertEqual(
                 self.events(raw),
                 [worker_line("cleared"), worker_line("300k", pane="workspace-task:p2")],
@@ -545,7 +633,7 @@ class WatcherTests(IsolatedTestCase):
         with patch.dict(os.environ, {"ORCH_RECYCLE_PCT": "55"}):
             self.assertEqual(
                 list(w.conditions("context", raw).values()),
-                ["RECYCLE-WORKER workspace-task:p1 owner=wArch 60%"],
+                ["RECYCLE-WORKER-SOFT workspace-task:p1 owner=wArch 60%"],
             )
 
     def test_context_junk_workspace_rows_never_stop_the_architect_recycle(self):

@@ -261,6 +261,27 @@ SETTINGS = [
         "Tokens used at which RECYCLE fires",
     ),
     _g(
+        "recycle.worker_soft_tokens",
+        "ORCH_WORKER_SOFT_TOKENS",
+        "int",
+        300000,
+        "Worker tokens at which the architect asks for a clean point",
+    ),
+    _g(
+        "recycle.worker_hard_tokens",
+        "ORCH_WORKER_HARD_TOKENS",
+        "int",
+        450000,
+        "Worker hard limit: known window clamps to 60 percent; unknown window uses at least soft",
+    ),
+    _g(
+        "recycle.worker_ask_timeout_s",
+        "ORCH_WORKER_ASK_TIMEOUT_S",
+        "int",
+        600,
+        "Seconds before deferring a worker re-ask until idle or done",
+    ),
+    _g(
         "recycle.pct",
         "ORCH_RECYCLE_PCT",
         "number",

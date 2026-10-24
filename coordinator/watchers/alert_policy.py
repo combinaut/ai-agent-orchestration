@@ -228,14 +228,14 @@ def hog_facts(line):
 
 
 def context_facts(line):
-    gone = re.match(r"RECYCLE(?:-WORKER)? (.+) cleared$", line)
+    gone = re.match(r"RECYCLE(?:-WORKER(?:-SOFT|-HARD)?)? (.+) cleared$", line)
     if gone:
         return [clear(f"context:{gone.group(1)}", exact=True)]
     if line.startswith("NOSENSOR "):
         if line.startswith("NOSENSOR CLEARED "):
             return [clear("context:nosensor:" + line.split(" ")[2], exact=True)]
         return [fact("context:nosensor:" + line.split(" ")[1], line, clearable=True)]
-    match = re.match(r"RECYCLE(?:-WORKER)? (.+) (\d+)(k|%)$", line)
+    match = re.match(r"RECYCLE(?:-WORKER(?:-SOFT|-HARD)?)? (.+) (\d+)(k|%)$", line)
     if not match:
         return (
             [fact(f"context:{line[8:]}", line, clearable=True)]
@@ -648,6 +648,13 @@ def apply(state, alerts, now, cfg=None, trace=None):
             if entry and entry["active"] and not item["terminal"]:
                 entry.pop("clearing_at", None)
                 entry.update(seen_at=now, value=item["value"])
+                if (
+                    mode == "context"
+                    and item["text"].startswith("RECYCLE-WORKER-HARD ")
+                    and not entry["text"].startswith("RECYCLE-WORKER-HARD ")
+                ):
+                    entry["text"] = item["text"]
+                    emit(item["key"], mode, item["text"], "start")
                 if mode == "pulls" and pull_owner(item["text"]) not in (
                     None,
                     "?",

@@ -23,6 +23,7 @@ import discovery
 import question_remind
 import todo_answers
 import watcher_runtime as runtime
+import worker_recycle as recycle_policy
 import worker_signals
 from question_lock import HELD, answers_lock, questions_directory
 from watcher_platform import (
@@ -208,16 +209,25 @@ def recycle_amount(value):
 
 
 def worker_recycle(agent, value, owners):
-    """`RECYCLE-WORKER <pane> owner=<workspace> [<name>] <amount>` for a worker over the threshold whose workspace has
+    """`RECYCLE-WORKER-{SOFT,HARD} <pane> owner=<workspace> [<name>] <amount>` for a worker over the threshold whose workspace has
     an owner tag. Only the agent name labels it: a terminal title changes while the worker runs."""
     owner = owners.get(agent.get("workspace_id"))
-    amount = recycle_amount(value) if owner else None
+    stage = recycle_policy.stage(value) if owner else None
+    amount = (
+        (
+            f"{int(value['tokens']) // 1000}k"
+            if value.get("tokens") is not None
+            else f"{100 - float(value['remaining']):.0f}%"
+        )
+        if stage
+        else None
+    )
     if not amount:
         return None
     return " ".join(
         part
         for part in (
-            "RECYCLE-WORKER",
+            f"RECYCLE-WORKER-{stage}",
             agent["pane_id"],
             f"owner={owner}",
             agent.get("name"),
@@ -515,8 +525,14 @@ def subject_cleared(line):
     )
 
 
-RECYCLE_LINES = ("RECYCLE ", "RECYCLE-WORKER ")
+RECYCLE_LINES = (
+    "RECYCLE ",
+    "RECYCLE-WORKER ",
+    "RECYCLE-WORKER-SOFT ",
+    "RECYCLE-WORKER-HARD ",
+)
 WORKSPACE_FAILS = "workspaces:unreadable"
+WINDOW_WARN_PREFIX = "window-warning:"
 
 
 def workspace_failures(previous, raw):
@@ -529,12 +545,17 @@ def workspace_failures(previous, raw):
 
 
 def worker_untagged(key, line, raw):
-    """True when a successful workspace read shows the owner tag gone from the workspace of the worker session `key`."""
-    if not line.startswith("RECYCLE-WORKER ") or raw.get("workspaces") is None:
+    """True when a successful workspace read shows this worker owner removed or changed."""
+    if (
+        not line.startswith(
+            ("RECYCLE-WORKER ", "RECYCLE-WORKER-SOFT ", "RECYCLE-WORKER-HARD ")
+        )
+        or raw.get("workspaces") is None
+    ):
         return False
     owners = workspace_owners(raw)
     return any(
-        not owners.get(row.get("workspace_id"))
+        owners.get(row.get("workspace_id")) != line.split()[2].removeprefix("owner=")
         for row in agents(raw["herdr"])
         if (row.get("agent_session") or {}).get("value") == key
     )
@@ -542,6 +563,16 @@ def worker_untagged(key, line, raw):
 
 def reduce_context(before, after, raw):
     previous = before or {}
+    after = dict(after)
+    for key, line in after.items():
+        old = previous.get(key, "")
+        if (
+            old.startswith("RECYCLE-WORKER-HARD ")
+            and line.startswith("RECYCLE-WORKER-SOFT ")
+            and old.split()[2] == line.split()[2]
+        ):
+            # HARD stays latched per session and owner.
+            after[key] = line.replace("RECYCLE-WORKER-SOFT ", "RECYCLE-WORKER-HARD ", 1)
     moved = {
         key
         for key in after
@@ -578,9 +609,34 @@ def reduce_context(before, after, raw):
         for key in sorted(after)
         if key not in previous
         or key in moved
-        or context_step(after[key]) > context_step(previous[key])
+        or (
+            not after[key].startswith("RECYCLE-WORKER")
+            and context_step(after[key]) > context_step(previous[key])
+        )
     ]
     remembered.update(after)
+    owners = workspace_owners(raw)
+    for agent in agents(raw["herdr"]):
+        sid = (agent.get("agent_session") or {}).get("value")
+        marker = WINDOW_WARN_PREFIX + (sid or "")
+        if not sid:
+            continue
+        if marker in previous:
+            remembered[marker] = previous[marker]
+            continue
+        value = raw["usage"].get(sid, {})
+        if (
+            agent.get("agent") == "claude"
+            and not architect_like(agent)
+            and owners.get(agent.get("workspace_id"))
+            and (value.get("tokens") is not None or value.get("remaining") is not None)
+            and recycle_policy.model_window(value) is None
+        ):
+            print(
+                f"context: {agent['pane_id']} model window unavailable; using configured worker hard limit {recycle_policy.limits(value)[1]} tokens (no clamp)",
+                file=sys.stderr,
+            )
+            remembered[marker] = "logged"
     fails = workspace_failures(previous, raw)
     if fails:
         remembered[WORKSPACE_FAILS] = str(fails)
@@ -1989,9 +2045,16 @@ def session_usage(sid):
     path = Path.home() / ".claude/context-usage" / sid
     try:
         try:
-            return {"tokens": int(Path(str(path) + ".tokens").read_text().strip())}
+            value = {"tokens": int(Path(str(path) + ".tokens").read_text().strip())}
         except FileNotFoundError:
-            return {"remaining": float(path.read_text().strip())}
+            value = {"remaining": float(path.read_text().strip())}
+        for field in ("window", "model"):
+            try:
+                text = Path(str(path) + "." + field).read_text().strip()
+                value[field] = int(text) if field == "window" else text
+            except (OSError, ValueError):
+                pass
+        return value
     except Exception:
         return {}
 
