@@ -6,7 +6,7 @@ import re
 import sys
 from pathlib import Path
 
-# Fallback windows live only here. Unknown models require architect confirmation.
+# Confirm new model windows with the architect before changing these fallbacks.
 MODEL_WINDOWS = dict.fromkeys(
     (
         "claude-haiku-5-5",

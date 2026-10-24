@@ -20,7 +20,7 @@ if [ -n "$session_id" ] && [ -n "$tokens" ]; then
     || echo "statusline: cannot write $HOME/.claude/context-usage/$session_id.tokens" >&2
 fi
 
-# Model metadata for worker hard-limit clamping. Remove old metadata when absent.
+# Model metadata for worker hard-limit clamping.
 if [ -n "$session_id" ]; then
   for field in window model; do
     case $field in

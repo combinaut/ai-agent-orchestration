@@ -453,23 +453,11 @@ class WatcherTests(IsolatedTestCase):
             raw["usage"]["session-worker-001"]["tokens"] = 440000
             self.assertEqual(self.events(raw), [])
 
-    def test_context_worker_soft_then_hard(self):
-        raw = worker_context(300000)
-        before, events = w.reduce("context", None, raw)
-        self.assertEqual(events, [worker_line("300k")])
-        raw["usage"]["session-worker-001"]["tokens"] = 450000
-        after, events = w.reduce("context", before, raw)
-        self.assertEqual(
-            events,
-            [worker_line("cleared"), worker_line("450k").replace("-SOFT", "-HARD")],
-        )
-        self.assertEqual(w.reduce("context", after, raw)[1], [])
-
     def test_worker_stage_never_downgrades_before_owner_or_session_changes(self):
         raw = worker_context(300000)
         before, events = w.reduce("context", None, raw)
         self.assertEqual(events, [worker_line("300k")])
-        for tokens in (450000, 320000, 450000, 1000):
+        for tokens in (450000, 450000, 320000, 450000, 1000):
             raw["usage"]["session-worker-001"]["tokens"] = tokens
             before, events = w.reduce("context", before, raw)
             if tokens == 450000 and not getattr(self, "hard_seen", False):
