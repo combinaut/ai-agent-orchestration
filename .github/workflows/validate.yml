@@ -36,7 +36,7 @@ jobs:
   macos:
     name: Validate (macos-latest)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.macos != 'false' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.macos != 'false') }}
     runs-on: macos-latest
     timeout-minutes: 40
     steps:
