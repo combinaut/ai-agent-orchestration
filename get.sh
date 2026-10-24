@@ -27,7 +27,7 @@ same_origin() {
 }
 
 main() {
-  local dir url origin dirty tmp
+  local dir url origin dirty tmp=""
 
   [ "${BASH_VERSINFO[0]}" -gt 3 ] || { [ "${BASH_VERSINFO[0]}" -eq 3 ] && [ "${BASH_VERSINFO[1]}" -ge 2 ]; } ||
     die "bash 3.2 or newer is required (this is $BASH_VERSION)"
@@ -43,10 +43,13 @@ main() {
   if [ -z "$dir" ]; then
     command -v curl >/dev/null 2>&1 || die "curl not found. Install curl, then run this again"
     tmp=$(mktemp "${TMPDIR:-/tmp}/ao-install.XXXXXX")
-    trap 'rm -f "$tmp"' EXIT
-    curl -fsSL "${ORCH_INSTALLER_URL:-https://raw.githubusercontent.com/$REPO_SLUG/main/install.sh}" -o "$tmp" ||
+    curl -fsSL "${ORCH_INSTALLER_URL:-https://raw.githubusercontent.com/$REPO_SLUG/main/install.sh}" -o "$tmp" || {
+      rm -f "$tmp"
       die "cannot download install.sh. Check the network and run this again"
-    dir=$(/bin/bash "$tmp" --print-repo-path) && [ -n "$dir" ] || die "cannot resolve the clone folder from install.sh"
+    }
+    dir=$(/bin/bash "$tmp" --print-repo-path) || dir=""
+    rm -f "$tmp"
+    [ -n "$dir" ] || die "cannot resolve the clone folder from install.sh"
   fi
 
   if [ ! -e "$dir" ]; then

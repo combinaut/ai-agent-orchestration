@@ -195,3 +195,16 @@ contains() { printf '%s' "$1" | grep -F -- "$2" >/dev/null; }
   contains "$output" "cannot download install.sh"
   [ ! -e "$HOME/.claude" ]
 }
+
+@test "no temp file is left behind, after success or a failed download" {
+  unset ORCH_INSTALL_DIR
+  export TMPDIR="$TMP/tmpdir"
+  mkdir -p "$TMPDIR"
+  run /bin/bash "$ROOT/get.sh"
+  [ "$status" -eq 0 ]
+  [ -z "$(ls "$TMPDIR")" ]
+  export ORCH_INSTALLER_URL="file://$TMP/missing.sh"
+  run /bin/bash "$ROOT/get.sh"
+  [ "$status" -ne 0 ]
+  [ -z "$(ls "$TMPDIR")" ]
+}
