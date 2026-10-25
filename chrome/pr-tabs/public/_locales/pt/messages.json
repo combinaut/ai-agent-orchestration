@@ -2,6 +2,9 @@
   "extName": {
     "message": "Orch Tabs"
   },
+  "langTag": {
+    "message": "pt"
+  },
   "extDescription": {
     "message": "Agrupa por assunto as abas de PR do GitHub, abre seus PRs abertos e fecha as abas de PRs mesclados ou fechados."
   },

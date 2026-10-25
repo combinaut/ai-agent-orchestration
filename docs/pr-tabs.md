@@ -58,7 +58,7 @@ Needs Node 22.12+, 24 or 26+ (the range Vite and Vitest support) and pnpm (the v
 | `pnpm typecheck` | `vue-tsc --noEmit` in strict mode. |
 | `pnpm check` | All of the above in that order, build last. |
 
-Every user-visible string is a key in `_locales/en/messages.json`; `MessageKey` and its placeholders derive from that file, so a misspelled key fails `pnpm typecheck`. Plurals are `<name>_one` and `<name>_other` keys. To add a language, copy `en` to a new folder, translate it and add the folder to `LOCALES` in `test/i18n/catalog.ts`. `test/i18n/parity.test.ts` requires every locale to have the keys and placeholders of `en`, and `test/i18n/literals.test.ts` fails on literal text in `src/`.
+Every user-visible string is a key in `_locales/en/messages.json`; `MessageKey` and its placeholders derive from that file, so a misspelled key fails `pnpm typecheck`. Plurals are `<name>_one` and `<name>_other` keys. `langTag` names the catalog language Chrome resolved; plural rules, list joins and the popup `lang` use it, so a UI language without a catalog formats as English. To add a language, copy `en` to a new folder, translate it and add the folder to `LOCALES` in `test/i18n/catalog.ts`. `test/i18n/parity.test.ts` requires every locale to have the keys and placeholders of `en`, and `test/i18n/literals.test.ts` fails on literal text in `src/`.
 
 After `pnpm build`, click the reload icon on the extension card at `chrome://extensions`. CI runs `scripts/ci/pr-tabs.sh` on Ubuntu: lint, types, tests, then a rebuild that fails when `extension/` differs from the commit.
 

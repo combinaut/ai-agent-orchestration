@@ -26,12 +26,17 @@ export function getPlainMessage(key: PlainMessageKey): string {
   return lookup(key);
 }
 
+// The language of the catalog Chrome resolved, which is en when the UI language has none.
+export function catalogLanguage(): string {
+  return lookup("langTag");
+}
+
 export function getMessage<K extends MessageKey>(key: K, ...values: MessageArguments<K>): string {
   return lookup(key, values.at(0));
 }
 
 function pluralForm(count: number): PluralForm {
-  const rules = new Intl.PluralRules(chrome.i18n.getUILanguage());
+  const rules = new Intl.PluralRules(catalogLanguage());
 
   return rules.select(count) === "one" ? "one" : "other";
 }
@@ -48,5 +53,5 @@ export function getPluralMessage<B extends PluralBase>(
 }
 
 export function listText(items: string[]): string {
-  return new Intl.ListFormat(chrome.i18n.getUILanguage(), { type: "conjunction" }).format(items);
+  return new Intl.ListFormat(catalogLanguage(), { type: "conjunction" }).format(items);
 }

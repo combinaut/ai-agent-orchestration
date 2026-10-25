@@ -54,6 +54,20 @@ test("the check catches text in a template: nodes, attributes, bound strings, in
   ]);
 });
 
+test("the check catches text inside conditional and call expressions", () => {
+  const sample = `<template>
+  <Button :label="busy ? 'Opening…' : 'Open PRs'" :class="busy ? 'a b' : 'c d'" />
+  <p>{{ busy ? "Please wait" : text }} {{ join(["one", "two words"]) }}</p>
+</template>`;
+
+  assert.deepEqual(literalProblems("Sample.vue", sample), [
+    '"Opening…"',
+    '"Open PRs"',
+    '"Please wait"',
+    '"two words"',
+  ]);
+});
+
 test("the check catches text in scripts and ignores logs, imports and type literals", () => {
   const sample = `import x from "primevue/some thing";
 type Kind = "info message";

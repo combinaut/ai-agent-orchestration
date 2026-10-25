@@ -19,7 +19,7 @@ const VISIBLE_ATTRIBUTES = new Set([
 ]);
 const WORDS = /\p{L}+[ \u00a0]+[\p{L}\p{N}]/u;
 const CAPITALISED_WORD = /^\p{Lu}\p{Ll}{2,}$/u;
-const QUOTED = /^(['"`])([\s\S]*)\1$/;
+const STYLING_DIRECTIVES: ReadonlySet<string> = new Set(["class", "style"]);
 
 // Prose a user could read: two words, a capitalised word, or an ellipsis.
 export function isUserText(text: string): boolean {
@@ -104,15 +104,15 @@ function textProblems(text: string): string[] {
   return isUserText(text) ? [quoted(text)] : [];
 }
 
-function quotedProblems(expression: string): string[] {
-  const inner = QUOTED.exec(expression.trim())?.[2];
-
-  return inner === undefined ? [] : textProblems(inner);
+function expressionProblems(expression: string): string[] {
+  return typescriptProblems(expression);
 }
 
 function propProblems(prop: TemplateElement["props"][number]): string[] {
   if (isDirective(prop)) {
-    return quotedProblems(expressionText(prop.exp));
+    return STYLING_DIRECTIVES.has(expressionText(prop.arg))
+      ? []
+      : expressionProblems(expressionText(prop.exp));
   }
 
   const isVisible = VISIBLE_ATTRIBUTES.has(prop.name);
@@ -126,7 +126,7 @@ function ownProblems(node: TemplateNode): string[] {
   }
 
   if (node.type === INTERPOLATION) {
-    return quotedProblems(expressionText("content" in node ? node.content : null));
+    return expressionProblems(expressionText("content" in node ? node.content : null));
   }
 
   return isElement(node) ? node.props.flatMap(propProblems) : [];

@@ -2,6 +2,9 @@
   "extName": {
     "message": "Orch Tabs"
   },
+  "langTag": {
+    "message": "de"
+  },
   "extDescription": {
     "message": "Gruppiert konfigurierte GitHub-PR-Tabs nach Thema, öffnet deine offenen PRs und schließt Tabs gemergter oder geschlossener PRs."
   },

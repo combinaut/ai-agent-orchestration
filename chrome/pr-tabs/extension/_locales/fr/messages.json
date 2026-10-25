@@ -2,6 +2,9 @@
   "extName": {
     "message": "Orch Tabs"
   },
+  "langTag": {
+    "message": "fr"
+  },
   "extDescription": {
     "message": "Regroupe par sujet les onglets de PR GitHub configurés, ouvre vos PR ouvertes et ferme les onglets des PR fusionnées ou fermées."
   },

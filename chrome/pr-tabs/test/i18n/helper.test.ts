@@ -67,6 +67,23 @@ test("localizeDocument sets the title to the name and the language to the UI lan
   assert.equal(document.documentElement.lang, "fr");
 });
 
+test("an unsupported UI language formats and labels by the English catalog it falls back to", () => {
+  vi.stubGlobal("chrome", { i18n: createI18n("en", "ja") });
+  localizeDocument(document);
+
+  assert.equal(getPluralMessage("prCount", 1), "1 PR");
+  assert.equal(listText(["a", "b"]), "a and b");
+  assert.equal(document.documentElement.lang, "en");
+});
+
+test("a regional UI language formats by the catalog language", () => {
+  vi.stubGlobal("chrome", { i18n: createI18n("pt", "pt-BR") });
+  localizeDocument(document);
+
+  assert.equal(listText(["a", "b"]), "a e b");
+  assert.equal(document.documentElement.lang, "pt");
+});
+
 test("the status lines follow the UI language", () => {
   speak("es");
 

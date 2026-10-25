@@ -40,8 +40,8 @@ function render(catalog: LocaleCatalog, key: string, substitutions: string[]): s
   });
 }
 
-// chrome.i18n backed by the real catalog of a locale.
-export function createI18n(locale: Locale = "en"): FakeI18n {
+// chrome.i18n backed by the real catalog of a locale; the UI language may differ from it.
+export function createI18n(locale: Locale = "en", uiLanguage: string = locale): FakeI18n {
   const catalog = readCatalog(locale);
 
   function getMessage(key: string, substitutions: string | string[] = []): string {
@@ -49,7 +49,7 @@ export function createI18n(locale: Locale = "en"): FakeI18n {
   }
 
   function getUILanguage(): string {
-    return locale;
+    return uiLanguage;
   }
 
   return { getMessage, getUILanguage };

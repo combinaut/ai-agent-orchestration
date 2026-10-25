@@ -19,6 +19,10 @@ for (const locale of LOCALES) {
     assert.deepEqual(catalogProblems(ENGLISH, readCatalog(locale)), []);
   });
 
+  test(`${locale} names its own language in langTag`, () => {
+    assert.equal(readCatalog(locale)["langTag"]?.message, locale);
+  });
+
   test(`${locale} keeps the name Orch Tabs within the Chrome limits`, () => {
     const catalog = readCatalog(locale);
 
