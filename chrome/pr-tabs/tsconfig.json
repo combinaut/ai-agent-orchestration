@@ -11,8 +11,9 @@
     "paths": {
       "#/*": ["./src/*"],
       "#popup/*": ["./src/popup/*"],
-      "#test/*": ["./test/*"]
+      "#test/*": ["./test/*"],
+      "#build/*": ["./build/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "test/**/*.ts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "test/**/*.ts", "vite.config.ts", "build/**/*.ts"]
 }

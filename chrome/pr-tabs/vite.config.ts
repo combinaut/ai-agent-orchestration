@@ -1,3 +1,4 @@
+import { primeVueTheme } from "./build/primevueTheme";
 import tailwindcss from "@tailwindcss/vite";
 import vue from "@vitejs/plugin-vue";
 import { readFileSync } from "node:fs";
@@ -27,7 +28,7 @@ export default defineConfig({
   root: path("src"),
   base: "./",
   publicDir: path("public"),
-  plugins: [vue(), tailwindcss()],
+  plugins: [vue(), tailwindcss(), primeVueTheme()],
   resolve: { alias: aliases },
   build: {
     outDir: path("extension"),
