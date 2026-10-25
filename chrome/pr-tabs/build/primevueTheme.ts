@@ -25,7 +25,6 @@ function stripStyleTags(stylesheet: string): string {
   return stylesheet.replace(/<style\b[^>]*>|<\/style>/g, "");
 }
 
-// PrimeVue's SSR stylesheet APIs produce the same Aura variables and rules as styled mode.
 export async function generateThemeCss(): Promise<string> {
   Theme.setTheme({
     preset: Aura,
