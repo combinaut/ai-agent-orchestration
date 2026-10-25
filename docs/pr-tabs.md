@@ -1,6 +1,6 @@
-# Chrome PR tabs
+# Orch Tabs
 
-A Chrome extension for PR tabs in `ORCH_PR_TABS_ORG`. It sorts PR tabs into named groups, jumps to a PR, opens your open PRs, and closes tabs whose PR is merged or closed.
+Orch Tabs is a Chrome extension for PR tabs in `ORCH_PR_TABS_ORG`. It sorts PR tabs into named groups, jumps to a PR, opens your open PRs, and closes tabs whose PR is merged or closed.
 
 ## ✨ What it does
 
@@ -11,6 +11,7 @@ A Chrome extension for PR tabs in `ORCH_PR_TABS_ORG`. It sorts PR tabs into name
 - **Close duplicate tabs** keeps one tab per PR and closes the rest, across all normal windows (incognito is skipped). It keeps the tab in view in the focused window if it is one of them, else a tab in view in another window, else the oldest (lowest tab ID). The popup says how many it closed. Two tabs are the same PR when owner, repo (any case) and number match, whatever the sub-page (`/files`, `/commits`), query or `#fragment`. Go to a PR and Open all my open PRs use the same match, so they focus or skip an open tab instead of adding a double.
 - **Automatic close** removes every background tab whose PR is merged or closed. The tab in view stays until you leave it. The check runs 30 seconds after the extension loads or Chrome starts, then every 4 minutes while PR tabs are open. It does not run when none are open. After a failed check it waits longer, with jitter, up to 30 minutes. It returns to 4 minutes once a check succeeds.
 - The popup, from the toolbar button, shows how many PRs are open in how many groups, with each group's colour and count. Light and dark follow the system.
+- **Languages**: English (default), Spanish, German, French and Portuguese. Chrome picks the language from its UI language; any other falls back to English. The name stays "Orch Tabs" in all five. Host errors and the setting names (`pr_tabs.org`) are not translated.
 
 GitHub access goes through your local `gh` login, via a native messaging host. No token is stored in the browser.
 
@@ -20,7 +21,7 @@ GitHub access goes through your local `gh` login, via a native messaging host. N
 2. Load the extension once. Chrome cannot load an unpacked extension from a script, so this step is manual:
    1. Open `chrome://extensions` and turn on **Developer mode**.
    2. Click **Load unpacked** and choose `chrome/pr-tabs/extension` inside the clone (`~/.claude/ai-agent-orchestration/chrome/pr-tabs/extension` unless you set `install.repo_path` in `~/.claude/orchestration.toml`).
-   3. Pin **PR tabs** from the puzzle-piece menu so the button stays in the toolbar.
+   3. Pin **Orch Tabs** from the puzzle-piece menu so the button stays in the toolbar.
 
    While no Chrome profile has the extension (read from each profile's `Preferences` and `Secure Preferences`, never written), the installer helps: it copies the extension path to the clipboard (`pbcopy`; on Linux `wl-copy` or `xclip`), opens `chrome://extensions` in Chrome, and prints one `load once` line:
    - macOS: `Developer mode on → Load unpacked → ⌘⇧G → paste → Open`
@@ -44,7 +45,7 @@ The native host asks the selected env adapter, through shared open-work discover
 
 ## 🛠 Develop
 
-The extension is Vue 3 with PrimeVue 4 (Aura theme, dark mode from the system) and TypeScript. Sources live in `chrome/pr-tabs/src`: `background.ts` (service worker), `core.ts` (pure logic), `messages.ts` (typed popup ↔ worker messages), `types.ts` (every shared type), `popup/` (`App.vue`, `components/`, `tokens.css` for the `--pr-tabs-*` design tokens) and `composables/` (popup logic on VueUse). Static files in `chrome/pr-tabs/public` (`manifest.json`, `rules.json`). Vite builds them into `chrome/pr-tabs/extension`, the folder Chrome loads. The build is committed, so installing needs no Node.
+The extension is Vue 3 with PrimeVue 4 (Aura theme, dark mode from the system) and TypeScript. Sources live in `chrome/pr-tabs/src`: `background.ts` (service worker), `core.ts` (pure logic), `messages.ts` (typed popup ↔ worker messages), `i18n.ts` and `texts.ts` (typed message lookup and the status lines), `types.ts` (every shared type), `popup/` (`App.vue`, `components/`, `tokens.css` for the `--pr-tabs-*` design tokens) and `composables/` (popup logic on VueUse). Static files in `chrome/pr-tabs/public` (`manifest.json`, `rules.json`, and `_locales/<lang>/messages.json` for en, es, de, fr, pt). Vite builds them into `chrome/pr-tabs/extension`, the folder Chrome loads. The build is committed, so installing needs no Node.
 
 Needs Node 22.12+, 24 or 26+ (the range Vite and Vitest support) and pnpm (the version `packageManager` in `package.json` pins). In `chrome/pr-tabs`:
 
@@ -57,11 +58,13 @@ Needs Node 22.12+, 24 or 26+ (the range Vite and Vitest support) and pnpm (the v
 | `pnpm typecheck` | `vue-tsc --noEmit` in strict mode. |
 | `pnpm check` | All of the above in that order, build last. |
 
+Every user-visible string is a key in `_locales/en/messages.json`; `MessageKey` and its placeholders derive from that file, so a misspelled key fails `pnpm typecheck`. Plurals are `<name>_one` and `<name>_other` keys. To add a language, copy `en` to a new folder, translate it and add the folder to `LOCALES` in `test/i18n/catalog.ts`. `test/i18n/parity.test.ts` requires every locale to have the keys and placeholders of `en`, and `test/i18n/literals.test.ts` fails on literal text in `src/`.
+
 After `pnpm build`, click the reload icon on the extension card at `chrome://extensions`. CI runs `scripts/ci/pr-tabs.sh` on Ubuntu: lint, types, tests, then a rebuild that fails when `extension/` differs from the commit.
 
 ## 🩺 Troubleshooting
 
-These are the common red errors in the popup. **Close merged PRs** puts `GitHub check failed: ` in front of a host error; **Open all my open PRs** shows it bare.
+These are the common red errors in the popup. **Close merged PRs** puts `GitHub check failed: ` in front of a host error; **Open all my open PRs** shows it bare. The messages below are the English ones; the popup shows them in the browser language.
 
 | Popup message | Meaning and fix |
 |---|---|
@@ -70,6 +73,6 @@ These are the common red errors in the popup. **Close merged PRs** puts `GitHub 
 | `gh timed out after 30s` | GitHub did not answer in time. Try again. |
 | Any other GitHub message, or `gh exited N` | The text is what `gh` or GitHub returned. Follow it. It can be a network failure, a rate limit or a query error; a logged-out `gh` (`gh auth login`) or an account without access to the org's repos is one cause. |
 | `native host timed out` or `empty reply from native host` | The host did not answer. Read the host log. |
-| `No answer from the PR tabs service worker…` | Reload the extension at `chrome://extensions`. |
+| `No answer from the Orch Tabs service worker…` | Reload the extension at `chrome://extensions`. |
 
 The host logs one line per request, with its error if any, to `~/.claude/chrome-pr-tabs/host.log`. At 256 KiB it moves to `host.log.1`. For the extension's own errors, open the **service worker** link on the extension card at `chrome://extensions`.
