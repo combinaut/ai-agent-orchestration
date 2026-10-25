@@ -5,7 +5,7 @@ import type { ThemeStyleModule } from "./types";
 
 const THEME_MODULE = "virtual:primevue-theme.css";
 const RESOLVED_THEME_MODULE = `\0${THEME_MODULE}`;
-const COMPONENTS = [
+export const COMPONENTS: readonly string[] = [
   "badge",
   "button",
   "iconfield",

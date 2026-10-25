@@ -1,24 +1,46 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "vitest";
-import { generateThemeCss } from "#build/primevueTheme";
+import { COMPONENTS, generateThemeCss } from "#build/primevueTheme";
 import { primeVueConfiguration } from "#popup/primevue";
 
-const COMPONENTS = [
-  "badge",
-  "button",
-  "iconfield",
-  "inputicon",
-  "inputtext",
-  "message",
-  "select",
-  "virtualscroller",
-];
+const SOURCE_ROOT = new URL("../src/", import.meta.url);
+const PRIMEVUE_IMPORT = /\b(?:from|import)\s*["']primevue\/([^/"']+)(?:\/[^"']*)?["']/g;
+
+function importedComponents(path: string): string[] {
+  const source = readFileSync(new URL(path, SOURCE_ROOT), "utf8");
+  const imports = Array.from(source.matchAll(PRIMEVUE_IMPORT), (match) => match[1] ?? "");
+
+  return imports.filter((component) => component !== "config");
+}
+
+test("every source PrimeVue component has build-time styles registered", () => {
+  const files = readdirSync(SOURCE_ROOT, { recursive: true });
+  const components = files.filter((file) => /\.(?:vue|ts)$/.test(file)).flatMap(importedComponents);
+
+  for (const component of components) {
+    assert.ok(COMPONENTS.includes(component), `Missing build-time styles for ${component}`);
+  }
+});
+
+test("popup entry imports the generated theme stylesheet", () => {
+  const source = readFileSync(new URL("popup/main.ts", SOURCE_ROOT), "utf8");
+
+  assert.match(source, /\bimport\s*["']virtual:primevue-theme\.css["']/);
+});
+
+test("transitive ripple and virtualscroller styles stay registered", () => {
+  assert.ok(COMPONENTS.includes("ripple"));
+  assert.ok(COMPONENTS.includes("virtualscroller"));
+});
 
 test("build emits Aura styles for initial, conditional and overlay components", async () => {
   const css = await generateThemeCss();
 
   for (const component of COMPONENTS) {
-    assert.ok(css.includes(`.p-${component}`), component);
+    const selector = component === "ripple" ? ".p-ink" : `.p-${component}`;
+
+    assert.ok(css.includes(selector), component);
   }
 
   assert.match(css, /li\.p-select-option[^{}]*\{\s*transition:\s*none/);
