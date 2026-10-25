@@ -1,4 +1,4 @@
-# Orch Tabs
+# <img src="../chrome/pr-tabs/icons/icon.svg" alt="Orch Tabs icon" height="24" align="top"> Orch Tabs
 
 Orch Tabs is a Chrome extension for PR tabs in `ORCH_PR_TABS_ORG`. It sorts PR tabs into named groups, jumps to a PR, opens your open PRs, and closes tabs whose PR is merged or closed.
 
