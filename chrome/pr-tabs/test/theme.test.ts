@@ -21,6 +21,7 @@ test("build emits Aura styles for initial, conditional and overlay components", 
     assert.ok(css.includes(`.p-${component}`), component);
   }
 
+  assert.match(css, /li\.p-select-option[^{}]*\{\s*transition:\s*none/);
   assert.match(css, /--p-primary-color:/);
   assert.match(css, /--p-select-option-selected-background:/);
   assert.match(css, /prefers-color-scheme:\s*dark/);

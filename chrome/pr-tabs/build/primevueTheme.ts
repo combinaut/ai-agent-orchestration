@@ -40,6 +40,7 @@ export async function generateThemeCss(): Promise<string> {
     base.getStyleSheet(),
     base.getCommonThemeStyleSheet(),
     base.getThemeStyleSheet(),
+    Theme.transformCSS("global-style", base.getCommonTheme().style ?? ""),
   ];
 
   for (const component of COMPONENTS) {
