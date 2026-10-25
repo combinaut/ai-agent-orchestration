@@ -366,7 +366,10 @@ MAX_PANE_LOOKUPS = 30
 HERDR_TIMEOUT_SECONDS = 5
 MAX_COMMAND_BYTES = 1024 * 1024
 OWNER = re.compile(r"^[A-Za-z0-9-]{1,39}$")
-BRANCH = re.compile(r"^(?![/.-])(?!.*(?://|\.\.|/\.))[A-Za-z0-9_./-]{1,255}(?<![/.])$")
+# git check-ref-format rules for a branch name.
+BRANCH = re.compile(
+    r"^(?![/.-])(?!.*(?://|\.\.|/\.|@\{|\.lock(?:/|$)))[^\x00-\x20~^:?*\[\\\x7f]{1,255}(?<![/.])\Z"
+)
 PANE_ID = re.compile(r"^[A-Za-z0-9:_-]{1,64}$")
 APP_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
 OPEN = "/usr/bin/open"
@@ -477,7 +480,9 @@ def asking_panes(now):
     asking = set()
     for path in sorted(signals.directory().glob("signal-*.json"))[:MAX_QUESTIONS]:
         try:
-            record = json.loads(path.read_text()[:MAX_REQUEST_BYTES])
+            with path.open("rb") as stream:
+                body = stream.read(MAX_REQUEST_BYTES + 1)
+            record = json.loads(body) if len(body) <= MAX_REQUEST_BYTES else None
         except (OSError, ValueError):
             continue
         if (
@@ -569,9 +574,10 @@ def focus_pane(request):
     if key not in chosen:
         raise RequestError(f"no Herdr pane has {key} checked out")
     _, row, pane = chosen[key]
-    bounded_command(time.monotonic() + HERDR_TIMEOUT_SECONDS)(
-        *focus_argv(herdr, row, pane)
-    )
+    with discovery_settings(values):
+        bounded_command(time.monotonic() + HERDR_TIMEOUT_SECONDS)(
+            *focus_argv(herdr, row, pane)
+        )
     raise_terminal(values)
     return {"ok": True, "pane": pane.get("pane")}
 

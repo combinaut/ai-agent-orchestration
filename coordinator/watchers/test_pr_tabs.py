@@ -405,6 +405,7 @@ class PrTabsTest(IsolatedTestCase):
 
 FAKE_HERDR = """#!/bin/sh
 printf '%s\\n' "$*" >>"$FAKE_HERDR_DIR/calls"
+printf '%s\\n' "${HERDR_SOCKET_PATH:-}" >>"$FAKE_HERDR_DIR/sockets"
 [ -z "$FAKE_HERDR_SLEEP" ] || sleep "$FAKE_HERDR_SLEEP"
 if [ -n "$FAKE_HERDR_FAIL" ]; then echo "$FAKE_HERDR_FAIL" >&2; exit 1; fi
 case "$1 $2" in
@@ -569,7 +570,10 @@ class PaneJumpTest(IsolatedTestCase):
             {"prs": [{"repo": "acme/web app", "branch": "feature"}]},
             {"prs": [{"repo": "acme/webapp", "branch": "-x"}]},
             {"prs": [{"repo": "acme/webapp", "branch": "a..b"}]},
-            {"prs": [{"repo": "acme/webapp", "branch": "a;rm"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "a b"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "a~1"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "x.lock"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "feature\n"}]},
             {"prs": [{"repo": "acme/webapp", "branch": 7}]},
         ):
             with self.subTest(bad=bad):
@@ -665,3 +669,53 @@ class PaneJumpTest(IsolatedTestCase):
         self.assertEqual(state(dict(question, cleanup=True)), "working")
         self.assertEqual(state(dict(question, pane="wA:p2")), "working")
         self.assertEqual(state(dict(question, kind="done")), "working")
+
+    def test_any_git_branch_name_is_looked_up(self):
+        plus = self.checkout("plus", "feature+fix@2", "https://github.com/acme/webapp")
+        self.herdr([("wP", None, plus)], [("wP", "wP:p1", {"agent": "claude"})])
+        reply = host.panes(
+            {
+                "prs": [
+                    {"repo": "acme/webapp", "branch": "feature+fix@2"},
+                    {"repo": "acme/webapp", "branch": "other;branch"},
+                ]
+            }
+        )
+        self.assertEqual(
+            reply["panes"],
+            {
+                "acme/webapp:feature+fix@2": {"state": None},
+                "acme/webapp:other;branch": None,
+            },
+        )
+
+    def test_focus_uses_the_configured_herdr_socket(self):
+        self.herdr([("wA", None, self.web)], [("wA", "wA:p1", {"agent": "claude"})])
+        with patch.dict(os.environ, {"ORCH_HERDR_SOCKET": "/fixture/socket"}):
+            host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+        self.assertEqual(
+            (self.base / "sockets").read_text().splitlines(), ["/fixture/socket"] * 3
+        )
+        self.assertNotEqual(os.environ.get("HERDR_SOCKET_PATH"), "/fixture/socket")
+
+    def test_an_oversized_question_record_is_skipped(self):
+        signals = self.base / "signals"
+        signals.mkdir()
+        record = {
+            "kind": "question",
+            "workspace": "wA",
+            "pane": "wA:p1",
+            "deadline": 2000,
+            "question": "x" * host.MAX_REQUEST_BYTES,
+        }
+        (signals / "signal-1.json").write_text(json.dumps(record))
+        self.herdr(
+            [("wA", None, self.web)],
+            [("wA", "wA:p1", {"agent": "claude", "agent_status": "idle"})],
+        )
+        with (
+            patch.object(worker_signals, "directory", return_value=signals),
+            patch.object(host.time, "time", return_value=1000),
+        ):
+            reply = host.panes({"prs": [{"repo": "acme/webapp", "branch": "feature"}]})
+        self.assertEqual(reply["panes"], {"acme/webapp:feature": {"state": "idle"}})
