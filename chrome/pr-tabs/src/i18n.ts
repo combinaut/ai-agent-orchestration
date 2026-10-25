@@ -41,7 +41,7 @@ function pluralForm(count: number): PluralForm {
   return rules.select(count) === "one" ? "one" : "other";
 }
 
-// Picks the _one or _other key of base by the UI language's plural rule; count fills $COUNT$.
+// Picks the _one or _other key of base by the catalog language's plural rule; count fills $COUNT$.
 export function getPluralMessage<B extends PluralBase>(
   base: B,
   count: number,

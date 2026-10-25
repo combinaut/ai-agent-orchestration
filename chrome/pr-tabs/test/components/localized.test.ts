@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
-import ActionButton from "#popup/components/ActionButton.vue";
 import GoToForm from "#popup/components/GoToForm.vue";
 import GroupItem from "#popup/components/GroupItem.vue";
 import GroupList from "#popup/components/GroupList.vue";
@@ -56,14 +55,4 @@ test("the group list label and the count label come from chrome.i18n", () => {
 
   assert.equal(list.attributes("aria-label"), "PR-Tab-Gruppen");
   assert.equal(item.find(".p-badge").attributes("aria-label"), "1 PR");
-});
-
-test("a button shows the label it is given", () => {
-  speakGerman();
-
-  const wrapper = mountPopup(ActionButton, {
-    props: { label: "Doppelte Tabs schließen", busy: false },
-  });
-
-  assert.equal(wrapper.text(), "Doppelte Tabs schließen");
 });

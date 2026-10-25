@@ -1,4 +1,4 @@
-// Pure PR tabs logic; background.ts owns every chrome.* call.
+// Pure PR tabs logic; background.ts owns every chrome.* call except catalog text read through i18n.ts.
 import { getPlainMessage } from "#/i18n";
 import type {
   Entry,
