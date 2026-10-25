@@ -29,14 +29,45 @@ test("src holds no literal user-visible text", () => {
   assert.deepEqual(found, []);
 });
 
-test("prose, a capitalised word and an ellipsis are user text; ids and classes are not", () => {
-  for (const text of ["Go to a PR", "Untitled", "Opening…", "Closed 2 tabs."]) {
+test("any letter-bearing string is user text; ids, classes, urls and symbols are not", () => {
+  for (const text of [
+    "Go to a PR",
+    "Untitled",
+    "Opening…",
+    "Closed 2 tabs.",
+    "search",
+    "Go",
+    "OK",
+  ]) {
     assert.equal(isUserText(text), true, text);
   }
 
-  for (const text of ["goToLabel", "MERGED", "bg-group-grey", "https://github.com/*/*", "~", ""]) {
+  for (const text of ["goToLabel", "bg-group-grey", "https://github.com/*/*", "~", "", "+3"]) {
     assert.equal(isUserText(text), false, text);
   }
+});
+
+test("a code word is not text only in the files that use it as a code", () => {
+  const sample = `const kind = "search";`;
+
+  assert.deepEqual(literalProblems("src/background.ts", sample), []);
+  assert.deepEqual(
+    literalProblems(
+      "src/popup/components/PrInput.vue",
+      `<script setup lang="ts">${sample}</script>`,
+    ),
+    ['"search"'],
+  );
+  assert.deepEqual(literalProblems("src/texts.ts", sample), ['"search"']);
+});
+
+test("the check catches short strings: bound literals and named script values", () => {
+  const named = `<script setup lang="ts">
+const inputTitle = "search";
+</script>
+<template><input :title="inputTitle" :label="'Go'" /></template>`;
+
+  assert.deepEqual(literalProblems("Sample.vue", named), ['"Go"', '"search"']);
 });
 
 test("the check catches text in a template: nodes, attributes, bound strings, interpolation", () => {
@@ -72,6 +103,7 @@ test("the check catches text inside conditional and call expressions", () => {
     '"Opening…"',
     '"Open PRs"',
     '"Please wait"',
+    '"one"',
     '"two words"',
   ]);
 });
@@ -87,6 +119,7 @@ throw new Error("Chrome created a tab without an id");`;
   assert.deepEqual(literalProblems("sample.ts", sample), [
     '"Opening…"',
     '"Closed"',
+    '"tabs"',
     '"Chrome created a tab without an id"',
   ]);
 });

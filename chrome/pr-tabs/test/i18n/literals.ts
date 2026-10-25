@@ -18,13 +18,80 @@ const VISIBLE_ATTRIBUTES = new Set([
   "aria-valuetext",
 ]);
 const LETTER = /\p{L}/u;
-const WORDS = /\p{L}+[ \u00a0]+[\p{L}\p{N}]/u;
-const CAPITALISED_WORD = /^\p{Lu}\p{Ll}{2,}$/u;
 const STYLING_DIRECTIVES: ReadonlySet<string> = new Set(["class", "style"]);
+const IDENTIFIER_CHARACTERS = /[/:#.@*_\-$%<>=[\]{}()?&|\\~+^,;!]/;
+const CAMEL_CASE = /^[a-z]+(?:[A-Z][a-z0-9]*)+$/;
 
-// Prose a user could read: two words, a capitalised word, or an ellipsis.
-export function isUserText(text: string): boolean {
-  return WORDS.test(text) || CAPITALISED_WORD.test(text.trim()) || text.includes("…");
+// Plain words a file uses as codes (message types, states, colours, option names), by file. A word
+// is a code only in the files listed, so "search" in PrInput.vue is still text.
+const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
+  "background.ts": [
+    "MERGED",
+    "CLOSED",
+    "settings",
+    "normal",
+    "object",
+    "meta",
+    "owners",
+    "failures",
+    "cursor",
+    "states",
+    "error",
+    "search",
+  ],
+  "composables/useRepoPicker.ts": ["repos"],
+  "composables/useStatus.ts": ["info", "error"],
+  "composables/useSummary.ts": ["summary"],
+  "core.ts": [
+    "complete",
+    "MERGED",
+    "CLOSED",
+    "OPEN",
+    "grey",
+    "blue",
+    "red",
+    "yellow",
+    "green",
+    "pink",
+    "purple",
+    "cyan",
+    "orange",
+  ],
+  "i18n.ts": ["one", "other", "conjunction"],
+  "messages.ts": ["error", "object", "message", "string", "type", "reply"],
+  "popup/components/ActionButton.vue": ["secondary", "run"],
+  "popup/components/GoToForm.vue": ["input", "repo", "go", "pick"],
+  "popup/components/PrInput.vue": ["field"],
+  "popup/components/RepoSelect.vue": ["pick"],
+  "popup/primevue.ts": ["system", "primevue", "theme, base, primevue, components, utilities"],
+  "texts.ts": ["MERGED"],
+};
+
+function isMachineIdentifier(text: string, codes: ReadonlySet<string>): boolean {
+  const word = text.trim();
+
+  if (codes.has(word)) {
+    return true;
+  }
+
+  if (/\s/.test(word) || word.includes("…")) {
+    return false;
+  }
+
+  return IDENTIFIER_CHARACTERS.test(word) || CAMEL_CASE.test(word);
+}
+
+function codesOf(path: string): ReadonlySet<string> {
+  const entry = Object.entries(CODE_WORDS).find(
+    ([file]) => path.endsWith(`/${file}`) || path === file,
+  );
+
+  return new Set(entry?.[1]);
+}
+
+// Any letter-bearing string that is not a machine identifier counts as user text.
+export function isUserText(text: string, codes: ReadonlySet<string> = new Set()): boolean {
+  return LETTER.test(text) && !isMachineIdentifier(text, codes);
 }
 
 function quoted(text: string): string {
@@ -59,13 +126,13 @@ function literalText(node: ts.Node): string | null {
   return null;
 }
 
-function scriptProblems(file: ts.SourceFile): string[] {
+function scriptProblems(file: ts.SourceFile, codes: ReadonlySet<string>): string[] {
   const found: string[] = [];
 
   function visit(node: ts.Node): void {
     const text = literalText(node);
 
-    if (text !== null && isUserText(text)) {
+    if (text !== null && isUserText(text, codes)) {
       found.push(quoted(text));
     }
 
@@ -79,8 +146,10 @@ function scriptProblems(file: ts.SourceFile): string[] {
   return found;
 }
 
-function typescriptProblems(source: string): string[] {
-  return scriptProblems(ts.createSourceFile("source.ts", source, ts.ScriptTarget.Latest, true));
+function typescriptProblems(source: string, codes: ReadonlySet<string> = new Set()): string[] {
+  const file = ts.createSourceFile("source.ts", source, ts.ScriptTarget.Latest, true);
+
+  return scriptProblems(file, codes);
 }
 
 function isNode(value: unknown): value is TemplateNode {
@@ -140,11 +209,11 @@ function nodeProblems(node: TemplateNode): string[] {
   return [...ownProblems(node), ...nested.filter(isNode).flatMap(nodeProblems)];
 }
 
-function vueProblems(source: string): string[] {
+function vueProblems(source: string, codes: ReadonlySet<string>): string[] {
   const { template, script, scriptSetup } = parse(source).descriptor;
   const fromTemplate = template?.ast ? nodeProblems(template.ast) : [];
   const fromScripts = [script, scriptSetup].flatMap((block) =>
-    block ? typescriptProblems(block.content) : [],
+    block ? typescriptProblems(block.content, codes) : [],
   );
 
   return [...fromTemplate, ...fromScripts];
@@ -164,8 +233,8 @@ function htmlProblems(source: string): string[] {
 // Every literal user-visible string in a src file, by file type.
 export function literalProblems(path: string, source: string): string[] {
   if (path.endsWith(".vue")) {
-    return vueProblems(source);
+    return vueProblems(source, codesOf(path));
   }
 
-  return path.endsWith(".html") ? htmlProblems(source) : typescriptProblems(source);
+  return path.endsWith(".html") ? htmlProblems(source) : typescriptProblems(source, codesOf(path));
 }
