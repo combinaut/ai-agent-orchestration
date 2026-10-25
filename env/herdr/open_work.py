@@ -26,9 +26,11 @@ def result(command, *args):
     return json.loads(command(herdr_bin(), *args))["result"]
 
 
-def checkout_of(command, path):
-    """(checkout, main clone) of the git checkout containing path."""
+def checkout_of(command, path, roots=True):
+    """(checkout, main clone) of the git checkout containing path; main clone None when roots is false."""
     top = command("git", "-C", path, "rev-parse", "--show-toplevel").strip()
+    if not roots:
+        return top, None
     common = Path(
         command(
             "git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"
@@ -37,7 +39,7 @@ def checkout_of(command, path):
     return top, str(common.parent) if common.name == ".git" else top
 
 
-def open_work(command):
+def open_work(command, roots=True):
     """{'workspaces': [{id, label, owner, status, checkout, repo_root, gone}], 'panes': [{workspace, pane, title, role, agent, status, cwd}]}.
 
     A workspace Herdr reports without a worktree takes the checkout of its first pane's directory; none when git says it is
@@ -49,20 +51,22 @@ def open_work(command):
     first_cwd = {}
     for pane in panes:
         first_cwd.setdefault(pane.get("workspace_id"), pane.get("cwd"))
-    rows = []
+    rows, probed = [], {}
     for row in workspaces:
         tree = row.get("worktree") or {}
         checkout, root, gone = tree.get("checkout_path"), tree.get("repo_root"), False
         cwd = first_cwd.get(row["workspace_id"])
         if not root and cwd:
-            try:
-                checkout, root = checkout_of(command, cwd)
-            except Exception as error:
-                detail = str(getattr(error, "stderr", None) or "")
-                gone = bool(GONE.search(detail))
-                if not gone and not NOT_A_CHECKOUT.search(detail):
-                    raise
-                checkout, root = None, None
+            if cwd not in probed:
+                try:
+                    probed[cwd] = (*checkout_of(command, cwd, roots), False)
+                except Exception as error:
+                    detail = str(getattr(error, "stderr", None) or "")
+                    gone = bool(GONE.search(detail))
+                    if not gone and not NOT_A_CHECKOUT.search(detail):
+                        raise
+                    probed[cwd] = (None, None, gone)
+            checkout, root, gone = probed[cwd]
         rows.append(
             dict(
                 id=row["workspace_id"],

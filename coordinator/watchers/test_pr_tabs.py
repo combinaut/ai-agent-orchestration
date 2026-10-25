@@ -719,3 +719,76 @@ class PaneJumpTest(IsolatedTestCase):
         ):
             reply = host.panes({"prs": [{"repo": "acme/webapp", "branch": "feature"}]})
         self.assertEqual(reply["panes"], {"acme/webapp:feature": {"state": "idle"}})
+
+    def test_an_orphaned_owner_is_not_a_worker(self):
+        self.herdr(
+            [
+                ("wOld", "closed-architect", self.web),
+                ("wArch", None, self.other),
+                ("wWorker", "wArch", self.web),
+            ],
+            [
+                ("wOld", "wOld:p1", {"agent": "claude"}),
+                ("wArch", "wArch:p1", {"agent": "claude"}),
+                ("wWorker", "wWorker:p1", {"agent": "claude"}),
+            ],
+        )
+        reply = host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+        self.assertEqual(reply["pane"], "wWorker:p1")
+
+    def test_a_long_valid_branch_does_not_reject_the_lookup(self):
+        self.herdr([("wA", None, self.web)], [("wA", "wA:p1", {})])
+        long = "b" * 300
+        reply = host.panes(
+            {
+                "prs": [
+                    {"repo": "acme/webapp", "branch": long},
+                    {"repo": "acme/webapp", "branch": "feature"},
+                ]
+            }
+        )
+        self.assertEqual(
+            reply["panes"],
+            {f"acme/webapp:{long}": None, "acme/webapp:feature": {"state": None}},
+        )
+
+    def test_shared_checkouts_are_probed_once_without_clone_roots(self):
+        sub = Path(self.web) / "sub"
+        sub.mkdir()
+        rows = [{"workspace_id": id} for id in ("wA", "wB", "wC")]
+        (self.base / "workspaces.json").write_text(
+            json.dumps({"result": {"workspaces": rows}})
+        )
+        pane_rows = [
+            {"workspace_id": "wA", "pane_id": "wA:p1", "cwd": self.web},
+            {"workspace_id": "wB", "pane_id": "wB:p1", "cwd": self.web},
+            {"workspace_id": "wC", "pane_id": "wC:p1", "cwd": str(sub)},
+        ]
+        (self.base / "panes.json").write_text(
+            json.dumps({"result": {"panes": pane_rows}})
+        )
+        calls, real = [], host.bounded_command
+
+        def counting(deadline):
+            command = real(deadline)
+
+            def run(*args):
+                calls.append(args[1:] if args[0] != "git" else args[3:])
+                return command(*args)
+
+            return run
+
+        with patch.object(host, "bounded_command", counting):
+            reply = host.panes({"prs": [{"repo": "acme/webapp", "branch": "feature"}]})
+        self.assertEqual(reply["panes"], {"acme/webapp:feature": {"state": None}})
+        self.assertEqual(
+            calls,
+            [
+                ("workspace", "list"),
+                ("pane", "list"),
+                ("rev-parse", "--show-toplevel"),
+                ("rev-parse", "--show-toplevel"),
+                ("symbolic-ref", "--quiet", "HEAD"),
+                ("remote", "get-url", "origin"),
+            ],
+        )

@@ -368,7 +368,7 @@ MAX_COMMAND_BYTES = 1024 * 1024
 OWNER = re.compile(r"^[A-Za-z0-9-]{1,39}$")
 # git check-ref-format rules for a branch name.
 BRANCH = re.compile(
-    r"^(?![/.-])(?!.*(?://|\.\.|/\.|@\{|\.lock(?:/|$)))[^\x00-\x20~^:?*\[\\\x7f]{1,255}(?<![/.])\Z"
+    r"^(?![/.-])(?!.*(?://|\.\.|/\.|@\{|\.lock(?:/|$)))[^\x00-\x20~^:?*\[\\\x7f]+(?<![/.])\Z"
 )
 PANE_ID = re.compile(r"^[A-Za-z0-9:_-]{1,64}$")
 APP_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
@@ -445,9 +445,9 @@ def load_discovery(root):
     return importlib.import_module("discovery")
 
 
-def pane_rank(row, pane, order):
-    """Worker workspaces first, then panes with an agent, then Herdr's list order."""
-    worker = bool(row.get("owner")) and row.get("owner") != row.get("id")
+def pane_rank(row, pane, order, workspaces):
+    """Worker workspaces (owned by another live workspace) first, then panes with an agent, then Herdr's list order."""
+    worker = row.get("owner") in workspaces and row.get("owner") != row.get("id")
     return (not worker, not pane.get("agent"), order)
 
 
@@ -457,6 +457,7 @@ def branch_panes(discovery, command, work, keys):
     for index, pane in enumerate(work["panes"]):
         panes.setdefault(pane.get("workspace"), []).append((index, pane))
     heads, chosen = {}, {}
+    workspaces = {row.get("id") for row in work["workspaces"]}
     for row in work["workspaces"]:
         checkout = row.get("checkout")
         if not checkout or row.get("gone"):
@@ -468,7 +469,7 @@ def branch_panes(discovery, command, work, keys):
                 heads[checkout] = None
         key = heads[checkout]
         for index, pane in panes.get(row["id"], []) if key in keys else []:
-            candidate = (pane_rank(row, pane, index), row, pane)
+            candidate = (pane_rank(row, pane, index, workspaces), row, pane)
             if key not in chosen or candidate[0] < chosen[key][0]:
                 chosen[key] = candidate
     return chosen
@@ -519,7 +520,7 @@ def resolve_panes(keys):
     command = bounded_command(time.monotonic() + HERDR_TIMEOUT_SECONDS)
     with discovery_settings(values):
         try:
-            work = discovery.open_work(command)
+            work = discovery.open_work(command, roots=False)
             herdr = discovery.adapter().herdr_bin()
         except discovery.Unavailable as error:
             raise RequestError(f"Herdr unavailable: {error}") from None

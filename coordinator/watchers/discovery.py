@@ -53,10 +53,12 @@ def adapter():
     return ADAPTERS[path]
 
 
-def open_work(command):
-    """Workspaces and panes of the open work; raises Unavailable when the env adapter cannot report them."""
+def open_work(command, roots=True):
+    """Workspaces and panes of the open work; raises Unavailable when the env adapter cannot report them.
+
+    roots=False leaves repo_root unset for workspaces whose checkout git has to find."""
     try:
-        return adapter().open_work(command)
+        return adapter().open_work(command, roots=roots)
     except READ_ERRORS as error:
         raise Unavailable(str(error)[:200]) from error
 
