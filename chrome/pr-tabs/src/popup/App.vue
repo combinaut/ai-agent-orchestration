@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { useMessages } from "#/composables/useMessages";
 import { useGoTo } from "#/composables/useGoTo";
 import { useRepoPicker } from "#/composables/useRepoPicker";
 import { useServiceWorker } from "#/composables/useServiceWorker";
@@ -11,6 +12,11 @@ import GoToForm from "./components/GoToForm.vue";
 import GroupList from "./components/GroupList.vue";
 import StatusLine from "./components/StatusLine.vue";
 
+const { openAllButton, checkNowButton, closeDuplicatesButton } = useMessages([
+  "openAllButton",
+  "checkNowButton",
+  "closeDuplicatesButton",
+]);
 const { ask } = useServiceWorker();
 const status = useStatus();
 const { statusText, isStatusError } = status;
@@ -65,19 +71,19 @@ onMounted(handlePopupMounted);
   <ActionButton
     id="open-all"
     primary
-    label="Open all my open PRs"
+    :label="openAllButton"
     :busy="isOpeningAll"
     @run="handleOpenAllRun"
   />
   <ActionButton
     id="check-now"
-    label="Close merged PRs"
+    :label="checkNowButton"
     :busy="isCheckingNow"
     @run="handleCheckNowRun"
   />
   <ActionButton
     id="close-duplicates"
-    label="Close duplicate tabs"
+    :label="closeDuplicatesButton"
     :busy="isClosingDuplicates"
     @run="handleCloseDuplicatesRun"
   />

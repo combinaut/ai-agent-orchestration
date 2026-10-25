@@ -1,0 +1,264 @@
+{
+  "extName": {
+    "message": "Orch Tabs"
+  },
+  "extDescription": {
+    "message": "Regroupe par sujet les onglets de PR GitHub configurés, ouvre vos PR ouvertes et ferme les onglets des PR fusionnées ou fermées."
+  },
+  "goToLabel": {
+    "message": "Aller à une PR"
+  },
+  "goToPlaceholder": {
+    "message": "2972 ou une URL de PR"
+  },
+  "submitHintLabel": {
+    "message": "Appuyez sur Entrée"
+  },
+  "repoSelectLabel": {
+    "message": "Dépôt pour un numéro seul"
+  },
+  "openAllButton": {
+    "message": "Ouvrir toutes mes PR ouvertes"
+  },
+  "checkNowButton": {
+    "message": "Fermer les PR fusionnées"
+  },
+  "closeDuplicatesButton": {
+    "message": "Fermer les onglets en double"
+  },
+  "groupsLabel": {
+    "message": "Groupes d'onglets de PR"
+  },
+  "pendingOpening": {
+    "message": "Ouverture…"
+  },
+  "pendingChecking": {
+    "message": "Vérification…"
+  },
+  "pendingClosing": {
+    "message": "Fermeture…"
+  },
+  "untitledGroup": {
+    "message": "Sans titre"
+  },
+  "noPrTabs": {
+    "message": "Aucun onglet de PR ouvert"
+  },
+  "noDuplicates": {
+    "message": "Aucun onglet de PR en double."
+  },
+  "closedDuplicates_one": {
+    "message": "$COUNT$ onglet de PR en double fermé.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedDuplicates_other": {
+    "message": "$COUNT$ onglets de PR en double fermés.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prCount_one": {
+    "message": "$COUNT$ PR",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prCount_other": {
+    "message": "$COUNT$ PR",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "groupCount_one": {
+    "message": "$COUNT$ groupe",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "groupCount_other": {
+    "message": "$COUNT$ groupes",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "summaryLine": {
+    "message": "$PRS$ dans $GROUPS$",
+    "placeholders": {
+      "prs": {
+        "content": "$1"
+      },
+      "groups": {
+        "content": "$2"
+      }
+    }
+  },
+  "mergedTabs_one": {
+    "message": "$COUNT$ onglet fusionné",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "mergedTabs_other": {
+    "message": "$COUNT$ onglets fusionnés",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedPrTabs_one": {
+    "message": "$COUNT$ onglet de PR fermée",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedPrTabs_other": {
+    "message": "$COUNT$ onglets de PR fermée",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedTabs": {
+    "message": "Fermés : $TABS$",
+    "placeholders": {
+      "tabs": {
+        "content": "$1"
+      }
+    }
+  },
+  "noneClosed_one": {
+    "message": "Aucune PR fusionnée ou fermée parmi $COUNT$ PR vérifiée",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "noneClosed_other": {
+    "message": "Aucune PR fusionnée ou fermée parmi $COUNT$ PR vérifiées",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "inViewKept_one": {
+    "message": "$COUNT$ onglet affiché conservé ($PRS$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "prs": {
+        "content": "$2"
+      }
+    }
+  },
+  "inViewKept_other": {
+    "message": "$COUNT$ onglets affichés conservés ($PRS$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "prs": {
+        "content": "$2"
+      }
+    }
+  },
+  "moreNextTime": {
+    "message": "$COUNT$ de plus la prochaine fois",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "openedCount": {
+    "message": "Ouverts : $COUNT$.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "moreNotOpened": {
+    "message": "$COUNT$ de plus non ouverts ; cliquez à nouveau pour le lot suivant.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "aboutMoreNotOpened": {
+    "message": "Environ $COUNT$ de plus non ouverts ; cliquez à nouveau pour le lot suivant.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "errTabWithoutId": {
+    "message": "Chrome a créé un onglet sans identifiant"
+  },
+  "errHostTimeout": {
+    "message": "l'hôte natif n'a pas répondu à temps"
+  },
+  "errHostEmptyReply": {
+    "message": "réponse vide de l'hôte natif"
+  },
+  "errGithubCheckFailed": {
+    "message": "Échec de la vérification GitHub : $MESSAGE$",
+    "placeholders": {
+      "message": {
+        "content": "$1"
+      }
+    }
+  },
+  "errSetOrgAndOpenAll": {
+    "message": "Définissez pr_tabs.org et pr_tabs.open_all dans orchestration.toml"
+  },
+  "errSetOrg": {
+    "message": "Définissez pr_tabs.org dans orchestration.toml"
+  },
+  "errSetDefaultRepo": {
+    "message": "Définissez pr_tabs.default_repo dans orchestration.toml"
+  },
+  "errNotAPr": {
+    "message": "Ni un numéro ni une URL de PR de $ORG$",
+    "placeholders": {
+      "org": {
+        "content": "$1"
+      }
+    }
+  },
+  "errNoAnswer": {
+    "message": "Aucune réponse du service worker d'Orch Tabs. Rechargez l'extension sur chrome://extensions."
+  },
+  "errUnknownType": {
+    "message": "Type de message inconnu $TYPE$. Rechargez l'extension sur chrome://extensions.",
+    "placeholders": {
+      "type": {
+        "content": "$1"
+      }
+    }
+  }
+}

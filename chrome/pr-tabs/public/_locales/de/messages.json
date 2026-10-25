@@ -1,0 +1,264 @@
+{
+  "extName": {
+    "message": "Orch Tabs"
+  },
+  "extDescription": {
+    "message": "Gruppiert konfigurierte GitHub-PR-Tabs nach Thema, öffnet deine offenen PRs und schließt Tabs gemergter oder geschlossener PRs."
+  },
+  "goToLabel": {
+    "message": "Zu einem PR gehen"
+  },
+  "goToPlaceholder": {
+    "message": "2972 oder eine PR-URL"
+  },
+  "submitHintLabel": {
+    "message": "Eingabetaste drücken"
+  },
+  "repoSelectLabel": {
+    "message": "Repository für eine einzelne Nummer"
+  },
+  "openAllButton": {
+    "message": "Alle meine offenen PRs öffnen"
+  },
+  "checkNowButton": {
+    "message": "Gemergte PRs schließen"
+  },
+  "closeDuplicatesButton": {
+    "message": "Doppelte Tabs schließen"
+  },
+  "groupsLabel": {
+    "message": "PR-Tab-Gruppen"
+  },
+  "pendingOpening": {
+    "message": "Öffne…"
+  },
+  "pendingChecking": {
+    "message": "Prüfe…"
+  },
+  "pendingClosing": {
+    "message": "Schließe…"
+  },
+  "untitledGroup": {
+    "message": "Ohne Titel"
+  },
+  "noPrTabs": {
+    "message": "Keine PR-Tabs offen"
+  },
+  "noDuplicates": {
+    "message": "Keine doppelten PR-Tabs."
+  },
+  "closedDuplicates_one": {
+    "message": "$COUNT$ doppelter PR-Tab geschlossen.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedDuplicates_other": {
+    "message": "$COUNT$ doppelte PR-Tabs geschlossen.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prCount_one": {
+    "message": "$COUNT$ PR",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prCount_other": {
+    "message": "$COUNT$ PRs",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "groupCount_one": {
+    "message": "$COUNT$ Gruppe",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "groupCount_other": {
+    "message": "$COUNT$ Gruppen",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "summaryLine": {
+    "message": "$PRS$ in $GROUPS$",
+    "placeholders": {
+      "prs": {
+        "content": "$1"
+      },
+      "groups": {
+        "content": "$2"
+      }
+    }
+  },
+  "mergedTabs_one": {
+    "message": "$COUNT$ gemergter Tab",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "mergedTabs_other": {
+    "message": "$COUNT$ gemergte Tabs",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedPrTabs_one": {
+    "message": "$COUNT$ Tab mit geschlossenem PR",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedPrTabs_other": {
+    "message": "$COUNT$ Tabs mit geschlossenem PR",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedTabs": {
+    "message": "Geschlossen: $TABS$",
+    "placeholders": {
+      "tabs": {
+        "content": "$1"
+      }
+    }
+  },
+  "noneClosed_one": {
+    "message": "Kein gemergter oder geschlossener PR unter $COUNT$ geprüftem PR",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "noneClosed_other": {
+    "message": "Kein gemergter oder geschlossener PR unter $COUNT$ geprüften PRs",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "inViewKept_one": {
+    "message": "$COUNT$ sichtbarer Tab bleibt offen ($PRS$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "prs": {
+        "content": "$2"
+      }
+    }
+  },
+  "inViewKept_other": {
+    "message": "$COUNT$ sichtbare Tabs bleiben offen ($PRS$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "prs": {
+        "content": "$2"
+      }
+    }
+  },
+  "moreNextTime": {
+    "message": "$COUNT$ weitere beim nächsten Mal",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "openedCount": {
+    "message": "Geöffnet: $COUNT$.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "moreNotOpened": {
+    "message": "$COUNT$ weitere nicht geöffnet; klicke erneut für den nächsten Stapel.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "aboutMoreNotOpened": {
+    "message": "Etwa $COUNT$ weitere nicht geöffnet; klicke erneut für den nächsten Stapel.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "errTabWithoutId": {
+    "message": "Chrome hat einen Tab ohne ID erstellt"
+  },
+  "errHostTimeout": {
+    "message": "Zeitüberschreitung beim nativen Host"
+  },
+  "errHostEmptyReply": {
+    "message": "Leere Antwort vom nativen Host"
+  },
+  "errGithubCheckFailed": {
+    "message": "GitHub-Prüfung fehlgeschlagen: $MESSAGE$",
+    "placeholders": {
+      "message": {
+        "content": "$1"
+      }
+    }
+  },
+  "errSetOrgAndOpenAll": {
+    "message": "Lege pr_tabs.org und pr_tabs.open_all in orchestration.toml fest"
+  },
+  "errSetOrg": {
+    "message": "Lege pr_tabs.org in orchestration.toml fest"
+  },
+  "errSetDefaultRepo": {
+    "message": "Lege pr_tabs.default_repo in orchestration.toml fest"
+  },
+  "errNotAPr": {
+    "message": "Keine PR-Nummer oder -URL von $ORG$",
+    "placeholders": {
+      "org": {
+        "content": "$1"
+      }
+    }
+  },
+  "errNoAnswer": {
+    "message": "Keine Antwort vom Orch-Tabs-Service-Worker. Lade die Erweiterung unter chrome://extensions neu."
+  },
+  "errUnknownType": {
+    "message": "Unbekannter Nachrichtentyp $TYPE$. Lade die Erweiterung unter chrome://extensions neu.",
+    "placeholders": {
+      "type": {
+        "content": "$1"
+      }
+    }
+  }
+}

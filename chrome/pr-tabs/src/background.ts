@@ -22,6 +22,7 @@ import {
   pickedRepo,
   showRepoPicker,
 } from "#/core";
+import { getMessage } from "#/i18n";
 import { errorText, messageListener } from "#/messages";
 import type {
   CheckResult,
@@ -99,7 +100,7 @@ function hasId(tab: Tab): tab is IdTab {
 // Chrome gives every tab it creates an id.
 function withId(tab: Tab): IdTab {
   if (!hasId(tab)) {
-    throw new Error("Chrome created a tab without an id");
+    throw new Error(getMessage("errTabWithoutId"));
   }
 
   return tab;
@@ -166,7 +167,7 @@ async function cachedRules(rules: Rules, error: unknown): Promise<Rules> {
 function askHost<M extends HostRequest>(message: M): Promise<HostOk<HostReplies[M["type"]]>> {
   return new Promise((resolve, reject) => {
     function handleHostTimeout(): void {
-      reject(new Error("native host timed out"));
+      reject(new Error(getMessage("errHostTimeout")));
     }
 
     const timer = setTimeout(handleHostTimeout, HOST_TIMEOUT_MS);
@@ -183,7 +184,7 @@ function askHost<M extends HostRequest>(message: M): Promise<HostOk<HostReplies[
       }
 
       if (!reply?.ok) {
-        reject(new Error(reply?.error || "empty reply from native host"));
+        reject(new Error(reply?.error || getMessage("errHostEmptyReply")));
 
         return;
       }
@@ -475,13 +476,13 @@ function prRefs(batch: PrKey[], byKey: Map<PrKey, Pr>): PrRef[] {
 }
 
 async function pollFailed(failures: number, error: unknown): Promise<Failure> {
-  const message = errorText(error);
+  const detail = errorText(error);
 
-  console.warn("PR tabs poll failed:", message);
+  console.warn("PR tabs poll failed:", detail);
   await writeStored({ failures: failures + 1 });
   await chrome.alarms.create(ALARM, { delayInMinutes: nextDelaySeconds(failures + 1) / 60 });
 
-  return { error: `GitHub check failed: ${message}` };
+  return { error: getMessage("errGithubCheckFailed", { message: detail }) };
 }
 
 async function fetchStates(entries: PrEntry[]): Promise<FetchedStates | Failure> {
@@ -671,7 +672,7 @@ export async function openAll(): Promise<Reply<"openAll">> {
   const rules = await loadRules();
 
   if (!rules.org || !rules.openAll) {
-    return { error: "Set pr_tabs.org and pr_tabs.open_all in orchestration.toml" };
+    return { error: getMessage("errSetOrgAndOpenAll") };
   }
 
   const openKeys = new Set((await prEntries(rules)).map((entry) => entry.pr.key));
@@ -715,11 +716,11 @@ export async function pickRepo(repo?: RepoName): Promise<void> {
 
 function configProblem(rules: Rules, input: string | undefined): string | null {
   if (!rules.org) {
-    return "Set pr_tabs.org in orchestration.toml";
+    return getMessage("errSetOrg");
   }
 
   if (/^#?\d+$/.test((input || "").trim()) && !effectiveRepos(rules).length) {
-    return "Set pr_tabs.default_repo in orchestration.toml";
+    return getMessage("errSetDefaultRepo");
   }
 
   return null;
@@ -764,7 +765,7 @@ async function findOrOpen(input?: string, repo?: RepoName): Promise<Reply<"goTo"
   const pr = parseTarget(input, rules, repo || stored);
 
   if (!pr) {
-    return { error: `Not a ${rules.org} PR number or URL` };
+    return { error: getMessage("errNotAPr", { org: rules.org }) };
   }
 
   const focused = await focusedId();

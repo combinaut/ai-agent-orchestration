@@ -1,6 +1,6 @@
 // Pure PR tabs logic; background.ts owns every chrome.* call.
+import { getPlainMessage } from "#/i18n";
 import type {
-  CheckResult,
   Entry,
   GroupColor,
   GroupCount,
@@ -11,7 +11,6 @@ import type {
   GroupTitle,
   Meta,
   OpenAllPlan,
-  OpenAllResult,
   Opened,
   OrgName,
   Owners,
@@ -231,14 +230,6 @@ export function duplicateTabIds(tabs: TabLike[], focusedWindowId?: WindowId): Ta
   return ids;
 }
 
-export function duplicateText(closed: number | undefined): string {
-  if (!closed) {
-    return "No duplicate PR tabs.";
-  }
-
-  return `Closed ${closed} duplicate PR tab${closed === 1 ? "" : "s"}.`;
-}
-
 const GROUP_COLORS: readonly GroupColor[] = [
   "grey",
   "blue",
@@ -400,7 +391,7 @@ export function summarize(entries: Entry[], groups: Map<GroupId | undefined, Gro
     }
 
     const counted = byGroup.get(tab.groupId) ?? {
-      title: group.title || "Untitled",
+      title: group.title || getPlainMessage("untitledGroup"),
       color: group.color,
       keys: new Set(),
     };
@@ -412,63 +403,4 @@ export function summarize(entries: Entry[], groups: Map<GroupId | undefined, Gro
   const list = [...byGroup.values()].map(groupSummary).toSorted(byCountThenTitle);
 
   return { prs: new Set(entries.map((entry) => entry.pr.key)).size, groups: list };
-}
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
-
-export function summaryText(summary: Summary): string {
-  if (!summary.prs) {
-    return "No PR tabs open";
-  }
-
-  return `${plural(summary.prs, "PR")} in ${plural(summary.groups.length, "group")}`;
-}
-
-// The popup line for a check result.
-export function checkText(result: CheckResult): string {
-  const { tabs, prs, checked, closed, inView } = result;
-
-  if (!tabs) {
-    return "No PR tabs open";
-  }
-
-  const merged = closed.filter((one) => one.state === "MERGED").length;
-  const parts: string[] = [];
-
-  if (merged) {
-    parts.push(`${plural(merged, "merged tab")}`);
-  }
-
-  if (closed.length - merged) {
-    parts.push(`${plural(closed.length - merged, "closed-PR tab")}`);
-  }
-
-  let text = parts.length
-    ? `Closed ${parts.join(" and ")}`
-    : `No merged or closed PRs among ${plural(checked, "PR")} checked`;
-
-  if (inView.length) {
-    text += `; ${plural(inView.length, "tab")} in view kept (${inView.join(", ")})`;
-  }
-
-  if (checked < prs) {
-    text += `; ${prs - checked} more next time`;
-  }
-
-  return `${text}.`;
-}
-
-export function openAllText(result: OpenAllResult, summary: string): string {
-  const { opened, remaining, estimated } = result;
-  const done = `Opened ${opened}.`;
-
-  if (!remaining) {
-    return `${done} ${summary}`;
-  }
-
-  const about = estimated ? "about " : "";
-
-  return `${done} ${about}${remaining} more not opened; click again for the next batch.`;
 }

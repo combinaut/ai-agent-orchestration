@@ -1,6 +1,6 @@
 import { useAsyncState } from "@vueuse/core";
-import { summaryText } from "#/core";
 import { failed } from "#/messages";
+import { summaryText } from "#/texts";
 import type { Ask, GroupSummary, Status, SummaryList } from "#/types";
 
 // A failed refresh keeps the groups it had.

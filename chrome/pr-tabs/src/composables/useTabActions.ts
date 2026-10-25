@@ -1,6 +1,7 @@
 import { useAsyncState } from "@vueuse/core";
-import { checkText, duplicateText, openAllText } from "#/core";
+import { getPlainMessage } from "#/i18n";
 import { failed } from "#/messages";
+import { checkText, duplicateText, openAllText } from "#/texts";
 import type {
   Replies,
   TabAction,
@@ -53,19 +54,19 @@ export function useTabActions(context: TabActionContext): TabActions {
 
   const openAll = useTabAction(context, {
     request: { type: "openAll" },
-    pending: "Opening…",
+    pending: getPlainMessage("pendingOpening"),
     report: reportOpenAll,
   });
 
   const checkNow = useTabAction(context, {
     request: { type: "checkNow" },
-    pending: "Checking…",
+    pending: getPlainMessage("pendingChecking"),
     report: checkText,
   });
 
   const closeDuplicates = useTabAction(context, {
     request: { type: "closeDuplicates" },
-    pending: "Closing…",
+    pending: getPlainMessage("pendingClosing"),
     report: reportDuplicates,
   });
 

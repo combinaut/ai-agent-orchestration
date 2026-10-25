@@ -6,7 +6,6 @@ import {
   pickedRepo,
   showRepoPicker,
   duplicateTabIds,
-  duplicateText,
   findOpenTab,
   isPrUrl,
   prKey,
@@ -14,8 +13,8 @@ import {
   parsePrUrl,
   parseTarget,
   summarize,
-  summaryText,
 } from "#/core";
+import { duplicateText, summaryText } from "#/texts";
 import { rules } from "./helpers";
 
 test("a bare number means acme/webapp", () => {

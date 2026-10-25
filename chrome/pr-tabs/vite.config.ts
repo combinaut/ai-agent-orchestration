@@ -46,6 +46,7 @@ export default defineConfig({
   test: {
     root: path("."),
     include: ["test/**/*.test.ts"],
+    setupFiles: ["test/setup.ts"],
     coverage: {
       enabled: true,
       provider: "v8",

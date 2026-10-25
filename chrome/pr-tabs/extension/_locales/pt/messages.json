@@ -1,0 +1,264 @@
+{
+  "extName": {
+    "message": "Orch Tabs"
+  },
+  "extDescription": {
+    "message": "Agrupa por assunto as abas de PR do GitHub, abre seus PRs abertos e fecha as abas de PRs mesclados ou fechados."
+  },
+  "goToLabel": {
+    "message": "Ir para um PR"
+  },
+  "goToPlaceholder": {
+    "message": "2972 ou a URL de um PR"
+  },
+  "submitHintLabel": {
+    "message": "Pressione Enter"
+  },
+  "repoSelectLabel": {
+    "message": "Repositório para um número avulso"
+  },
+  "openAllButton": {
+    "message": "Abrir todos os meus PRs abertos"
+  },
+  "checkNowButton": {
+    "message": "Fechar PRs mesclados"
+  },
+  "closeDuplicatesButton": {
+    "message": "Fechar abas duplicadas"
+  },
+  "groupsLabel": {
+    "message": "Grupos de abas de PR"
+  },
+  "pendingOpening": {
+    "message": "Abrindo…"
+  },
+  "pendingChecking": {
+    "message": "Verificando…"
+  },
+  "pendingClosing": {
+    "message": "Fechando…"
+  },
+  "untitledGroup": {
+    "message": "Sem título"
+  },
+  "noPrTabs": {
+    "message": "Nenhuma aba de PR aberta"
+  },
+  "noDuplicates": {
+    "message": "Nenhuma aba de PR duplicada."
+  },
+  "closedDuplicates_one": {
+    "message": "$COUNT$ aba de PR duplicada fechada.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedDuplicates_other": {
+    "message": "$COUNT$ abas de PR duplicadas fechadas.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prCount_one": {
+    "message": "$COUNT$ PR",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prCount_other": {
+    "message": "$COUNT$ PRs",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "groupCount_one": {
+    "message": "$COUNT$ grupo",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "groupCount_other": {
+    "message": "$COUNT$ grupos",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "summaryLine": {
+    "message": "$PRS$ em $GROUPS$",
+    "placeholders": {
+      "prs": {
+        "content": "$1"
+      },
+      "groups": {
+        "content": "$2"
+      }
+    }
+  },
+  "mergedTabs_one": {
+    "message": "$COUNT$ aba mesclada",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "mergedTabs_other": {
+    "message": "$COUNT$ abas mescladas",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedPrTabs_one": {
+    "message": "$COUNT$ aba de PR fechado",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedPrTabs_other": {
+    "message": "$COUNT$ abas de PR fechado",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedTabs": {
+    "message": "Fechadas: $TABS$",
+    "placeholders": {
+      "tabs": {
+        "content": "$1"
+      }
+    }
+  },
+  "noneClosed_one": {
+    "message": "Nenhum PR mesclado ou fechado entre $COUNT$ PR verificado",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "noneClosed_other": {
+    "message": "Nenhum PR mesclado ou fechado entre $COUNT$ PRs verificados",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "inViewKept_one": {
+    "message": "$COUNT$ aba em exibição mantida ($PRS$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "prs": {
+        "content": "$2"
+      }
+    }
+  },
+  "inViewKept_other": {
+    "message": "$COUNT$ abas em exibição mantidas ($PRS$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "prs": {
+        "content": "$2"
+      }
+    }
+  },
+  "moreNextTime": {
+    "message": "$COUNT$ a mais na próxima vez",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "openedCount": {
+    "message": "Abertos: $COUNT$.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "moreNotOpened": {
+    "message": "$COUNT$ a mais não abertos; clique de novo para o próximo lote.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "aboutMoreNotOpened": {
+    "message": "Cerca de $COUNT$ a mais não abertos; clique de novo para o próximo lote.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "errTabWithoutId": {
+    "message": "O Chrome criou uma aba sem id"
+  },
+  "errHostTimeout": {
+    "message": "o host nativo não respondeu a tempo"
+  },
+  "errHostEmptyReply": {
+    "message": "resposta vazia do host nativo"
+  },
+  "errGithubCheckFailed": {
+    "message": "Falha na verificação do GitHub: $MESSAGE$",
+    "placeholders": {
+      "message": {
+        "content": "$1"
+      }
+    }
+  },
+  "errSetOrgAndOpenAll": {
+    "message": "Defina pr_tabs.org e pr_tabs.open_all em orchestration.toml"
+  },
+  "errSetOrg": {
+    "message": "Defina pr_tabs.org em orchestration.toml"
+  },
+  "errSetDefaultRepo": {
+    "message": "Defina pr_tabs.default_repo em orchestration.toml"
+  },
+  "errNotAPr": {
+    "message": "Não é um número nem uma URL de PR de $ORG$",
+    "placeholders": {
+      "org": {
+        "content": "$1"
+      }
+    }
+  },
+  "errNoAnswer": {
+    "message": "Sem resposta do service worker do Orch Tabs. Recarregue a extensão em chrome://extensions."
+  },
+  "errUnknownType": {
+    "message": "Tipo de mensagem desconhecido $TYPE$. Recarregue a extensão em chrome://extensions.",
+    "placeholders": {
+      "type": {
+        "content": "$1"
+      }
+    }
+  }
+}

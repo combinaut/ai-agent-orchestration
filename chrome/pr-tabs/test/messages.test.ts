@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { ask, errorText, failed, messageListener, NO_ANSWER } from "#/messages";
+import { ask, errorText, failed, messageListener, noAnswer } from "#/messages";
 
 // The listener's answer, or "no answer" when sendResponse is not called within a second.
 function deliver(listener: ReturnType<typeof messageListener>, message: unknown): Promise<unknown> {
@@ -81,7 +81,7 @@ test("the popup shows the real error after the retry", async () => {
 });
 
 test("two silent answers name the stale service worker", async () => {
-  assert.deepEqual(await ask(async () => undefined, { type: "summary" }), { error: NO_ANSWER });
+  assert.deepEqual(await ask(async () => undefined, { type: "summary" }), { error: noAnswer() });
 });
 
 test("Open all is sent once, so a lost answer cannot open a second batch", async () => {
@@ -96,7 +96,7 @@ test("Open all is sent once, so a lost answer cannot open a second batch", async
   );
 
   assert.equal(calls, 1);
-  assert.deepEqual(answer, { error: NO_ANSWER });
+  assert.deepEqual(answer, { error: noAnswer() });
 });
 
 test("Check now is sent once, so a lost answer cannot poll and close tabs twice", async () => {
@@ -111,7 +111,7 @@ test("Check now is sent once, so a lost answer cannot poll and close tabs twice"
   );
 
   assert.equal(calls, 1);
-  assert.deepEqual(answer, { error: NO_ANSWER });
+  assert.deepEqual(answer, { error: noAnswer() });
 });
 
 test("closeDuplicates is not retried when no answer comes back", async () => {
@@ -126,7 +126,7 @@ test("closeDuplicates is not retried when no answer comes back", async () => {
   );
 
   assert.equal(calls, 1);
-  assert.deepEqual(answer, { error: NO_ANSWER });
+  assert.deepEqual(answer, { error: noAnswer() });
 });
 
 test("a reply failed only when it carries an error text", () => {

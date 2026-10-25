@@ -1,0 +1,264 @@
+{
+  "extName": {
+    "message": "Orch Tabs"
+  },
+  "extDescription": {
+    "message": "Agrupa por tema las pestañas de PR de GitHub, abre tus PR abiertos y cierra las de los PR fusionados o cerrados."
+  },
+  "goToLabel": {
+    "message": "Ir a un PR"
+  },
+  "goToPlaceholder": {
+    "message": "2972 o la URL de un PR"
+  },
+  "submitHintLabel": {
+    "message": "Pulsa Intro"
+  },
+  "repoSelectLabel": {
+    "message": "Repositorio para un número solo"
+  },
+  "openAllButton": {
+    "message": "Abrir todos mis PR abiertos"
+  },
+  "checkNowButton": {
+    "message": "Cerrar PR fusionados"
+  },
+  "closeDuplicatesButton": {
+    "message": "Cerrar pestañas duplicadas"
+  },
+  "groupsLabel": {
+    "message": "Grupos de pestañas de PR"
+  },
+  "pendingOpening": {
+    "message": "Abriendo…"
+  },
+  "pendingChecking": {
+    "message": "Comprobando…"
+  },
+  "pendingClosing": {
+    "message": "Cerrando…"
+  },
+  "untitledGroup": {
+    "message": "Sin título"
+  },
+  "noPrTabs": {
+    "message": "No hay pestañas de PR abiertas"
+  },
+  "noDuplicates": {
+    "message": "No hay pestañas de PR duplicadas."
+  },
+  "closedDuplicates_one": {
+    "message": "Se cerró $COUNT$ pestaña de PR duplicada.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedDuplicates_other": {
+    "message": "Se cerraron $COUNT$ pestañas de PR duplicadas.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prCount_one": {
+    "message": "$COUNT$ PR",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prCount_other": {
+    "message": "$COUNT$ PR",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "groupCount_one": {
+    "message": "$COUNT$ grupo",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "groupCount_other": {
+    "message": "$COUNT$ grupos",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "summaryLine": {
+    "message": "$PRS$ en $GROUPS$",
+    "placeholders": {
+      "prs": {
+        "content": "$1"
+      },
+      "groups": {
+        "content": "$2"
+      }
+    }
+  },
+  "mergedTabs_one": {
+    "message": "$COUNT$ pestaña fusionada",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "mergedTabs_other": {
+    "message": "$COUNT$ pestañas fusionadas",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedPrTabs_one": {
+    "message": "$COUNT$ pestaña de PR cerrado",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedPrTabs_other": {
+    "message": "$COUNT$ pestañas de PR cerrado",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closedTabs": {
+    "message": "Cerradas: $TABS$",
+    "placeholders": {
+      "tabs": {
+        "content": "$1"
+      }
+    }
+  },
+  "noneClosed_one": {
+    "message": "Ningún PR fusionado ni cerrado entre $COUNT$ PR comprobado",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "noneClosed_other": {
+    "message": "Ningún PR fusionado ni cerrado entre $COUNT$ PR comprobados",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "inViewKept_one": {
+    "message": "$COUNT$ pestaña a la vista se conserva ($PRS$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "prs": {
+        "content": "$2"
+      }
+    }
+  },
+  "inViewKept_other": {
+    "message": "$COUNT$ pestañas a la vista se conservan ($PRS$)",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      },
+      "prs": {
+        "content": "$2"
+      }
+    }
+  },
+  "moreNextTime": {
+    "message": "$COUNT$ más la próxima vez",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "openedCount": {
+    "message": "Abiertos: $COUNT$.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "moreNotOpened": {
+    "message": "$COUNT$ más sin abrir; vuelve a pulsar para el siguiente lote.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "aboutMoreNotOpened": {
+    "message": "Unos $COUNT$ más sin abrir; vuelve a pulsar para el siguiente lote.",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "errTabWithoutId": {
+    "message": "Chrome creó una pestaña sin id"
+  },
+  "errHostTimeout": {
+    "message": "el host nativo no respondió a tiempo"
+  },
+  "errHostEmptyReply": {
+    "message": "respuesta vacía del host nativo"
+  },
+  "errGithubCheckFailed": {
+    "message": "Falló la comprobación de GitHub: $MESSAGE$",
+    "placeholders": {
+      "message": {
+        "content": "$1"
+      }
+    }
+  },
+  "errSetOrgAndOpenAll": {
+    "message": "Define pr_tabs.org y pr_tabs.open_all en orchestration.toml"
+  },
+  "errSetOrg": {
+    "message": "Define pr_tabs.org en orchestration.toml"
+  },
+  "errSetDefaultRepo": {
+    "message": "Define pr_tabs.default_repo en orchestration.toml"
+  },
+  "errNotAPr": {
+    "message": "No es un número ni una URL de PR de $ORG$",
+    "placeholders": {
+      "org": {
+        "content": "$1"
+      }
+    }
+  },
+  "errNoAnswer": {
+    "message": "El service worker de Orch Tabs no responde. Recarga la extensión en chrome://extensions."
+  },
+  "errUnknownType": {
+    "message": "Tipo de mensaje desconocido $TYPE$. Recarga la extensión en chrome://extensions.",
+    "placeholders": {
+      "type": {
+        "content": "$1"
+      }
+    }
+  }
+}

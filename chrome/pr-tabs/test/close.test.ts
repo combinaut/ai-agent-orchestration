@@ -1,15 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { Closed, Entry, Meta, Opened, States } from "#/types";
-import {
-  checkText,
-  pruneMeta,
-  recordStates,
-  seedOpen,
-  shouldClose,
-  stillShowsPr,
-  tabsToClose,
-} from "#/core";
+import { checkText } from "#/texts";
+import { pruneMeta, recordStates, seedOpen, shouldClose, stillShowsPr, tabsToClose } from "#/core";
 
 const background = { active: false };
 

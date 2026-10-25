@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createI18n } from "#test/i18n/catalog";
 import type { HostOk, HostRequest, Rules } from "#/types";
 import type {
   FakeAction,
@@ -146,6 +147,7 @@ const windows = {
 const action = { setBadgeText: async () => {} } satisfies FakeAction;
 
 export const fakeChrome = {
+  i18n: createI18n("en"),
   tabs,
   tabGroups,
   windows,

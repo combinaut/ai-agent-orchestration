@@ -8,6 +8,7 @@ import type { ActionCase } from "#test/types";
 import { effectiveRepos, pickedRepo, showRepoPicker } from "#/core";
 import App from "#popup/App.vue";
 import { mountPopup } from "#test/components/mountPopup";
+import { createI18n } from "#test/i18n/catalog";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -34,7 +35,10 @@ async function popup(repos: RepoName[], replies: Partial<Replies> = {}) {
     return answers[message.type] ?? { error: "unexpected" };
   }
 
-  vi.stubGlobal("chrome", { runtime: { sendMessage: handleSendMessage } });
+  vi.stubGlobal("chrome", {
+    runtime: { sendMessage: handleSendMessage },
+    i18n: createI18n(),
+  });
 
   const wrapper = mountPopup(App, { attachTo: document.body });
 

@@ -4,6 +4,7 @@ import type { Component } from "vue";
 import type { SFCDescriptor } from "vue/compiler-sfc";
 import type {
   Ask,
+  CatalogEntry,
   GroupId,
   HostReply,
   HostRequest,
@@ -126,8 +127,17 @@ export type FakeAction = Known<
   typeof chrome.action
 >;
 
+export type FakeI18n = Known<
+  {
+    getMessage: (key: string, substitutions?: string | string[]) => string;
+    getUILanguage: () => string;
+  },
+  typeof chrome.i18n
+>;
+
 export type FakeChrome = Known<
   {
+    i18n: FakeI18n;
     tabs: FakeTabs;
     tabGroups: FakeTabGroups;
     windows: FakeWindows;
@@ -138,6 +148,10 @@ export type FakeChrome = Known<
   },
   typeof chrome
 >;
+
+// The locale catalogs.
+export type Locale = "de" | "en" | "es" | "fr" | "pt";
+export type LocaleCatalog = Readonly<Record<string, CatalogEntry>>;
 
 // The fake service worker.
 export type FakeReplies = { [K in RequestType]?: Reply<K> };

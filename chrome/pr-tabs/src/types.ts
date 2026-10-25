@@ -1,5 +1,6 @@
 // Every PR tabs type: domain, chrome messages, native host, storage and popup.
 import type { ComputedRef, Ref } from "vue";
+import type en from "#locales/en/messages.json";
 
 export type OrgName = string;
 export type RepoName = string;
@@ -411,3 +412,49 @@ export interface GoToFormEmits {
 export interface RepoSelectEmits {
   pick: [];
 }
+
+// Chrome i18n: keys and placeholders come from the English catalog.
+type MessageCatalog = typeof en;
+
+export type MessageKey = keyof MessageCatalog;
+
+export type PlaceholderName<K extends MessageKey> = MessageCatalog[K] extends {
+  placeholders: infer P;
+}
+  ? keyof P & string
+  : never;
+
+export type PlainMessageKey = {
+  [K in MessageKey]: [PlaceholderName<K>] extends [never] ? K : never;
+}[MessageKey];
+
+export type PlaceholderValue = string | number;
+
+export type NamedValues = Readonly<Record<string, PlaceholderValue>>;
+
+export type MessageArguments<K extends MessageKey> = [PlaceholderName<K>] extends [never]
+  ? []
+  : [values: Readonly<Record<PlaceholderName<K>, PlaceholderValue>>];
+
+export type PluralBase = {
+  [K in MessageKey]: K extends `${infer B}_one`
+    ? `${B}_other` extends MessageKey
+      ? B
+      : never
+    : never;
+}[MessageKey];
+
+type ExtraPlaceholder<B extends PluralBase> = Exclude<PlaceholderName<`${B}_one`>, "count">;
+
+export type PluralArguments<B extends PluralBase> = [ExtraPlaceholder<B>] extends [never]
+  ? []
+  : [values: Readonly<Record<ExtraPlaceholder<B>, PlaceholderValue>>];
+
+export type PluralForm = "one" | "other";
+
+export interface CatalogEntry {
+  message: string;
+  placeholders?: Readonly<Record<string, { content: string }>>;
+}
+
+export type Labels<K extends PlainMessageKey> = Readonly<Record<K, string>>;

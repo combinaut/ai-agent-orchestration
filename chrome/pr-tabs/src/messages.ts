@@ -1,4 +1,5 @@
 // The runtime message contract between the popup and background.ts.
+import { getMessage } from "#/i18n";
 import type {
   Delivered,
   Failure,
@@ -12,8 +13,9 @@ import type {
   UntypedHandler,
 } from "#/types";
 
-export const NO_ANSWER =
-  "No answer from the PR tabs service worker. Reload the extension at chrome://extensions.";
+export function noAnswer(): string {
+  return getMessage("errNoAnswer");
+}
 
 export function failed<T extends object>(reply: T | Failure): reply is Failure {
   return "error" in reply && Boolean(reply.error);
@@ -49,7 +51,7 @@ function handlerFor(handlers: Handlers, type: unknown): UntypedHandler | undefin
 function unknownType(type: unknown): Failure {
   const name = JSON.stringify(type);
 
-  return { error: `Unknown message type ${name}. Reload the extension at chrome://extensions.` };
+  return { error: getMessage("errUnknownType", { type: name }) };
 }
 
 function answer(handler: UntypedHandler, message: unknown, respond: Respond): void {
@@ -97,7 +99,7 @@ async function sendOnce(send: Send, message: Request): Promise<Delivered | Failu
   try {
     const reply = await send(message);
 
-    return reply === undefined || reply === null ? { error: NO_ANSWER } : { reply };
+    return reply === undefined || reply === null ? { error: noAnswer() } : { reply };
   } catch (error) {
     return { error: errorText(error) };
   }
@@ -107,7 +109,7 @@ async function sendOnce(send: Send, message: Request): Promise<Delivered | Failu
 // failures come back as { error }.
 export async function ask<M extends Request>(send: Send, message: M): Promise<Reply<M["type"]>> {
   const attempts = NOT_RETRIED.has(message.type) ? 1 : 2;
-  let failure: Failure = { error: NO_ANSWER };
+  let failure: Failure = { error: noAnswer() };
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     const outcome = await sendOnce(send, message);

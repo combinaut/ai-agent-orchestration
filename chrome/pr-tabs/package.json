@@ -8,6 +8,7 @@
   "imports": {
     "#/*": "./src/*",
     "#popup/*": "./src/popup/*",
+    "#locales/*": "./public/_locales/*",
     "#test/*": "./test/*"
   },
   "scripts": {
