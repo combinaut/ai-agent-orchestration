@@ -9,7 +9,8 @@
     "#/*": "./src/*",
     "#popup/*": "./src/popup/*",
     "#locales/*": "./public/_locales/*",
-    "#test/*": "./test/*"
+    "#test/*": "./test/*",
+    "#build/*": "./build/*"
   },
   "scripts": {
     "build": "vite build",
@@ -26,6 +27,7 @@
     "vue": "3.5.44"
   },
   "devDependencies": {
+    "@primevue/core": "4.5.5",
     "@tailwindcss/vite": "4.3.3",
     "@types/chrome": "0.3.6",
     "@types/node": "26.6.5",

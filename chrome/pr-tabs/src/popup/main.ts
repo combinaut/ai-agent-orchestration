@@ -3,6 +3,7 @@ import { createApp } from "vue";
 import App from "./App.vue";
 import { localizeDocument } from "./localize";
 import { primeVueConfiguration } from "./primevue";
+import "virtual:primevue-theme.css";
 import "./tailwind.css";
 
 localizeDocument(document);

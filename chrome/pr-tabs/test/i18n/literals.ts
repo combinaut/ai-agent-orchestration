@@ -63,7 +63,7 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   "popup/components/GoToForm.vue": ["input", "repo", "go", "pick"],
   "popup/components/PrInput.vue": ["field"],
   "popup/components/RepoSelect.vue": ["pick"],
-  "popup/primevue.ts": ["system", "primevue", "theme, base, primevue, components, utilities"],
+  "popup/primevue.ts": ["none"],
   "texts.ts": ["MERGED"],
 };
 

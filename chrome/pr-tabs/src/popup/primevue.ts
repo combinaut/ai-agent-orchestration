@@ -1,12 +1,4 @@
-import Aura from "@primeuix/themes/aura";
 import type { PrimeVueConfiguration } from "primevue/config";
 
-export const primeVueConfiguration: PrimeVueConfiguration = {
-  theme: {
-    preset: Aura,
-    options: {
-      darkModeSelector: "system",
-      cssLayer: { name: "primevue", order: "theme, base, primevue, components, utilities" },
-    },
-  },
-};
+// Aura CSS is emitted by the build; keep styled component classes without runtime theming.
+export const primeVueConfiguration: PrimeVueConfiguration = { theme: "none" };
