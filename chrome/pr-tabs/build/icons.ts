@@ -5,7 +5,6 @@ import type { IconSize } from "./types";
 
 export const ICON_SIZES: readonly IconSize[] = [16, 32, 48, 128];
 
-// 16 px has its own simplified drawing.
 function iconSource(size: IconSize): URL {
   const name = size === 16 ? "icon-16.svg" : "icon.svg";
 
