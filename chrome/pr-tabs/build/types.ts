@@ -13,3 +13,5 @@ export interface ThemeStyle {
 export interface ThemeStyleModule {
   default: ThemeStyle;
 }
+
+export type IconSize = 16 | 32 | 48 | 128;

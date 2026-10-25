@@ -1,3 +1,4 @@
+import { extensionIcons } from "./build/icons";
 import { primeVueTheme } from "./build/primevueTheme";
 import tailwindcss from "@tailwindcss/vite";
 import vue from "@vitejs/plugin-vue";
@@ -28,7 +29,7 @@ export default defineConfig({
   root: path("src"),
   base: "./",
   publicDir: path("public"),
-  plugins: [vue(), tailwindcss(), primeVueTheme()],
+  plugins: [vue(), tailwindcss(), primeVueTheme(), extensionIcons()],
   resolve: { alias: aliases },
   build: {
     outDir: path("extension"),

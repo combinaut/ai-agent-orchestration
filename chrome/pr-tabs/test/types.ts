@@ -189,3 +189,11 @@ export type TemplateRoot = NonNullable<NonNullable<SFCDescriptor["template"]>["a
 export type TemplateNode = TemplateRoot | TemplateRoot["children"][number];
 export type TemplateElement = Extract<TemplateNode, { tagType: unknown }>;
 export type TemplateDirective = Extract<TemplateElement["props"][number], { modifiers: unknown }>;
+
+// The extension icons.
+export type IconManifest = Pick<chrome.runtime.ManifestV3, "icons" | "action">;
+
+export interface PngSize {
+  width: number;
+  height: number;
+}
