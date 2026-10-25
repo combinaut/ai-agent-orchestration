@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "vitest";
 import type * as Background from "#/background";
-import type { Meta } from "#/types";
+import { MAX_PANE_LOOKUPS } from "#/core";
+import type { HostRequest, Meta } from "#/types";
 import type { FakeTab } from "#test/types";
 import { CONFIGURED, fakeChrome, installFakeChrome, world } from "./fakeChrome";
 
@@ -14,8 +15,10 @@ function freshWorker(tag: string): Promise<typeof Background> {
 
 const {
   closeDuplicates,
+  focusPane,
   goTo,
   openAll,
+  panes,
   prEntries,
   checkNow: chromeMessageCheck,
 } = await import("#/background");
@@ -619,4 +622,50 @@ test("one listed repo hides the dropdown", async () => {
   world.hostSettings = { ...CONFIGURED, repos: ["webapp"] };
   const single = await freshWorker("single-repo");
   assert.equal((await single.repoChoices()).show, false);
+});
+
+test("a pane lookup is one host request for at most the cap; none for no heads", async () => {
+  const sent: HostRequest[] = [];
+
+  world.nativeHandler = async (message) => {
+    sent.push(message);
+
+    return { ok: true, panes: { "acme/webapp:b0": { state: "working" } } };
+  };
+
+  const heads = Array.from({ length: MAX_PANE_LOOKUPS + 3 }, (_, i) => ({
+    repo: "acme/webapp",
+    branch: `b${i}`,
+    extra: "dropped",
+  }));
+
+  assert.deepEqual(await panes([]), {});
+  assert.deepEqual(await panes(heads), { "acme/webapp:b0": { state: "working" } });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.type, "panes");
+  assert.deepEqual(sent[0]?.type === "panes" ? sent[0].prs.at(0) : null, {
+    repo: "acme/webapp",
+    branch: "b0",
+  });
+  assert.equal(sent[0]?.type === "panes" ? sent[0].prs.length : 0, MAX_PANE_LOOKUPS);
+});
+
+test("focusing a pane sends repo and branch; a host error rejects with its text", async () => {
+  const sent: HostRequest[] = [];
+
+  world.nativeHandler = async (message) => {
+    sent.push(message);
+
+    return { ok: true, pane: "w1:p2" };
+  };
+
+  assert.deepEqual(await focusPane({ repo: "acme/webapp", branch: "feature" }), { pane: "w1:p2" });
+  assert.deepEqual(sent, [{ type: "focusPane", repo: "acme/webapp", branch: "feature" }]);
+
+  world.nativeHandler = async () => ({
+    ok: false,
+    error: "no Herdr pane has acme/webapp:x checked out",
+  });
+
+  await assert.rejects(focusPane({ repo: "acme/webapp", branch: "x" }), /no Herdr pane/);
 });

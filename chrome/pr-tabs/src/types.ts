@@ -12,7 +12,8 @@ export type WindowId = number;
 export type GroupId = number;
 export type PrKey = `${OrgName}/${RepoName}#${PrNumber}`;
 export type PrUrl = `https://github.com/${OrgName}/${RepoName}/pull/${PrNumber}`;
-export type OwnerKey = `${string}:${BranchName}`;
+export type HeadKey = `${string}:${BranchName}`;
+export type OwnerKey = HeadKey;
 export type PrStateName = "OPEN" | "CLOSED" | "MERGED";
 export type GroupColor = `${chrome.tabGroups.Color}`;
 export type Tab = chrome.tabs.Tab;
@@ -46,9 +47,9 @@ export type TabLike = Partial<Pick<Tab, "url" | "active" | "windowId" | "groupId
   id: TabId;
 };
 
-export interface Entry<T extends TabLike = TabLike> {
+export interface Entry<T extends TabLike = TabLike, P extends Pick<Pr, "key"> = Pick<Pr, "key">> {
   tab: T;
-  pr: Pick<Pr, "key">;
+  pr: P;
 }
 
 export interface PrEntry {
@@ -117,17 +118,40 @@ export interface GroupPlacement {
 
 export type GroupLike = Partial<Pick<TabGroup, "title" | "color">>;
 
+// The repo (owner/name, the head repository for a fork) and branch a PR's head lives on.
+export interface BranchRef {
+  readonly repo: string;
+  readonly branch: BranchName;
+}
+
+export interface PrRow {
+  readonly key: PrKey;
+  readonly label: string;
+  readonly title: string;
+  readonly head: BranchRef | null;
+}
+
 export interface GroupCount {
   title: GroupTitle;
   color?: GroupColor;
-  keys: Set<PrKey>;
+  prs: Map<PrKey, PrRow>;
 }
 
 export interface GroupSummary {
   title: GroupTitle;
   color?: GroupColor;
   count: number;
+  prs: PrRow[];
 }
+
+export type AgentState = "working" | "idle" | "done" | "waiting";
+
+export interface PaneMatch {
+  readonly state: AgentState | null;
+}
+
+// null: no Herdr pane has the branch checked out.
+export type PaneLookup = Partial<Record<HeadKey, PaneMatch | null>>;
 
 export interface Summary {
   prs: number;
@@ -171,7 +195,18 @@ export interface GoToRequest {
   readonly repo?: RepoName;
 }
 
-export type Request = PlainRequest | PickRepoRequest | GoToRequest;
+export interface PanesRequest {
+  readonly type: "panes";
+  readonly heads: readonly BranchRef[];
+}
+
+export interface FocusPaneRequest {
+  readonly type: "focusPane";
+  readonly head: BranchRef;
+}
+
+export type Request =
+  PlainRequest | PickRepoRequest | GoToRequest | PanesRequest | FocusPaneRequest;
 export type RequestType = Request["type"];
 export type RequestOf<K extends RequestType> = K extends PlainRequestType
   ? PlainRequest<K>
@@ -205,6 +240,10 @@ export interface DuplicatesClosed {
   readonly closed: number;
 }
 
+export interface FocusedPane {
+  readonly pane: string;
+}
+
 export interface Replies {
   readonly summary: Summary;
   readonly repos: RepoChoices;
@@ -213,6 +252,8 @@ export interface Replies {
   readonly openAll: OpenAllResult;
   readonly checkNow: CheckResult;
   readonly closeDuplicates: DuplicatesClosed;
+  readonly panes: PaneLookup;
+  readonly focusPane: FocusedPane;
 }
 
 export type Reply<K extends RequestType> = Replies[K] | Failure;
@@ -246,7 +287,17 @@ export interface SearchRequest {
   after?: string;
 }
 
-export type HostRequest = SettingsRequest | StatesRequest | SearchRequest;
+export interface PanesHostRequest {
+  type: "panes";
+  prs: BranchRef[];
+}
+
+export interface FocusPaneHostRequest extends BranchRef {
+  type: "focusPane";
+}
+
+export type HostRequest =
+  SettingsRequest | StatesRequest | SearchRequest | PanesHostRequest | FocusPaneHostRequest;
 
 export interface Ownership {
   owners?: Owners | null;
@@ -261,10 +312,16 @@ export interface SearchReply extends Ownership, SearchResult {
   endCursor?: string;
 }
 
+export interface PanesReply {
+  panes: PaneLookup;
+}
+
 export interface HostReplies {
   settings: Partial<Rules>;
   states: StatesReply;
   search: SearchReply;
+  panes: PanesReply;
+  focusPane: FocusedPane;
 }
 
 export type HostOk<T> = { ok: true } & T;
@@ -332,6 +389,30 @@ export interface GoTo {
   go: () => Promise<void>;
 }
 
+export type PaneAvailability = "unchecked" | "checking" | "found" | "missing";
+
+export interface Panes {
+  checking: Readonly<Ref<boolean>>;
+  lookup: Readonly<Ref<PaneLookup>>;
+  ensure: (heads: readonly BranchRef[]) => Promise<void>;
+  focus: (head: BranchRef) => Promise<void>;
+}
+
+export interface PrPane {
+  availability: ComputedRef<PaneAvailability>;
+  isGoVisible: ComputedRef<boolean>;
+  isGoDisabled: ComputedRef<boolean>;
+  isChecking: ComputedRef<boolean>;
+  goLabel: ComputedRef<string>;
+  state: ComputedRef<AgentState | null>;
+  isStateVisible: ComputedRef<boolean>;
+  stateText: ComputedRef<string>;
+  stateLabel: ComputedRef<string>;
+  stateSeverity: ComputedRef<TagSeverity>;
+}
+
+export type TagSeverity = "success" | "info" | "secondary" | "warn";
+
 export interface SummaryList {
   groups: Ref<GroupSummary[]>;
   refresh: () => Promise<void>;
@@ -393,10 +474,18 @@ export interface StatusLineProps {
 
 export interface GroupListProps {
   groups: GroupSummary[];
+  panes: Panes;
 }
 
 export interface GroupItemProps {
   group: GroupSummary;
+  index: number;
+  panes: Panes;
+}
+
+export interface PrItemProps {
+  pr: PrRow;
+  panes: Panes;
 }
 
 // Component events.

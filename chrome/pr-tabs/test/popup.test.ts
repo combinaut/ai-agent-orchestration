@@ -17,7 +17,10 @@ afterEach(() => {
 
 function noop(): void {}
 
-const SUMMARY: Summary = { prs: 2, groups: [{ title: "Finder", color: "yellow", count: 2 }] };
+const SUMMARY: Summary = {
+  prs: 2,
+  groups: [{ title: "Finder", color: "yellow", count: 2, prs: [] }],
+};
 
 async function popup(repos: RepoName[], replies: Partial<Replies> = {}) {
   const rules: Rules = { org: "acme", defaultRepo: "", openAll: "", repos };
@@ -149,6 +152,39 @@ test("the repo dropdown shows only while the input is a bare PR number", async (
     await field.setValue(text);
     assert.equal(wrapper.findComponent(Select).exists(), shown, JSON.stringify(text));
   }
+
+  wrapper.unmount();
+});
+
+test("the first expanded group looks up panes once; go to pane focuses and closes", async () => {
+  const close = vi.spyOn(window, "close").mockImplementation(noop);
+  const head = { repo: "acme/webapp", branch: "feature" };
+  const summary: Summary = {
+    prs: 1,
+    groups: [
+      { title: "A", count: 1, prs: [{ key: "acme/webapp#1", label: "webapp#1", title: "", head }] },
+      { title: "B", count: 1, prs: [{ key: "acme/webapp#2", label: "webapp#2", title: "", head }] },
+    ],
+  };
+  const { wrapper, sent } = await popup([], {
+    summary,
+    panes: { "acme/webapp:feature": { state: "waiting" } },
+    focusPane: { pane: "w1:p2" },
+  });
+
+  for (const header of wrapper.findAll("button[aria-expanded]")) {
+    await header.trigger("click");
+    await flushPromises();
+  }
+
+  assert.deepEqual(sent, [{ type: "panes", heads: [head] }]);
+  assert.equal(wrapper.findAll(".p-tag").length, 2);
+
+  await wrapper.find("li button:not([aria-expanded])").trigger("click");
+  await flushPromises();
+
+  assert.deepEqual(sent.at(-1), { type: "focusPane", head });
+  assert.equal(close.mock.calls.length, 1);
 
   wrapper.unmount();
 });

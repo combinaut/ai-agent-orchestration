@@ -4,10 +4,10 @@ import { useGroupItem } from "#/composables/useGroupItem";
 import type { GroupColor } from "#/types";
 
 test("a Chrome colour gets its dot; unknown and inherited names are grey", () => {
-  const grey = useGroupItem({ title: "a", color: "grey", count: 1 }).dotClass.value;
+  const grey = useGroupItem({ title: "a", color: "grey", count: 1, prs: [] }).dotClass.value;
 
   assert.equal(
-    useGroupItem({ title: "a", color: "blue", count: 1 }).dotClass.value,
+    useGroupItem({ title: "a", color: "blue", count: 1, prs: [] }).dotClass.value,
     "bg-group-blue",
   );
 
@@ -15,11 +15,15 @@ test("a Chrome colour gets its dot; unknown and inherited names are grey", () =>
   const unknown = [undefined, "magenta", "constructor"] as (GroupColor | undefined)[];
 
   for (const color of unknown) {
-    assert.equal(useGroupItem({ title: "a", color, count: 1 }).dotClass.value, grey, String(color));
+    assert.equal(
+      useGroupItem({ title: "a", color, count: 1, prs: [] }).dotClass.value,
+      grey,
+      String(color),
+    );
   }
 });
 
 test("the count label names PRs, singular for one", () => {
-  assert.equal(useGroupItem({ title: "a", count: 1 }).countLabel.value, "1 PR");
-  assert.equal(useGroupItem({ title: "a", count: 4 }).countLabel.value, "4 PRs");
+  assert.equal(useGroupItem({ title: "a", count: 1, prs: [] }).countLabel.value, "1 PR");
+  assert.equal(useGroupItem({ title: "a", count: 4, prs: [] }).countLabel.value, "4 PRs");
 });

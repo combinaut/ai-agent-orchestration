@@ -1,13 +1,16 @@
 // Every test-only type: the fake browser, fake service worker, host runs and template AST.
 import type { mount } from "@vue/test-utils";
-import type { Component } from "vue";
+import type { Component, Ref } from "vue";
 import type { SFCDescriptor } from "vue/compiler-sfc";
 import type {
   Ask,
+  BranchRef,
   CatalogEntry,
   GroupId,
   HostReply,
   HostRequest,
+  PaneLookup,
+  Panes,
   PlainRequest,
   Replies,
   Reply,
@@ -196,4 +199,12 @@ export type IconManifest = Pick<chrome.runtime.ManifestV3, "icons" | "action">;
 export interface PngSize {
   width: number;
   height: number;
+}
+
+// The fake pane lookup.
+export interface FakePanes extends Omit<Panes, "checking" | "lookup"> {
+  checking: Ref<boolean>;
+  lookup: Ref<PaneLookup>;
+  ensured: (readonly BranchRef[])[];
+  focused: BranchRef[];
 }

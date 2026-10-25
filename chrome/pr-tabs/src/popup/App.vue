@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useMessages } from "#/composables/useMessages";
+import { usePanes } from "#/composables/usePanes";
 import { useGoTo } from "#/composables/useGoTo";
 import { useRepoPicker } from "#/composables/useRepoPicker";
 import { useServiceWorker } from "#/composables/useServiceWorker";
@@ -21,6 +22,7 @@ const { ask } = useServiceWorker();
 const status = useStatus();
 const { statusText, isStatusError } = status;
 const { groups, refresh } = useSummary(ask, status);
+const panes = usePanes(ask, status);
 const input = ref("");
 const picker = useRepoPicker(ask, input);
 const { repos, repo, visible: isRepoPickerVisible } = picker;
@@ -88,5 +90,5 @@ onMounted(handlePopupMounted);
     @run="handleCloseDuplicatesRun"
   />
   <StatusLine :text="statusText" :error="isStatusError" />
-  <GroupList :groups="groups" />
+  <GroupList :groups="groups" :panes="panes" />
 </template>

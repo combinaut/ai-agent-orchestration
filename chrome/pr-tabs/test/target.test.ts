@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import type { Entry, GroupLike, PrKey, TabId, WindowId } from "#/types";
+import type {
+  Entry,
+  GroupLike,
+  Meta,
+  Pr,
+  PrKey,
+  PrRow,
+  Summary,
+  TabId,
+  TabLike,
+  WindowId,
+} from "#/types";
 import {
+  headKey,
+  lookupHeads,
+  MAX_PANE_LOOKUPS,
   effectiveRepos,
   pickedRepo,
   showRepoPicker,
@@ -97,38 +111,109 @@ test("a PR without a tab is not open", () => {
   assert.equal(findOpenTab([entry(1, 10, "acme/webapp#1")], "acme/webapp#9", 10), null);
 });
 
-test("the summary counts distinct PRs and the PRs in each group", () => {
+function prEntry(id: TabId, groupId: number, number: number): Entry<TabLike, Pr> {
+  const pr = parsePrUrl(`https://github.com/acme/webapp/pull/${number}`, "acme");
+
+  assert.ok(pr);
+
+  return { tab: { id, groupId }, pr };
+}
+
+const SUMMARIZED: Summary = {
+  prs: 4,
+  groups: [
+    {
+      title: "Search",
+      color: "blue",
+      count: 2,
+      prs: [
+        { key: "acme/webapp#1", label: "webapp#1", title: "Fix", head: null },
+        {
+          key: "acme/webapp#2",
+          label: "webapp#2",
+          title: "Fork",
+          head: { repo: "Me/WebApp", branch: "f" },
+        },
+      ],
+    },
+    {
+      title: "Infra",
+      color: "red",
+      count: 1,
+      prs: [
+        {
+          key: "acme/webapp#3",
+          label: "webapp#3",
+          title: "",
+          head: { repo: "acme/webapp", branch: "infra" },
+        },
+      ],
+    },
+  ],
+};
+
+test("the summary counts distinct PRs and lists the PRs of each group with their head", () => {
   const entries = [
-    entry(1, 10, "acme/webapp#1"),
-    entry(2, 10, "acme/webapp#1"),
-    entry(3, 10, "acme/webapp#2"),
-    entry(4, 10, "acme/webapp#3"),
-    entry(5, 10, "acme/webapp#4"),
+    prEntry(1, 7, 1),
+    prEntry(2, 7, 1),
+    prEntry(3, 7, 2),
+    prEntry(4, 8, 3),
+    prEntry(5, -1, 4),
   ];
-
-  for (const [i, groupId] of [7, 7, 7, 8, -1].entries()) {
-    const tab = entries[i]?.tab;
-    assert.ok(tab);
-    tab.groupId = groupId;
-  }
-
   const groups = new Map<number | undefined, GroupLike>([
     [7, { title: "Search", color: "blue" }],
     [8, { title: "Infra", color: "red" }],
   ]);
+  const meta: Meta = {
+    "acme/webapp#1": { title: "Fix", headRefName: "fix", headRepository: null },
+    "acme/webapp#2": {
+      title: "Fork",
+      headRefName: "f",
+      headRepository: { nameWithOwner: "Me/WebApp" },
+    },
+    "acme/webapp#3": { headRefName: "infra" },
+  };
 
-  const result = summarize(entries, groups);
+  const result = summarize(entries, groups, meta);
 
-  assert.deepEqual(result, {
-    prs: 4,
-    groups: [
-      { title: "Search", color: "blue", count: 2 },
-      { title: "Infra", color: "red", count: 1 },
-    ],
-  });
+  assert.deepEqual(result, SUMMARIZED);
   assert.equal(summaryText(result), "4 PRs in 2 groups");
-  assert.equal(summaryText({ prs: 1, groups: [{ title: "Search", count: 1 }] }), "1 PR in 1 group");
+  assert.equal(
+    summaryText({ prs: 1, groups: [{ title: "Search", count: 1, prs: [] }] }),
+    "1 PR in 1 group",
+  );
   assert.equal(summaryText({ prs: 0, groups: [] }), "No PR tabs open");
+});
+
+function row(n: number, repo: string, branch: string): PrRow {
+  return { key: `acme/webapp#${n}`, label: `webapp#${n}`, title: "", head: { repo, branch } };
+}
+
+test("pane lookups ask for each distinct head once, in list order, at most the cap", () => {
+  const many = Array.from({ length: MAX_PANE_LOOKUPS + 5 }, (_, i) =>
+    row(i + 10, "acme/webapp", `b${i}`),
+  );
+  const groups = [
+    {
+      title: "a",
+      count: 3,
+      prs: [
+        row(1, "acme/webapp", "x"),
+        row(2, "ACME/WebApp", "x"),
+        { ...row(3, "", ""), head: null },
+      ],
+    },
+    { title: "b", count: many.length, prs: many },
+  ];
+
+  const heads = lookupHeads(groups);
+
+  assert.equal(heads.length, MAX_PANE_LOOKUPS);
+  assert.deepEqual(heads.slice(0, 2), [
+    { repo: "acme/webapp", branch: "x" },
+    { repo: "acme/webapp", branch: "b0" },
+  ]);
+  assert.equal(headKey({ repo: "Acme/WebApp", branch: "Feat/X" }), "acme/webapp:Feat/X");
 });
 
 test("only PR pages count as PR tab updates", () => {

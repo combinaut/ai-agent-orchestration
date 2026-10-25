@@ -272,5 +272,49 @@
         "content": "$1"
       }
     }
+  },
+  "goToPane": {
+    "message": "Zum Herdr-Pane von $PR$",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
+  },
+  "noPane": {
+    "message": "Kein Herdr-Pane hat den Branch von $PR$ ausgecheckt",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
+  },
+  "checkingPane": {
+    "message": "Suche das Herdr-Pane von $PR$…",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
+  },
+  "agentState": {
+    "message": "Agent $STATE$",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "agentWorking": {
+    "message": "arbeitet"
+  },
+  "agentIdle": {
+    "message": "bereit"
+  },
+  "agentDone": {
+    "message": "fertig"
+  },
+  "agentWaiting": {
+    "message": "wartet"
   }
 }

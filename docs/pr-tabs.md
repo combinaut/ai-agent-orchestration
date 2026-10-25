@@ -11,6 +11,9 @@ Orch Tabs is a Chrome extension for PR tabs in `ORCH_PR_TABS_ORG`. It sorts PR t
 - **Close duplicate tabs** keeps one tab per PR and closes the rest, across all normal windows (incognito is skipped). It keeps the tab in view in the focused window if it is one of them, else a tab in view in another window, else the oldest (lowest tab ID). The popup says how many it closed. Two tabs are the same PR when owner, repo (any case) and number match, whatever the sub-page (`/files`, `/commits`), query or `#fragment`. Go to a PR and Open all my open PRs use the same match, so they focus or skip an open tab instead of adding a double.
 - **Automatic close** removes every background tab whose PR is merged or closed. The tab in view stays until you leave it. The check runs 30 seconds after the extension loads or Chrome starts, then every 4 minutes while PR tabs are open. It does not run when none are open. After a failed check it waits longer, with jitter, up to 30 minutes. It returns to 4 minutes once a check succeeds.
 - The popup, from the toolbar button, shows how many PRs are open in how many groups, with each group's colour and count. Light and dark follow the system.
+- **Go to pane**: each group row opens to list its PRs. The first group you open asks the host once which Herdr panes have the head branches checked out (up to 30 branches; the answer lasts while the popup is open). Each PR then has a terminal button that focuses its pane, with a tag for the agent's state: working, idle, done, or waiting (a Herdr approval prompt or an open `orch-signal ask` question). No tag without an agent or when Herdr cannot tell. The button is disabled with a "no pane" hint when no workspace has the branch, and Herdr missing or not running shows its error in the status line.
+  - A pane matches when its workspace checkout is on the PR's head branch and its `origin` is the PR's head repository. With several, the order is: a worker workspace (its `owner` token names another workspace), then a pane with an agent, then Herdr's list order.
+  - The host uses `herdr agent focus <pane>` for a pane with an agent, else `herdr workspace focus <workspace>`. Herdr does not raise the terminal window, so on macOS set `pr_tabs.terminal_app` (for example `Ghostty`) to bring that app to the front with `open -a`.
 - **Languages**: English (default), Spanish, German, French and Portuguese. Chrome picks the language from its UI language; any other falls back to English. The name stays "Orch Tabs" in all five. Host errors and the setting names (`pr_tabs.org`) are not translated.
 
 GitHub access goes through your local `gh` login, via a native messaging host. No token is stored in the browser.
@@ -33,7 +36,7 @@ After an update, run the install command, then click the reload icon on the exte
 
 ## 🔩 Settings and ownership
 
-`pr_tabs.org` selects the organization, `pr_tabs.default_repo` is the repo for bare numbers, `pr_tabs.repos` adds more repos to pick from (environment form: comma-separated `ORCH_PR_TABS_REPOS`), and `pr_tabs.open_all` is the GitHub search behind the button. Their environment overrides are `ORCH_PR_TABS_ORG`, `ORCH_PR_TABS_DEFAULT_REPO`, `ORCH_PR_TABS_REPOS` and `ORCH_PR_TABS_OPEN_ALL`. Reload the extension after changing settings.
+`pr_tabs.org` selects the organization, `pr_tabs.default_repo` is the repo for bare numbers, `pr_tabs.repos` adds more repos to pick from (environment form: comma-separated `ORCH_PR_TABS_REPOS`), `pr_tabs.open_all` is the GitHub search behind the button, and `pr_tabs.terminal_app` is the macOS app go to pane brings forward. Their environment overrides are `ORCH_PR_TABS_ORG`, `ORCH_PR_TABS_DEFAULT_REPO`, `ORCH_PR_TABS_REPOS`, `ORCH_PR_TABS_OPEN_ALL` and `ORCH_PR_TABS_TERMINAL_APP`. Reload the extension after changing settings.
 
 The native host asks the selected env adapter, through shared open-work discovery, for checked-out branches and their workspace owners. It caches the results for 30 seconds. Herdr resolves the worker workspace's `owner` token to the architect workspace label.
 
@@ -72,6 +75,7 @@ These are the common red errors in the popup. **Close merged PRs** puts `GitHub 
 | `gh not found on PATH` | The launcher's `PATH` is `ORCH_PATH`. Add the folder of `gh` to `watchers.path` in `~/.claude/orchestration.toml`, then run the install command. |
 | `gh timed out after 30s` | GitHub did not answer in time. Try again. |
 | Any other GitHub message, or `gh exited N` | The text is what `gh` or GitHub returned. Follow it. It can be a network failure, a rate limit or a query error; a logged-out `gh` (`gh auth login`) or an account without access to the org's repos is one cause. |
+| `herdr not found on PATH`, `herdr failed: …` or `herdr timed out after 5s` | Go to pane cannot reach Herdr. Start Herdr, or set `ORCH_HERDR_BIN` and run the install command. |
 | `native host timed out` or `empty reply from native host` | The host did not answer. Read the host log. |
 | `No answer from the Orch Tabs service worker…` | Reload the extension at `chrome://extensions`. |
 

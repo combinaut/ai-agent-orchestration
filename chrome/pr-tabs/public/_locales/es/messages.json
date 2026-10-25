@@ -272,5 +272,49 @@
         "content": "$1"
       }
     }
+  },
+  "goToPane": {
+    "message": "Ir al panel de Herdr de $PR$",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
+  },
+  "noPane": {
+    "message": "Ningún panel de Herdr tiene la rama de $PR$",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
+  },
+  "checkingPane": {
+    "message": "Buscando el panel de Herdr de $PR$…",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
+  },
+  "agentState": {
+    "message": "Agente $STATE$",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "agentWorking": {
+    "message": "trabajando"
+  },
+  "agentIdle": {
+    "message": "inactivo"
+  },
+  "agentDone": {
+    "message": "terminado"
+  },
+  "agentWaiting": {
+    "message": "esperando"
   }
 }

@@ -21,15 +21,18 @@ import {
   effectiveRepos,
   pickedRepo,
   showRepoPicker,
+  MAX_PANE_LOOKUPS,
 } from "#/core";
 import { getMessage } from "#/i18n";
 import { errorText, messageListener } from "#/messages";
 import type {
+  BranchRef,
   CheckResult,
   Closed,
   DuplicatesClosed,
   Failure,
   FetchedStates,
+  FocusedPane,
   GroupId,
   GroupPlacement,
   GroupTitle,
@@ -42,6 +45,7 @@ import type {
   OpenAllPlan,
   OrgName,
   Owners,
+  PaneLookup,
   Planned,
   Pr,
   PrEntry,
@@ -839,7 +843,30 @@ async function groupsById(entries: PrEntry[]): Promise<Map<GroupId, TabGroup>> {
 async function summary(): Promise<Summary> {
   const entries = await prEntries(await loadRules());
 
-  return summarize(entries, await groupsById(entries));
+  return summarize(entries, await groupsById(entries), await readMeta());
+}
+
+function branchRef(head: BranchRef): BranchRef {
+  return { repo: head.repo, branch: head.branch };
+}
+
+// One host lookup for up to MAX_PANE_LOOKUPS heads.
+export async function panes(heads: readonly BranchRef[]): Promise<PaneLookup> {
+  const prs = heads.slice(0, MAX_PANE_LOOKUPS).map(branchRef);
+
+  if (prs.length === 0) {
+    return {};
+  }
+
+  const reply = await askHost({ type: "panes", prs });
+
+  return reply.panes;
+}
+
+export async function focusPane(head: BranchRef): Promise<FocusedPane> {
+  const reply = await askHost({ type: "focusPane", ...branchRef(head) });
+
+  return { pane: reply.pane };
 }
 
 const pending = new Map<TabId, ReturnType<typeof setTimeout>>();
@@ -898,6 +925,14 @@ function handleCloseDuplicatesMessage(): Promise<DuplicatesClosed> {
   return closeDuplicates();
 }
 
+function handlePanesMessage(message: RequestOf<"panes">): Promise<PaneLookup> {
+  return panes(message.heads);
+}
+
+function handleFocusPaneMessage(message: RequestOf<"focusPane">): Promise<FocusedPane> {
+  return focusPane(message.head);
+}
+
 const handleRuntimeMessage = messageListener({
   openAll: handleOpenAllMessage,
   goTo: handleGoToMessage,
@@ -906,6 +941,8 @@ const handleRuntimeMessage = messageListener({
   summary: handleSummaryMessage,
   checkNow: handleCheckNowMessage,
   closeDuplicates: handleCloseDuplicatesMessage,
+  panes: handlePanesMessage,
+  focusPane: handleFocusPaneMessage,
 });
 
 async function groupOpenTabs(rules: Rules, meta: Meta): Promise<void> {

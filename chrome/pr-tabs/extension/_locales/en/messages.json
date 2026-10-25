@@ -272,5 +272,49 @@
         "content": "$1"
       }
     }
+  },
+  "goToPane": {
+    "message": "Go to the Herdr pane for $PR$",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
+  },
+  "noPane": {
+    "message": "No Herdr pane has the branch of $PR$ checked out",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
+  },
+  "checkingPane": {
+    "message": "Looking for the Herdr pane of $PR$…",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
+  },
+  "agentState": {
+    "message": "Agent $STATE$",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "agentWorking": {
+    "message": "working"
+  },
+  "agentIdle": {
+    "message": "idle"
+  },
+  "agentDone": {
+    "message": "done"
+  },
+  "agentWaiting": {
+    "message": "waiting"
   }
 }

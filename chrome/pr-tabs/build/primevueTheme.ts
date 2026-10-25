@@ -6,6 +6,10 @@ import type { ThemeStyleModule } from "./types";
 const THEME_MODULE = "virtual:primevue-theme.css";
 const RESOLVED_THEME_MODULE = `\0${THEME_MODULE}`;
 export const COMPONENTS: readonly string[] = [
+  "accordion",
+  "accordioncontent",
+  "accordionheader",
+  "accordionpanel",
   "badge",
   "button",
   "iconfield",
@@ -14,6 +18,7 @@ export const COMPONENTS: readonly string[] = [
   "message",
   "ripple",
   "select",
+  "tag",
   "virtualscroller",
 ];
 

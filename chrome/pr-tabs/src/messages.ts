@@ -93,7 +93,12 @@ export function messageListener(handlers: Handlers): RuntimeListener {
 }
 
 // Messages whose handler has side effects a second delivery would repeat.
-const NOT_RETRIED: ReadonlySet<RequestType> = new Set(["openAll", "checkNow", "closeDuplicates"]);
+const NOT_RETRIED: ReadonlySet<RequestType> = new Set([
+  "openAll",
+  "checkNow",
+  "closeDuplicates",
+  "focusPane",
+]);
 
 async function sendOnce(send: Send, message: Request): Promise<Delivered | Failure> {
   try {

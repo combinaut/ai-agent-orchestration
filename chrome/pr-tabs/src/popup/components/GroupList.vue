@@ -1,16 +1,37 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import Accordion from "primevue/accordion";
+import { computed, ref } from "vue";
+import { lookupHeads } from "#/core";
 import { useMessages } from "#/composables/useMessages";
 import type { GroupListProps } from "#/types";
 import GroupItem from "./GroupItem.vue";
 
 const props = defineProps<GroupListProps>();
 const { groupsLabel } = useMessages(["groupsLabel"]);
+const expanded = ref<string[]>([]);
 const groupRows = computed(() => props.groups);
+const panes = computed(() => props.panes);
+
+function handleGroupsUpdate(): void {
+  void props.panes.ensure(lookupHeads(props.groups));
+}
 </script>
 
 <template>
-  <ul id="groups" class="mt-2 list-none p-0" :aria-label="groupsLabel">
-    <GroupItem v-for="(group, index) in groupRows" :key="index" :group="group" />
-  </ul>
+  <Accordion
+    id="groups"
+    v-model:value="expanded"
+    class="mt-2"
+    multiple
+    :aria-label="groupsLabel"
+    @update:value="handleGroupsUpdate"
+  >
+    <GroupItem
+      v-for="(group, index) in groupRows"
+      :key="index"
+      :group="group"
+      :index="index"
+      :panes="panes"
+    />
+  </Accordion>
 </template>

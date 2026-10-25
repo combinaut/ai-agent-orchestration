@@ -88,7 +88,10 @@ test("the status lines follow the UI language", () => {
   speak("es");
 
   assert.equal(duplicateText(2), "Se cerraron 2 pestañas de PR duplicadas.");
-  assert.equal(summaryText({ prs: 1, groups: [{ title: "a", count: 1 }] }), "1 PR en 1 grupo");
+  assert.equal(
+    summaryText({ prs: 1, groups: [{ title: "a", count: 1, prs: [] }] }),
+    "1 PR en 1 grupo",
+  );
   assert.equal(
     checkText({
       tabs: 3,

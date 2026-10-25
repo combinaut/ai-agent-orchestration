@@ -2,11 +2,11 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import GoToForm from "#popup/components/GoToForm.vue";
-import GroupItem from "#popup/components/GroupItem.vue";
 import GroupList from "#popup/components/GroupList.vue";
 import PrInput from "#popup/components/PrInput.vue";
 import RepoSelect from "#popup/components/RepoSelect.vue";
 import { createI18n } from "#test/i18n/catalog";
+import { fakePanes } from "./fakePanes";
 import { mountPopup } from "./mountPopup";
 
 afterEach(() => {
@@ -67,8 +67,10 @@ test("the dropdown live-region messages come from chrome.i18n", async () => {
 test("the group list label and the count label come from chrome.i18n", () => {
   speakGerman();
 
-  const list = mountPopup(GroupList, { props: { groups: [] } });
-  const item = mountPopup(GroupItem, { props: { group: { title: "Finder", count: 1 } } });
+  const list = mountPopup(GroupList, { props: { groups: [], panes: fakePanes() } });
+  const item = mountPopup(GroupList, {
+    props: { groups: [{ title: "Finder", count: 1, prs: [] }], panes: fakePanes() },
+  });
 
   assert.equal(list.attributes("aria-label"), "PR-Tab-Gruppen");
   assert.equal(item.find(".p-badge").attributes("aria-label"), "1 PR");

@@ -1,6 +1,7 @@
 // Pure PR tabs logic; background.ts owns every chrome.* call except catalog text read through i18n.ts.
 import { getPlainMessage } from "#/i18n";
 import type {
+  BranchRef,
   Entry,
   GroupColor,
   GroupCount,
@@ -9,6 +10,7 @@ import type {
   GroupPlacement,
   GroupSummary,
   GroupTitle,
+  HeadKey,
   Meta,
   OpenAllPlan,
   Opened,
@@ -21,6 +23,8 @@ import type {
   PrKey,
   PrNumber,
   PrRef,
+  PrRow,
+  PrState,
   PrStateName,
   RepoName,
   RepoRules,
@@ -41,6 +45,7 @@ export const MAX_BACKOFF_SECONDS = 1800;
 export const MAX_PRS_PER_POLL = 100;
 export const OPEN_ALL_CAP = 30;
 export const MAX_SEARCH_PAGES = 10;
+export const MAX_PANE_LOOKUPS = 30;
 
 const PR_URL =
   /^(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9_.-]{1,100})\/pull\/(\d{1,9})(?:[/?#]|$)/i;
@@ -371,15 +376,64 @@ export function planOpenAll(search: SearchResult, openKeys: Set<PrKey>, org: Org
 }
 
 function groupSummary(counted: GroupCount): GroupSummary {
-  return { title: counted.title, color: counted.color, count: counted.keys.size };
+  const prs = [...counted.prs.values()];
+
+  return { title: counted.title, color: counted.color, count: prs.length, prs };
 }
 
 function byCountThenTitle(a: GroupSummary, b: GroupSummary): number {
   return b.count - a.count || a.title.localeCompare(b.title);
 }
 
-// Open PR count and, per tab group holding PR tabs, its title, colour and PR count.
-export function summarize(entries: Entry[], groups: Map<GroupId | undefined, GroupLike>): Summary {
+// Lowercase repo, branch as is: the key the host replies under.
+export function headKey(head: BranchRef): HeadKey {
+  return `${head.repo.toLowerCase()}:${head.branch}`;
+}
+
+// The branch of a PR's head; null while unknown or when the head repository is gone.
+export function prBranch(
+  pr: Pick<Pr, "owner" | "repo">,
+  state: PrState | undefined,
+): BranchRef | null {
+  if (!state?.headRefName || state.headRepository === null) {
+    return null;
+  }
+
+  const repo = state.headRepository?.nameWithOwner || `${pr.owner}/${pr.repo}`;
+
+  return { repo, branch: state.headRefName };
+}
+
+function prRow(pr: Pr, meta: Meta): PrRow {
+  const state = meta[pr.key];
+
+  return {
+    key: pr.key,
+    label: `${pr.repo}#${pr.number}`,
+    title: state?.title ?? "",
+    head: prBranch(pr, state),
+  };
+}
+
+// Distinct heads of the listed PRs in list order, at most MAX_PANE_LOOKUPS.
+export function lookupHeads(groups: GroupSummary[]): BranchRef[] {
+  const heads = new Map<HeadKey, BranchRef>();
+
+  for (const row of groups.flatMap((group) => group.prs)) {
+    if (row.head && !heads.has(headKey(row.head))) {
+      heads.set(headKey(row.head), row.head);
+    }
+  }
+
+  return [...heads.values()].slice(0, MAX_PANE_LOOKUPS);
+}
+
+// Open PR count and, per tab group holding PR tabs, its title, colour and PRs.
+export function summarize(
+  entries: Entry<TabLike, Pr>[],
+  groups: Map<GroupId | undefined, GroupLike>,
+  meta: Meta,
+): Summary {
   const byGroup = new Map<GroupId | undefined, GroupCount>();
 
   for (const entry of entries) {
@@ -393,10 +447,10 @@ export function summarize(entries: Entry[], groups: Map<GroupId | undefined, Gro
     const counted = byGroup.get(tab.groupId) ?? {
       title: group.title || getPlainMessage("untitledGroup"),
       color: group.color,
-      keys: new Set(),
+      prs: new Map(),
     };
 
-    counted.keys.add(pr.key);
+    counted.prs.set(pr.key, prRow(pr, meta));
     byGroup.set(tab.groupId, counted);
   }
 
