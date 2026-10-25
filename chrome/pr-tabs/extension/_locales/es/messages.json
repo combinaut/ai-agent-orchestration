@@ -20,6 +20,15 @@
   "repoSelectLabel": {
     "message": "Repositorio para un número solo"
   },
+  "repoSelectedMessage": {
+    "message": "1 repositorio seleccionado"
+  },
+  "repoNoneSelectedMessage": {
+    "message": "Ningún repositorio seleccionado"
+  },
+  "repoEmptyMessage": {
+    "message": "No hay repositorios disponibles"
+  },
   "openAllButton": {
     "message": "Abrir todos mis PR abiertos"
   },

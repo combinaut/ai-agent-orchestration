@@ -20,6 +20,15 @@
   "repoSelectLabel": {
     "message": "Dépôt pour un numéro seul"
   },
+  "repoSelectedMessage": {
+    "message": "1 dépôt sélectionné"
+  },
+  "repoNoneSelectedMessage": {
+    "message": "Aucun dépôt sélectionné"
+  },
+  "repoEmptyMessage": {
+    "message": "Aucun dépôt disponible"
+  },
   "openAllButton": {
     "message": "Ouvrir toutes mes PR ouvertes"
   },

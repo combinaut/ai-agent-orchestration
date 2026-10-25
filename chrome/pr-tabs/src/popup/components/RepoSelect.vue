@@ -5,7 +5,13 @@ import type { RepoName, RepoSelectEmits, RepoSelectProps } from "#/types";
 
 defineProps<RepoSelectProps>();
 
-const { repoSelectLabel } = useMessages(["repoSelectLabel"]);
+const { repoSelectLabel, repoSelectedMessage, repoNoneSelectedMessage, repoEmptyMessage } =
+  useMessages([
+    "repoSelectLabel",
+    "repoSelectedMessage",
+    "repoNoneSelectedMessage",
+    "repoEmptyMessage",
+  ]);
 
 const repo = defineModel<RepoName>({ required: true });
 const emit = defineEmits<RepoSelectEmits>();
@@ -23,6 +29,9 @@ function handleRepoChange(): void {
     size="small"
     class="mt-2 w-full"
     :aria-label="repoSelectLabel"
+    :selection-message="repoSelectedMessage"
+    :empty-selection-message="repoNoneSelectedMessage"
+    :empty-message="repoEmptyMessage"
     @change="handleRepoChange"
   />
 </template>

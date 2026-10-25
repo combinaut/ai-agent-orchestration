@@ -54,6 +54,14 @@ test("the check catches text in a template: nodes, attributes, bound strings, in
   ]);
 });
 
+test("the check catches short static labels that the prose rule would pass", () => {
+  const vue = `<template><button>OK</button><span>Go</span><input placeholder="search" /></template>`;
+  const html = `<html><body><button>OK</button><input title="go" /></body></html>`;
+
+  assert.deepEqual(literalProblems("Sample.vue", vue), ['"OK"', '"Go"', '"search"']);
+  assert.deepEqual(literalProblems("popup.html", html), ['"OK"', '"go"']);
+});
+
 test("the check catches text inside conditional and call expressions", () => {
   const sample = `<template>
   <Button :label="busy ? 'Opening…' : 'Open PRs'" :class="busy ? 'a b' : 'c d'" />

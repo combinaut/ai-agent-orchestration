@@ -17,6 +17,7 @@ const VISIBLE_ATTRIBUTES = new Set([
   "aria-placeholder",
   "aria-valuetext",
 ]);
+const LETTER = /\p{L}/u;
 const WORDS = /\p{L}+[ \u00a0]+[\p{L}\p{N}]/u;
 const CAPITALISED_WORD = /^\p{Lu}\p{Ll}{2,}$/u;
 const STYLING_DIRECTIVES: ReadonlySet<string> = new Set(["class", "style"]);
@@ -100,8 +101,9 @@ function expressionText(value: unknown): string {
   return isSimple && typeof value.content === "string" ? value.content : "";
 }
 
-function textProblems(text: string): string[] {
-  return isUserText(text) ? [quoted(text)] : [];
+// Static markup text and visible attributes are user text whenever they hold a letter.
+function staticProblems(text: string): string[] {
+  return LETTER.test(text) ? [quoted(text)] : [];
 }
 
 function expressionProblems(expression: string): string[] {
@@ -117,12 +119,12 @@ function propProblems(prop: TemplateElement["props"][number]): string[] {
 
   const isVisible = VISIBLE_ATTRIBUTES.has(prop.name);
 
-  return isVisible ? textProblems(prop.value?.content ?? "") : [];
+  return isVisible ? staticProblems(prop.value?.content ?? "") : [];
 }
 
 function ownProblems(node: TemplateNode): string[] {
   if (node.type === TEXT) {
-    return textProblems(expressionText(node));
+    return staticProblems(expressionText(node));
   }
 
   if (node.type === INTERPOLATION) {
@@ -156,7 +158,7 @@ function htmlProblems(source: string): string[] {
   const attributes = [...markup.matchAll(/\s(?:title|alt|placeholder|aria-label)="([^"]*)"/g)];
   const values = [...texts, ...attributes.map((match) => match[1] ?? "")];
 
-  return values.filter(isUserText).map(quoted);
+  return values.filter((value) => LETTER.test(value)).map(quoted);
 }
 
 // Every literal user-visible string in a src file, by file type.

@@ -47,6 +47,23 @@ test("the repo dropdown label comes from chrome.i18n", () => {
   );
 });
 
+test("the dropdown live-region messages come from chrome.i18n", async () => {
+  speakGerman();
+
+  const wrapper = mountPopup(RepoSelect, { props: { repos: ["a", "b"], modelValue: "a" } });
+
+  await wrapper.find(".p-select").trigger("click");
+
+  const regions = [...document.body.querySelectorAll("[role=status]")];
+
+  assert.deepEqual(
+    regions.map((region) => region.textContent?.trim()),
+    ["1 Repository ausgewählt"],
+  );
+
+  wrapper.unmount();
+});
+
 test("the group list label and the count label come from chrome.i18n", () => {
   speakGerman();
 
