@@ -15,7 +15,7 @@ function importedComponents(path: string): string[] {
 }
 
 test("every source PrimeVue component has build-time styles registered", () => {
-  const files = readdirSync(SOURCE_ROOT, { recursive: true });
+  const files = readdirSync(SOURCE_ROOT, { recursive: true, encoding: "utf8" });
   const components = files.filter((file) => /\.(?:vue|ts)$/.test(file)).flatMap(importedComponents);
 
   for (const component of components) {
