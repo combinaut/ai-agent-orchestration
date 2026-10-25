@@ -850,7 +850,6 @@ function branchRef(head: BranchRef): BranchRef {
   return { repo: head.repo, branch: head.branch };
 }
 
-// One host lookup for up to MAX_PANE_LOOKUPS heads.
 export async function panes(heads: readonly BranchRef[]): Promise<PaneLookup> {
   const prs = heads.slice(0, MAX_PANE_LOOKUPS).map(branchRef);
 

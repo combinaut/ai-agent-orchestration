@@ -10,7 +10,6 @@ const props = defineProps<GroupListProps>();
 const { groupsLabel } = useMessages(["groupsLabel"]);
 const expanded = ref<string[]>([]);
 const groupRows = computed(() => props.groups);
-const panes = computed(() => props.panes);
 
 function handleGroupsUpdate(): void {
   void props.panes.ensure(lookupHeads(props.groups));

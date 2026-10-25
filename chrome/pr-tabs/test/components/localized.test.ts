@@ -67,11 +67,10 @@ test("the dropdown live-region messages come from chrome.i18n", async () => {
 test("the group list label and the count label come from chrome.i18n", () => {
   speakGerman();
 
-  const list = mountPopup(GroupList, { props: { groups: [], panes: fakePanes() } });
-  const item = mountPopup(GroupList, {
+  const list = mountPopup(GroupList, {
     props: { groups: [{ title: "Finder", count: 1, prs: [] }], panes: fakePanes() },
   });
 
   assert.equal(list.attributes("aria-label"), "PR-Tab-Gruppen");
-  assert.equal(item.find(".p-badge").attributes("aria-label"), "1 PR");
+  assert.equal(list.find(".p-badge").attributes("aria-label"), "1 PR");
 });

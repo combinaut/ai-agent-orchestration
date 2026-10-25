@@ -12,7 +12,6 @@ const props = defineProps<GroupItemProps>();
 const { title, count, dotClass, countLabel } = useGroupItem(() => props.group);
 const value = computed(() => String(props.index));
 const prRows = computed(() => props.group.prs);
-const panes = computed(() => props.panes);
 </script>
 
 <template>
