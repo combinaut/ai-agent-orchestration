@@ -175,6 +175,8 @@ default_repo = ""
 repos = []
 # GitHub search behind the Open all button; empty turns it off
 open_all = ""
+# macOS app the popup's go to pane button brings to the front after focusing the Herdr pane; empty leaves the windows as they are
+terminal_app = ""
 
 [review]
 # Slash commands workers run before calling a PR done or ready; empty skips this step. The global file sets it for every repo; a repo file overrides it

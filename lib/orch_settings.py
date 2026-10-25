@@ -556,6 +556,13 @@ SETTINGS = [
         "",
         "GitHub search behind the Open all button; empty turns it off",
     ),
+    _g(
+        "pr_tabs.terminal_app",
+        "ORCH_PR_TABS_TERMINAL_APP",
+        "str",
+        "",
+        "macOS app the popup's go to pane button brings to the front after focusing the Herdr pane; empty leaves the windows as they are",
+    ),
     _r(
         "guard.big_repo",
         "ORCH_BIG_REPO",

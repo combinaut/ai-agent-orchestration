@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -12,6 +13,7 @@ from unittest.mock import patch
 from test_support import IsolatedTestCase
 
 import discovery
+import worker_signals
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -399,3 +401,267 @@ class PrTabsTest(IsolatedTestCase):
             [("workspace", "list"), ("pane", "list")],
         )
         self.assertEqual(before, {key: os.environ.get(key) for key in before})
+
+
+FAKE_HERDR = """#!/bin/sh
+printf '%s\\n' "$*" >>"$FAKE_HERDR_DIR/calls"
+[ -z "$FAKE_HERDR_SLEEP" ] || sleep "$FAKE_HERDR_SLEEP"
+if [ -n "$FAKE_HERDR_FAIL" ]; then echo "$FAKE_HERDR_FAIL" >&2; exit 1; fi
+case "$1 $2" in
+  "workspace list") cat "$FAKE_HERDR_DIR/workspaces.json" ;;
+  "pane list") cat "$FAKE_HERDR_DIR/panes.json" ;;
+  *) echo '{"result":{}}' ;;
+esac
+"""
+
+
+class PaneJumpTest(IsolatedTestCase):
+    def setUp(self):
+        super().setUp()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.base = Path(directory.name)
+        herdr = self.base / "fake-herdr"
+        herdr.write_text(FAKE_HERDR)
+        herdr.chmod(0o755)
+        config = self.base / "config.toml"
+        config.write_text('[install]\nenv = "herdr"\n')
+        environ = {
+            "ORCH_CONFIG": str(config),
+            "ORCH_ENV": "herdr",
+            "HERDR_BIN_PATH": str(herdr),
+            "FAKE_HERDR_DIR": str(self.base),
+            "PR_TABS_LOG": str(self.base / "host.log"),
+        }
+        patcher = patch.dict(os.environ, environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        (self.base / "calls").write_text("")
+        self.web = self.checkout("web", "feature", "git@github.com:Acme/WebApp.git")
+        self.other = self.checkout("other", "main", "https://github.com/acme/webapp")
+
+    def checkout(self, name, branch, origin):
+        path = self.base / name
+        subprocess.run(
+            ["git", "init", "-q", f"--initial-branch={branch}", str(path)], check=True
+        )
+        subprocess.run(
+            ["git", "-C", str(path), "remote", "add", "origin", origin], check=True
+        )
+        return str(path)
+
+    def herdr(self, workspaces, panes):
+        rows = [
+            {
+                "workspace_id": id,
+                "tokens": {"owner": owner} if owner else {},
+                "worktree": {"checkout_path": path, "repo_root": path},
+            }
+            for id, owner, path in workspaces
+        ]
+        (self.base / "workspaces.json").write_text(
+            json.dumps({"result": {"workspaces": rows}})
+        )
+        pane_rows = [
+            dict({"workspace_id": workspace, "pane_id": pane}, **extra)
+            for workspace, pane, extra in panes
+        ]
+        (self.base / "panes.json").write_text(
+            json.dumps({"result": {"panes": pane_rows}})
+        )
+
+    def calls(self):
+        return (self.base / "calls").read_text().splitlines()
+
+    def focus_calls(self):
+        return [call for call in self.calls() if "focus" in call]
+
+    def test_lookup_reports_which_branches_have_a_pane(self):
+        self.herdr(
+            [("wA", None, self.web), ("wB", None, self.other)],
+            [("wA", "wA:p1", {"agent": "claude"}), ("wB", "wB:p1", {})],
+        )
+        reply = host.panes(
+            {
+                "prs": [
+                    {"repo": "acme/webapp", "branch": "feature"},
+                    {"repo": "ACME/WebApp", "branch": "main"},
+                    {"repo": "acme/webapp", "branch": "gone"},
+                    {"repo": "acme/docs", "branch": "feature"},
+                ]
+            }
+        )
+        self.assertEqual(
+            reply["panes"],
+            {
+                "acme/webapp:feature": {"state": None},
+                "acme/webapp:main": {"state": None},
+                "acme/webapp:gone": None,
+                "acme/docs:feature": None,
+            },
+        )
+        self.assertEqual(self.calls(), ["workspace list", "pane list"])
+
+    def test_focus_prefers_the_worker_workspace_then_its_agent_pane(self):
+        self.herdr(
+            [("wArch", None, self.web), ("wWork", "wArch", self.web)],
+            [
+                ("wArch", "wArch:p1", {"agent": "claude"}),
+                ("wWork", "wWork:p1", {}),
+                ("wWork", "wWork:p2", {"agent": "claude"}),
+            ],
+        )
+        reply = host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+        self.assertEqual(reply, {"ok": True, "pane": "wWork:p2"})
+        self.assertEqual(self.focus_calls(), ["agent focus wWork:p2"])
+
+    def test_self_owned_workspace_is_not_a_worker_and_order_breaks_ties(self):
+        self.herdr(
+            [("wSelf", "wSelf", self.web), ("wLater", None, self.web)],
+            [("wSelf", "wSelf:p1", {}), ("wLater", "wLater:p1", {})],
+        )
+        reply = host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+        self.assertEqual(reply["pane"], "wSelf:p1")
+        self.assertEqual(self.focus_calls(), ["workspace focus wSelf"])
+
+    def test_no_matching_pane_focuses_nothing(self):
+        self.herdr([("wB", None, self.other)], [("wB", "wB:p1", {"agent": "x"})])
+        with self.assertRaisesRegex(host.RequestError, "no Herdr pane"):
+            host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+        self.assertEqual(self.focus_calls(), [])
+
+    def test_herdr_missing_not_running_or_slow_is_a_clear_error(self):
+        self.herdr([], [])
+        request = {"prs": [{"repo": "acme/webapp", "branch": "feature"}]}
+        with patch.dict(os.environ, {"HERDR_BIN_PATH": str(self.base / "absent")}):
+            with self.assertRaisesRegex(host.RequestError, "^absent not found"):
+                host.panes(request)
+        with patch.dict(os.environ, {"FAKE_HERDR_FAIL": "server not running"}):
+            with self.assertRaisesRegex(
+                host.RequestError, "fake-herdr failed: server not running"
+            ):
+                host.panes(request)
+        with (
+            patch.dict(os.environ, {"FAKE_HERDR_SLEEP": "3"}),
+            patch.object(host, "HERDR_TIMEOUT_SECONDS", 0.3),
+        ):
+            started = time.monotonic()
+            with self.assertRaisesRegex(host.RequestError, "fake-herdr timed out"):
+                host.panes(request)
+            self.assertLess(time.monotonic() - started, 2)
+        with patch.dict(os.environ, {"ORCH_ENV": "none"}):
+            with self.assertRaisesRegex(host.RequestError, "install.env"):
+                host.panes(request)
+
+    def test_output_over_the_limit_is_refused(self):
+        self.herdr([("wA", None, self.web)], [("wA", "wA:p1", {})])
+        with patch.object(host, "MAX_COMMAND_BYTES", 16):
+            with self.assertRaisesRegex(host.RequestError, "output over 16 bytes"):
+                host.panes({"prs": [{"repo": "acme/webapp", "branch": "feature"}]})
+
+    def test_invalid_input_is_refused_before_herdr_runs(self):
+        good = {"repo": "acme/webapp", "branch": "feature"}
+        for bad in (
+            {"prs": []},
+            {"prs": [good] * (host.MAX_PANE_LOOKUPS + 1)},
+            {"prs": "acme/webapp:feature"},
+            {"prs": [{"repo": "acme", "branch": "feature"}]},
+            {"prs": [{"repo": "acme/web app", "branch": "feature"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "-x"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "a..b"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "a;rm"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": 7}]},
+        ):
+            with self.subTest(bad=bad):
+                with self.assertRaises(host.RequestError):
+                    host.panes(bad)
+        with self.assertRaises(host.RequestError):
+            host.focus_pane({"repo": "acme/webapp", "branch": "feat/../x"})
+        self.assertEqual(self.calls(), [])
+
+    def test_terminal_app_comes_forward_on_macos_only_when_set(self):
+        self.herdr([("wA", None, self.web)], [("wA", "wA:p1", {"agent": "c"})])
+        request = {"repo": "acme/webapp", "branch": "feature"}
+        opener = self.base / "open"
+        opener.write_text(
+            '#!/bin/sh\nprintf "open %s\\n" "$*" >>"$FAKE_HERDR_DIR/calls"\n'
+        )
+        opener.chmod(0o755)
+        with (
+            patch.object(host, "OPEN", str(opener)),
+            patch.object(host.sys, "platform", "darwin"),
+        ):
+            host.focus_pane(request)
+            with patch.dict(os.environ, {"ORCH_PR_TABS_TERMINAL_APP": "Ghostty"}):
+                host.focus_pane(request)
+            with patch.dict(os.environ, {"ORCH_PR_TABS_TERMINAL_APP": "-n x"}):
+                with self.assertRaisesRegex(host.RequestError, "application name"):
+                    host.focus_pane(request)
+        with (
+            patch.object(host, "OPEN", str(opener)),
+            patch.object(host.sys, "platform", "linux"),
+            patch.dict(os.environ, {"ORCH_PR_TABS_TERMINAL_APP": "Ghostty"}),
+        ):
+            host.focus_pane(request)
+        self.assertEqual(
+            [call for call in self.calls() if call.startswith("open")],
+            ["open -a Ghostty"],
+        )
+
+    def test_lookup_reports_the_agent_state_from_herdr_and_open_questions(self):
+        signals = self.base / "signals"
+        signals.mkdir()
+        cases = {
+            "working": ({"agent": "claude", "agent_status": "working"}, "working"),
+            "idle": ({"agent": "claude", "agent_status": "idle"}, "idle"),
+            "done": ({"agent": "claude", "agent_status": "done"}, "done"),
+            "blocked": ({"agent": "claude", "agent_status": "blocked"}, "waiting"),
+            "unknown": ({"agent": "claude", "agent_status": "unknown"}, None),
+            "no agent": ({"agent_status": "working"}, None),
+        }
+        for label, (pane, expected) in cases.items():
+            with self.subTest(label=label):
+                self.herdr([("wA", None, self.web)], [("wA", "wA:p1", pane)])
+                with patch.object(worker_signals, "directory", return_value=signals):
+                    reply = host.panes(
+                        {"prs": [{"repo": "acme/webapp", "branch": "feature"}]}
+                    )
+                self.assertEqual(
+                    reply["panes"], {"acme/webapp:feature": {"state": expected}}
+                )
+
+    def test_an_open_orch_signal_question_means_waiting(self):
+        signals = self.base / "signals"
+        signals.mkdir()
+        question = {
+            "kind": "question",
+            "workspace": "wA",
+            "pane": "wA:p1",
+            "deadline": 2000,
+        }
+        self.herdr(
+            [("wA", None, self.web)],
+            [("wA", "wA:p1", {"agent": "claude", "agent_status": "working"})],
+        )
+        request = {"prs": [{"repo": "acme/webapp", "branch": "feature"}]}
+
+        def state(record, now=1000, answered=False):
+            path = signals / "signal-1.json"
+            path.write_text(json.dumps(record))
+            answer = path.with_suffix(".answer")
+            if answered:
+                answer.write_text("a")
+            else:
+                answer.unlink(missing_ok=True)
+            with (
+                patch.object(worker_signals, "directory", return_value=signals),
+                patch.object(host.time, "time", return_value=now),
+            ):
+                return host.panes(request)["panes"]["acme/webapp:feature"]["state"]
+
+        self.assertEqual(state(question), "waiting")
+        self.assertEqual(state(question, answered=True), "working")
+        self.assertEqual(state(question, now=3000), "working")
+        self.assertEqual(state(dict(question, cleanup=True)), "working")
+        self.assertEqual(state(dict(question, pane="wA:p2")), "working")
+        self.assertEqual(state(dict(question, kind="done")), "working")

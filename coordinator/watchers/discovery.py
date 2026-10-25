@@ -83,6 +83,26 @@ def github_repo(command, clone, remote="origin"):
     return match[1] if match else None
 
 
+def checkout_head(command, checkout):
+    """repo:branch (repo lowercased) checked out at checkout; None when detached, closed or not on GitHub."""
+    try:
+        branch = (
+            command("git", "-C", checkout, "symbolic-ref", "--quiet", "HEAD")
+            .strip()
+            .removeprefix("refs/heads/")
+        )
+    except subprocess.CalledProcessError as error:
+        if error.returncode == 1 or GONE.search(str(error.stderr or "")):
+            return None
+        raise Unavailable(
+            f"branch of {checkout} unreadable: {str(error.stderr or error).strip()[:200]}"
+        ) from error
+    repo = github_repo(command, checkout)
+    if not repo or not branch:
+        return None
+    return f"{repo.lower()}:{branch}"
+
+
 def branch_owners(command, work=None):
     """Architect labels for repo:branch, using the same open-work snapshot and origin parser as repo discovery."""
     work = open_work(command) if work is None else work
@@ -92,22 +112,9 @@ def branch_owners(command, work=None):
         label, checkout = labels.get(row.get("owner")), row.get("checkout")
         if not label or not checkout:
             continue
-        try:
-            branch = (
-                command("git", "-C", checkout, "symbolic-ref", "--quiet", "HEAD")
-                .strip()
-                .removeprefix("refs/heads/")
-            )
-        except subprocess.CalledProcessError as error:
-            if error.returncode == 1 or GONE.search(str(error.stderr or "")):
-                continue  # Detached or confirmed closed checkout; other workspaces still contribute.
-            raise Unavailable(
-                f"branch of {checkout} unreadable: {str(error.stderr or error).strip()[:200]}"
-            ) from error
-        repo = github_repo(command, checkout)
-        if not repo or not branch:
-            continue
-        key = f"{repo.lower()}:{branch}"
+        key = checkout_head(command, checkout)
+        if not key:
+            continue  # Detached or confirmed closed checkout; other workspaces still contribute.
         if key in owners and owners[key] != label:
             ambiguous.add(key)
         owners[key] = label

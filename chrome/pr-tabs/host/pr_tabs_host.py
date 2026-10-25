@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chrome native messaging host for PR tabs: one request, at most one gh call, one reply, then exit."""
+"""Chrome native messaging host for PR tabs: one request, at most one gh call or one bounded Herdr lookup, one reply, then exit."""
 
 import hashlib
 import importlib.util
@@ -276,24 +276,28 @@ def discover_owners(root, values):
         return discovery.branch_owners(command)
 
 
+def orch_values(root):
+    """Global settings with ORCH_* environment overrides."""
+    spec = importlib.util.spec_from_file_location(
+        "orch_settings", root / "lib/orch_settings.py"
+    )
+    config = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = config
+    spec.loader.exec_module(config)
+    values = config.load_global(
+        os.environ.get("ORCH_CONFIG", str(Path.home() / ".claude/orchestration.toml"))
+    )
+    values.update(
+        {key: value for key, value in os.environ.items() if key.startswith("ORCH_")}
+    )
+    return values
+
+
 def ownership():
     """The optional env adapter owns runtime discovery; cache across one-shot hosts."""
     root = Path(__file__).resolve().parents[3]
     try:
-        spec = importlib.util.spec_from_file_location(
-            "orch_settings", root / "lib/orch_settings.py"
-        )
-        config = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = config
-        spec.loader.exec_module(config)
-        values = config.load_global(
-            os.environ.get(
-                "ORCH_CONFIG", str(Path.home() / ".claude/orchestration.toml")
-            )
-        )
-        values.update(
-            {key: value for key, value in os.environ.items() if key.startswith("ORCH_")}
-        )
+        values = orch_values(root)
         adapter = values.get("ORCH_ENV") or "herdr"
         if not NAME.fullmatch(adapter):
             return {}
@@ -358,7 +362,227 @@ def ownership():
         return None
 
 
-HANDLERS = {"states": states, "search": search, "settings": settings}
+MAX_PANE_LOOKUPS = 30
+HERDR_TIMEOUT_SECONDS = 5
+MAX_COMMAND_BYTES = 1024 * 1024
+OWNER = re.compile(r"^[A-Za-z0-9-]{1,39}$")
+BRANCH = re.compile(r"^(?![/.-])(?!.*(?://|\.\.|/\.))[A-Za-z0-9_./-]{1,255}(?<![/.])$")
+PANE_ID = re.compile(r"^[A-Za-z0-9:_-]{1,64}$")
+APP_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
+OPEN = "/usr/bin/open"
+MAX_QUESTIONS = 200
+AGENT_STATES = {
+    "working": "working",
+    "idle": "idle",
+    "done": "done",
+    "blocked": "waiting",
+}
+
+
+def head_key(item, where):
+    """repo:branch (repo lowercased) of a {repo: owner/name, branch} item."""
+    repo, branch = (
+        item.get(key) if isinstance(item, dict) else None for key in ("repo", "branch")
+    )
+    owner, _, name = repo.partition("/") if isinstance(repo, str) else ("", "", "")
+    if not (
+        OWNER.match(owner)
+        and NAME.match(name)
+        and isinstance(branch, str)
+        and BRANCH.match(branch)
+    ):
+        raise RequestError(f"invalid repo or branch{where}")
+    return f"{repo.lower()}:{branch}"
+
+
+def read_bounded(stream):
+    stream.seek(0)
+    body = stream.read(MAX_COMMAND_BYTES + 1)
+    if len(body) > MAX_COMMAND_BYTES:
+        raise RequestError(f"command output over {MAX_COMMAND_BYTES} bytes")
+    return body.decode(errors="replace")
+
+
+def bounded_command(deadline):
+    """Runs argv without a shell before deadline, reading at most MAX_COMMAND_BYTES of each stream."""
+
+    def command(*args):
+        name = Path(args[0]).name
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RequestError(f"{name} timed out after {HERDR_TIMEOUT_SECONDS}s")
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            try:
+                done = subprocess.run(
+                    args,
+                    stdout=out,
+                    stderr=err,
+                    timeout=remaining,
+                    check=False,
+                    env=dict(os.environ, LC_ALL="C"),
+                )
+            except subprocess.TimeoutExpired:
+                raise RequestError(
+                    f"{name} timed out after {HERDR_TIMEOUT_SECONDS}s"
+                ) from None
+            except FileNotFoundError:
+                raise RequestError(f"{name} not found on PATH") from None
+            stdout, stderr = read_bounded(out), read_bounded(err)
+        if done.returncode and name != "git":
+            raise RequestError(f"{name} failed: {stderr.strip()[:200]}")
+        if done.returncode:
+            raise subprocess.CalledProcessError(done.returncode, args, stdout, stderr)
+        return stdout.strip()
+
+    return command
+
+
+def load_discovery(root):
+    sys.path.insert(0, str(root / "coordinator/watchers"))
+    return importlib.import_module("discovery")
+
+
+def pane_rank(row, pane, order):
+    """Worker workspaces first, then panes with an agent, then Herdr's list order."""
+    worker = bool(row.get("owner")) and row.get("owner") != row.get("id")
+    return (not worker, not pane.get("agent"), order)
+
+
+def branch_panes(discovery, command, work, keys):
+    """The best (rank, workspace, pane) for each repo:branch in keys that a workspace has checked out."""
+    panes = {}
+    for index, pane in enumerate(work["panes"]):
+        panes.setdefault(pane.get("workspace"), []).append((index, pane))
+    heads, chosen = {}, {}
+    for row in work["workspaces"]:
+        checkout = row.get("checkout")
+        if not checkout or row.get("gone"):
+            continue
+        if checkout not in heads:
+            try:
+                heads[checkout] = discovery.checkout_head(command, checkout)
+            except discovery.Unavailable:
+                heads[checkout] = None
+        key = heads[checkout]
+        for index, pane in panes.get(row["id"], []) if key in keys else []:
+            candidate = (pane_rank(row, pane, index), row, pane)
+            if key not in chosen or candidate[0] < chosen[key][0]:
+                chosen[key] = candidate
+    return chosen
+
+
+def asking_panes(now):
+    """Panes with an open orch-signal question: unanswered, not past its deadline, not being cleaned up."""
+    signals = importlib.import_module("worker_signals")
+    asking = set()
+    for path in sorted(signals.directory().glob("signal-*.json"))[:MAX_QUESTIONS]:
+        try:
+            record = json.loads(path.read_text()[:MAX_REQUEST_BYTES])
+        except (OSError, ValueError):
+            continue
+        if (
+            isinstance(record, dict)
+            and record.get("kind") == "question"
+            and not record.get("cleanup")
+            and isinstance(record.get("deadline"), (int, float))
+            and now < record["deadline"]
+            and not path.with_suffix(".answer").exists()
+        ):
+            asking.add((record.get("workspace"), record.get("pane")))
+    return asking
+
+
+def agent_state(pane, asking):
+    """working, idle, done or waiting; None without an agent or for a state Herdr cannot classify."""
+    if not pane.get("agent"):
+        return None
+    if (pane.get("workspace"), pane.get("pane")) in asking:
+        return "waiting"
+    return AGENT_STATES.get(pane.get("status"))
+
+
+def resolve_panes(keys):
+    """The chosen pane per repo:branch and the Herdr binary, from one Herdr snapshot."""
+    root = Path(__file__).resolve().parents[3]
+    try:
+        values = orch_values(root)
+    except Exception as error:
+        raise RequestError(f"Cannot load settings: {type(error).__name__}") from None
+    if (values.get("ORCH_ENV") or "herdr") != "herdr":
+        raise RequestError('pane jump needs install.env = "herdr"')
+    discovery = load_discovery(root)
+    command = bounded_command(time.monotonic() + HERDR_TIMEOUT_SECONDS)
+    with discovery_settings(values):
+        try:
+            work = discovery.open_work(command)
+            herdr = discovery.adapter().herdr_bin()
+        except discovery.Unavailable as error:
+            raise RequestError(f"Herdr unavailable: {error}") from None
+        chosen = branch_panes(discovery, command, work, keys)
+    return chosen, herdr, values
+
+
+def panes(request):
+    prs = request.get("prs")
+    if not isinstance(prs, list) or not 1 <= len(prs) <= MAX_PANE_LOOKUPS:
+        raise RequestError(f"prs must list 1 to {MAX_PANE_LOOKUPS} branches")
+    keys = [head_key(pr, f" at index {i}") for i, pr in enumerate(prs)]
+    chosen, _, _ = resolve_panes(set(keys))
+    try:
+        asking = asking_panes(time.time())
+    except Exception:  # Question records only refine the state.
+        asking = set()
+    return {
+        "ok": True,
+        "panes": {
+            key: {"state": agent_state(chosen[key][2], asking)}
+            if key in chosen
+            else None
+            for key in keys
+        },
+    }
+
+
+def focus_argv(herdr, row, pane):
+    """agent focus for a pane with an agent, else workspace focus."""
+    target = pane.get("pane") if pane.get("agent") else row.get("id")
+    if not isinstance(target, str) or not PANE_ID.match(target):
+        raise RequestError("Herdr returned an invalid pane or workspace id")
+    if pane.get("agent"):
+        return [herdr, "agent", "focus", target]
+    return [herdr, "workspace", "focus", target]
+
+
+def raise_terminal(values):
+    """Brings pr_tabs.terminal_app to the front on macOS; nothing when unset."""
+    app = values.get("ORCH_PR_TABS_TERMINAL_APP") or ""
+    if not app or sys.platform != "darwin":
+        return
+    if not APP_NAME.match(app):
+        raise RequestError("ORCH_PR_TABS_TERMINAL_APP must be an application name")
+    bounded_command(time.monotonic() + HERDR_TIMEOUT_SECONDS)(OPEN, "-a", app)
+
+
+def focus_pane(request):
+    key = head_key(request, "")
+    chosen, herdr, values = resolve_panes({key})
+    if key not in chosen:
+        raise RequestError(f"no Herdr pane has {key} checked out")
+    _, row, pane = chosen[key]
+    bounded_command(time.monotonic() + HERDR_TIMEOUT_SECONDS)(
+        *focus_argv(herdr, row, pane)
+    )
+    raise_terminal(values)
+    return {"ok": True, "pane": pane.get("pane")}
+
+
+HANDLERS = {
+    "states": states,
+    "search": search,
+    "settings": settings,
+    "panes": panes,
+    "focusPane": focus_pane,
+}
 LOG_BYTES = 256 * 1024
 
 
@@ -378,6 +602,10 @@ def log(request, reply):
         summary["states"] = {
             key: (node or {}).get("state") for key, node in reply["prs"].items()
         }
+    elif reply.get("ok") and isinstance(reply.get("panes"), dict):
+        summary["found"] = sum(1 for pane in reply["panes"].values() if pane)
+    elif reply.get("ok") and "pane" in reply:
+        summary["pane"] = reply["pane"]
     elif reply.get("ok"):
         summary["hits"] = len(reply.get("prs") or [])
     else:
