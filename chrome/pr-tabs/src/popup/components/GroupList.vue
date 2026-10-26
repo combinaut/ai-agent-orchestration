@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Accordion from "primevue/accordion";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { lookupHeads } from "#/core";
 import { useMessages } from "#/composables/useMessages";
 import type { GroupListProps } from "#/types";
@@ -14,6 +14,13 @@ const groupRows = computed(() => props.groups);
 function handleGroupsUpdate(): void {
   void props.panes.ensure(lookupHeads(props.groups));
 }
+function handleGroupsChanged(): void {
+  if (expanded.value.length > 0) {
+    handleGroupsUpdate();
+  }
+}
+
+watch(() => props.groups, handleGroupsChanged);
 </script>
 
 <template>

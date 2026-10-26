@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { MAX_PANE_LOOKUPS } from "#/core";
 import { usePanes } from "#/composables/usePanes";
 import { useStatus } from "#/composables/useStatus";
 import type { Ask, Reply, Request } from "#/types";
@@ -18,7 +19,7 @@ function panesWith(ask: Ask) {
   return { panes: usePanes(ask, status, countClose), status, closes: () => closed };
 }
 
-test("the first ensure asks the host once; later ones reuse the answer", async () => {
+test("ensure reuses known heads and fetches only new heads", async () => {
   const { ask, sent } = fakeAsk({ panes: { "acme/webapp:feature": { state: "idle" } } });
   const { panes } = panesWith(ask);
 
@@ -26,7 +27,10 @@ test("the first ensure asks the host once; later ones reuse the answer", async (
   await panes.ensure([HEAD]);
   await panes.ensure([HEAD, { repo: "acme/api", branch: "x" }]);
 
-  assert.deepEqual(sent, [{ type: "panes", heads: [HEAD] }]);
+  assert.deepEqual(sent, [
+    { type: "panes", heads: [HEAD] },
+    { type: "panes", heads: [{ repo: "acme/api", branch: "x" }] },
+  ]);
   assert.deepEqual(panes.lookup.value, { "acme/webapp:feature": { state: "idle" } });
   assert.equal(panes.checking.value, false);
 });
@@ -77,4 +81,36 @@ test("a second click while a focus is in flight sends nothing", async () => {
   await first;
 
   assert.equal(sent.length, 1);
+});
+
+test("incremental pane reads are single-flight and capped across overlapping triggers", async () => {
+  const held = Promise.withResolvers<void>();
+  const started = Promise.withResolvers<void>();
+  const fake = fakeAsk({ panes: {} });
+  let active = 0;
+  let maximum = 0;
+  const ask: Ask = async (message) => {
+    maximum = Math.max(maximum, ++active);
+    started.resolve();
+    await held.promise;
+    active--;
+
+    return fake.ask(message);
+  };
+  const { panes } = panesWith(ask);
+  const first = panes.ensure([HEAD]);
+  await started.promise;
+  const heads = Array.from({ length: MAX_PANE_LOOKUPS + 5 }, (_value, index) => ({
+    repo: "acme/webapp",
+    branch: `b${index}`,
+  }));
+  const second = panes.ensure([HEAD, ...heads]);
+  const third = panes.ensure(heads);
+  held.resolve();
+  await Promise.all([first, second, third]);
+  assert.equal(maximum, 1);
+  assert.deepEqual(fake.sent, [
+    { type: "panes", heads: [HEAD] },
+    { type: "panes", heads: heads.slice(0, MAX_PANE_LOOKUPS - 1) },
+  ]);
 });

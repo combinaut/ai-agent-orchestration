@@ -22,6 +22,7 @@ import {
   pickedRepo,
   showRepoPicker,
   MAX_PANE_LOOKUPS,
+  MAX_PRS_PER_POLL,
 } from "#/core";
 import { getMessage } from "#/i18n";
 import { errorText, messageListener } from "#/messages";
@@ -898,7 +899,64 @@ async function groupsById(entries: PrEntry[]): Promise<Map<GroupId, TabGroup>> {
   return new Map(groups.filter(isGroup).map((group) => [group.id, group]));
 }
 
-async function summary(): Promise<Summary> {
+const metadataAttempts = new Map<PrKey, number>();
+let metadataFlight: Promise<void> | undefined;
+
+function needsMetadata(key: PrKey, meta: Meta): boolean {
+  const recorded = meta[key];
+
+  return !recorded?.title || !recorded.headRefName;
+}
+
+function metadataBatch(entries: PrEntry[], meta: Meta): PrRef[] {
+  const byKey = new Map(entries.map((entry) => [entry.pr.key, entry.pr]));
+  const batch: PrRef[] = [];
+  const now = Date.now();
+
+  for (const key of metadataAttempts.keys()) {
+    if (!byKey.has(key)) {
+      metadataAttempts.delete(key);
+    }
+  }
+
+  for (const [key, pr] of byKey) {
+    const retryAt = metadataAttempts.get(key) ?? 0;
+
+    if (needsMetadata(key, meta) && now >= retryAt && batch.length < MAX_PRS_PER_POLL) {
+      batch.push({ owner: pr.owner, repo: pr.repo, number: pr.number });
+      metadataAttempts.set(key, now + SETTINGS_RETRY_MS);
+    }
+  }
+
+  return batch;
+}
+
+async function hydrateMetadata(): Promise<void> {
+  const rules = await loadRules();
+  const batch = metadataBatch(await prEntries(rules), await readMeta());
+
+  if (batch.length === 0) {
+    return;
+  }
+
+  const reply = await askHost({ type: "states", prs: batch });
+  await recordOwners(reply.owners);
+  await updateMeta((meta) => recordStates(meta, reply.prs));
+  await regroup(rules, await prEntries(rules));
+}
+
+function handleMetadataSettled(): void {
+  metadataFlight = undefined;
+}
+
+function backfillMissingMetadata(): Promise<void> {
+  metadataFlight ??= hydrateMetadata().catch(warn).finally(handleMetadataSettled);
+
+  return metadataFlight;
+}
+
+export async function summary(): Promise<Summary> {
+  await backfillMissingMetadata();
   const entries = await prEntries(await loadRules());
 
   return summarize(entries, await groupsById(entries), await readMeta());
@@ -1015,6 +1073,7 @@ async function groupOpenTabs(rules: Rules, meta: Meta): Promise<void> {
 async function start(): Promise<void> {
   await chrome.alarms.create(ALARM, { delayInMinutes: FIRST_POLL_SECONDS / 60 });
 
+  await backfillMissingMetadata();
   const rules = await loadRules();
   const meta = await readMeta();
 

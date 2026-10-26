@@ -406,6 +406,8 @@ export interface GoTo {
 
 export type PaneAvailability = "unchecked" | "checking" | "found" | "missing";
 
+export type PaneLoader = (heads: readonly BranchRef[]) => Promise<PaneLookup | undefined>;
+
 export interface Panes {
   checking: Readonly<Ref<boolean>>;
   lookup: Readonly<Ref<PaneLookup>>;

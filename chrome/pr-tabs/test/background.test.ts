@@ -441,7 +441,7 @@ test("a restarted worker restores ownership before grouping persisted PR metadat
   world.store = {
     owners: { "acme/webapp:feature": "Finder" },
     meta: {
-      "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
+      "acme/webapp#7": { state: "OPEN", title: "Feature", headRefName: "feature" },
     },
   };
 
@@ -499,7 +499,9 @@ function watchOwnersWrite(title: string) {
   return { fresh, restore };
 }
 
-const OPEN_FEATURE: Meta = { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } };
+const OPEN_FEATURE: Meta = {
+  "acme/webapp#7": { state: "OPEN", title: "Feature", headRefName: "feature" },
+};
 
 test("a delayed persisted restore cannot overwrite fresh ownership from a check", async () => {
   world.tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];

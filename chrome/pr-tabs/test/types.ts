@@ -52,6 +52,7 @@ export interface World {
   nextId: TabId;
   alarmListener: (alarm: FiredAlarm) => void;
   installedListener: () => Promise<void>;
+  startupListener: () => Promise<void>;
 }
 
 // A fake namespace may only name members its chrome namespace has.

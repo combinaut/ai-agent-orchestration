@@ -42,6 +42,7 @@ export const world: World = {
   nextId: 100,
   alarmListener: noListener,
   installedListener: noListener,
+  startupListener: noListener,
 };
 
 const ignored = { addListener() {} };
@@ -128,9 +129,13 @@ function handleInstalledListen(listener: World["installedListener"]): void {
   world.installedListener = listener;
 }
 
+function handleStartupListen(listener: World["startupListener"]): void {
+  world.startupListener = listener;
+}
+
 const runtime = {
   onMessage: ignored,
-  onStartup: ignored,
+  onStartup: { addListener: handleStartupListen },
   onInstalled: { addListener: handleInstalledListen },
   getURL: (path) => path,
   lastError: undefined,

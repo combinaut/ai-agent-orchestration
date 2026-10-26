@@ -2,8 +2,12 @@
 import assert from "node:assert/strict";
 import { flushPromises } from "@vue/test-utils";
 import { test } from "vitest";
+import { usePanes } from "#/composables/usePanes";
+import { useStatus } from "#/composables/useStatus";
+import { fakeAsk } from "#test/composables/fakeAsk";
 import GroupItem from "#popup/components/GroupItem.vue";
 import GroupList from "#popup/components/GroupList.vue";
+import type { FakeReplies } from "#test/types";
 import type { GroupSummary } from "#/types";
 import { fakePanes } from "./fakePanes";
 import { mountPopup } from "./mountPopup";
@@ -49,4 +53,35 @@ test("expanding a group lists its PRs and looks up the panes of every listed PR"
   assert.match(wrapper.text(), /webapp#1 One/);
 
   wrapper.unmount();
+});
+
+test("expanded groups resolve later batch heads with the real pane cache", async () => {
+  const replies: FakeReplies = { panes: { "acme/webapp:feature": { state: "idle" } } };
+  const fake = fakeAsk(replies);
+  const panes = usePanes(fake.ask, useStatus());
+  const first = groups[0];
+  assert.ok(first);
+  const wrapper = mountPopup(GroupList, { props: { groups: [first], panes } });
+
+  try {
+    await wrapper.find("button[aria-expanded]").trigger("click");
+    await flushPromises();
+    const later = { repo: "acme/webapp", branch: "later" };
+    const updated: GroupSummary = {
+      ...first,
+      count: 2,
+      prs: [...first.prs, { key: "acme/webapp#3", label: "webapp#3", title: "Later", head: later }],
+    };
+    replies.panes = { "acme/webapp:later": { state: "working" } };
+    await wrapper.setProps({ groups: [updated] });
+    await flushPromises();
+    assert.deepEqual(fake.sent, [
+      { type: "panes", heads: [HEAD] },
+      { type: "panes", heads: [later] },
+    ]);
+    assert.equal(wrapper.findAll("li button").length, 2);
+    assert.ok(wrapper.text().includes("working"));
+  } finally {
+    wrapper.unmount();
+  }
 });
