@@ -1,7 +1,7 @@
 import { useAsyncState } from "@vueuse/core";
 import { ref } from "vue";
 import { headKey, MAX_PANE_LOOKUPS } from "#/core";
-import { failed } from "#/messages";
+import { errorText, failed } from "#/messages";
 import type { Ask, BranchRef, HeadKey, PaneLoader, PaneLookup, Panes, Status } from "#/types";
 
 type PaneStatus = Pick<Status, "error">;
@@ -88,17 +88,21 @@ function usePaneFocus(ask: Ask, status: PaneStatus, close: () => void): Panes["f
 
     focusing.value = true;
 
-    const reply = await ask({ type: "focusPane", head });
+    try {
+      const reply = await ask({ type: "focusPane", head });
 
-    focusing.value = false;
+      if (failed(reply)) {
+        status.error(reply.error);
 
-    if (failed(reply)) {
-      status.error(reply.error);
+        return;
+      }
 
-      return;
+      close();
+    } catch (error) {
+      status.error(errorText(error));
+    } finally {
+      focusing.value = false;
     }
-
-    close();
   };
 }
 

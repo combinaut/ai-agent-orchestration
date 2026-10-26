@@ -24,7 +24,7 @@ const SUMMARY: Summary = {
 
 async function popup(
   repos: RepoName[],
-  replies: Partial<Replies> = {},
+  replies: FakeReplies = {},
   pending: PendingOpeningReplies = {},
 ) {
   const rules: Rules = { org: "acme", defaultRepo: "", openAll: "", repos };
@@ -330,3 +330,32 @@ for (const type of ["openAll", "openReviews"] as const) {
     }
   });
 }
+
+test("a terminal focus failure is visible in the popup error status", async () => {
+  const head = { repo: "acme/webapp", branch: "feature" };
+  const summary: Summary = {
+    prs: 1,
+    groups: [
+      { title: "A", count: 1, prs: [{ key: "acme/webapp#1", label: "webapp#1", title: "", head }] },
+    ],
+  };
+  const { wrapper, sent } = await popup([], {
+    summary,
+    panes: { "acme/webapp:feature": { state: "working" } },
+    focusPane: { error: "Native focus failed: diagnostic reason" },
+  });
+
+  await wrapper.find("button[aria-expanded]").trigger("click");
+  await flushPromises();
+  await wrapper.find("li button:not([aria-expanded])").trigger("click");
+  await flushPromises();
+
+  assert.deepEqual(sent.at(-1), { type: "focusPane", head });
+  assert.equal(
+    wrapper.find("#status .p-message-error").text(),
+    "Native focus failed: diagnostic reason",
+  );
+  assert.equal(wrapper.find("#status .p-message-error").isVisible(), true);
+
+  wrapper.unmount();
+});

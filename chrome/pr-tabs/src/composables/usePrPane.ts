@@ -83,7 +83,9 @@ export function usePrPane(row: MaybeRefOrGetter<PrRow>, panes: Panes): PrPane {
 
   return {
     availability,
-    isGoVisible: computed(() => availability.value !== "unchecked"),
+    isGoVisible: computed(
+      () => availability.value === "found" || availability.value === "checking",
+    ),
     isGoDisabled: computed(() => availability.value !== "found"),
     isChecking: computed(() => availability.value === "checking"),
     goLabel: computed(() => goLabelFor(availability.value, toValue(row).label)),

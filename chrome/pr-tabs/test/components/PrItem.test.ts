@@ -21,8 +21,8 @@ function item(answer: PaneLookup, checking = false, row: PrRow = ROW) {
   return { wrapper: mountPopup(PrItem, { props: { pr: row, panes } }), panes };
 }
 
-test("a found pane enables the button, which focuses the PR's head", async () => {
-  const { wrapper, panes } = item({ "acme/webapp:feature": { state: "working" } });
+test("a found pane without an agent state still enables focus", async () => {
+  const { wrapper, panes } = item({ "acme/webapp:feature": { state: null } });
   const button = wrapper.findComponent(Button);
 
   assert.match(wrapper.text(), /webapp#7 Fix the thing/);
@@ -34,21 +34,22 @@ test("a found pane enables the button, which focuses the PR's head", async () =>
   assert.deepEqual(panes.focused, [ROW.head]);
 });
 
-test("no pane disables the button with the hint; checking shows it loading", () => {
+test("missing panes hide the button; checking keeps the loading spinner", () => {
   const missing = item({ "acme/webapp:feature": null }).wrapper;
-  const disabled = missing.findComponent(Button);
 
-  assert.equal(disabled.find("button").element.disabled, true);
+  assert.equal(missing.findComponent(Button).exists(), false);
+  assert.equal(item({}).wrapper.findComponent(Button).exists(), false);
   assert.equal(
-    missing.find("[title]:not(.truncate)").attributes("title"),
-    "No Herdr pane has the branch of webapp#7 checked out",
+    item({}, false, { ...ROW, head: null })
+      .wrapper.findComponent(Button)
+      .exists(),
+    false,
   );
 
   const checking = item({}, true).wrapper.findComponent(Button);
 
   assert.equal(checking.props("loading"), true);
   assert.equal(checking.find("button").element.disabled, true);
-  assert.equal(item({}).wrapper.findComponent(Button).exists(), false);
 });
 
 test("the agent state shows as a tag with an aria label; none without an agent", () => {

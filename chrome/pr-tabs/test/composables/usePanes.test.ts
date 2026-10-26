@@ -47,7 +47,7 @@ test("a failed lookup shows the error and leaves the lookup empty", async () => 
 });
 
 test("focus sends the head and closes the popup; a failure shows the error and stays", async () => {
-  const good = fakeAsk({ focusPane: { pane: "w1:p2" } });
+  const good = fakeAsk({ focusPane: { pane: null } });
   const done = panesWith(good.ask);
 
   await done.panes.focus(HEAD);
@@ -113,4 +113,22 @@ test("incremental pane reads are single-flight and capped across overlapping tri
     { type: "panes", heads: [HEAD] },
     { type: "panes", heads: heads.slice(0, MAX_PANE_LOOKUPS - 1) },
   ]);
+});
+
+test("an unexpected focus rejection shows its reason and allows another click", async () => {
+  let attempts = 0;
+
+  async function ask<M extends Request>(_message: M): Promise<Reply<M["type"]>> {
+    attempts++;
+    throw new Error("message serialization failed");
+  }
+
+  const { panes, status, closes } = panesWith(ask);
+
+  await panes.focus(HEAD);
+  await panes.focus(HEAD);
+
+  assert.equal(status.statusText.value, "message serialization failed");
+  assert.equal(attempts, 2);
+  assert.equal(closes(), 0);
 });

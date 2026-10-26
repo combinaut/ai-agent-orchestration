@@ -251,7 +251,7 @@ export interface DuplicatesClosed {
 }
 
 export interface FocusedPane {
-  readonly pane: string;
+  readonly pane: string | null;
 }
 
 export interface Replies {

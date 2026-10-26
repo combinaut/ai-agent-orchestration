@@ -979,9 +979,18 @@ export async function panes(heads: readonly BranchRef[]): Promise<PaneLookup> {
 }
 
 export async function focusPane(head: BranchRef): Promise<FocusedPane> {
-  const reply = await askHost({ type: "focusPane", ...branchRef(head) });
+  console.info("PR tabs focusPane send", branchRef(head));
 
-  return { pane: reply.pane };
+  try {
+    const reply = await askHost({ type: "focusPane", ...branchRef(head) });
+
+    console.info("PR tabs focusPane reply", reply);
+
+    return { pane: reply.pane };
+  } catch (error) {
+    console.warn("PR tabs focusPane failed", error);
+    throw error;
+  }
 }
 
 const pending = new Map<TabId, ReturnType<typeof setTimeout>>();
