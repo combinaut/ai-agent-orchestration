@@ -1,4 +1,4 @@
-"""Answers queued by the to-do UI; the existing todo producer and notifier own delivery."""
+"""Answer bookkeeping and relay queue for the interactive to-do views."""
 
 import fcntl
 import hashlib
@@ -159,7 +159,7 @@ def prune(now):
             record["discarded"] = True
             write(directory() / (record["key"] + ".json"), record)
             current.append(record)
-        elif changed or expired:
+        elif expired or (changed and not record.get("pane_delivered")):
             (directory() / (record["key"] + ".json")).unlink(missing_ok=True)
         else:
             current.append(record)
@@ -167,7 +167,11 @@ def prune(now):
 
 
 def filter_canceled(text):
-    current = pending_ids()
+    current = {
+        record["id"]
+        for record in records()
+        if not record.get("discarded") and not record.get("pane_delivered")
+    }
     kept = []
     for line in text.splitlines():
         match = re.search(
@@ -261,15 +265,20 @@ def collect(command):
         current = [
             record
             for record in pruned
-            if not record.get("delivered_at") and not record.get("discarded")
+            if (not record.get("delivered_at") or record.get("pane_delivered"))
+            and not record.get("discarded")
         ]
     if not current:
         return [], notices
+    direct = [record for record in current if record.get("pane_delivered")]
+    current = [record for record in current if not record.get("pane_delivered")]
+    if not current:
+        return direct, notices
     try:
         owners = discovery.architect_owners(command)
     except discovery.Unavailable:
-        return [], notices + ["answer:" + record["architect"] for record in current]
-    ready, failed = [], []
+        return direct, notices + ["answer:" + record["architect"] for record in current]
+    ready, failed = direct, []
     for record in current:
         owner = owners.get(record["architect"])
         if owner and re.fullmatch(r"[A-Za-z0-9_-]+", owner):

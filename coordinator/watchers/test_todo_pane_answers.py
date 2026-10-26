@@ -1,0 +1,252 @@
+"""Interactive answers use fake Herdr only."""
+
+import ast
+import importlib.util
+import json
+import subprocess
+from unittest.mock import patch
+
+from test_support import IsolatedTestCase
+
+import test_todo_answers as existing
+import todo_answers as a
+import watchers as w
+
+OWNER, TEXT = existing.OWNER, existing.TEXT
+
+EMPTY = "Earlier output\n" + "─" * 50 + "\n❯ \n" + "─" * 50 + "\n  ? for shortcuts"
+
+
+class PaneAnswerTests(IsolatedTestCase):
+    setUp = existing.TodoAnswerTests.setUp
+    view_app = existing.TodoAnswerTests.view_app
+
+    def fake(self, app, view, *, status="idle", screen=EMPTY, rows=None, fail=False):
+        self.calls = []
+        agent = dict(
+            name="tooling",
+            terminal_title_stripped=OWNER,
+            workspace_id="w1",
+            pane_id="w1:p2",
+            agent="claude",
+            agent_status=status,
+            tokens=dict(role="architect"),
+        )
+        self.agent = agent
+        self.rows = [agent] if rows is None else rows
+
+        def run(argv, **kwargs):
+            self.assertIsInstance(argv, list)
+            self.assertFalse(kwargs.get("shell"))
+            self.calls.append(argv)
+            command = argv[1:3]
+            data = {}
+            code = 0
+            if command == ["agent", "list"]:
+                data = dict(agents=self.rows)
+            elif command == ["agent", "get"]:
+                data = dict(agent=agent)
+            elif command == ["pane", "read"]:
+                self.assertEqual(
+                    argv[3:], ["w1:p2", "--source", "visible", "--format", "text"]
+                )
+                data = dict(read=dict(text=screen))
+            elif command == ["agent", "prompt"]:
+                code = int(fail)
+            elif command != ["agent", "focus"]:
+                self.fail(f"Unexpected fake Herdr call: {argv}")
+            return subprocess.CompletedProcess(
+                argv, code, json.dumps(dict(result=data)), ""
+            )
+
+        stub = patch.object(subprocess, "run", run)
+        stub.start()
+        self.addCleanup(stub.stop)
+
+    def prompts(self):
+        return [call for call in self.calls if call[1:3] == ["agent", "prompt"]]
+
+    def test_choice_sends_exact_argv_and_records_delivery(self):
+        app, view = self.view_app()
+        self.fake(app, view, status="done")
+        app.feed("a2")
+        self.assertEqual(
+            [p[1:] for p in self.prompts()],
+            [["agent", "prompt", "w1:p2", f"Mario (to-do panel): {TEXT} -> later"]],
+        )
+        self.assertEqual(app.status, "sent to Architect::Tooling")
+        self.assertEqual(app.rows, [])
+        record = a.records()[0]
+        self.assertTrue(record["delivered_at"])
+        self.assertTrue(record["pane_delivered"])
+
+    def test_mouse_choice_sends(self):
+        app, view = self.view_app()
+        self.fake(app, view)
+        app.feed("a")
+        row, col, *_ = next(hit for hit in app.hits if hit[3] == "answer-1")
+        app.feed(f"\x1b[<0;{col};{row}M")
+        self.assertEqual(len(self.prompts()), 1)
+
+    def test_typed_answer_waits_for_enter(self):
+        app, view = self.view_app()
+        self.fake(app, view)
+        app.feed("at$(touch /tmp/never); `echo x`")
+        self.assertEqual(self.prompts(), [])
+        app.feed("\r")
+        self.assertEqual(
+            self.prompts()[0][-1],
+            f"Mario (to-do panel): {TEXT} -> $(touch /tmp/never); `echo x`",
+        )
+
+    def test_sanitizes_and_caps_both_parts(self):
+        app, view = self.view_app()
+        self.fake(app, view)
+        dirty = "\x00\x1b\x07\n hi\t " + "x" * 700
+        item = "\x00\x1b\n Item\t " + "y" * 700 + " [1: yes]"
+        module = w.todo_module()
+        with (
+            patch.object(view, "generator", return_value=module),
+            patch.object(module, "answer_submission") as transaction,
+            patch.object(module, "dismiss_locked"),
+            patch.object(a, "write"),
+        ):
+            transaction.return_value.__enter__.return_value = ({"key": "fake"}, {})
+            view.answer_item(OWNER, item, dirty, 1)
+        expected = (
+            "Mario (to-do panel): "
+            + ("Item " + "y" * 700)[:512]
+            + " -> "
+            + ("hi " + "x" * 700)[:512]
+        )
+        self.assertEqual(self.prompts()[0][-1], expected)
+
+    def test_nonempty_composer_focuses_and_keeps_item(self):
+        app, view = self.view_app()
+        self.fake(app, view, screen=EMPTY.replace("❯ ", "❯ unfinished input"))
+        app.feed("a1")
+        self.assertEqual(self.prompts(), [])
+        self.assertIn(["agent", "focus", "w1:p2"], [c[1:] for c in self.calls])
+        self.assertEqual(app.status, "type it in the pane: now")
+        self.assertEqual(a.records(), [])
+        self.assertEqual(len(app.rows), 1)
+
+    def test_unknown_screen_focuses_and_keeps_item(self):
+        app, view = self.view_app()
+        for screen in (
+            "❯\nunrecognized dialog",
+            EMPTY.replace("? for shortcuts", "Approve command?"),
+        ):
+            self.fake(app, view, screen=screen)
+            app.feed("a1")
+            self.assertEqual(app.status, "type it in the pane: now")
+            self.assertEqual(self.prompts(), [])
+            self.assertIn(["agent", "focus", "w1:p2"], [c[1:] for c in self.calls])
+            self.assertEqual(len(app.rows), 1)
+
+    def test_blocked_and_unknown_status_focus_without_send(self):
+        app, view = self.view_app()
+        self.fake(app, view)
+        for status in ("blocked", "unknown", "waiting", None):
+            self.agent["agent_status"] = status
+            app.feed("a1")
+            self.assertEqual(app.status, "type it in the pane: now")
+            self.assertEqual(self.prompts(), [])
+            self.assertEqual(len(app.rows), 1)
+        self.assertEqual(
+            len([c for c in self.calls if c[1:3] == ["agent", "focus"]]), 4
+        )
+
+    def test_working_queues_with_busy_wording(self):
+        app, view = self.view_app()
+        self.fake(
+            app,
+            view,
+            status="working",
+            screen=EMPTY.replace(
+                "? for shortcuts", "⏵⏵ bypass permissions on (shift+tab to cycle)"
+            ),
+        )
+        app.feed("a1")
+        self.assertEqual(app.status, "sent to Architect::Tooling (queued while busy)")
+        self.assertEqual(len(self.prompts()), 1)
+
+    def test_worker_coordinator_and_ambiguous_targets_never_receive_input(self):
+        app, view = self.view_app()
+        self.fake(app, view)
+        for role in ("worker", "coordinator"):
+            self.agent["tokens"]["role"] = role
+            self.agent["name"] = OWNER
+            app.feed("a1")
+            self.assertEqual(app.status, "type it in the pane: now")
+            self.assertEqual(self.prompts(), [])
+            self.assertEqual(a.records(), [])
+        self.agent["tokens"]["role"] = "architect"
+        self.rows.append(dict(self.agent, name="other", pane_id="w1:p3"))
+        app.feed("a1")
+        self.assertEqual(app.status, "type it in the pane: now")
+        self.assertEqual(self.prompts(), [])
+        self.assertFalse(any(c[1:3] == ["agent", "focus"] for c in self.calls))
+        self.rows.clear()
+        app.feed("a1")
+        self.assertEqual(app.status, "type it in the pane: now")
+        self.assertEqual(self.prompts(), [])
+        self.assertEqual(a.records(), [])
+
+    def test_failed_send_falls_back_to_native_relay(self):
+        app, view = self.view_app()
+        self.fake(app, view, fail=True)
+        app.feed("a1")
+        self.assertEqual(app.status, "relayed; the architect may ask again")
+        self.assertEqual(len(self.prompts()), 1)
+        self.assertFalse(a.records()[0].get("delivered_at"))
+        self.assertEqual(len(a.collect(w.command)[0]), 1)
+        self.assertEqual(app.rows, [])
+
+    def test_delivered_feed_survives_without_native_double_delivery(self):
+        app, view = self.view_app()
+        self.fake(app, view)
+        app.feed("a1")
+        (self.base / "status" / f"{OWNER}.md").write_text("## Waits on the user\n")
+        records, _ = a.collect(w.command)
+        raw = dict(now=[], unreadable=[], read=[], scanned=True, todo_answers=records)
+        after, lines = w.reduce_todo(None, raw)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("TODO ANSWER owner=w1", lines[0])
+        self.assertEqual(w.reduce_todo(after, raw)[1], [])
+        spec = importlib.util.spec_from_file_location(
+            "pane_inbox", w.ROOT / "notify-inbox.py"
+        )
+        inbox = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inbox)
+        import argparse
+
+        args = argparse.Namespace(bindings_dir=self.base, binding=None)
+        stamped = ["stamp todo: " + lines[0]]
+        self.assertEqual(inbox.native_messages(args, stamped, False, []), [])
+        with patch.object(inbox, "send_to_socket") as send:
+            self.assertTrue(
+                inbox.send_line(self.base / "architect-w1.json", stamped[0])
+            )
+            send.assert_not_called()
+        self.assertEqual(a.filter_canceled(stamped[0]), "")
+        for path in [
+            w.ROOT / "watchers.py",
+            w.ROOT / "todo_answers.py",
+            w.ROOT / "notify-inbox.py",
+            w.ROOT.parent / "user-todo.py",
+        ]:
+            tree = ast.parse(path.read_text())
+            for node in ast.walk(tree):
+                parts = (
+                    node.elts
+                    if isinstance(node, (ast.List, ast.Tuple))
+                    else node.args
+                    if isinstance(node, ast.Call)
+                    else []
+                )
+                if parts:
+                    words = [
+                        part.value for part in parts if isinstance(part, ast.Constant)
+                    ]
+                    self.assertNotEqual(words[:2], ["agent", "prompt"], str(path))

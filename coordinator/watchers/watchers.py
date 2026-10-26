@@ -1546,7 +1546,10 @@ def reduce_todo(before, raw):
         record["id"]
         for record in records
         if record["id"] not in previous
-        or now - retries.get(record["id"], now) >= todo_answers.KEEP_SECONDS + 60
+        or (
+            not record.get("pane_delivered")
+            and now - retries.get(record["id"], now) >= todo_answers.KEEP_SECONDS + 60
+        )
     }
     events += [
         todo_answers.event_line(record) for record in records if record["id"] in emitted

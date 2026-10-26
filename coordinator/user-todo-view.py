@@ -10,6 +10,7 @@ import re
 import select
 import shutil
 import signal
+import subprocess
 import sys
 import tempfile
 import termios
@@ -445,8 +446,139 @@ def jump(text):
     return generator().jump({"text": text})
 
 
+def pane_text(text):
+    return " ".join("".join(c if c.isprintable() else " " for c in text).split())[
+        : todo_answers.ANSWER_MAX
+    ]
+
+
+def architect_target(owner, rows):
+    matches = []
+    for row in rows:
+        role = (row.get("tokens") or {}).get("role")
+        name = row.get("name") or ""
+        labels = {name, row.get("terminal_title_stripped")}
+        if owner not in labels:
+            continue
+        if role in ("worker", "coordinator") or (
+            role != "architect" and not name.startswith("Architect::")
+        ):
+            continue
+        matches.append(row)
+    return matches[0] if len(matches) == 1 else None
+
+
+def empty_composer(agent, screen):
+    if agent.get("agent") != "claude":
+        return False
+    lines = screen.splitlines()
+    borders = [n for n, line in enumerate(lines) if re.fullmatch(r"\s*─{8,}\s*", line)]
+    if len(borders) < 2:
+        return False
+    first, last = borders[-2:]
+    composer = [line.strip() for line in lines[first + 1 : last] if line.strip()]
+    footers = {
+        "",
+        "? for shortcuts",
+        "esc to interrupt",
+        "Esc to interrupt",
+        "⏵⏵ bypass permissions on (shift+tab to cycle)",
+        "⏵⏵ accept edits on (shift+tab to cycle)",
+        "⏸ plan mode on (shift+tab to cycle)",
+    }
+    return composer == ["❯"] and all(
+        line.strip() in footers for line in lines[last + 1 :]
+    )
+
+
 def answer_item(owner, text, answer, generation):
-    return generator().answer_from_view(owner, text, answer, TODO, generation)
+    module = generator()
+    herdr = (
+        os.environ.get("HERDR_BIN_PATH") or os.environ.get("ORCH_HERDR_BIN") or "herdr"
+    )
+
+    def run(*args):
+        return subprocess.run(
+            [herdr, *args], capture_output=True, text=True, check=False, timeout=5
+        )
+
+    def result(*args):
+        response = run(*args)
+        if response.returncode:
+            raise ValueError("Herdr read failed")
+        return json.loads(response.stdout)["result"]
+
+    target = None
+    status, safe = None, False
+    try:
+        target = architect_target(owner, result("agent", "list")["agents"])
+        if target and target.get("pane_id") and target.get("workspace_id"):
+            current = result("agent", "get", target["pane_id"])["agent"]
+            if (
+                architect_target(owner, [current])
+                and current.get("pane_id") == target["pane_id"]
+                and current.get("name") == target.get("name")
+            ):
+                status = current.get("agent_status")
+                if status in ("idle", "done", "working"):
+                    screen = result(
+                        "pane",
+                        "read",
+                        target["pane_id"],
+                        "--source",
+                        "visible",
+                        "--format",
+                        "text",
+                    )["read"]["text"]
+                    safe = empty_composer(current, screen)
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        AttributeError,
+        subprocess.TimeoutExpired,
+    ):
+        pass
+    if not safe:
+        if target and target.get("pane_id"):
+            try:
+                run("agent", "focus", target["pane_id"])
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        return "type it in the pane: " + pane_text(answer)
+
+    item = dict(source=owner + ".md", text=text, id=todo_answers.item_id(owner, text))
+    state_path = module.answer_state_path()
+    with module.answer_submission(item, answer, state_path, generation) as (
+        record,
+        state,
+    ):
+        try:
+            sent = (
+                run(
+                    "agent",
+                    "prompt",
+                    target["pane_id"],
+                    f"Mario (to-do panel): {pane_text(text)} -> {pane_text(answer)}",
+                ).returncode
+                == 0
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            sent = False
+        if sent:
+            record.update(
+                pane_delivered=True,
+                delivered_at=time.time(),
+                owner=target["workspace_id"],
+            )
+            todo_answers.write(
+                todo_answers.directory() / (record["key"] + ".json"), record
+            )
+        module.dismiss_locked(item, state_path, TODO, state)
+    if not sent:
+        return "relayed; the architect may ask again"
+    return "sent to " + owner + (" (queued while busy)" if status == "working" else "")
 
 
 def report_count(pane, count):

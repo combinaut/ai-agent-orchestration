@@ -175,6 +175,38 @@ class TodoAnswerTests(IsolatedTestCase):
         env.start()
         self.addCleanup(env.stop)
         hidden = view.Hidden(self.base / "hidden.json", self.base / "feed.log")
+        import subprocess
+
+        agent = dict(
+            name="tooling",
+            terminal_title_stripped=OWNER,
+            workspace_id="w1",
+            pane_id="w1:p2",
+            agent="claude",
+            agent_status="idle",
+            tokens=dict(role="architect"),
+        )
+
+        def relay_only(argv, **kwargs):
+            if argv[1:3] == ["agent", "list"]:
+                result = dict(agents=[agent])
+            elif argv[1:3] == ["agent", "get"]:
+                result = dict(agent=agent)
+            elif argv[1:3] == ["pane", "read"]:
+                result = dict(
+                    read=dict(text="────────────\n❯\n────────────\n? for shortcuts")
+                )
+            else:
+                return subprocess.CompletedProcess(
+                    argv, 1, "", "fake submission failure"
+                )
+            return subprocess.CompletedProcess(
+                argv, 0, json.dumps(dict(result=result)), ""
+            )
+
+        stub = patch.object(subprocess, "run", relay_only)
+        stub.start()
+        self.addCleanup(stub.stop)
         app = view.App(
             hidden,
             False,

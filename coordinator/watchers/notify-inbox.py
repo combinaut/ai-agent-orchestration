@@ -235,6 +235,8 @@ def native_messages(args, stamped, fallback, patterns):
         if WAIT_OWNER.match(body):
             continue  # WAITING start and REPEAT are fyi; ESCALATE goes to the Coordinator below
         owner = OWNER.match(body) or TODO_OWNER.match(body)
+        if TODO_OWNER.match(body) and not w.todo_answers.filter_canceled(line):
+            continue
         if (
             owner
             and not line.endswith("(clear)")

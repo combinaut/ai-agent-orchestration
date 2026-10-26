@@ -19,6 +19,7 @@ import termios
 import time
 import tty
 import unicodedata
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "watchers"))
@@ -406,7 +407,8 @@ def answer_generation(owner, text, state_path=None):
         return None
 
 
-def answer_item(item, answer, state_path, output, generation=CURRENT_GENERATION):
+@contextmanager
+def answer_submission(item, answer, state_path, generation=CURRENT_GENERATION):
     owner = item["source"].removesuffix(".md")
     state_path = Path(state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -423,8 +425,15 @@ def answer_item(item, answer, state_path, output, generation=CURRENT_GENERATION)
             expected = current if generation is CURRENT_GENERATION else generation
             if current is None or expected != current:
                 raise ValueError(STALE_ANSWER)
-            todo_answers.submit_locked(owner, item["text"], answer, expected, existing)
-            dismiss_locked(item, state_path, output, state)
+            record = todo_answers.submit_locked(
+                owner, item["text"], answer, expected, existing
+            )
+            yield record, state
+
+
+def answer_item(item, answer, state_path, output, generation=CURRENT_GENERATION):
+    with answer_submission(item, answer, state_path, generation) as (_, state):
+        dismiss_locked(item, state_path, output, state)
     return "answer queued (removed)"
 
 

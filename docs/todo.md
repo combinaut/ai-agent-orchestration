@@ -47,18 +47,41 @@ supports `a`: type the item number, press `a`, then choose or type. Outside answ
 mode, number/Enter jumps, n/p paging, mouse clicks, Ignore and Reminder keep their
 existing behavior. In text mode, letters such as q, n and p are answer text. If the item disappears or changes while you type, press Esc to leave the canceled answer; buffered text cannot act on another item.
 
-The queued answer removes the item using the same dismissal state as a successful
-jump. It returns only when the architect changes or re-adds the status item.
-Ignore still emits `TODO IGNORED`; answering emits `TODO ANSWER` instead. The
-message goes to the architect whose status file owns the line, through the
-existing to-do producer, native architect binding and notifier outbox. The target
-after `->` still controls normal jumps. An unavailable architect keeps the answer
-queued and raises a to-do read warning; it is never sent by typing into a pane.
+The buttons view submits an answer synchronously from your choice click/key press or
+Enter in the answer editor, as typed input to the owning architect's pane:
+`Mario (to-do panel): <item text> -> <chosen answer>`. Both parts have controls
+removed, whitespace collapsed, and a 512-character cap. The status-file stem
+selects the architect using its role/name and title; the `->` target still
+controls ordinary jumps. Workers, the Coordinator, unknown owners and ambiguous
+matches never receive typed answers.
+
+The view requires idle, done or working status and a visible Claude screen with
+an empty composer between its horizontal borders and a recognized footer. Herdr
+currently exposes no composer-state field; an unfamiliar screen or agent cannot
+establish emptiness. A non-empty or uncertain composer, or blocked/unknown agent
+status, keeps the item and focuses the resolved architect with
+`type it in the pane: <answer>`. An unresolved or ambiguous owner keeps the item
+without focusing another pane. The view does not overwrite unfinished input or
+answer an approval dialog.
+
+A successful submission removes the item and shows `sent to <architect>`, adding
+`(queued while busy)` for a working architect. Claude Code queues that typed
+input. A failed submission uses the existing queue/native relay and shows
+`relayed; the architect may ask again`. The simple `user-todo.py --follow` editor
+continues to use that relay. No CLI flag, environment variable, file or feed event
+can request a pane submission; only the interactive buttons view sends input.
+
+Successful typed submissions are recorded as delivered. The watcher still emits
+`TODO ANSWER` for the Coordinator, while the notifier suppresses the architect's
+native relay, including stale outbox copies. The watcher never types into panes.
+Queued fallbacks retain the existing native binding and notifier retries. The
+item returns when the architect changes or re-adds it; Ignore still emits
+`TODO IGNORED` instead.
 
 | Resource | Bound |
 |---|---|
 | Choices | Consecutive 1–9; each label at most 512 characters |
-| Answer text | 1–512 characters; editor buffer stops at 512 |
+| Answer text | 1–512 characters; editor buffer stops at 512; typed item context also capped at 512 |
 | Typing preview | Last four wrapped lines; the full answer is retained |
 | Pending answers | One per item, at most 200 records machine-wide |
 | Queue retention | Undelivered answers persist until native delivery or status-item change; delivered duplicate tombstones expire after 3600 seconds |
@@ -83,7 +106,7 @@ Incomplete CSI sequences stay buffered across reads, including modifier sequence
 split after `ESC[1;`.
 
 Each answer editor captures the item's `first_seen` generation when it opens. Submit
-validates that captured generation, queues the answer, and dismisses the item while
+validates that captured generation, records the answer, and dismisses the item while
 holding the queue and to-do state locks (queue first). If an identical wait was
 removed and re-added, it rejects the stale answer with one visible error line and
 leaves the replacement decision visible. Escape and reopen Answer to respond to it.
