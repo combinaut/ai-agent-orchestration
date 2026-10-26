@@ -83,7 +83,12 @@ test("progress starts during search, counts actual openings and clears on comple
     assert.deepEqual(background.openingProgress(), { active: true, opened: 0, planned: 1 });
     held.resolve();
     await running;
-    assert.deepEqual(background.openingProgress(), { active: false, opened: 0, planned: 0 });
+    assert.deepEqual(background.openingProgress(), {
+      active: false,
+      opened: 0,
+      planned: 0,
+      result: { opened: 1, remaining: 0, estimated: false },
+    });
   } finally {
     held.resolve();
     fakeChrome.tabs.create = create;
@@ -126,6 +131,7 @@ test("failed review searches clear progress and allow a new batch", async () => 
 
   await assert.rejects(background.openReviews(), /offline/);
   assert.equal(background.openingProgress().active, false);
+  assert.deepEqual(background.openingProgress().result, { error: "offline" });
 
   world.nativeHandler = async () => ({ ok: true, total: 0, prs: [] });
   assert.deepEqual(await background.openReviews(), { opened: 0, remaining: 0, estimated: false });

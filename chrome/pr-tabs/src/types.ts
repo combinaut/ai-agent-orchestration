@@ -184,6 +184,7 @@ export interface OpeningProgress {
   readonly active: boolean;
   readonly opened: number;
   readonly planned: number;
+  readonly result?: Reply<"openAll">;
 }
 
 export type PlainRequestType =
@@ -435,6 +436,12 @@ export interface TabActionContext {
   ask: Ask;
   status: Pick<Status, "statusText" | "info" | "error">;
   refresh: () => Promise<void>;
+}
+
+export type OpeningProgressObserver = (progress: OpeningProgress) => Promise<void>;
+
+export interface OpeningProgressContext extends TabActionContext {
+  localBusy: Readonly<Ref<boolean>>;
 }
 
 export interface TabActionSpec<K extends TabActionType> {

@@ -46,14 +46,15 @@ const { busy: isGoToBusy, go } = useGoTo({ ask, status, picker }, input);
 const { openAll, openReviews, checkNow, closeDuplicates } = useTabActions({ ask, status, refresh });
 const { busy: isOpeningAll } = openAll;
 const { busy: isOpeningReviews } = openReviews;
-const workerProgress = useOpeningProgress(ask);
-const openingProgress = computed(() => ({
-  ...workerProgress.value,
-  active: workerProgress.value.active || isOpeningAll.value || isOpeningReviews.value,
-}));
-const isOpeningBatch = computed(() => openingProgress.value.active);
 const { busy: isCheckingNow } = checkNow;
 const { busy: isClosingDuplicates } = closeDuplicates;
+const localBusy = computed(() => isOpeningAll.value || isOpeningReviews.value);
+const workerProgress = useOpeningProgress({ ask, status, refresh, localBusy });
+const openingProgress = computed(() => ({
+  ...workerProgress.value,
+  active: workerProgress.value.active || localBusy.value,
+}));
+const isOpeningBatch = computed(() => openingProgress.value.active);
 
 function handleGoToSubmit(): void {
   void go();

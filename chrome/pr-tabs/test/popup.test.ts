@@ -4,7 +4,7 @@ import { flushPromises } from "@vue/test-utils";
 import Select from "primevue/select";
 import { afterEach, test, vi } from "vitest";
 import type { RepoName, Replies, Request, Rules, Summary } from "#/types";
-import type { ActionCase } from "#test/types";
+import type { ActionCase, FakeReplies } from "#test/types";
 import { effectiveRepos, pickedRepo, showRepoPicker } from "#/core";
 import App from "#popup/App.vue";
 import { mountPopup } from "#test/components/mountPopup";
@@ -29,7 +29,7 @@ async function popup(repos: RepoName[], replies: Partial<Replies> = {}) {
     selected: pickedRepo(rules),
     show: showRepoPicker(rules),
   };
-  const answers: Partial<Replies> = { repos: choices, summary: SUMMARY, ...replies };
+  const answers: FakeReplies = { repos: choices, summary: SUMMARY, ...replies };
   const sent: Request[] = [];
 
   async function handleSendMessage(message: Request): Promise<unknown> {
@@ -48,7 +48,7 @@ async function popup(repos: RepoName[], replies: Partial<Replies> = {}) {
   await flushPromises();
   sent.length = 0;
 
-  return { wrapper, sent };
+  return { wrapper, sent, answers };
 }
 
 const ACTIONS: readonly ActionCase[] = [
@@ -220,3 +220,29 @@ test("actions use a two-column grid with opening actions before closing actions"
   );
   wrapper.unmount();
 });
+
+for (const result of [{ opened: 3, remaining: 0, estimated: false }, { error: "offline" }]) {
+  test(`an observed batch refreshes on completion and reports ${JSON.stringify(result)}`, async () => {
+    vi.useFakeTimers();
+    const { wrapper, answers } = await popup([], {
+      openingProgress: { active: true, opened: 1, planned: 3 },
+    });
+
+    try {
+      answers.summary = { prs: 3, groups: [{ title: "New", color: "blue", count: 3, prs: [] }] };
+      answers.openingProgress = { active: false, opened: 0, planned: 0, result };
+      await vi.advanceTimersByTimeAsync(250);
+      await flushPromises();
+
+      assert.equal(wrapper.find("[role=progressbar]").exists(), false);
+      assert.ok(wrapper.text().includes("New"));
+      assert.equal(
+        wrapper.find("#status").text(),
+        "error" in result ? "offline" : "Opened 3. 3 PRs in 1 group",
+      );
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+}

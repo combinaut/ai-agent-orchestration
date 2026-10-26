@@ -711,13 +711,26 @@ export function openingProgress(): OpeningProgress {
 
 function handleOpenBatchSettled(): void {
   openingBatch = undefined;
-  progress = { active: false, opened: 0, planned: 0 };
+  progress = { active: false, opened: 0, planned: 0, result: progress.result };
+}
+
+function recordOpeningResult(result: Reply<"openAll">): Reply<"openAll"> {
+  progress = { ...progress, result };
+
+  return result;
+}
+
+function handleOpeningFailed(error: unknown): never {
+  recordOpeningResult({ error: errorText(error) });
+  throw error;
 }
 
 function openBatch(action: OpenBatchAction): Promise<Reply<"openAll">> {
   if (!openingBatch) {
     progress = { active: true, opened: 0, planned: 0 };
-    openingBatch = openBatchOnce(action).finally(handleOpenBatchSettled);
+    openingBatch = openBatchOnce(action)
+      .then(recordOpeningResult, handleOpeningFailed)
+      .finally(handleOpenBatchSettled);
   }
 
   return openingBatch;

@@ -2,10 +2,60 @@ import { useIntervalFn } from "@vueuse/core";
 import { ref } from "vue";
 import type { Ref } from "vue";
 import { failed } from "#/messages";
-import type { Ask, OpeningProgress } from "#/types";
+import { openAllText } from "#/texts";
+import type {
+  OpeningProgress,
+  OpeningProgressContext,
+  OpeningProgressObserver,
+  Reply,
+} from "#/types";
 
-export function useOpeningProgress(ask: Ask): Readonly<Ref<OpeningProgress>> {
+async function reportCompletion(
+  context: OpeningProgressContext,
+  result: Reply<"openAll">,
+): Promise<void> {
+  const { status, refresh, localBusy } = context;
+  await refresh();
+
+  if (localBusy.value) {
+    return;
+  }
+
+  if (failed(result)) {
+    status.error(result.error);
+  } else {
+    status.info(openAllText(result, status.statusText.value));
+  }
+}
+
+function observeProgress(
+  context: OpeningProgressContext,
+  progress: Ref<OpeningProgress>,
+): OpeningProgressObserver {
+  let observing = false;
+
+  async function recordProgress(reply: OpeningProgress): Promise<void> {
+    progress.value = reply;
+
+    if (context.localBusy.value) {
+      observing = false;
+    } else if (reply.active) {
+      observing = true;
+    } else if (observing && reply.result) {
+      observing = false;
+      await reportCompletion(context, reply.result);
+    }
+  }
+
+  return recordProgress;
+}
+
+export function useOpeningProgress(
+  context: OpeningProgressContext,
+): Readonly<Ref<OpeningProgress>> {
+  const { ask } = context;
   const progress = ref<OpeningProgress>({ active: false, opened: 0, planned: 0 });
+  const recordProgress = observeProgress(context, progress);
   let reading = false;
 
   async function handleProgressTick(): Promise<void> {
@@ -19,7 +69,7 @@ export function useOpeningProgress(ask: Ask): Readonly<Ref<OpeningProgress>> {
       const reply = await ask({ type: "openingProgress" });
 
       if (!failed(reply)) {
-        progress.value = reply;
+        await recordProgress(reply);
       }
     } finally {
       reading = false;
