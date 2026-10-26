@@ -217,17 +217,18 @@ function serial<T>(task: () => Promise<T>): Promise<T> {
 const prTabIds = new Set<TabId>();
 
 function isOpenPrTab(tab: Tab): tab is IdTab {
-  return hasId(tab) && !tab.incognito;
+  return hasId(tab) && !tab.incognito && prKey(tab.pendingUrl || tab.url) !== null;
 }
 
 // Normal-window github.com PR tabs; incognito tabs are left out.
 async function openPrTabs(): Promise<IdTab[]> {
   const tabs = await chrome.tabs.query({
-    url: "https://github.com/*/*/pull/*",
     windowType: "normal",
   });
 
-  return tabs.filter(isOpenPrTab);
+  return tabs
+    .filter(isOpenPrTab)
+    .map((tab) => Object.assign({}, tab, { url: tab.pendingUrl || tab.url }));
 }
 
 function entryOf(tab: IdTab, org: OrgName): PrEntry[] {
@@ -672,7 +673,7 @@ function badgeText(plan: OpenAllPlan): string {
   return `${plan.estimated ? "~" : "+"}${plan.remaining}`;
 }
 
-export async function openAll(): Promise<Reply<"openAll">> {
+async function openAllOnce(): Promise<Reply<"openAll">> {
   const rules = await loadRules();
 
   if (!rules.org || !rules.openAll) {
@@ -688,6 +689,18 @@ export async function openAll(): Promise<Reply<"openAll">> {
   await ensureAlarm();
 
   return { opened: opened.length, remaining: plan.remaining, estimated: plan.estimated };
+}
+
+let openingAll: Promise<Reply<"openAll">> | undefined;
+
+function handleOpenAllSettled(): void {
+  openingAll = undefined;
+}
+
+export function openAll(): Promise<Reply<"openAll">> {
+  openingAll ??= openAllOnce().finally(handleOpenAllSettled);
+
+  return openingAll;
 }
 
 // Focuses the PR's open tab (window, group, tab) or opens it in its architect group, one request at

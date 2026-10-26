@@ -13,7 +13,7 @@
     "128": "icons/icon-128.png"
   },
   "permissions": ["tabGroups", "alarms", "nativeMessaging", "storage"],
-  "host_permissions": ["https://github.com/*/*/pull/*"],
+  "host_permissions": ["*://github.com/*/*/pull/*", "*://www.github.com/*/*/pull/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

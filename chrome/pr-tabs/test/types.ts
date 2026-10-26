@@ -26,7 +26,7 @@ import type {
 
 // The fake browser.
 export type FakeTab = Required<Pick<Tab, "id" | "url">> &
-  Partial<Pick<Tab, "windowId" | "groupId" | "title" | "active" | "incognito">> &
+  Partial<Pick<Tab, "windowId" | "groupId" | "title" | "active" | "incognito" | "pendingUrl">> &
   Pick<chrome.tabs.QueryInfo, "windowType">;
 
 export type FakeStore = Partial<StoredState>;
