@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import type { PrKey } from "#/types";
+import { computed, onMounted, ref, useTemplateRef } from "vue";
+import type { GroupListControl, PrKey } from "#/types";
+import { useFuzzyFilter } from "#/composables/useFuzzyFilter";
+import { usePrClose } from "#/composables/usePrClose";
+import PrSearch from "./components/PrSearch.vue";
 import { useOpeningProgress } from "#/composables/useOpeningProgress";
 import { useMessages } from "#/composables/useMessages";
 import { usePanes } from "#/composables/usePanes";
@@ -40,6 +43,15 @@ const status = useStatus();
 const { statusText, isStatusError } = status;
 const { groups, refresh } = useSummary(ask, status);
 const panes = usePanes(ask, status);
+const query = ref("");
+const {
+  groups: visibleGroups,
+  active: isFiltering,
+  count: matchCount,
+  best: bestMatch,
+} = useFuzzyFilter(groups, query);
+const groupList = useTemplateRef<GroupListControl>("groupList");
+const closing = usePrClose({ ask, status, refresh });
 const input = ref("");
 const picker = useRepoPicker(ask, input);
 const { repos, repo, visible: isRepoPickerVisible } = picker;
@@ -56,6 +68,20 @@ const openingProgress = computed(() => ({
   active: workerProgress.value.active || localBusy.value,
 }));
 const isOpeningBatch = computed(() => openingProgress.value.active);
+
+function handleSearchNext(): void {
+  groupList.value?.focusFirst();
+}
+
+function handleSearchGo(): void {
+  if (bestMatch.value) {
+    void focusPr(bestMatch.value);
+  }
+}
+
+function handlePrClose(key: PrKey): void {
+  void closing.close(key);
+}
 
 function handlePrGo(key: PrKey): void {
   void focusPr(key);
@@ -140,6 +166,20 @@ onMounted(handlePopupMounted);
     </div>
     <OpeningProgress :progress="openingProgress" />
     <StatusLine :text="statusText" :error="isStatusError" />
-    <GroupList :groups="groups" :panes="panes" @go="handlePrGo" />
+    <PrSearch
+      v-model="query"
+      :active="isFiltering"
+      :count="matchCount"
+      @next="handleSearchNext"
+      @go="handleSearchGo"
+    />
+    <GroupList
+      ref="groupList"
+      :groups="visibleGroups"
+      :panes="panes"
+      :filtering="isFiltering"
+      @go="handlePrGo"
+      @close="handlePrClose"
+    />
   </main>
 </template>

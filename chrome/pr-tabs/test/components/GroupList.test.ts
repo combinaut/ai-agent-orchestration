@@ -38,7 +38,9 @@ test("one collapsed panel per group, in the given order", () => {
     groups,
   );
   assert.deepEqual(
-    wrapper.findAll("button[aria-expanded]").map((header) => header.attributes("aria-expanded")),
+    wrapper
+      .findAll<HTMLButtonElement>("button[aria-expanded]")
+      .map((header) => header.attributes("aria-expanded")),
     ["false", "false"],
   );
 });
@@ -81,31 +83,53 @@ test("expanded groups resolve later batch heads with the real pane cache", async
       { type: "panes", heads: [HEAD] },
       { type: "panes", heads: [later] },
     ]);
-    assert.equal(wrapper.findAll("li .p-button").length, 2);
+    assert.equal(wrapper.findAll("li [data-pr-pane]").length, 2);
     assert.ok(wrapper.text().includes("working"));
   } finally {
     wrapper.unmount();
   }
 });
 
-test("a live count reorder preserves expansion by stable group identity", async () => {
-  const finder = { id: "7", title: "Finder", count: 2, prs: [] };
-  const webapp = { id: "8", title: "webapp", count: 1, prs: [] };
+test("a live count reorder preserves expansion and focused header identity", async () => {
+  const finder = { id: "10", title: "Finder", count: 2, prs: [] };
+  const webapp = { id: "9", title: "webapp", count: 1, prs: [] };
   const wrapper = mountPopup(GroupList, {
     props: { groups: [finder, webapp], panes: fakePanes() },
+    attachTo: document.body,
   });
   try {
-    await wrapper.findAll("button[aria-expanded]")[0]?.trigger("click");
-    await wrapper.setProps({ groups: [{ ...webapp, count: 3 }, finder] });
-    const headers = wrapper.findAll("button[aria-expanded]");
-    assert.equal(
-      headers.find((header) => header.text().includes("Finder"))?.attributes("aria-expanded"),
-      "true",
-    );
-    assert.equal(
-      headers.find((header) => header.text().includes("webapp"))?.attributes("aria-expanded"),
-      "false",
-    );
+    const headers = wrapper.findAll<HTMLButtonElement>("button[aria-expanded]");
+    assert.ok(headers[0]?.text().includes("Finder"));
+    await headers[0]?.trigger("click");
+    headers[0]?.element.focus();
+    await wrapper.setProps({
+      groups: [
+        { ...webapp, count: 5 },
+        { ...finder, count: 3 },
+      ],
+    });
+    const reordered = wrapper.findAll<HTMLButtonElement>("button[aria-expanded]");
+    assert.ok(reordered[0]?.text().includes("webapp"));
+    assert.equal(reordered[1]?.attributes("aria-expanded"), "true");
+    assert.ok(document.activeElement?.textContent?.includes("Finder"));
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("PR row focus stays on its key across a live row reorder", async () => {
+  const first = { key: "acme/webapp#1" as const, label: "webapp#1", title: "First", head: null };
+  const second = { key: "acme/webapp#2" as const, label: "webapp#2", title: "Second", head: null };
+  const group = { id: "10", title: "Finder", count: 2, prs: [first, second] };
+  const wrapper = mountPopup(GroupList, {
+    props: { groups: [group], panes: fakePanes() },
+    attachTo: document.body,
+  });
+  try {
+    await wrapper.find("button[aria-expanded]").trigger("click");
+    wrapper.find<HTMLButtonElement>("button[data-pr-tab]").element.focus();
+    await wrapper.setProps({ groups: [{ ...group, prs: [second, first] }] });
+    assert.equal(document.activeElement?.getAttribute("aria-label"), "webapp#1 First");
   } finally {
     wrapper.unmount();
   }

@@ -44,11 +44,22 @@ function visibleProgress(
 function trackLocalStart(context: OpeningProgressContext, progress: Ref<OpeningProgress>): void {
   function handleLocalBusyChange(busy: boolean): void {
     if (busy && !progress.value.active) {
-      progress.value = { active: false, opened: 0, planned: 0 };
+      progress.value = {
+        active: false,
+        opened: 0,
+        planned: 0,
+        metadataRevision: progress.value.metadataRevision,
+      };
     }
   }
 
   watch(context.localBusy, handleLocalBusyChange, { flush: "sync" });
+}
+
+function progressAdvanced(reply: OpeningProgress, previous: OpeningProgress): boolean {
+  const opened = reply.active && reply.opened > previous.opened;
+
+  return opened || (reply.metadataRevision ?? 0) > (previous.metadataRevision ?? 0);
 }
 
 function observeProgress(
@@ -59,7 +70,7 @@ function observeProgress(
 
   async function recordProgress(reply: OpeningProgress): Promise<void> {
     const local = context.localBusy.value;
-    const advanced = reply.active && reply.opened > progress.value.opened;
+    const advanced = progressAdvanced(reply, progress.value);
     progress.value = visibleProgress(reply, progress.value, local);
 
     if (advanced) {

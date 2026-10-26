@@ -348,5 +348,35 @@
   },
   "errPrTabGone": {
     "message": "La pestaña de esa PR ya no está abierta."
+  },
+  "prSearchLabel": {
+    "message": "Buscar pestañas de PR"
+  },
+  "prSearchEmpty": {
+    "message": "No hay PR coincidentes"
+  },
+  "prSearchCount_one": {
+    "message": "$COUNT$ PR coincidente",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prSearchCount_other": {
+    "message": "$COUNT$ PR coincidentes",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closePrTab": {
+    "message": "Cerrar pestaña $PR$",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
   }
 }

@@ -52,6 +52,8 @@ afterEach(() => {
 
 test("empty storage restores open PR titles, heads, architect groups and pane controls", async () => {
   const worker = await freshWorker();
+  await worker.summary();
+  await flushPromises();
   const summary = await worker.summary();
   assert.equal(summary.groups[0]?.title, "Finder");
   assert.equal(summary.groups[0]?.prs[0]?.title, "Restored title");
@@ -67,7 +69,7 @@ test("empty storage restores open PR titles, heads, architect groups and pane co
   try {
     await wrapper.find("button[aria-expanded]").trigger("click");
     await flushPromises();
-    assert.equal(wrapper.findAll("li .p-button").length, 1);
+    assert.equal(wrapper.findAll("li [data-pr-pane]").length, 1);
     assert.ok(wrapper.text().includes("Restored title"));
   } finally {
     wrapper.unmount();
@@ -141,6 +143,8 @@ test("timed-out hydration preserves cached data, cools down and can retry", asyn
     await worker.summary();
     assert.equal(requests, 1);
     await vi.advanceTimersByTimeAsync(15000);
+    await worker.summary();
+    await flushPromises();
     const restored = await worker.summary();
     assert.equal(requests, 2);
     assert.equal(restored.groups[0]?.prs[0]?.title, "Restored title");
@@ -164,11 +168,80 @@ test("hydration merges current metadata and rechecks tabs before regrouping", as
     assert.ok(tab);
     tab.url = "https://example.com";
     held.resolve(RESPONSE);
-    assert.equal((await summary).prs, 0);
+    await summary;
+    await flushPromises();
+    assert.equal((await worker.summary()).prs, 0);
     assert.equal(world.store.meta?.["acme/webapp#99"]?.title, "Concurrent new PR");
     assert.equal(world.grouped.length, 0);
   } finally {
     held.resolve(RESPONSE);
     await summary;
   }
+});
+
+test("a held hydration never delays cached summary or startup grouping", async () => {
+  const held = Promise.withResolvers<HostOk<StatesReply>>();
+  world.store.meta = { "acme/webapp#7": { title: "Cached title" } };
+  world.nativeHandler = async () => held.promise;
+  const worker = await freshWorker();
+  let returned = false;
+  const reading = worker.summary().then((value) => {
+    returned = true;
+
+    return value;
+  });
+  const starting = world.startupListener();
+  try {
+    await flushPromises();
+    assert.equal(returned, true);
+    assert.equal(world.grouped.at(-1)?.title, "webapp");
+    assert.equal((await reading).groups[0]?.prs[0]?.title, "Cached title");
+  } finally {
+    held.resolve(RESPONSE);
+    await Promise.all([reading, starting]);
+  }
+});
+
+test("parallel triggers keep hydration active until the shared request settles", async () => {
+  const held = Promise.withResolvers<HostOk<StatesReply>>();
+  let requests = 0;
+  world.nativeHandler = async () => {
+    requests++;
+
+    return held.promise;
+  };
+  const worker = await freshWorker();
+  const first = worker.summary();
+  try {
+    await flushPromises();
+    world.tabs.push({ id: 2, url: URL.replace("/7", "/8"), windowId: 1, groupId: 1 });
+    const second = worker.summary();
+    const starting = world.startupListener();
+    await flushPromises();
+    assert.equal(requests, 1);
+    assert.equal(worker.openingProgress().hydrating, true);
+    held.resolve(RESPONSE);
+    await Promise.all([first, second, starting]);
+    await flushPromises();
+    assert.equal(worker.openingProgress().hydrating, undefined);
+    assert.equal(worker.openingProgress().metadataRevision, 1);
+  } finally {
+    held.resolve(RESPONSE);
+    await first;
+  }
+});
+
+test("startup alone hydrates metadata and restores the architect group", async () => {
+  await freshWorker();
+  let requests = 0;
+  world.nativeHandler = async () => {
+    requests++;
+
+    return RESPONSE;
+  };
+  await world.startupListener();
+  await flushPromises();
+  assert.equal(requests, 1);
+  assert.equal(world.grouped.at(-1)?.title, "Finder");
+  assert.equal(world.store.meta?.["acme/webapp#7"]?.title, "Restored title");
 });

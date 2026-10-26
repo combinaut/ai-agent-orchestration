@@ -37,11 +37,11 @@ test("a found pane without an agent state still enables focus", async () => {
 test("missing panes hide the button; checking keeps the loading spinner", () => {
   const missing = item({ "acme/webapp:feature": null }).wrapper;
 
-  assert.equal(missing.findComponent(Button).exists(), false);
-  assert.equal(item({}).wrapper.findComponent(Button).exists(), false);
+  assert.equal(missing.find("[data-pr-pane]").exists(), false);
+  assert.equal(item({}).wrapper.find("[data-pr-pane]").exists(), false);
   assert.equal(
     item({}, false, { ...ROW, head: null })
-      .wrapper.findComponent(Button)
+      .wrapper.find("[data-pr-pane]")
       .exists(),
     false,
   );
@@ -110,4 +110,47 @@ test("a named native row button selects its PR; terminal focus remains separate"
   await wrapper.findComponent(Button).trigger("click");
   assert.deepEqual(panes.focused, [ROW.head]);
   assert.equal(wrapper.emitted("go")?.length, 1);
+});
+
+test("close is a named sibling control after the terminal and never selects the row", async () => {
+  const { wrapper, panes } = item({ "acme/webapp:feature": { state: "working" } });
+  const close = wrapper.find("button[data-pr-close]");
+  let bubbled = 0;
+  function handleBubble(): void {
+    bubbled++;
+  }
+  wrapper.find("li").element.addEventListener("click", handleBubble);
+  try {
+    assert.equal(close.attributes("aria-label"), "Close tab webapp#7");
+    assert.equal(close.attributes("title"), "Close tab webapp#7");
+    assert.equal(close.element.parentElement, wrapper.find("li").element);
+    await close.trigger("click");
+    assert.deepEqual(wrapper.emitted("close"), [[ROW.key]]);
+    assert.equal(wrapper.emitted("go"), undefined);
+    assert.equal(panes.focused.length, 0);
+    assert.equal(bubbled, 0);
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("Fuse label/title highlights render marks safely and clear with the query", async () => {
+  const pr = {
+    ...ROW,
+    title: "<img> Fix",
+    highlights: { label: [[0, 5]] as const, title: [[6, 8]] as const, queryLength: 3 },
+  };
+  const { wrapper } = item({}, false, pr);
+  try {
+    assert.deepEqual(
+      wrapper.findAll("mark").map((mark) => mark.text()),
+      ["webapp", "Fix"],
+    );
+    assert.equal(wrapper.find("img").exists(), false);
+    assert.ok(wrapper.find(".truncate").text().includes("<img>"));
+    await wrapper.setProps({ pr: ROW });
+    assert.equal(wrapper.find("mark").exists(), false);
+  } finally {
+    wrapper.unmount();
+  }
 });

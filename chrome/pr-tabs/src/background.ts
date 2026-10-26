@@ -43,6 +43,7 @@ import type {
   HostRequest,
   IdTab,
   Meta,
+  MetadataRevision,
   OpenAllPlan,
   OpenBatchAction,
   OpeningProgress,
@@ -711,7 +712,11 @@ let openingBatch: Promise<Reply<"openAll">> | undefined;
 let progress: OpeningProgress = { active: false, opened: 0, planned: 0 };
 
 export function openingProgress(): OpeningProgress {
-  return { ...progress };
+  if (metadataFlight) {
+    return { ...progress, hydrating: true, metadataRevision };
+  }
+
+  return metadataRevision > 0 ? { ...progress, metadataRevision } : { ...progress };
 }
 
 function handleOpenBatchSettled(): void {
@@ -770,6 +775,22 @@ async function focusKnownPr(key: PrKey): Promise<Reply<"focusPr">> {
 
 export function focusPr(key: PrKey): Promise<Reply<"focusPr">> {
   return serial(() => focusKnownPr(key));
+}
+
+async function closeKnownPr(key: PrKey): Promise<Reply<"closePr">> {
+  const rules = await loadRules();
+  const entry = findOpenTab(await prEntries(rules), key, await focusedId());
+  const tab = entry ? await findTab(entry.tab.id) : null;
+
+  if (!tab || !stillShowsPr(tab, key, rules.org)) {
+    return { closed: 0 };
+  }
+
+  return { closed: (await removeTab(tab.id)) ? 1 : 0 };
+}
+
+export function closePr(key: PrKey): Promise<Reply<"closePr">> {
+  return serial(() => closeKnownPr(key));
 }
 
 // What the popup needs for the repo dropdown: the listed repos, the selected one, and whether to
@@ -918,6 +939,7 @@ async function groupsById(entries: PrEntry[]): Promise<Map<GroupId, TabGroup>> {
 
 const metadataAttempts = new Map<PrKey, number>();
 let metadataFlight: Promise<void> | undefined;
+let metadataRevision: MetadataRevision = 0;
 
 function needsMetadata(key: PrKey, meta: Meta): boolean {
   const recorded = meta[key];
@@ -956,10 +978,14 @@ async function hydrateMetadata(): Promise<void> {
     return;
   }
 
-  const reply = await askHost({ type: "states", prs: batch });
-  await recordOwners(reply.owners);
-  await updateMeta((meta) => recordStates(meta, reply.prs));
-  await regroup(rules, await prEntries(rules));
+  try {
+    const reply = await askHost({ type: "states", prs: batch });
+    await recordOwners(reply.owners);
+    await updateMeta((meta) => recordStates(meta, reply.prs));
+    await regroup(rules, await prEntries(rules));
+  } finally {
+    metadataRevision++;
+  }
 }
 
 function handleMetadataSettled(): void {
@@ -973,7 +999,7 @@ function backfillMissingMetadata(): Promise<void> {
 }
 
 export async function summary(): Promise<Summary> {
-  await backfillMissingMetadata();
+  void backfillMissingMetadata();
   const entries = await prEntries(await loadRules());
 
   return summarize(entries, await groupsById(entries), await readMeta());
@@ -1050,6 +1076,10 @@ function handleFocusPrMessage(message: RequestOf<"focusPr">): Promise<Reply<"foc
   return focusPr(message.key);
 }
 
+function handleClosePrMessage(message: RequestOf<"closePr">): Promise<Reply<"closePr">> {
+  return closePr(message.key);
+}
+
 function handleReposMessage(): Promise<RepoChoices> {
   return repoChoices();
 }
@@ -1084,6 +1114,7 @@ const handleRuntimeMessage = messageListener({
   openingProgress,
   goTo: handleGoToMessage,
   focusPr: handleFocusPrMessage,
+  closePr: handleClosePrMessage,
   repos: handleReposMessage,
   pickRepo: handlePickRepoMessage,
   summary: handleSummaryMessage,
@@ -1104,7 +1135,7 @@ async function groupOpenTabs(rules: Rules, meta: Meta): Promise<void> {
 async function start(): Promise<void> {
   await chrome.alarms.create(ALARM, { delayInMinutes: FIRST_POLL_SECONDS / 60 });
 
-  await backfillMissingMetadata();
+  void backfillMissingMetadata();
   const rules = await loadRules();
   const meta = await readMeta();
 

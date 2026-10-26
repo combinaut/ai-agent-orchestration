@@ -410,3 +410,109 @@ test("selecting a row focuses its existing tab and closes the popup", async () =
     wrapper.unmount();
   }
 });
+
+test("hydration settlement refreshes cached titles once without a batch", async () => {
+  vi.useFakeTimers();
+  const row = {
+    key: "acme/webapp#7" as const,
+    label: "webapp#7",
+    title: "Cached title",
+    head: null,
+  };
+  const group = { id: "10", title: "Finder", count: 1, prs: [row] };
+  const { wrapper, answers, sent } = await popup([], { summary: { prs: 1, groups: [group] } });
+  try {
+    await wrapper.find("button[aria-expanded]").trigger("click");
+    assert.ok(wrapper.text().includes("Cached title"));
+    answers.summary = {
+      prs: 1,
+      groups: [{ ...group, prs: [{ ...row, title: "Restored title" }] }],
+    };
+    answers.openingProgress = { active: false, opened: 0, planned: 0, metadataRevision: 1 };
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+    assert.ok(wrapper.text().includes("Restored title"));
+    await vi.advanceTimersByTimeAsync(500);
+    assert.equal(sent.filter((message) => message.type === "summary").length, 1);
+  } finally {
+    wrapper.unmount();
+    vi.useRealTimers();
+  }
+});
+
+const SEARCH_SUMMARY: Summary = {
+  prs: 2,
+  groups: [
+    {
+      id: "10",
+      title: "Finder",
+      count: 1,
+      prs: [{ key: "acme/webapp#7", label: "webapp#7", title: "Amber Zeppelin", head: null }],
+    },
+    {
+      id: "9",
+      title: "Other",
+      count: 1,
+      prs: [{ key: "acme/webapp#8", label: "webapp#8", title: "Plain record", head: null }],
+    },
+  ],
+};
+
+async function searchablePopup() {
+  return popup([], {
+    summary: SEARCH_SUMMARY,
+    panes: {},
+    focusPr: { focused: "acme/webapp#7" },
+    closePr: { closed: 1 },
+  });
+}
+
+test("search expands matches, restores expansion, moves down and Enter focuses the best existing tab", async () => {
+  const { wrapper, sent } = await searchablePopup();
+  try {
+    assert.equal(document.activeElement?.id, "target");
+    await wrapper.findAll("button[aria-expanded]")[1]?.trigger("click");
+    const search = wrapper.find<HTMLInputElement>("#pr-search");
+    await search.setValue("Amber");
+    await flushPromises();
+    assert.equal(wrapper.findAll("button[aria-expanded]").length, 1);
+    assert.equal(wrapper.find("button[aria-expanded]").attributes("aria-expanded"), "true");
+    await search.trigger("keydown", { key: "ArrowDown" });
+    assert.equal(document.activeElement?.getAttribute("aria-label"), "webapp#7 Amber Zeppelin");
+    await search.trigger("keydown", { key: "Escape" });
+    await flushPromises();
+    assert.equal(wrapper.findAll("button[aria-expanded]")[1]?.attributes("aria-expanded"), "true");
+    await search.setValue("Amber");
+    await search.trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    assert.deepEqual(
+      sent.filter((message) => message.type === "focusPr" || message.type === "goTo"),
+      [{ type: "focusPr", key: "acme/webapp#7" }],
+    );
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("closing the only filtered match refreshes counts and focuses search without closing the popup", async () => {
+  const closeWindow = vi.spyOn(window, "close").mockImplementation(noop);
+  const { wrapper, answers, sent } = await searchablePopup();
+  try {
+    await wrapper.find("#pr-search").setValue("Amber");
+    await flushPromises();
+    answers.summary = { prs: 1, groups: SEARCH_SUMMARY.groups.slice(1) };
+    await wrapper.find("button[data-pr-close]").trigger("click");
+    await flushPromises();
+    assert.equal(wrapper.findAll("button[aria-expanded]").length, 0);
+    assert.ok(wrapper.text().includes("No matching PRs"));
+    assert.equal(document.activeElement?.id, "pr-search");
+    assert.equal(closeWindow.mock.calls.length, 0);
+    assert.deepEqual(
+      sent.filter((message) => message.type === "closePr" || message.type === "focusPr"),
+      [{ type: "closePr", key: "acme/webapp#7" }],
+    );
+    assert.ok(wrapper.find("#status").text().includes("1 PR"));
+  } finally {
+    wrapper.unmount();
+  }
+});

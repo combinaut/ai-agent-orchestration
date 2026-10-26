@@ -6,12 +6,12 @@ import AccordionHeader, { type AccordionHeaderPassThroughOptions } from "primevu
 import AccordionPanel from "primevue/accordionpanel";
 import Badge from "primevue/badge";
 import { computed } from "vue";
-import type { GroupItemProps, PrKey, PrRows } from "#/types";
+import type { GroupItemProps, PrKey, PrRowEvents, PrRows } from "#/types";
 import { useGroupItem } from "#/composables/useGroupItem";
 import PrItem from "./PrItem.vue";
 
 const props = defineProps<GroupItemProps>();
-const emit = defineEmits<{ go: [key: PrKey] }>();
+const emit = defineEmits<PrRowEvents>();
 const { title, count, dotClass, countLabel } = useGroupItem(() => props.group);
 const value = computed(() => props.group.id);
 const prRows = computed<PrRows>(() =>
@@ -25,6 +25,10 @@ const accordionHeaderPassThrough: AccordionHeaderPassThroughOptions = {
 };
 function handlePrGo(key: PrKey): void {
   emit("go", key);
+}
+
+function handlePrClose(key: PrKey): void {
+  emit("close", key);
 }
 </script>
 
@@ -43,7 +47,14 @@ function handlePrGo(key: PrKey): void {
     </AccordionHeader>
     <AccordionContent class="grid-cols-1" :pt="accordionContentPassThrough">
       <ul class="list-none p-0">
-        <PrItem v-for="(row, key) in prRows" :key="key" :pr="row" :panes="panes" @go="handlePrGo" />
+        <PrItem
+          v-for="(row, key) in prRows"
+          :key="key"
+          :pr="row"
+          :panes="panes"
+          @go="handlePrGo"
+          @close="handlePrClose"
+        />
       </ul>
     </AccordionContent>
   </AccordionPanel>

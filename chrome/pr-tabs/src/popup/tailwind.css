@@ -8,6 +8,8 @@
 }
 
 @theme inline {
+  --color-search-match: var(--pr-tabs-match-background);
+  --color-search-match-text: var(--pr-tabs-match-text);
   --color-popup: var(--p-content-background);
   --color-popup-text: var(--p-text-color);
   --color-row-hover: var(--p-content-hover-background);

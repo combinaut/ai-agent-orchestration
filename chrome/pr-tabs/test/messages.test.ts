@@ -142,3 +142,30 @@ test("an error reads as its message, anything else as text", () => {
   assert.equal(errorText({ message: "" }), "[object Object]");
   assert.equal(errorText("timeout"), "timeout");
 });
+
+test("focusPr is sent once when an answer is lost", async () => {
+  let calls = 0;
+  const result = await ask(
+    async () => {
+      calls++;
+
+      return undefined;
+    },
+    { type: "focusPr", key: "acme/webapp#7" },
+  );
+  assert.equal(calls, 1);
+  assert.deepEqual(result, { error: noAnswer() });
+});
+
+test("closePr is never retried after a lost answer", async () => {
+  let calls = 0;
+  await ask(
+    async () => {
+      calls++;
+
+      return undefined;
+    },
+    { type: "closePr", key: "acme/webapp#7" },
+  );
+  assert.equal(calls, 1);
+});

@@ -1,5 +1,7 @@
 /* The popup's own design tokens, for what the Aura preset (--p-*) lacks. */
 :root {
+  --pr-tabs-match-background: var(--p-highlight-background);
+  --pr-tabs-match-text: var(--p-highlight-color);
   --p-progressbar-height: 0.5rem;
   --pr-tabs-popup-width: 480px;
   --pr-tabs-popup-max-height: 584px;

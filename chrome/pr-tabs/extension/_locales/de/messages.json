@@ -348,5 +348,35 @@
   },
   "errPrTabGone": {
     "message": "Dieser PR-Tab ist nicht mehr geöffnet."
+  },
+  "prSearchLabel": {
+    "message": "PR-Tabs durchsuchen"
+  },
+  "prSearchEmpty": {
+    "message": "Keine passenden PRs"
+  },
+  "prSearchCount_one": {
+    "message": "$COUNT$ passende PR",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prSearchCount_other": {
+    "message": "$COUNT$ passende PRs",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closePrTab": {
+    "message": "Tab $PR$ schließen",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
   }
 }

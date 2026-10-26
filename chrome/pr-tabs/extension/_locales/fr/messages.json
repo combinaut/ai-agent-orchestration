@@ -348,5 +348,35 @@
   },
   "errPrTabGone": {
     "message": "L’onglet de cette PR n’est plus ouvert."
+  },
+  "prSearchLabel": {
+    "message": "Rechercher un onglet PR"
+  },
+  "prSearchEmpty": {
+    "message": "Aucune PR correspondante"
+  },
+  "prSearchCount_one": {
+    "message": "$COUNT$ PR correspondante",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prSearchCount_other": {
+    "message": "$COUNT$ PR correspondantes",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closePrTab": {
+    "message": "Fermer l’onglet $PR$",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
   }
 }

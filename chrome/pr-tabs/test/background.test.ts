@@ -702,3 +702,36 @@ test("row focus reuses an existing tab and never creates a replacement after it 
   });
   assert.equal(world.created.length, 0);
 });
+
+test("closePr removes only the selected PR tab without opening or focusing", async () => {
+  const worker = await freshWorker("close-pr");
+  world.tabs = [
+    { id: 1, url: `${PR}/7` },
+    { id: 2, url: `${PR}/8` },
+  ];
+  world.created = [];
+  const focus = vi.spyOn(fakeChrome.windows, "update");
+  try {
+    assert.deepEqual(await worker.closePr("acme/webapp#7"), { closed: 1 });
+    assert.deepEqual(ids(), [2]);
+    assert.deepEqual(await worker.closePr("acme/webapp#7"), { closed: 0 });
+    assert.equal(world.created.length, 0);
+    assert.equal(focus.mock.calls.length, 0);
+  } finally {
+    focus.mockRestore();
+  }
+});
+
+test("closePr rechecks the tab id so a navigated tab is never closed", async () => {
+  const worker = await freshWorker("close-pr-navigation");
+  world.tabs = [{ id: 1, url: `${PR}/7` }];
+  const get = vi
+    .spyOn(fakeChrome.tabs, "get")
+    .mockImplementation(async () => ({ id: 1, url: `${PR}/8` }));
+  try {
+    assert.deepEqual(await worker.closePr("acme/webapp#7"), { closed: 0 });
+    assert.deepEqual(ids(), [1]);
+  } finally {
+    get.mockRestore();
+  }
+});

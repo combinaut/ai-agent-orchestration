@@ -125,6 +125,7 @@ export interface BranchRef {
 }
 
 export interface PrRow {
+  readonly highlights?: PrHighlights;
   readonly key: PrKey;
   readonly label: string;
   readonly title: string;
@@ -185,7 +186,11 @@ export interface OpenAllResult {
 // Requests from the popup to the service worker.
 export type OpenBatchAction = "openAll" | "openReviews";
 
+export type MetadataRevision = number;
+
 export interface OpeningProgress {
+  readonly hydrating?: boolean;
+  readonly metadataRevision?: MetadataRevision;
   readonly active: boolean;
   readonly opened: number;
   readonly planned: number;
@@ -204,10 +209,14 @@ export interface PickRepoRequest {
   readonly repo: RepoName;
 }
 
-export interface FocusPrRequest {
-  readonly type: "focusPr";
+export type PrKeyAction = "focusPr" | "closePr";
+
+export interface PrKeyRequest<K extends PrKeyAction = PrKeyAction> {
+  readonly type: K;
   readonly key: PrKey;
 }
+
+export type FocusPrRequest = PrKeyRequest<"focusPr">;
 
 export interface GoToRequest {
   readonly type: "goTo";
@@ -226,11 +235,13 @@ export interface FocusPaneRequest {
 }
 
 export type Request =
-  PlainRequest | PickRepoRequest | GoToRequest | FocusPrRequest | PanesRequest | FocusPaneRequest;
+  PlainRequest | PickRepoRequest | GoToRequest | PrKeyRequest | PanesRequest | FocusPaneRequest;
 export type RequestType = Request["type"];
 export type RequestOf<K extends RequestType> = K extends PlainRequestType
   ? PlainRequest<K>
-  : Extract<Request, { readonly type: K }>;
+  : K extends PrKeyAction
+    ? PrKeyRequest<K>
+    : Extract<Request, { readonly type: K }>;
 
 export interface Failure {
   readonly error: string;
@@ -270,6 +281,7 @@ export interface Replies {
   readonly pickRepo: Readonly<Record<string, never>>;
   readonly goTo: GoToResult;
   readonly focusPr: Focusing;
+  readonly closePr: DuplicatesClosed;
   readonly openAll: OpenAllResult;
   readonly openReviews: OpenAllResult;
   readonly openingProgress: OpeningProgress;
@@ -518,6 +530,7 @@ export interface StatusLineProps {
 }
 
 export interface GroupListProps {
+  filtering?: boolean;
   groups: GroupSummary[];
   panes: Panes;
 }
@@ -591,3 +604,60 @@ export interface CatalogEntry {
 }
 
 export type Labels<K extends PlainMessageKey> = Readonly<Record<K, string>>;
+
+export interface SearchPr {
+  label: string;
+  row: PrRow;
+  group: GroupSummary;
+  title: string;
+  repo: RepoName;
+  number: PrNumber;
+  branch: BranchName;
+  groupName: GroupTitle;
+}
+
+export interface FuzzyFilter {
+  groups: ComputedRef<GroupSummary[]>;
+  active: ComputedRef<boolean>;
+  count: ComputedRef<number>;
+  best: ComputedRef<PrKey | null>;
+}
+
+export interface PrSearchProps {
+  count: number;
+  active: boolean;
+}
+export interface PrSearchCommands {
+  go: [];
+  next: [];
+}
+export interface PrRowEvents {
+  go: [key: PrKey];
+  close: [key: PrKey];
+}
+export interface GroupListControl {
+  focusFirst: () => void;
+}
+export type CloseFocus = () => void;
+export interface PrCloseContext {
+  ask: Ask;
+  status: Pick<Status, "error">;
+  refresh: () => Promise<void>;
+}
+export interface PrClose {
+  close: (key: PrKey) => Promise<void>;
+}
+
+export type MatchRange = readonly [number, number];
+export interface Segment {
+  text: string;
+  matched: boolean;
+}
+export interface PrHighlights {
+  label: readonly MatchRange[];
+  title: readonly MatchRange[];
+  queryLength: number;
+}
+export interface TextSegmentProps {
+  segment: Segment;
+}
