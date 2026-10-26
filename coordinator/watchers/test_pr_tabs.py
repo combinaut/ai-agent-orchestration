@@ -392,6 +392,10 @@ class PrTabsTest(IsolatedTestCase):
                 failing = False
 
                 def run(args, **kwargs):
+                    if args[1:] == ("agent", "list"):
+                        return SimpleNamespace(
+                            stdout='{"result":{"agents":[{"name":"Finder","workspace_id":"a","tokens":{"role":"architect"}}]}}'
+                        )
                     if args[3] == "symbolic-ref":
                         if failing:
                             raise subprocess.CalledProcessError(
@@ -436,7 +440,9 @@ class PrTabsTest(IsolatedTestCase):
                 "ORCH_ENV": "herdr",
             }
             reply = SimpleNamespace(
-                stdout=json.dumps({"result": {"workspaces": [], "panes": []}})
+                stdout=json.dumps(
+                    {"result": {"workspaces": [], "panes": [], "agents": []}}
+                )
             )
             with (
                 patch.dict(os.environ, environ),
@@ -498,6 +504,10 @@ class PrTabsTest(IsolatedTestCase):
         def run(args, **kwargs):
             self.assertLessEqual(kwargs["timeout"], 5)
             self.assertEqual(kwargs["env"]["HERDR_SOCKET_PATH"], "/fixture/socket")
+            if args[1:] == ("agent", "list"):
+                return SimpleNamespace(
+                    stdout='{"result":{"agents":[{"name":"Finder","workspace_id":"a","tokens":{"role":"architect"}}]}}'
+                )
             return SimpleNamespace(
                 stdout="refs/heads/feature"
                 if args[3] == "symbolic-ref"
@@ -539,6 +549,20 @@ class PrTabsTest(IsolatedTestCase):
                 value = json.dumps(
                     {"result": {"panes": [{"workspace_id": "w", "cwd": "/docs/sub"}]}}
                 )
+            elif args[1:] == ("agent", "list"):
+                value = json.dumps(
+                    {
+                        "result": {
+                            "agents": [
+                                {
+                                    "name": "Finder",
+                                    "workspace_id": "a",
+                                    "tokens": {"role": "architect"},
+                                }
+                            ]
+                        }
+                    }
+                )
             elif args[3] == "rev-parse":
                 value = "/docs/.git" if "--git-common-dir" in args else "/docs"
             elif args[3] == "symbolic-ref":
@@ -573,6 +597,7 @@ if [ -n "$FAKE_HERDR_FAIL" ]; then echo "$FAKE_HERDR_FAIL" >&2; exit 1; fi
 case "$1 $2" in
   "workspace list") cat "$FAKE_HERDR_DIR/workspaces.json" ;;
   "pane list") cat "$FAKE_HERDR_DIR/panes.json" ;;
+  "agent list") printf '%s\n' '{"result":{"agents":[]}}' ;;
   *) echo '{"result":{}}' ;;
 esac
 """
