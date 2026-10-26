@@ -18,6 +18,11 @@ import orch_settings  # noqa: E402
 GITHUB_REMOTE = orch_settings.GITHUB_REMOTE
 NO_REMOTE = re.compile(r"No such remote", re.I)
 GONE = re.compile(r"cannot change to .*: No such file or directory", re.I)
+OPEN_PRS = "## open prs"
+PR_URL = re.compile(
+    r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)(?=$|[/?#])",
+    re.I,
+)
 READ_ERRORS = (
     OSError,
     ValueError,
@@ -120,6 +125,44 @@ def branch_owners(command, work=None):
         if key in owners and owners[key] != label:
             ambiguous.add(key)
         owners[key] = label
+    return {key: label for key, label in owners.items() if key not in ambiguous}
+
+
+def status_directory():
+    return Path(
+        os.environ.get("ORCH_USER_TODO_STATUS_DIR")
+        or Path.home() / ".claude/coordinator/status"
+    )
+
+
+def status_owners(labels, directory):
+    """Architect labels for owner/repo#number URLs under each matching Open PRs heading."""
+    owners, ambiguous = {}, set()
+    try:
+        files = sorted(
+            path for path in Path(directory).iterdir() if path.suffix == ".md"
+        )
+    except OSError:
+        return owners
+    for path in files:
+        if path.stem not in labels:
+            continue
+        try:
+            lines = path.read_text().splitlines()
+        except (OSError, ValueError):
+            continue
+        section = False
+        for line in lines:
+            if line.rstrip().casefold() == OPEN_PRS:
+                section = True
+            elif section and line.startswith("## "):
+                break
+            elif section:
+                for repo, number in PR_URL.findall(line):
+                    key = f"{repo.lower()}#{number}"
+                    if key in owners and owners[key] != path.stem:
+                        ambiguous.add(key)
+                    owners[key] = path.stem
     return {key: label for key, label in owners.items() if key not in ambiguous}
 
 

@@ -118,6 +118,85 @@ class PrTabsTest(IsolatedTestCase):
 
         self.assertEqual(discovery.branch_owners(command, work), {})
 
+    def test_status_owners_reads_open_prs_only_and_accepts_pr_subpages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_text(
+                "https://github.com/acme/ignored/pull/1\n"
+                "## Open PRs\n"
+                "- https://github.com/Acme/WebApp/pull/12/files\n"
+                "- https://github.com/acme/docs/pull/23?plain=1\n"
+                "## Closed workers\n"
+                "https://github.com/acme/ignored/pull/2\n"
+            )
+            (status / "architect-fixes.md").write_text(
+                "## Open PRs\nhttps://github.com/acme/ignored/pull/3\n"
+            )
+            self.assertEqual(
+                discovery.status_owners({"Finder"}, status),
+                {"acme/webapp#12": "Finder", "acme/docs#23": "Finder"},
+            )
+
+    def test_status_owners_ignores_unreadable_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            finder = status / "Finder.md"
+            tooling = status / "Tooling.md"
+            finder.write_text("## Open PRs\nhttps://github.com/acme/webapp/pull/12\n")
+            tooling.write_text("## Open PRs\nhttps://github.com/acme/docs/pull/23\n")
+            original = Path.read_text
+
+            def read(path, *args, **kwargs):
+                if path == tooling:
+                    raise OSError("unreadable fixture")
+                return original(path, *args, **kwargs)
+
+            with patch.object(Path, "read_text", read):
+                self.assertEqual(
+                    discovery.status_owners({"Finder", "Tooling"}, status),
+                    {"acme/webapp#12": "Finder"},
+                )
+
+    def test_status_owners_omits_ambiguous_prs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            for label in ("Finder", "Tooling"):
+                (status / f"{label}.md").write_text(
+                    "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+                )
+            self.assertEqual(discovery.status_owners({"Finder", "Tooling"}, status), {})
+
+    def test_host_merges_status_owners_without_overriding_branch_owners(self):
+        work = {
+            "workspaces": [
+                {"id": "a", "label": "Finder"},
+                {"id": "w", "owner": "a", "checkout": "/web"},
+            ]
+        }
+        branch = {"acme/webapp:feature": "Finder", "acme/webapp#12": "Branch"}
+        status = {"acme/webapp#12": "Status", "acme/docs#23": "Finder"}
+        with (
+            patch.object(discovery, "open_work", return_value=work),
+            patch.object(discovery, "branch_owners", return_value=branch) as branches,
+            patch.object(discovery, "status_owners", return_value=status) as statuses,
+        ):
+            self.assertEqual(
+                host.discover_owners(
+                    ROOT,
+                    {
+                        "ORCH_ENV": "herdr",
+                        "ORCH_USER_TODO_STATUS_DIR": "/fixture/status",
+                    },
+                ),
+                {
+                    "acme/webapp:feature": "Finder",
+                    "acme/webapp#12": "Branch",
+                    "acme/docs#23": "Finder",
+                },
+            )
+        self.assertEqual(branches.call_args.args[1], work)
+        self.assertEqual(statuses.call_args.args, ({"Finder"}, Path("/fixture/status")))
+
     def test_host_cache_expires_and_missing_or_broken_adapter_falls_back(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "config.toml"

@@ -3,7 +3,7 @@ import { test } from "vitest";
 import type { Owners, PrBranch } from "#/types";
 import { groupForPr, groupColor } from "#/core";
 
-const pr: PrBranch = { owner: "acme", repo: "webapp", branch: "feature" };
+const pr: PrBranch = { owner: "acme", repo: "webapp", number: 7, branch: "feature" };
 
 test("owned branches group by architect; unknown branches use repository", () => {
   const owners: Owners = { "acme/webapp:feature": "Finder", "acme/docs:feature": "Tooling" };
@@ -47,4 +47,11 @@ test("an explicitly unavailable head repository never matches the base checkout"
     groupForPr({ "acme/webapp:feature": "Finder" }, { ...pr, headRepository: null }).name,
     "webapp",
   );
+});
+
+test("PR status ownership applies after a branch ownership match", () => {
+  const status = { "acme/webapp#7": "Watcher" };
+
+  assert.equal(groupForPr(status, pr).name, "Watcher");
+  assert.equal(groupForPr({ ...status, "acme/webapp:feature": "Finder" }, pr).name, "Finder");
 });

@@ -239,7 +239,10 @@ def is_owner_map(value):
 @contextmanager
 def discovery_settings(values):
     # Main's adapter reads these process settings. Restore them for in-process callers.
-    updates = {key: values.get(key, "") for key in ("ORCH_ENV", "ORCH_HERDR_BIN")}
+    updates = {
+        key: values.get(key, "")
+        for key in ("ORCH_ENV", "ORCH_HERDR_BIN", "ORCH_USER_TODO_STATUS_DIR")
+    }
     if values.get("ORCH_HERDR_SOCKET"):
         updates["HERDR_SOCKET_PATH"] = values["ORCH_HERDR_SOCKET"]
     before = {key: os.environ.get(key) for key in updates}
@@ -273,7 +276,17 @@ def discover_owners(root, values):
         ).stdout.strip()
 
     with discovery_settings(values):
-        return discovery.branch_owners(command)
+        work = discovery.open_work(command)
+        branch = discovery.branch_owners(command, work)
+        labels = {
+            row["label"]
+            for row in work["workspaces"]
+            if row.get("id") and row.get("label")
+        }
+        return {
+            **discovery.status_owners(labels, discovery.status_directory()),
+            **branch,
+        }
 
 
 def orch_values(root):
