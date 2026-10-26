@@ -139,16 +139,15 @@ test("no two @theme tokens claim the same Tailwind utility", () => {
 });
 
 test("the popup root reserves the scrollbar gutter before groups expand", () => {
+  const tailwind = readFileSync(join(SRC, "popup/tailwind.css"), "utf8");
   const tokens = readFileSync(join(SRC, TOKENS), "utf8");
 
-  assert.match(tokens, /html\s*\{\s*scrollbar-gutter:\s*stable;/);
+  assert.match(tailwind, /@layer base\s*\{\s*html\s*\{\s*scrollbar-gutter:\s*stable;/);
+  assert.doesNotMatch(tokens, /(?:^|\n)(?:html|\.pr-tab-row)/);
 });
 
 test("PR rows use Aura's hover colour for pointer and keyboard interaction", () => {
-  const tokens = readFileSync(join(SRC, TOKENS), "utf8");
+  const tailwind = readFileSync(join(SRC, "popup/tailwind.css"), "utf8");
 
-  assert.match(
-    tokens,
-    /\.pr-tab-row:hover,\s*\.pr-tab-row:focus-within\s*\{\s*background-color: var\(--p-content-hover-background\);/,
-  );
+  assert.match(tailwind, /--color-row-hover: var\(--p-content-hover-background\);/);
 });

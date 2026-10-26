@@ -28,7 +28,7 @@ function handleGoClick(): void {
 </script>
 
 <template>
-  <li class="pr-tab-row flex items-center gap-2 py-group-row">
+  <li class="flex items-center gap-2 py-group-row focus-within:bg-row-hover hover:bg-row-hover">
     <span class="min-w-0 flex-auto truncate" :title="title">{{ label }} {{ title }}</span>
     <Tag
       v-if="isStateVisible"

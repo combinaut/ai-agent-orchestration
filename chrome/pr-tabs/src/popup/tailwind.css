@@ -3,9 +3,16 @@
 @import "tailwindcss-primeui";
 @import "./tokens.css";
 
+@layer base {
+  html {
+    scrollbar-gutter: stable;
+  }
+}
+
 @theme inline {
   --color-popup: var(--p-content-background);
   --color-popup-text: var(--p-text-color);
+  --color-row-hover: var(--p-content-hover-background);
   --color-group-grey: var(--pr-tabs-group-grey);
   --color-group-blue: var(--pr-tabs-group-blue);
   --color-group-red: var(--pr-tabs-group-red);

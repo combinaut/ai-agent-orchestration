@@ -1,13 +1,4 @@
 /* The popup's own design tokens, for what the Aura preset (--p-*) lacks. */
-html {
-  scrollbar-gutter: stable;
-}
-
-.pr-tab-row:hover,
-.pr-tab-row:focus-within {
-  background-color: var(--p-content-hover-background);
-}
-
 :root {
   --pr-tabs-popup-width: 480px;
   --p-button-sm-padding-x: 0.25rem;
