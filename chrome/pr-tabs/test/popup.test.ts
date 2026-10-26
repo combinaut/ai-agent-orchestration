@@ -206,3 +206,17 @@ test("reopening the popup displays the active batch and disables both opening ac
   assert.equal(wrapper.find("#open-reviews").attributes("disabled"), "");
   wrapper.unmount();
 });
+
+test("actions use a two-column grid with opening actions before closing actions", async () => {
+  const { wrapper } = await popup([]);
+  const row = wrapper.find("#open-all").element.parentElement;
+
+  assert.ok(row);
+  assert.ok(row.classList.contains("grid"));
+  assert.ok(row.classList.contains("grid-cols-2"));
+  assert.deepEqual(
+    Array.from(row.querySelectorAll("button"), (button) => button.id),
+    ["open-all", "open-reviews", "check-now", "close-duplicates"],
+  );
+  wrapper.unmount();
+});

@@ -97,7 +97,7 @@ onMounted(handlePopupMounted);
     @go="handleGoToSubmit"
     @pick="handleRepoPick"
   />
-  <div class="mt-3 flex gap-2">
+  <div class="mt-3 grid grid-cols-2 gap-2">
     <ActionButton
       id="open-all"
       primary
