@@ -157,4 +157,6 @@ test("PR rows use Aura's hover colour for pointer and keyboard interaction", () 
   assert.match(tailwind, /--spacing-popup-padding: var\(--pr-tabs-popup-padding\);/);
   assert.match(tailwind, /--spacing-pane-icon: var\(--pr-tabs-pane-icon-size\);/);
   assert.match(tokens, /--pr-tabs-pane-icon-size: var\(--p-icon-size\);/);
+  assert.match(tailwind, /--spacing-pr-row: var\(--pr-tabs-pr-row-min-height\);/);
+  assert.match(tokens, /--pr-tabs-pr-row-min-height: calc\(/);
 });

@@ -755,6 +755,23 @@ export function goTo(input?: string, repo?: RepoName): Promise<Reply<"goTo">> {
   return serial(() => findOrOpen(input, repo));
 }
 
+async function focusKnownPr(key: PrKey): Promise<Reply<"focusPr">> {
+  const rules = await loadRules();
+  const entry = findOpenTab(await prEntries(rules), key, await focusedId());
+
+  if (!entry) {
+    return { error: getMessage("errPrTabGone") };
+  }
+
+  await focusTab(entry.tab);
+
+  return { focused: key };
+}
+
+export function focusPr(key: PrKey): Promise<Reply<"focusPr">> {
+  return serial(() => focusKnownPr(key));
+}
+
 // What the popup needs for the repo dropdown: the listed repos, the selected one, and whether to
 // show it.
 export async function repoChoices(): Promise<RepoChoices> {
@@ -1029,6 +1046,10 @@ function handleGoToMessage(message: RequestOf<"goTo">): Promise<Reply<"goTo">> {
   return goTo(message.input, message.repo);
 }
 
+function handleFocusPrMessage(message: RequestOf<"focusPr">): Promise<Reply<"focusPr">> {
+  return focusPr(message.key);
+}
+
 function handleReposMessage(): Promise<RepoChoices> {
   return repoChoices();
 }
@@ -1062,6 +1083,7 @@ const handleRuntimeMessage = messageListener({
   openReviews,
   openingProgress,
   goTo: handleGoToMessage,
+  focusPr: handleFocusPrMessage,
   repos: handleReposMessage,
   pickRepo: handlePickRepoMessage,
   summary: handleSummaryMessage,

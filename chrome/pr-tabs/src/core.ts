@@ -378,7 +378,7 @@ export function planOpenAll(search: SearchResult, openKeys: Set<PrKey>, org: Org
 function groupSummary(counted: GroupCount): GroupSummary {
   const prs = [...counted.prs.values()];
 
-  return { title: counted.title, color: counted.color, count: prs.length, prs };
+  return { id: counted.id, title: counted.title, color: counted.color, count: prs.length, prs };
 }
 
 function byCountThenTitle(a: GroupSummary, b: GroupSummary): number {
@@ -445,6 +445,7 @@ export function summarize(
     }
 
     const counted = byGroup.get(tab.groupId) ?? {
+      id: String(tab.groupId),
       title: group.title || getPlainMessage("untitledGroup"),
       color: group.color,
       prs: new Map(),

@@ -24,6 +24,7 @@
   --spacing-popup-content: var(--pr-tabs-popup-max-height);
   --spacing-popup-padding: var(--pr-tabs-popup-padding);
   --spacing-status: var(--pr-tabs-status-min-height);
+  --spacing-pr-row: var(--pr-tabs-pr-row-min-height);
   --spacing-group-row: var(--pr-tabs-group-row-padding);
   --spacing-dot: var(--pr-tabs-dot-size);
   --spacing-pane-icon: var(--pr-tabs-pane-icon-size);

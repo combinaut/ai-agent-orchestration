@@ -132,17 +132,22 @@ export interface PrRow {
 }
 
 export interface GroupCount {
+  id: string;
   title: GroupTitle;
   color?: GroupColor;
   prs: Map<PrKey, PrRow>;
 }
 
 export interface GroupSummary {
+  id: string;
   title: GroupTitle;
   color?: GroupColor;
   count: number;
   prs: PrRow[];
 }
+
+export type GroupRows = Record<string, GroupSummary>;
+export type PrRows = Record<string, PrRow>;
 
 export type AgentState = "working" | "idle" | "done" | "waiting";
 
@@ -199,6 +204,11 @@ export interface PickRepoRequest {
   readonly repo: RepoName;
 }
 
+export interface FocusPrRequest {
+  readonly type: "focusPr";
+  readonly key: PrKey;
+}
+
 export interface GoToRequest {
   readonly type: "goTo";
   readonly input: string;
@@ -216,7 +226,7 @@ export interface FocusPaneRequest {
 }
 
 export type Request =
-  PlainRequest | PickRepoRequest | GoToRequest | PanesRequest | FocusPaneRequest;
+  PlainRequest | PickRepoRequest | GoToRequest | FocusPrRequest | PanesRequest | FocusPaneRequest;
 export type RequestType = Request["type"];
 export type RequestOf<K extends RequestType> = K extends PlainRequestType
   ? PlainRequest<K>
@@ -259,6 +269,7 @@ export interface Replies {
   readonly repos: RepoChoices;
   readonly pickRepo: Readonly<Record<string, never>>;
   readonly goTo: GoToResult;
+  readonly focusPr: Focusing;
   readonly openAll: OpenAllResult;
   readonly openReviews: OpenAllResult;
   readonly openingProgress: OpeningProgress;
@@ -398,10 +409,13 @@ export interface GoToContext {
   picker: Pick<RepoPicker, "repo"> & { available: Readonly<Ref<boolean>> };
 }
 
+export type PrNavigationRequest = GoToRequest | FocusPrRequest;
+
 export interface GoTo {
   input: Ref<string>;
   busy: Readonly<Ref<boolean>>;
   go: () => Promise<void>;
+  focusPr: (key: PrKey) => Promise<void>;
 }
 
 export type PaneAvailability = "unchecked" | "checking" | "found" | "missing";
@@ -510,7 +524,6 @@ export interface GroupListProps {
 
 export interface GroupItemProps {
   group: GroupSummary;
-  index: number;
   panes: Panes;
 }
 

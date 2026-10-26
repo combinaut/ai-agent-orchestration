@@ -91,3 +91,23 @@ test("the go-to-pane icon uses the Aura icon size inside the small button target
   assert.equal(button.props("size"), "small");
   assert.equal(button.find(".size-pane-icon").exists(), true);
 });
+
+test("every row has a shared minimum height and pointer cursor", () => {
+  const row = item({}).wrapper.find("li");
+
+  assert.equal(row.classes().includes("min-h-pr-row"), true);
+  assert.equal(row.classes().includes("cursor-pointer"), true);
+});
+
+test("a named native row button selects its PR; terminal focus remains separate", async () => {
+  const { wrapper, panes } = item({ "acme/webapp:feature": { state: "working" } });
+  const row = wrapper.find("button[data-pr-tab]");
+
+  assert.equal(row.attributes("type"), "button");
+  assert.equal(row.attributes("aria-label"), "webapp#7 Fix the thing");
+  await row.trigger("click");
+  assert.deepEqual(wrapper.emitted("go"), [[ROW.key]]);
+  await wrapper.findComponent(Button).trigger("click");
+  assert.deepEqual(panes.focused, [ROW.head]);
+  assert.equal(wrapper.emitted("go")?.length, 1);
+});

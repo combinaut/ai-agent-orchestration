@@ -345,5 +345,8 @@
   },
   "pendingSearching": {
     "message": "Suche…"
+  },
+  "errPrTabGone": {
+    "message": "Dieser PR-Tab ist nicht mehr geöffnet."
   }
 }

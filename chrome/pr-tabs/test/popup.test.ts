@@ -19,7 +19,7 @@ function noop(): void {}
 
 const SUMMARY: Summary = {
   prs: 2,
-  groups: [{ title: "Finder", color: "yellow", count: 2, prs: [] }],
+  groups: [{ id: "1", title: "Finder", color: "yellow", count: 2, prs: [] }],
 };
 
 async function popup(
@@ -183,18 +183,29 @@ test("popup content is the capped stable-gutter scroller", async () => {
   wrapper.unmount();
 });
 
+const PANE_HEAD = { repo: "acme/webapp", branch: "feature" };
+const PANE_SUMMARY: Summary = {
+  prs: 1,
+  groups: [
+    {
+      id: "2",
+      title: "A",
+      count: 1,
+      prs: [{ key: "acme/webapp#1", label: "webapp#1", title: "", head: PANE_HEAD }],
+    },
+    {
+      id: "3",
+      title: "B",
+      count: 1,
+      prs: [{ key: "acme/webapp#2", label: "webapp#2", title: "", head: PANE_HEAD }],
+    },
+  ],
+};
+
 test("the first expanded group looks up panes once; go to pane focuses and closes", async () => {
   const close = vi.spyOn(window, "close").mockImplementation(noop);
-  const head = { repo: "acme/webapp", branch: "feature" };
-  const summary: Summary = {
-    prs: 1,
-    groups: [
-      { title: "A", count: 1, prs: [{ key: "acme/webapp#1", label: "webapp#1", title: "", head }] },
-      { title: "B", count: 1, prs: [{ key: "acme/webapp#2", label: "webapp#2", title: "", head }] },
-    ],
-  };
   const { wrapper, sent } = await popup([], {
-    summary,
+    summary: PANE_SUMMARY,
     panes: { "acme/webapp:feature": { state: "waiting" } },
     focusPane: { pane: "w1:p2" },
   });
@@ -204,13 +215,13 @@ test("the first expanded group looks up panes once; go to pane focuses and close
     await flushPromises();
   }
 
-  assert.deepEqual(sent, [{ type: "panes", heads: [head] }]);
+  assert.deepEqual(sent, [{ type: "panes", heads: [PANE_HEAD] }]);
   assert.equal(wrapper.findAll(".p-tag").length, 2);
 
-  await wrapper.find("li button:not([aria-expanded])").trigger("click");
+  await wrapper.find("li .p-button").trigger("click");
   await flushPromises();
 
-  assert.deepEqual(sent.at(-1), { type: "focusPane", head });
+  assert.deepEqual(sent.at(-1), { type: "focusPane", head: PANE_HEAD });
   assert.equal(close.mock.calls.length, 1);
 
   wrapper.unmount();
@@ -250,7 +261,10 @@ for (const result of [{ opened: 3, remaining: 0, estimated: false }, { error: "o
     });
 
     try {
-      answers.summary = { prs: 3, groups: [{ title: "New", color: "blue", count: 3, prs: [] }] };
+      answers.summary = {
+        prs: 3,
+        groups: [{ id: "4", title: "New", color: "blue", count: 3, prs: [] }],
+      };
       answers.openingProgress = { active: false, opened: 0, planned: 0, result };
       await vi.advanceTimersByTimeAsync(250);
       await flushPromises();
@@ -279,7 +293,7 @@ test("progress refreshes counts and groups before an observed batch finishes", a
   try {
     answers.summary = {
       prs: 3,
-      groups: [{ title: "During batch", color: "blue", count: 3, prs: [] }],
+      groups: [{ id: "5", title: "During batch", color: "blue", count: 3, prs: [] }],
     };
     answers.openingProgress = { active: true, opened: 1, planned: 3 };
     await vi.advanceTimersByTimeAsync(250);
@@ -348,7 +362,12 @@ test("a terminal focus failure is visible in the popup error status", async () =
   const summary: Summary = {
     prs: 1,
     groups: [
-      { title: "A", count: 1, prs: [{ key: "acme/webapp#1", label: "webapp#1", title: "", head }] },
+      {
+        id: "6",
+        title: "A",
+        count: 1,
+        prs: [{ key: "acme/webapp#1", label: "webapp#1", title: "", head }],
+      },
     ],
   };
   const { wrapper, sent } = await popup([], {
@@ -359,7 +378,7 @@ test("a terminal focus failure is visible in the popup error status", async () =
 
   await wrapper.find("button[aria-expanded]").trigger("click");
   await flushPromises();
-  await wrapper.find("li button:not([aria-expanded])").trigger("click");
+  await wrapper.find("li .p-button").trigger("click");
   await flushPromises();
 
   assert.deepEqual(sent.at(-1), { type: "focusPane", head });
@@ -370,4 +389,24 @@ test("a terminal focus failure is visible in the popup error status", async () =
   assert.equal(wrapper.find("#status .p-message-error").isVisible(), true);
 
   wrapper.unmount();
+});
+
+test("selecting a row focuses its existing tab and closes the popup", async () => {
+  const close = vi.spyOn(window, "close").mockImplementation(noop);
+  const { wrapper, sent } = await popup([], {
+    summary: PANE_SUMMARY,
+    panes: {},
+    focusPr: { focused: "acme/webapp#1" },
+  });
+  try {
+    await wrapper.find("button[aria-expanded]").trigger("click");
+    await flushPromises();
+    sent.length = 0;
+    await wrapper.find("button[data-pr-tab]").trigger("click");
+    await flushPromises();
+    assert.deepEqual(sent, [{ type: "focusPr", key: "acme/webapp#1" }]);
+    assert.equal(close.mock.calls.length, 1);
+  } finally {
+    wrapper.unmount();
+  }
 });

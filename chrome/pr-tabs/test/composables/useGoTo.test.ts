@@ -85,3 +85,20 @@ test("a second Enter while one request runs sends nothing more", async () => {
 
   assert.equal(sent.length, 1);
 });
+
+test("row navigation focuses only the existing PR and reports a closed-tab error", async () => {
+  const fake = fakeAsk({ focusPr: { focused: "acme/webapp#7" } });
+  const flow = goTo(fake.ask, false, "");
+  await flow.focusPr("acme/webapp#7");
+
+  assert.deepEqual(fake.sent, [{ type: "focusPr", key: "acme/webapp#7" }]);
+  assert.equal(flow.closes(), 1);
+  const gone = goTo(
+    fakeAsk({ focusPr: { error: "That PR tab is no longer open." } }).ask,
+    false,
+    "",
+  );
+  await gone.focusPr("acme/webapp#7");
+  assert.equal(gone.closes(), 0);
+  assert.equal(gone.status.isStatusError.value, true);
+});

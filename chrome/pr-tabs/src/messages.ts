@@ -99,6 +99,7 @@ const NOT_RETRIED: ReadonlySet<RequestType> = new Set([
   "checkNow",
   "closeDuplicates",
   "focusPane",
+  "focusPr",
 ]);
 
 async function sendOnce(send: Send, message: Request): Promise<Delivered | Failure> {

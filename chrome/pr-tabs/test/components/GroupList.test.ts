@@ -15,12 +15,14 @@ import { mountPopup } from "./mountPopup";
 const HEAD = { repo: "acme/webapp", branch: "feature" };
 const groups: GroupSummary[] = [
   {
+    id: "1",
     title: "Finder",
     color: "yellow",
     count: 1,
     prs: [{ key: "acme/webapp#1", label: "webapp#1", title: "One", head: HEAD }],
   },
   {
+    id: "2",
     title: "webapp",
     count: 1,
     prs: [{ key: "acme/webapp#2", label: "webapp#2", title: "", head: null }],
@@ -79,8 +81,31 @@ test("expanded groups resolve later batch heads with the real pane cache", async
       { type: "panes", heads: [HEAD] },
       { type: "panes", heads: [later] },
     ]);
-    assert.equal(wrapper.findAll("li button").length, 2);
+    assert.equal(wrapper.findAll("li .p-button").length, 2);
     assert.ok(wrapper.text().includes("working"));
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("a live count reorder preserves expansion by stable group identity", async () => {
+  const finder = { id: "7", title: "Finder", count: 2, prs: [] };
+  const webapp = { id: "8", title: "webapp", count: 1, prs: [] };
+  const wrapper = mountPopup(GroupList, {
+    props: { groups: [finder, webapp], panes: fakePanes() },
+  });
+  try {
+    await wrapper.findAll("button[aria-expanded]")[0]?.trigger("click");
+    await wrapper.setProps({ groups: [{ ...webapp, count: 3 }, finder] });
+    const headers = wrapper.findAll("button[aria-expanded]");
+    assert.equal(
+      headers.find((header) => header.text().includes("Finder"))?.attributes("aria-expanded"),
+      "true",
+    );
+    assert.equal(
+      headers.find((header) => header.text().includes("webapp"))?.attributes("aria-expanded"),
+      "false",
+    );
   } finally {
     wrapper.unmount();
   }

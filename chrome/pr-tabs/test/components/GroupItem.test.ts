@@ -49,7 +49,7 @@ function hasHeaderClass(value: unknown): value is AccordionHeaderPassThrough {
 }
 
 test("a row shows the group's colour dot, title and PR count", () => {
-  const groups: GroupSummary[] = [{ title: "Finder", color: "yellow", count: 2, prs: [] }];
+  const groups: GroupSummary[] = [{ id: "1", title: "Finder", color: "yellow", count: 2, prs: [] }];
   const wrapper = mountPopup(GroupList, { props: { groups, panes: fakePanes() } });
 
   assert.ok(wrapper.find("[aria-hidden=true]").classes().includes("bg-group-yellow"));
@@ -68,7 +68,7 @@ test("the expanded content is a shrinkable grid column, so a long PR title canno
   const prs: PrRow[] = [
     { key: "acme/webapp#1", label: "webapp#1", title: "T".repeat(200), head: null },
   ];
-  const groups: GroupSummary[] = [{ title: "Finder", count: 1, prs }];
+  const groups: GroupSummary[] = [{ id: "2", title: "Finder", count: 1, prs }];
   const wrapper = mountPopup(GroupList, { props: { groups, panes: fakePanes() } });
 
   await wrapper.find("button[aria-expanded]").trigger("click");

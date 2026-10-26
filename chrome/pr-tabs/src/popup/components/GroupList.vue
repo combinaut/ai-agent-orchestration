@@ -3,13 +3,16 @@ import Accordion from "primevue/accordion";
 import { computed, ref, watch } from "vue";
 import { lookupHeads } from "#/core";
 import { useMessages } from "#/composables/useMessages";
-import type { GroupListProps } from "#/types";
+import type { GroupListProps, GroupRows, PrKey } from "#/types";
 import GroupItem from "./GroupItem.vue";
 
 const props = defineProps<GroupListProps>();
+const emit = defineEmits<{ go: [key: PrKey] }>();
 const { groupsLabel } = useMessages(["groupsLabel"]);
 const expanded = ref<string[]>([]);
-const groupRows = computed(() => props.groups);
+const groupRows = computed<GroupRows>(() =>
+  Object.fromEntries(props.groups.map((group) => [`group-${group.id}`, group])),
+);
 
 function handleGroupsUpdate(): void {
   void props.panes.ensure(lookupHeads(props.groups));
@@ -21,6 +24,9 @@ function handleGroupsChanged(): void {
 }
 
 watch(() => props.groups, handleGroupsChanged);
+function handlePrGo(key: PrKey): void {
+  emit("go", key);
+}
 </script>
 
 <template>
@@ -33,11 +39,11 @@ watch(() => props.groups, handleGroupsChanged);
     @update:value="handleGroupsUpdate"
   >
     <GroupItem
-      v-for="(group, index) in groupRows"
-      :key="index"
+      v-for="(group, id) in groupRows"
+      :key="id"
       :group="group"
-      :index="index"
       :panes="panes"
+      @go="handlePrGo"
     />
   </Accordion>
 </template>

@@ -6,7 +6,7 @@ import type { Ask, GroupSummary } from "#/types";
 import type { FakeReplies } from "#test/types";
 import { fakeAsk } from "./fakeAsk";
 
-const groups: GroupSummary[] = [{ title: "Finder", color: "yellow", count: 2, prs: [] }];
+const groups: GroupSummary[] = [{ id: "1", title: "Finder", color: "yellow", count: 2, prs: [] }];
 
 test("refresh shows the PR count and lists the groups", async () => {
   const status = useStatus();

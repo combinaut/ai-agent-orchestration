@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import type { PrKey } from "#/types";
 import { useOpeningProgress } from "#/composables/useOpeningProgress";
 import { useMessages } from "#/composables/useMessages";
 import { usePanes } from "#/composables/usePanes";
@@ -42,7 +43,7 @@ const panes = usePanes(ask, status);
 const input = ref("");
 const picker = useRepoPicker(ask, input);
 const { repos, repo, visible: isRepoPickerVisible } = picker;
-const { busy: isGoToBusy, go } = useGoTo({ ask, status, picker }, input);
+const { busy: isGoToBusy, go, focusPr } = useGoTo({ ask, status, picker }, input);
 const { openAll, openReviews, checkNow, closeDuplicates } = useTabActions({ ask, status, refresh });
 const { busy: isOpeningAll } = openAll;
 const { busy: isOpeningReviews } = openReviews;
@@ -55,6 +56,10 @@ const openingProgress = computed(() => ({
   active: workerProgress.value.active || localBusy.value,
 }));
 const isOpeningBatch = computed(() => openingProgress.value.active);
+
+function handlePrGo(key: PrKey): void {
+  void focusPr(key);
+}
 
 function handleGoToSubmit(): void {
   void go();
@@ -135,6 +140,6 @@ onMounted(handlePopupMounted);
     </div>
     <OpeningProgress :progress="openingProgress" />
     <StatusLine :text="statusText" :error="isStatusError" />
-    <GroupList :groups="groups" :panes="panes" />
+    <GroupList :groups="groups" :panes="panes" @go="handlePrGo" />
   </main>
 </template>

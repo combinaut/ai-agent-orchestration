@@ -688,3 +688,17 @@ test("Open reviews requires only the organization setting", async () => {
     error: "Set pr_tabs.org and pr_tabs.open_all in orchestration.toml",
   });
 });
+
+test("row focus reuses an existing tab and never creates a replacement after it closes", async () => {
+  const worker = await freshWorker("row-focus");
+  world.tabs = [{ id: 1, url: `${PR}/7/files`, windowId: 2, groupId: -1 }];
+  world.created = [];
+
+  assert.deepEqual(await worker.focusPr("acme/webapp#7"), { focused: "acme/webapp#7" });
+  assert.equal(world.tabs[0]?.active, true);
+  world.tabs = [];
+  assert.deepEqual(await worker.focusPr("acme/webapp#7"), {
+    error: "That PR tab is no longer open.",
+  });
+  assert.equal(world.created.length, 0);
+});

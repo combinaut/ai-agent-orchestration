@@ -67,7 +67,7 @@ test("empty storage restores open PR titles, heads, architect groups and pane co
   try {
     await wrapper.find("button[aria-expanded]").trigger("click");
     await flushPromises();
-    assert.equal(wrapper.findAll("li button").length, 1);
+    assert.equal(wrapper.findAll("li .p-button").length, 1);
     assert.ok(wrapper.text().includes("Restored title"));
   } finally {
     wrapper.unmount();

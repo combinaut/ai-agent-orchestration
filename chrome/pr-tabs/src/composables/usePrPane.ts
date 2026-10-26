@@ -38,15 +38,11 @@ function availabilityOf(
     return "missing";
   }
 
-  if (checking) {
-    return "checking";
+  if (match !== undefined) {
+    return match ? "found" : "missing";
   }
 
-  if (match === undefined) {
-    return "unchecked";
-  }
-
-  return match ? "found" : "missing";
+  return checking ? "checking" : "unchecked";
 }
 
 function goLabelFor(availability: PaneAvailability, pr: string): string {
