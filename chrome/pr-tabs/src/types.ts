@@ -460,6 +460,7 @@ export interface GroupRow {
 // Component props.
 export interface ActionButtonProps {
   label: string;
+  hint: string;
   busy: boolean;
   primary?: boolean;
 }

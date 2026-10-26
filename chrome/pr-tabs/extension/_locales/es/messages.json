@@ -30,12 +30,21 @@
     "message": "No hay repositorios disponibles"
   },
   "openAllButton": {
+    "message": "Abrir todos"
+  },
+  "openAllHint": {
     "message": "Abrir todos mis PR abiertos"
   },
   "checkNowButton": {
+    "message": "Cerrar fusionados"
+  },
+  "checkNowHint": {
     "message": "Cerrar PR fusionados"
   },
   "closeDuplicatesButton": {
+    "message": "Cerrar duplicadas"
+  },
+  "closeDuplicatesHint": {
     "message": "Cerrar pestañas duplicadas"
   },
   "groupsLabel": {

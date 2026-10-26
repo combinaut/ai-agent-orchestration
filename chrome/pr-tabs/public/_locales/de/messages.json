@@ -30,12 +30,21 @@
     "message": "Keine Repositories verfügbar"
   },
   "openAllButton": {
+    "message": "Alle öffnen"
+  },
+  "openAllHint": {
     "message": "Alle meine offenen PRs öffnen"
   },
   "checkNowButton": {
+    "message": "Gemergte schließen"
+  },
+  "checkNowHint": {
     "message": "Gemergte PRs schließen"
   },
   "closeDuplicatesButton": {
+    "message": "Duplikate schließen"
+  },
+  "closeDuplicatesHint": {
     "message": "Doppelte Tabs schließen"
   },
   "groupsLabel": {

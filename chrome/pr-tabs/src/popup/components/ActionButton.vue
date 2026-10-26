@@ -5,7 +5,6 @@ import type { ActionButtonEmits, ActionButtonProps } from "#/types";
 
 const props = defineProps<ActionButtonProps>();
 const emit = defineEmits<ActionButtonEmits>();
-const spacingClass = computed(() => (props.primary ? "mt-3" : "mt-2"));
 const severity = computed(() => (props.primary ? undefined : "secondary"));
 
 function handleButtonClick(): void {
@@ -15,11 +14,11 @@ function handleButtonClick(): void {
 
 <template>
   <Button
-    class="w-full"
-    :class="spacingClass"
+    class="min-w-0 flex-1"
     size="small"
     :severity="severity"
     :label="label"
+    :title="hint"
     :disabled="busy"
     @click="handleButtonClick"
   />

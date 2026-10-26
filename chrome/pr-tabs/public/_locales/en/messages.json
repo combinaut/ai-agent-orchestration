@@ -30,12 +30,21 @@
     "message": "No repositories available"
   },
   "openAllButton": {
+    "message": "Open all"
+  },
+  "openAllHint": {
     "message": "Open all my open PRs"
   },
   "checkNowButton": {
+    "message": "Close merged"
+  },
+  "checkNowHint": {
     "message": "Close merged PRs"
   },
   "closeDuplicatesButton": {
+    "message": "Close duplicates"
+  },
+  "closeDuplicatesHint": {
     "message": "Close duplicate tabs"
   },
   "groupsLabel": {
