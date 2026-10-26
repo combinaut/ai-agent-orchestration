@@ -154,3 +154,17 @@ test("PR row focus stays on its key across a live row reorder", async () => {
     wrapper.unmount();
   }
 });
+
+test("ArrowDown enters the first expanded result group after an earlier group is collapsed", async () => {
+  const wrapper = mountPopup(GroupList, {
+    props: { groups, panes: fakePanes(), filtering: true },
+    attachTo: document.body,
+  });
+  try {
+    await wrapper.find("button[aria-expanded]").trigger("click");
+    wrapper.vm.focusFirst();
+    assert.equal(document.activeElement?.getAttribute("aria-label"), "webapp#2");
+  } finally {
+    wrapper.unmount();
+  }
+});

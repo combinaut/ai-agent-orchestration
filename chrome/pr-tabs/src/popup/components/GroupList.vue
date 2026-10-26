@@ -56,7 +56,8 @@ function handlePrClose(key: PrKey, tabId: TabId): void {
 function focusFirst(): void {
   const root: unknown = list.value?.$el;
   if (root instanceof HTMLElement) {
-    root.querySelector<HTMLButtonElement>("button[data-pr-tab]")?.focus();
+    const panel = root.querySelector(".p-accordionpanel:has([aria-expanded=true])");
+    panel?.querySelector<HTMLButtonElement>("button[data-pr-tab]")?.focus();
   }
 }
 
