@@ -13,6 +13,7 @@ import PaneIcon from "./PaneIcon.vue";
 const props = defineProps<PrItemProps>();
 const emit = defineEmits<PrRowEvents>();
 const key = computed(() => props.pr.key);
+const tabId = computed(() => props.pr.tabId);
 const closeLabel = computed(() => getMessage("closePrTab", { pr: props.pr.label }));
 const segments = computed(() => rowSegments(props.pr));
 const title = computed(() => props.pr.title);
@@ -29,7 +30,7 @@ const {
 } = usePrPane(() => props.pr, props.panes);
 
 function handleCloseClick(): void {
-  emit("close", props.pr.key);
+  emit("close", props.pr.key, props.pr.tabId);
 }
 
 function handleRowClick(): void {
@@ -91,6 +92,7 @@ function handleGoClick(): void {
       text
       rounded
       :data-pr-close="key"
+      :data-pr-close-id="tabId"
       :aria-label="closeLabel"
       :title="closeLabel"
       @click.stop="handleCloseClick"

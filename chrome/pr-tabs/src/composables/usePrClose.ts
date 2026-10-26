@@ -1,7 +1,7 @@
 import { useAsyncState } from "@vueuse/core";
 import { nextTick } from "vue";
 import { failed } from "#/messages";
-import type { CloseFocus, PrClose, PrCloseContext, PrKey } from "#/types";
+import type { CloseFocus, PrClose, PrCloseContext, PrKey, TabId } from "#/types";
 
 function closeButtons(): HTMLButtonElement[] {
   return Array.from(document.querySelectorAll<HTMLButtonElement>("button[data-pr-close]")).filter(
@@ -13,27 +13,29 @@ function closeButtons(): HTMLButtonElement[] {
   );
 }
 
-function closeFocus(key: PrKey): CloseFocus {
+function closeFocus(tabId: TabId): CloseFocus {
   const before = closeButtons();
   const index = Math.max(
     0,
-    before.findIndex((button) => button.dataset.prClose === key),
+    before.findIndex((button) => button.dataset.prCloseId === String(tabId)),
   );
-  const preferred = before[index + 1]?.dataset.prClose ?? before[index - 1]?.dataset.prClose;
+  const preferred = before[index + 1]?.dataset.prCloseId ?? before[index - 1]?.dataset.prCloseId;
 
   return function restoreFocus(): void {
     const after = closeButtons();
     const next =
-      after.find((button) => button.dataset.prClose === preferred) ?? after[index] ?? after.at(-1);
+      after.find((button) => button.dataset.prCloseId === preferred) ??
+      after[index] ??
+      after.at(-1);
     const target = next ?? document.querySelector<HTMLInputElement>("#pr-search");
     target?.focus();
   };
 }
 
 export function usePrClose(context: PrCloseContext): PrClose {
-  async function send(key: PrKey): Promise<void> {
-    const focus = closeFocus(key);
-    const result = await context.ask({ type: "closePr", key });
+  async function send(key: PrKey, tabId: TabId): Promise<void> {
+    const focus = closeFocus(tabId);
+    const result = await context.ask({ type: "closePr", key, tabId });
 
     if (failed(result)) {
       context.status.error(result.error);
@@ -50,9 +52,9 @@ export function usePrClose(context: PrCloseContext): PrClose {
     immediate: false,
   });
 
-  async function close(key: PrKey): Promise<void> {
+  async function close(key: PrKey, tabId: TabId): Promise<void> {
     if (!busy.value) {
-      await executeImmediate(key);
+      await executeImmediate(key, tabId);
     }
   }
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, useTemplateRef } from "vue";
-import type { GroupListControl, PrKey } from "#/types";
+import type { GroupListControl, PrKey, TabId } from "#/types";
 import { useFuzzyFilter } from "#/composables/useFuzzyFilter";
 import { usePrClose } from "#/composables/usePrClose";
 import PrSearch from "./components/PrSearch.vue";
@@ -79,8 +79,8 @@ function handleSearchGo(): void {
   }
 }
 
-function handlePrClose(key: PrKey): void {
-  void closing.close(key);
+function handlePrClose(key: PrKey, tabId: TabId): void {
+  void closing.close(key, tabId);
 }
 
 function handlePrGo(key: PrKey): void {

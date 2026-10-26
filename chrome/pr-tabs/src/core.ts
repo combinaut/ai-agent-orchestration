@@ -404,11 +404,12 @@ export function prBranch(
   return { repo, branch: state.headRefName };
 }
 
-function prRow(pr: Pr, meta: Meta): PrRow {
+function prRow(pr: Pr, tabId: TabId, meta: Meta): PrRow {
   const state = meta[pr.key];
 
   return {
     key: pr.key,
+    tabId,
     label: `${pr.repo}#${pr.number}`,
     title: state?.title ?? "",
     head: prBranch(pr, state),
@@ -451,7 +452,7 @@ export function summarize(
       prs: new Map(),
     };
 
-    counted.prs.set(pr.key, prRow(pr, meta));
+    counted.prs.set(pr.key, prRow(pr, tab.id, meta));
     byGroup.set(tab.groupId, counted);
   }
 

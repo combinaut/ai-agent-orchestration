@@ -66,7 +66,7 @@ test("a row shows the group's colour dot, title and PR count", () => {
 
 test("the expanded content is a shrinkable grid column, so a long PR title cannot widen the popup", async () => {
   const prs: PrRow[] = [
-    { key: "acme/webapp#1", label: "webapp#1", title: "T".repeat(200), head: null },
+    { tabId: 1, key: "acme/webapp#1", label: "webapp#1", title: "T".repeat(200), head: null },
   ];
   const groups: GroupSummary[] = [{ id: "2", title: "Finder", count: 1, prs }];
   const wrapper = mountPopup(GroupList, { props: { groups, panes: fakePanes() } });

@@ -13,8 +13,9 @@ afterEach(() => {
 for (const choice of ["next", "previous", "empty"] as const) {
   test(`closing refreshes without leaving the popup and focuses ${choice}`, async () => {
     document.body.innerHTML =
-      '<input id="pr-search"><button data-pr-close="acme/webapp#1"></button><button data-pr-close="acme/webapp#2"></button><button data-pr-close="acme/webapp#3"></button>';
+      '<input id="pr-search"><button data-pr-close-id="1" data-pr-close="acme/webapp#1"></button><button data-pr-close-id="2" data-pr-close="acme/webapp#2"></button><button data-pr-close-id="3" data-pr-close="acme/webapp#3"></button>';
     const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
+    const tabId = choice === "previous" ? 3 : 2;
     const key = choice === "previous" ? "acme/webapp#3" : "acme/webapp#2";
     buttons.find((button) => button.dataset.prClose === key)?.focus();
     const fake = fakeAsk({ closePr: { closed: 1 } });
@@ -27,9 +28,9 @@ for (const choice of ["next", "previous", "empty"] as const) {
       }
     }
     const flow = usePrClose({ ask: fake.ask, status: useStatus(), refresh });
-    await flow.close(key);
+    await flow.close(key, tabId);
     const expected = choice === "next" ? "acme/webapp#3" : "acme/webapp#2";
-    assert.deepEqual(fake.sent, [{ type: "closePr", key }]);
+    assert.deepEqual(fake.sent, [{ type: "closePr", key, tabId }]);
     assert.equal(closeWindow.mock.calls.length, 0);
     assert.equal(
       choice === "empty"

@@ -27,3 +27,24 @@ test("search has an accessible input, live count and keyboard commands", async (
     wrapper.unmount();
   }
 });
+
+test("search shortcuts leave IME candidate confirmation and navigation untouched", async () => {
+  const wrapper = mountPopup(PrSearch, { props: { modelValue: "amber", active: true, count: 2 } });
+  try {
+    for (const key of ["Enter", "ArrowDown", "Escape"]) {
+      const event = new KeyboardEvent("keydown", {
+        key,
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      wrapper.find("input").element.dispatchEvent(event);
+      assert.equal(event.defaultPrevented, false);
+    }
+    assert.equal(wrapper.emitted("go"), undefined);
+    assert.equal(wrapper.emitted("next"), undefined);
+    assert.equal(wrapper.emitted("update:modelValue"), undefined);
+  } finally {
+    wrapper.unmount();
+  }
+});

@@ -191,13 +191,13 @@ const PANE_SUMMARY: Summary = {
       id: "2",
       title: "A",
       count: 1,
-      prs: [{ key: "acme/webapp#1", label: "webapp#1", title: "", head: PANE_HEAD }],
+      prs: [{ tabId: 1, key: "acme/webapp#1", label: "webapp#1", title: "", head: PANE_HEAD }],
     },
     {
       id: "3",
       title: "B",
       count: 1,
-      prs: [{ key: "acme/webapp#2", label: "webapp#2", title: "", head: PANE_HEAD }],
+      prs: [{ tabId: 2, key: "acme/webapp#2", label: "webapp#2", title: "", head: PANE_HEAD }],
     },
   ],
 };
@@ -366,7 +366,7 @@ test("a terminal focus failure is visible in the popup error status", async () =
         id: "6",
         title: "A",
         count: 1,
-        prs: [{ key: "acme/webapp#1", label: "webapp#1", title: "", head }],
+        prs: [{ tabId: 1, key: "acme/webapp#1", label: "webapp#1", title: "", head }],
       },
     ],
   };
@@ -414,6 +414,7 @@ test("selecting a row focuses its existing tab and closes the popup", async () =
 test("hydration settlement refreshes cached titles once without a batch", async () => {
   vi.useFakeTimers();
   const row = {
+    tabId: 7,
     key: "acme/webapp#7" as const,
     label: "webapp#7",
     title: "Cached title",
@@ -447,13 +448,17 @@ const SEARCH_SUMMARY: Summary = {
       id: "10",
       title: "Finder",
       count: 1,
-      prs: [{ key: "acme/webapp#7", label: "webapp#7", title: "Amber Zeppelin", head: null }],
+      prs: [
+        { tabId: 7, key: "acme/webapp#7", label: "webapp#7", title: "Amber Zeppelin", head: null },
+      ],
     },
     {
       id: "9",
       title: "Other",
       count: 1,
-      prs: [{ key: "acme/webapp#8", label: "webapp#8", title: "Plain record", head: null }],
+      prs: [
+        { tabId: 8, key: "acme/webapp#8", label: "webapp#8", title: "Plain record", head: null },
+      ],
     },
   ],
 };
@@ -509,7 +514,7 @@ test("closing the only filtered match refreshes counts and focuses search withou
     assert.equal(closeWindow.mock.calls.length, 0);
     assert.deepEqual(
       sent.filter((message) => message.type === "closePr" || message.type === "focusPr"),
-      [{ type: "closePr", key: "acme/webapp#7" }],
+      [{ type: "closePr", key: "acme/webapp#7", tabId: 7 }],
     );
     assert.ok(wrapper.find("#status").text().includes("1 PR"));
   } finally {

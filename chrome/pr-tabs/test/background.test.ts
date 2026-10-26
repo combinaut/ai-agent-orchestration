@@ -712,9 +712,9 @@ test("closePr removes only the selected PR tab without opening or focusing", asy
   world.created = [];
   const focus = vi.spyOn(fakeChrome.windows, "update");
   try {
-    assert.deepEqual(await worker.closePr("acme/webapp#7"), { closed: 1 });
+    assert.deepEqual(await worker.closePr("acme/webapp#7", 1), { closed: 1 });
     assert.deepEqual(ids(), [2]);
-    assert.deepEqual(await worker.closePr("acme/webapp#7"), { closed: 0 });
+    assert.deepEqual(await worker.closePr("acme/webapp#7", 1), { closed: 0 });
     assert.equal(world.created.length, 0);
     assert.equal(focus.mock.calls.length, 0);
   } finally {
@@ -729,9 +729,31 @@ test("closePr rechecks the tab id so a navigated tab is never closed", async () 
     .spyOn(fakeChrome.tabs, "get")
     .mockImplementation(async () => ({ id: 1, url: `${PR}/8` }));
   try {
-    assert.deepEqual(await worker.closePr("acme/webapp#7"), { closed: 0 });
+    assert.deepEqual(await worker.closePr("acme/webapp#7", 1), { closed: 0 });
     assert.deepEqual(ids(), [1]);
   } finally {
     get.mockRestore();
   }
+});
+
+test("closePr closes the selected row's tab across duplicate groups and never substitutes", async () => {
+  const worker = await freshWorker("close-selected-row");
+  world.tabs = [
+    { id: 1, url: `${PR}/7`, windowId: 1, groupId: 10 },
+    { id: 2, url: `${PR}/7`, windowId: 2, groupId: 9 },
+  ];
+  assert.deepEqual(await worker.closePr("acme/webapp#7", 2), { closed: 1 });
+  assert.deepEqual(ids(), [1]);
+  assert.deepEqual(await worker.closePr("acme/webapp#7", 2), { closed: 0 });
+  assert.deepEqual(ids(), [1]);
+});
+
+test("closePr uses pending URLs for loading tabs and pending navigation away", async () => {
+  const worker = await freshWorker("close-pending-url");
+  world.tabs = [{ id: 1, url: "", pendingUrl: `${PR}/7` }];
+  assert.deepEqual(await worker.closePr("acme/webapp#7", 1), { closed: 1 });
+  assert.deepEqual(ids(), []);
+  world.tabs = [{ id: 2, url: `${PR}/7`, pendingUrl: "https://example.com/" }];
+  assert.deepEqual(await worker.closePr("acme/webapp#7", 2), { closed: 0 });
+  assert.deepEqual(ids(), [2]);
 });

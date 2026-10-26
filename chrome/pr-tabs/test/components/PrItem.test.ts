@@ -9,6 +9,7 @@ import { fakePanes } from "./fakePanes";
 import { mountPopup } from "./mountPopup";
 
 const ROW: PrRow = {
+  tabId: 7,
   key: "acme/webapp#7",
   label: "webapp#7",
   title: "Fix the thing",
@@ -125,7 +126,7 @@ test("close is a named sibling control after the terminal and never selects the 
     assert.equal(close.attributes("title"), "Close tab webapp#7");
     assert.equal(close.element.parentElement, wrapper.find("li").element);
     await close.trigger("click");
-    assert.deepEqual(wrapper.emitted("close"), [[ROW.key]]);
+    assert.deepEqual(wrapper.emitted("close"), [[ROW.key, ROW.tabId]]);
     assert.equal(wrapper.emitted("go"), undefined);
     assert.equal(panes.focused.length, 0);
     assert.equal(bubbled, 0);

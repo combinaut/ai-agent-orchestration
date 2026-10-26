@@ -4,7 +4,7 @@ import { computed, ref, watch, useTemplateRef } from "vue";
 import { lookupHeads } from "#/core";
 import { useMessages } from "#/composables/useMessages";
 import type { ComponentPublicInstance } from "vue";
-import type { GroupListProps, GroupRows, PrKey, PrRowEvents } from "#/types";
+import type { GroupListProps, GroupRows, PrKey, TabId, PrRowEvents } from "#/types";
 import GroupItem from "./GroupItem.vue";
 
 const props = defineProps<GroupListProps>();
@@ -49,8 +49,8 @@ function handlePrGo(key: PrKey): void {
   emit("go", key);
 }
 
-function handlePrClose(key: PrKey): void {
-  emit("close", key);
+function handlePrClose(key: PrKey, tabId: TabId): void {
+  emit("close", key, tabId);
 }
 
 function focusFirst(): void {

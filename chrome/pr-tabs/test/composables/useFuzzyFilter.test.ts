@@ -11,6 +11,7 @@ const groups: GroupSummary[] = [
     count: 1,
     prs: [
       {
+        tabId: 731,
         key: "acme/obsidian#731",
         label: "ShownLabel",
         title: "Amber Zeppelin",
@@ -22,7 +23,15 @@ const groups: GroupSummary[] = [
     id: "9",
     title: "Different",
     count: 1,
-    prs: [{ key: "acme/quartz#999", label: "quartz#999", title: "Plain record", head: null }],
+    prs: [
+      {
+        tabId: 999,
+        key: "acme/quartz#999",
+        label: "quartz#999",
+        title: "Plain record",
+        head: null,
+      },
+    ],
   },
 ];
 
@@ -69,7 +78,10 @@ function updatedGroups(): GroupSummary[] {
     {
       ...primary,
       count: 2,
-      prs: [first, { key: "acme/obsidian#2", label: "obsidian#2", title: "Amber", head: null }],
+      prs: [
+        first,
+        { tabId: 2, key: "acme/obsidian#2", label: "obsidian#2", title: "Amber", head: null },
+      ],
     },
   ];
 }

@@ -8,24 +8,33 @@ import { fakeAsk } from "#test/composables/fakeAsk";
 import GroupItem from "#popup/components/GroupItem.vue";
 import GroupList from "#popup/components/GroupList.vue";
 import type { FakeReplies } from "#test/types";
-import type { GroupSummary } from "#/types";
+import type { GroupSummary, PrRow } from "#/types";
 import { fakePanes } from "./fakePanes";
 import { mountPopup } from "./mountPopup";
 
 const HEAD = { repo: "acme/webapp", branch: "feature" };
+const LATER_HEAD = { repo: "acme/webapp", branch: "later" };
+const LATER_ROW: PrRow = {
+  tabId: 3,
+  key: "acme/webapp#3",
+  label: "webapp#3",
+  title: "Later",
+  head: LATER_HEAD,
+};
+
 const groups: GroupSummary[] = [
   {
     id: "1",
     title: "Finder",
     color: "yellow",
     count: 1,
-    prs: [{ key: "acme/webapp#1", label: "webapp#1", title: "One", head: HEAD }],
+    prs: [{ tabId: 1, key: "acme/webapp#1", label: "webapp#1", title: "One", head: HEAD }],
   },
   {
     id: "2",
     title: "webapp",
     count: 1,
-    prs: [{ key: "acme/webapp#2", label: "webapp#2", title: "", head: null }],
+    prs: [{ tabId: 2, key: "acme/webapp#2", label: "webapp#2", title: "", head: null }],
   },
 ];
 
@@ -70,18 +79,17 @@ test("expanded groups resolve later batch heads with the real pane cache", async
   try {
     await wrapper.find("button[aria-expanded]").trigger("click");
     await flushPromises();
-    const later = { repo: "acme/webapp", branch: "later" };
     const updated: GroupSummary = {
       ...first,
       count: 2,
-      prs: [...first.prs, { key: "acme/webapp#3", label: "webapp#3", title: "Later", head: later }],
+      prs: [...first.prs, LATER_ROW],
     };
     replies.panes = { "acme/webapp:later": { state: "working" } };
     await wrapper.setProps({ groups: [updated] });
     await flushPromises();
     assert.deepEqual(fake.sent, [
       { type: "panes", heads: [HEAD] },
-      { type: "panes", heads: [later] },
+      { type: "panes", heads: [LATER_HEAD] },
     ]);
     assert.equal(wrapper.findAll("li [data-pr-pane]").length, 2);
     assert.ok(wrapper.text().includes("working"));
@@ -118,8 +126,20 @@ test("a live count reorder preserves expansion and focused header identity", asy
 });
 
 test("PR row focus stays on its key across a live row reorder", async () => {
-  const first = { key: "acme/webapp#1" as const, label: "webapp#1", title: "First", head: null };
-  const second = { key: "acme/webapp#2" as const, label: "webapp#2", title: "Second", head: null };
+  const first = {
+    tabId: 1,
+    key: "acme/webapp#1" as const,
+    label: "webapp#1",
+    title: "First",
+    head: null,
+  };
+  const second = {
+    tabId: 2,
+    key: "acme/webapp#2" as const,
+    label: "webapp#2",
+    title: "Second",
+    head: null,
+  };
   const group = { id: "10", title: "Finder", count: 2, prs: [first, second] };
   const wrapper = mountPopup(GroupList, {
     props: { groups: [group], panes: fakePanes() },

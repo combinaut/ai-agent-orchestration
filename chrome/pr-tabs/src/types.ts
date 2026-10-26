@@ -125,6 +125,7 @@ export interface BranchRef {
 }
 
 export interface PrRow {
+  readonly tabId: TabId;
   readonly highlights?: PrHighlights;
   readonly key: PrKey;
   readonly label: string;
@@ -218,6 +219,10 @@ export interface PrKeyRequest<K extends PrKeyAction = PrKeyAction> {
 
 export type FocusPrRequest = PrKeyRequest<"focusPr">;
 
+export interface ClosePrRequest extends PrKeyRequest<"closePr"> {
+  readonly tabId: TabId;
+}
+
 export interface GoToRequest {
   readonly type: "goTo";
   readonly input: string;
@@ -235,13 +240,17 @@ export interface FocusPaneRequest {
 }
 
 export type Request =
-  PlainRequest | PickRepoRequest | GoToRequest | PrKeyRequest | PanesRequest | FocusPaneRequest;
+  | PlainRequest
+  | PickRepoRequest
+  | GoToRequest
+  | FocusPrRequest
+  | ClosePrRequest
+  | PanesRequest
+  | FocusPaneRequest;
 export type RequestType = Request["type"];
 export type RequestOf<K extends RequestType> = K extends PlainRequestType
   ? PlainRequest<K>
-  : K extends PrKeyAction
-    ? PrKeyRequest<K>
-    : Extract<Request, { readonly type: K }>;
+  : Extract<Request, { readonly type: K }>;
 
 export interface Failure {
   readonly error: string;
@@ -633,7 +642,7 @@ export interface PrSearchCommands {
 }
 export interface PrRowEvents {
   go: [key: PrKey];
-  close: [key: PrKey];
+  close: [key: PrKey, tabId: TabId];
 }
 export interface GroupListControl {
   focusFirst: () => void;
@@ -645,7 +654,7 @@ export interface PrCloseContext {
   refresh: () => Promise<void>;
 }
 export interface PrClose {
-  close: (key: PrKey) => Promise<void>;
+  close: (key: PrKey, tabId: TabId) => Promise<void>;
 }
 
 export type MatchRange = readonly [number, number];

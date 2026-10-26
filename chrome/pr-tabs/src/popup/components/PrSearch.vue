@@ -22,6 +22,10 @@ const resultText = computed(() => {
 });
 
 function handleSearchKeydown(event: KeyboardEvent): void {
+  if (event.isComposing) {
+    return;
+  }
+
   if (event.key === "ArrowDown") {
     event.preventDefault();
     emit("next");

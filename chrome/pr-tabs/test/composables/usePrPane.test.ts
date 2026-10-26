@@ -6,6 +6,7 @@ import type { AgentState, PaneLookup, PrRow } from "#/types";
 import { fakePanes } from "#test/components/fakePanes";
 
 const ROW: PrRow = {
+  tabId: 7,
   key: "acme/webapp#7",
   label: "webapp#7",
   title: "Fix",

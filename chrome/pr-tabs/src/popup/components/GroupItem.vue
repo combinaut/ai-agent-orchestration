@@ -6,7 +6,7 @@ import AccordionHeader, { type AccordionHeaderPassThroughOptions } from "primevu
 import AccordionPanel from "primevue/accordionpanel";
 import Badge from "primevue/badge";
 import { computed } from "vue";
-import type { GroupItemProps, PrKey, PrRowEvents, PrRows } from "#/types";
+import type { GroupItemProps, PrKey, TabId, PrRowEvents, PrRows } from "#/types";
 import { useGroupItem } from "#/composables/useGroupItem";
 import PrItem from "./PrItem.vue";
 
@@ -27,8 +27,8 @@ function handlePrGo(key: PrKey): void {
   emit("go", key);
 }
 
-function handlePrClose(key: PrKey): void {
-  emit("close", key);
+function handlePrClose(key: PrKey, tabId: TabId): void {
+  emit("close", key, tabId);
 }
 </script>
 

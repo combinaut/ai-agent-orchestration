@@ -165,7 +165,7 @@ test("closePr is never retried after a lost answer", async () => {
 
       return undefined;
     },
-    { type: "closePr", key: "acme/webapp#7" },
+    { type: "closePr", key: "acme/webapp#7", tabId: 7 },
   );
   assert.equal(calls, 1);
 });

@@ -128,8 +128,9 @@ const SUMMARIZED: Summary = {
       color: "blue",
       count: 2,
       prs: [
-        { key: "acme/webapp#1", label: "webapp#1", title: "Fix", head: null },
+        { tabId: 2, key: "acme/webapp#1", label: "webapp#1", title: "Fix", head: null },
         {
+          tabId: 3,
           key: "acme/webapp#2",
           label: "webapp#2",
           title: "Fork",
@@ -144,6 +145,7 @@ const SUMMARIZED: Summary = {
       count: 1,
       prs: [
         {
+          tabId: 4,
           key: "acme/webapp#3",
           label: "webapp#3",
           title: "",
@@ -188,7 +190,13 @@ test("the summary counts distinct PRs and lists the PRs of each group with their
 });
 
 function row(n: number, repo: string, branch: string): PrRow {
-  return { key: `acme/webapp#${n}`, label: `webapp#${n}`, title: "", head: { repo, branch } };
+  return {
+    tabId: n,
+    key: `acme/webapp#${n}`,
+    label: `webapp#${n}`,
+    title: "",
+    head: { repo, branch },
+  };
 }
 
 test("pane lookups ask for each distinct head once, in list order, at most the cap", () => {

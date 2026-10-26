@@ -777,20 +777,19 @@ export function focusPr(key: PrKey): Promise<Reply<"focusPr">> {
   return serial(() => focusKnownPr(key));
 }
 
-async function closeKnownPr(key: PrKey): Promise<Reply<"closePr">> {
+async function closeKnownPr(key: PrKey, tabId: TabId): Promise<Reply<"closePr">> {
   const rules = await loadRules();
-  const entry = findOpenTab(await prEntries(rules), key, await focusedId());
-  const tab = entry ? await findTab(entry.tab.id) : null;
+  const tab = await findTab(tabId);
 
-  if (!tab || !stillShowsPr(tab, key, rules.org)) {
+  if (!tab || parsePrUrl(tab.pendingUrl || tab.url, rules.org)?.key !== key) {
     return { closed: 0 };
   }
 
   return { closed: (await removeTab(tab.id)) ? 1 : 0 };
 }
 
-export function closePr(key: PrKey): Promise<Reply<"closePr">> {
-  return serial(() => closeKnownPr(key));
+export function closePr(key: PrKey, tabId: TabId): Promise<Reply<"closePr">> {
+  return serial(() => closeKnownPr(key, tabId));
 }
 
 // What the popup needs for the repo dropdown: the listed repos, the selected one, and whether to
@@ -1077,7 +1076,7 @@ function handleFocusPrMessage(message: RequestOf<"focusPr">): Promise<Reply<"foc
 }
 
 function handleClosePrMessage(message: RequestOf<"closePr">): Promise<Reply<"closePr">> {
-  return closePr(message.key);
+  return closePr(message.key, message.tabId);
 }
 
 function handleReposMessage(): Promise<RepoChoices> {
