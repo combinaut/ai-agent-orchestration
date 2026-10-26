@@ -280,12 +280,18 @@ def discover_owners(root, values):
         branch = discovery.branch_owners(command, work)
         workspace_labels = {row["id"]: row.get("label") for row in work["workspaces"]}
         labels = {
-            name
+            name: workspace_labels[workspace]
             for name, workspace in discovery.architect_owners(command).items()
-            if workspace in workspace_labels
+            if workspace_labels.get(workspace)
+        }
+        status = {
+            key: labels[owner]
+            for key, owner in discovery.status_owners(
+                set(labels), discovery.status_directory()
+            ).items()
         }
         return {
-            **discovery.status_owners(labels, discovery.status_directory()),
+            **status,
             **branch,
         }
 

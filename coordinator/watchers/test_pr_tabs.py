@@ -194,7 +194,7 @@ class PrTabsTest(IsolatedTestCase):
             ]
         }
         branch = {"acme/webapp:feature": "Finder", "acme/webapp#12": "Branch"}
-        status = {"acme/webapp#12": "Status", "acme/docs#23": "Finder"}
+        status = {"acme/webapp#12": "Finder", "acme/docs#23": "Finder"}
         with (
             patch.object(discovery, "open_work", return_value=work),
             patch.object(discovery, "branch_owners", return_value=branch) as branches,
@@ -249,21 +249,23 @@ class PrTabsTest(IsolatedTestCase):
     def test_host_includes_an_architect_status_file_without_workers(self):
         with tempfile.TemporaryDirectory() as directory:
             status = Path(directory)
-            (status / "Finder.md").write_text(
+            (status / "Architect::Example.md").write_text(
                 "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
             )
-            work = {"workspaces": [{"id": "a", "label": "Finder"}]}
+            work = {"workspaces": [{"id": "a", "label": "example-app"}]}
             with (
                 patch.object(discovery, "open_work", return_value=work),
                 patch.object(discovery, "branch_owners", return_value={}),
                 patch.object(
-                    discovery, "architect_owners", return_value={"Finder": "a"}
+                    discovery,
+                    "architect_owners",
+                    return_value={"Architect::Example": "a"},
                 ),
                 patch.object(discovery, "status_directory", return_value=status),
             ):
                 self.assertEqual(
                     host.discover_owners(ROOT, {"ORCH_ENV": "herdr"}),
-                    {"acme/webapp#12": "Finder"},
+                    {"acme/webapp#12": "example-app"},
                 )
 
     def test_host_preserves_last_good_ownership_when_architect_lookup_fails(self):
