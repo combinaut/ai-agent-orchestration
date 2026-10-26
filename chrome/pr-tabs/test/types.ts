@@ -208,3 +208,10 @@ export interface FakePanes extends Omit<Panes, "checking" | "lookup"> {
   ensured: (readonly BranchRef[])[];
   focused: BranchRef[];
 }
+
+export interface OpeningBatchFixture {
+  pending: Promise<Reply<"openReviews">>;
+  firstOpened: Promise<void>;
+  release: () => void;
+  restore: () => void;
+}

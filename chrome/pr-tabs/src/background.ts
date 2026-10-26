@@ -661,6 +661,7 @@ async function openPlanned(plan: Planned[], rules: Rules): Promise<Planned[]> {
 
   for (const planned of plan) {
     if (await openPr(planned, rules)) {
+      await updateMeta((meta) => seedOpen(meta, [planned]));
       opened.push(planned);
       progress = { ...progress, opened: opened.length };
     }
@@ -695,7 +696,6 @@ async function openBatchOnce(action: OpenBatchAction): Promise<Reply<"openAll">>
   const plan = planOpenAll(await searchOpenPrs(rules, openKeys), openKeys, rules.org);
   const opened = await openPlanned(plan.open, rules);
 
-  await updateMeta((meta) => seedOpen(meta, opened));
   await chrome.action.setBadgeText({ text: badgeText(plan) });
   await ensureAlarm();
 
