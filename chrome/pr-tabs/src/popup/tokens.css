@@ -1,6 +1,8 @@
 /* The popup's own design tokens, for what the Aura preset (--p-*) lacks. */
 :root {
   --pr-tabs-popup-width: 480px;
+  --pr-tabs-popup-max-height: 584px;
+  --pr-tabs-popup-padding: 1rem;
   --p-button-sm-padding-x: 0.25rem;
   --pr-tabs-font-family: ui-sans-serif, system-ui, sans-serif;
   --pr-tabs-font-size: 13px;
@@ -10,6 +12,7 @@
   --pr-tabs-status-min-height: 1.4em;
   --pr-tabs-group-row-padding: 3px;
   --pr-tabs-dot-size: 10px;
+  --pr-tabs-pane-icon-size: var(--p-icon-size);
   --pr-tabs-dot-radius: 50%;
   --pr-tabs-dot-ring: inset 0 0 0 1px rgb(0 0 0 / 0.3);
   --pr-tabs-group-grey: #5f6368;

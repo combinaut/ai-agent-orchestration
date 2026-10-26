@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import assert from "node:assert/strict";
 import Badge from "primevue/badge";
+import AccordionContent from "primevue/accordioncontent";
 import { test } from "vitest";
 import GroupList from "#popup/components/GroupList.vue";
 import type { GroupSummary, PrRow } from "#/types";
@@ -30,4 +31,5 @@ test("the expanded content is a shrinkable grid column, so a long PR title canno
   await wrapper.find("button[aria-expanded]").trigger("click");
 
   assert.ok(wrapper.find("[data-pc-name=accordioncontent]").classes().includes("grid-cols-1"));
+  assert.equal(wrapper.findComponent(AccordionContent).props("pt").content.class, "p-0");
 });
