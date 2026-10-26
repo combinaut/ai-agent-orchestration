@@ -266,6 +266,20 @@ class PrTabsTest(IsolatedTestCase):
                     {"acme/webapp#12": "Finder"},
                 )
 
+    def test_host_preserves_last_good_ownership_when_architect_lookup_fails(self):
+        work = {"workspaces": [{"id": "a", "label": "Finder"}]}
+        with (
+            patch.object(discovery, "open_work", return_value=work),
+            patch.object(discovery, "branch_owners", return_value={}),
+            patch.object(
+                discovery,
+                "architect_owners",
+                side_effect=discovery.Unavailable("agent list timed out"),
+            ),
+        ):
+            with self.assertRaisesRegex(discovery.Unavailable, "agent list timed out"):
+                host.discover_owners(ROOT, {"ORCH_ENV": "herdr"})
+
     def test_host_cache_expires_and_missing_or_broken_adapter_falls_back(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "config.toml"
