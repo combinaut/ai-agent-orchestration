@@ -18,7 +18,6 @@ function handleButtonClick(): void {
     size="small"
     :severity="severity"
     :label="label"
-    :aria-label="hint"
     :title="hint"
     :disabled="busy"
     @click="handleButtonClick"

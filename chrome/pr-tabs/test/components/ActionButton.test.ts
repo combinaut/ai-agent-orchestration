@@ -11,7 +11,7 @@ test("a click runs the action, and a busy button is disabled", async () => {
   });
 
   assert.equal(wrapper.text(), "Close merged");
-  assert.equal(wrapper.find("button").attributes("aria-label"), "Close merged PRs");
+  assert.equal(wrapper.find("button").attributes("aria-label"), "Close merged");
   assert.equal(wrapper.find("button").attributes("title"), "Close merged PRs");
 
   await wrapper.find("button").trigger("click");
