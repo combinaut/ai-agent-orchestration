@@ -156,6 +156,18 @@ test("the repo dropdown shows only while the input is a bare PR number", async (
   wrapper.unmount();
 });
 
+test("popup content is the capped stable-gutter scroller", async () => {
+  const { wrapper } = await popup([]);
+  const content = wrapper.find("#popup-content");
+
+  assert.equal(content.element.tagName, "MAIN");
+  assert.equal(content.classes().includes("scrollbar-gutter-both-edges"), true);
+  assert.equal(content.classes().includes("max-h-popup-content"), true);
+  assert.equal(content.classes().includes("overflow-y-auto"), true);
+
+  wrapper.unmount();
+});
+
 test("the first expanded group looks up panes once; go to pane focuses and closes", async () => {
   const close = vi.spyOn(window, "close").mockImplementation(noop);
   const head = { repo: "acme/webapp", branch: "feature" };
