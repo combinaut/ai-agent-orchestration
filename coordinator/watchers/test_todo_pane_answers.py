@@ -125,17 +125,20 @@ class PaneAnswerTests(IsolatedTestCase):
             len([c for c in self.herdr.calls if c[1:3] == ["agent", "focus"]]), 4
         )
 
-    def test_working_queues_with_busy_wording(self):
+    def test_working_focuses_and_keeps_item_without_sending(self):
         app, view = self.view_app()
-        self.fake(
-            app,
-            view,
-            status="working",
-            screen=EMPTY,
-        )
+        self.fake(app, view, status="working", screen=EMPTY)
         app.feed("a1")
-        self.assertEqual(app.status, "sent to Architect::Tooling (queued while busy)")
-        self.assertEqual(len(self.prompts()), 1)
+        self.assertEqual(self.prompts(), [])
+        self.assertEqual(app.status, "type it in the pane: now")
+        self.assertEqual(len(app.rows), 1)
+        self.assertEqual(a.records(), [])
+        self.assertIn(
+            ["agent", "focus", "w1:p2"], [call[1:] for call in self.herdr.calls]
+        )
+        self.assertFalse(
+            any(call[1:3] == ["pane", "read"] for call in self.herdr.calls)
+        )
 
     def test_worker_coordinator_and_ambiguous_targets_never_receive_input(self):
         app, view = self.view_app()

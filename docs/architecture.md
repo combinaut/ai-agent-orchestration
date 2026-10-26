@@ -67,6 +67,7 @@ flowchart LR
   - a brand-new worker's first brief, and follow-ups to a worker pane the architect owns and nobody types into;
   - the startup of a fresh successor pane after a recycle (`date`, the `/architect` or `/coordinate` brief, startup slash commands), Claude panes only.
   - `/remote-control` to an idle architect whose Remote Control failed while `remote_control.architects` is on, after the idle state and an empty composer are verified.
+  - the [To-do answer exception (user OK 2026-10-26)](../skills/coordinate/SKILL.md#messages), limited to the owning architect's idle pane with a verified empty composer.
 - Never type into a composer a person may be using.
 - Herdr stays available for layout and read-only inspection.
 

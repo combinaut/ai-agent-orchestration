@@ -509,7 +509,7 @@ def answer_item(owner, text, answer, generation):
             if same_architect(owner, candidate, current):
                 target = current
                 status = current.get("agent_status")
-                if status in ("idle", "done", "working"):
+                if status in ("idle", "done"):
                     screen = run(
                         "pane",
                         "read",
@@ -584,11 +584,7 @@ def answer_item(owner, text, answer, generation):
             )
             module.dismiss_locked(item, state_path, TODO, state)
             return (
-                "sent to "
-                + owner
-                + (" (queued while busy)" if status == "working" else "")
-                if sent
-                else "relayed; the architect may ask again"
+                "sent to " + owner if sent else "relayed; the architect may ask again"
             )
     if target:
         try:

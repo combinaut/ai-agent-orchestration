@@ -104,6 +104,8 @@ Use `herdr agent prompt` only for a brand-new worker's first brief or for follow
 
 **Remote Control repair exception (Claude panes only, user OK 2026-10-11).** When `ORCH_REMOTE_CONTROL_ARCHITECTS=1`, `/remote-control` may be sent with `herdr agent prompt` to an idle architect pane whose Remote Control failed, only after checking that its composer is empty. Do not send it unless both the idle state and empty composer are verified.
 
+**To-do answer exception (user OK 2026-10-26).** Only the to-do view's key/click handler may use `herdr agent prompt` to deliver Mario's own answer to the owning architect's idle pane (`idle` or `done`), after verifying that its composer is empty. The input is the fixed one-line text `Mario (to-do panel): <item text> -> <chosen answer>`. A working architect or any other status receives no pane input; focus the pane for manual input and keep the item.
+
 Preserve saved names `Coordinator` and `Architect::...`, worker UUIDs, and current handoffs. Prefer a verified live UUID when names are ambiguous. Codex subagents in one collaboration tree may use their native collaboration channel. Verify the recipient runtime and supported native route before a mixed-runtime handoff. Do not silently fall back to input injection if native delivery fails; inspect and repair the native route. Rebind watcher destinations and verify a round-trip acknowledgement after recycle. Herdr remains available for layout and read-only inspection. Sandbox denial accessing Codex queue/state means request normal escalation. Do not replay stale holds or setup GO from historical queues.
 
 ## Supporting background

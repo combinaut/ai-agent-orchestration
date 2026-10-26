@@ -47,6 +47,10 @@ supports `a`: type the item number, press `a`, then choose or type. Outside answ
 mode, number/Enter jumps, n/p paging, mouse clicks, Ignore and Reminder keep their
 existing behavior. In text mode, letters such as q, n and p are answer text. If the item disappears or changes while you type, press Esc to leave the canceled answer; buffered text cannot act on another item.
 
+The [To-do answer exception (user OK 2026-10-26)](../skills/coordinate/SKILL.md#messages)
+is a named exception to the native-message rule for Mario's own answer. It does
+not authorize arbitrary agent messages through pane input.
+
 The buttons view submits an answer synchronously from your choice click/key press or
 Enter in the answer editor, as typed input to the owning architect's pane:
 `Mario (to-do panel): <item text> -> <chosen answer>`. Both parts have controls
@@ -57,7 +61,7 @@ controls ordinary jumps. Workers, the Coordinator, unknown owners and ambiguous
 matches never receive typed answers.
 
 The view reads the architect identity, status and visible Claude screen before
-acquiring the answer locks. It requires idle, done or working status and a bare
+acquiring the answer locks. It requires idle or done status and a bare
 `❯` prompt line occupying the entire composer region, immediately above the last
 pure horizontal border. Multiline drafts, including a prompt-looking final line,
 are non-empty. The upper
@@ -68,16 +72,16 @@ unrecognized screen cannot establish emptiness.
 Under the queue and item-state locks, the handler rechecks the item's generation,
 existing delivery records, and that the snapshot is at most 250 ms old. An already
 recorded answer is rejected before dispatch or manual-input fallback. A stale
-snapshot, non-empty or uncertain composer, or blocked/unknown status keeps the
+snapshot, non-empty or uncertain composer, or any status other than idle/done keeps the
 item. After releasing the locks, the view focuses the resolved architect and
 shows `type it in the pane: <answer>`. Unknown or ambiguous owners receive no
 focus. Only the prompt subprocess runs under the locks, serializing dispatch and
 bookkeeping across views; reads and focus never wait on Herdr under either lock.
 The screen check is a snapshot, so changes after it remain a terminal-input race.
 
-A successful submission removes the item and shows `sent to <architect>`, adding
-`(queued while busy)` for a working architect. Claude Code queues that typed
-input. Only a documented pre-send rejection (`agent_blocked`) uses the queue/native relay and shows
+A successful submission removes the item and shows `sent to <architect>`. A
+working architect receives no pane input: focus the pane, show
+`type it in the pane: <answer>`, and keep the item. Only a documented pre-send rejection (`agent_blocked`) uses the queue/native relay and shows
 `relayed; the architect may ask again`. A prompt timeout, other non-zero exit, or process-start error leaves delivery
 unknown. The view records unknown delivery before dispatch, so an interrupted
 submission also keeps the item and cannot become a duplicate native relay. It
