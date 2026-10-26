@@ -43,6 +43,8 @@ import type {
   IdTab,
   Meta,
   OpenAllPlan,
+  OpenBatchAction,
+  OpeningProgress,
   OrgName,
   Owners,
   PaneLookup,
@@ -655,10 +657,12 @@ async function searchOpenPrs(rules: Rules, openKeys: Set<PrKey>): Promise<Search
 
 async function openPlanned(plan: Planned[], rules: Rules): Promise<Planned[]> {
   const opened: Planned[] = [];
+  progress = { active: true, opened: 0, planned: plan.length };
 
   for (const planned of plan) {
     if (await openPr(planned, rules)) {
       opened.push(planned);
+      progress = { ...progress, opened: opened.length };
     }
   }
 
@@ -673,8 +677,15 @@ function badgeText(plan: OpenAllPlan): string {
   return `${plan.estimated ? "~" : "+"}${plan.remaining}`;
 }
 
-async function openAllOnce(): Promise<Reply<"openAll">> {
-  const rules = await loadRules();
+async function openBatchOnce(action: OpenBatchAction): Promise<Reply<"openAll">> {
+  const configured = await loadRules();
+  const rules =
+    action === "openReviews"
+      ? {
+          ...configured,
+          openAll: ["is:pr", "is:open", `org:${configured.org}`, "review-requested:@me"].join(" "),
+        }
+      : configured;
 
   if (!rules.org || !rules.openAll) {
     return { error: getMessage("errSetOrgAndOpenAll") };
@@ -691,16 +702,33 @@ async function openAllOnce(): Promise<Reply<"openAll">> {
   return { opened: opened.length, remaining: plan.remaining, estimated: plan.estimated };
 }
 
-let openingAll: Promise<Reply<"openAll">> | undefined;
+let openingBatch: Promise<Reply<"openAll">> | undefined;
+let progress: OpeningProgress = { active: false, opened: 0, planned: 0 };
 
-function handleOpenAllSettled(): void {
-  openingAll = undefined;
+export function openingProgress(): OpeningProgress {
+  return { ...progress };
+}
+
+function handleOpenBatchSettled(): void {
+  openingBatch = undefined;
+  progress = { active: false, opened: 0, planned: 0 };
+}
+
+function openBatch(action: OpenBatchAction): Promise<Reply<"openAll">> {
+  if (!openingBatch) {
+    progress = { active: true, opened: 0, planned: 0 };
+    openingBatch = openBatchOnce(action).finally(handleOpenBatchSettled);
+  }
+
+  return openingBatch;
 }
 
 export function openAll(): Promise<Reply<"openAll">> {
-  openingAll ??= openAllOnce().finally(handleOpenAllSettled);
+  return openBatch("openAll");
+}
 
-  return openingAll;
+export function openReviews(): Promise<Reply<"openReviews">> {
+  return openBatch("openReviews");
 }
 
 // Focuses the PR's open tab (window, group, tab) or opens it in its architect group, one request at
@@ -947,6 +975,8 @@ function handleFocusPaneMessage(message: RequestOf<"focusPane">): Promise<Focuse
 
 const handleRuntimeMessage = messageListener({
   openAll: handleOpenAllMessage,
+  openReviews,
+  openingProgress,
   goTo: handleGoToMessage,
   repos: handleReposMessage,
   pickRepo: handlePickRepoMessage,

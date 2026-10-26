@@ -178,7 +178,16 @@ export interface OpenAllResult {
 }
 
 // Requests from the popup to the service worker.
-export type PlainRequestType = "summary" | "repos" | "openAll" | "checkNow" | "closeDuplicates";
+export type OpenBatchAction = "openAll" | "openReviews";
+
+export interface OpeningProgress {
+  readonly active: boolean;
+  readonly opened: number;
+  readonly planned: number;
+}
+
+export type PlainRequestType =
+  "summary" | "repos" | OpenBatchAction | "openingProgress" | "checkNow" | "closeDuplicates";
 
 export interface PlainRequest<K extends PlainRequestType = PlainRequestType> {
   readonly type: K;
@@ -250,6 +259,8 @@ export interface Replies {
   readonly pickRepo: Readonly<Record<string, never>>;
   readonly goTo: GoToResult;
   readonly openAll: OpenAllResult;
+  readonly openReviews: OpenAllResult;
+  readonly openingProgress: OpeningProgress;
   readonly checkNow: CheckResult;
   readonly closeDuplicates: DuplicatesClosed;
   readonly panes: PaneLookup;
