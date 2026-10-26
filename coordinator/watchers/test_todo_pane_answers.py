@@ -386,3 +386,25 @@ class PaneAnswerTests(IsolatedTestCase):
         self.assertFalse(any(c[1:3] == ["agent", "focus"] for c in self.herdr.calls))
         self.assertEqual(a.records(), [])
         self.assertEqual(len(app.rows), 1)
+
+    def test_multiline_draft_cannot_end_in_a_prompt_looking_line(self):
+        _, view = self.view_app()
+        for tail in ("  ❯", "❯"):
+            screen = EMPTY_SCREEN.replace(
+                "\n❯\n", "\n❯ draft already in composer\n" + tail + "\n"
+            )
+            self.assertFalse(view.empty_composer({"agent": "claude"}, screen))
+
+    def test_stale_second_view_rejects_recorded_answer_before_manual_fallback(self):
+        first, first_view = self.view_app()
+        second, second_view = self.view_app()
+        self.fake(first, first_view)
+        self.fake(second, second_view)
+        second.feed("a")
+        first.feed("a1")
+        self.herdr.screen = TYPED_SCREEN
+        second.feed("2")
+        self.assertIn("already recorded", second.status)
+        self.assertEqual(len(self.prompts()), 1)
+        self.assertFalse(any(c[1:3] == ["agent", "focus"] for c in self.herdr.calls))
+        self.assertEqual(a.records()[0]["answer"], "now")

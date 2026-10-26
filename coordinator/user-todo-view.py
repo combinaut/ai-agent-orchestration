@@ -476,7 +476,11 @@ def empty_composer(agent, screen):
         return False
     lines = screen.splitlines()
     borders = [n for n, line in enumerate(lines) if re.fullmatch(r"\s*─{8,}\s*", line)]
-    return bool(borders and borders[-1] > 0 and lines[borders[-1] - 1].strip() == "❯")
+    if not borders:
+        return False
+    last = borders[-1]
+    upper = [n for n, line in enumerate(lines[:last]) if line.startswith("─" * 8)]
+    return bool(upper and last - upper[-1] == 2 and lines[last - 1].rstrip() == "❯")
 
 
 def answer_item(owner, text, answer, generation):
@@ -537,14 +541,12 @@ def answer_item(owner, text, answer, generation):
     ):
         unknown = "delivery unknown; check the pane: " + pane_text(answer)
         for record in existing:
-            if (
-                record["item_id"] == item["id"]
-                and record.get("generation") == expected
-                and record.get("pane_delivery_unknown_at")
-            ):
-                return "delivery unknown; check the pane: " + pane_text(
-                    record["answer"]
-                )
+            if record["item_id"] == item["id"] and record.get("generation") == expected:
+                if record.get("pane_delivery_unknown_at"):
+                    return "delivery unknown; check the pane: " + pane_text(
+                        record["answer"]
+                    )
+                return "answer already recorded: " + pane_text(record["answer"])
         if safe and mono() - observed_at <= SNAPSHOT_MAX_AGE:
             record = todo_answers.submit_locked(
                 owner, text, answer, expected, existing, pane_dispatch=True

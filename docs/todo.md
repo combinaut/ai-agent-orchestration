@@ -58,13 +58,16 @@ matches never receive typed answers.
 
 The view reads the architect identity, status and visible Claude screen before
 acquiring the answer locks. It requires idle, done or working status and a bare
-`❯` prompt line immediately above the last pure horizontal border. The upper
+`❯` prompt line occupying the entire composer region, immediately above the last
+pure horizontal border. Multiline drafts, including a prompt-looking final line,
+are non-empty. The upper
 border may contain a title; anything below the lower border is footer or status
 text. A nonbreaking space after the prompt glyph counts as whitespace. An
 unrecognized screen cannot establish emptiness.
 
 Under the queue and item-state locks, the handler rechecks the item's generation,
-existing delivery records, and that the snapshot is at most 250 ms old. A stale
+existing delivery records, and that the snapshot is at most 250 ms old. An already
+recorded answer is rejected before dispatch or manual-input fallback. A stale
 snapshot, non-empty or uncertain composer, or blocked/unknown status keeps the
 item. After releasing the locks, the view focuses the resolved architect and
 shows `type it in the pane: <answer>`. Unknown or ambiguous owners receive no
