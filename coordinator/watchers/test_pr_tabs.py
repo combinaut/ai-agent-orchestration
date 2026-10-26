@@ -133,8 +133,8 @@ class PrTabsTest(IsolatedTestCase):
                 "## Open PRs\nhttps://github.com/acme/ignored/pull/3\n"
             )
             self.assertEqual(
-                discovery.status_owners({"Finder"}, status),
-                {"acme/webapp#12": "Finder", "acme/docs#23": "Finder"},
+                discovery.status_owners({"Finder": "a"}, status),
+                {"acme/webapp#12": "a", "acme/docs#23": "a"},
             )
 
     def test_status_owners_accepts_markdown_and_prose_url_terminators(self):
@@ -153,8 +153,8 @@ class PrTabsTest(IsolatedTestCase):
                 f"- [#12]({url})\n"
             )
             self.assertEqual(
-                discovery.status_owners({"Finder"}, status),
-                {"acme/webapp#12": "Finder"},
+                discovery.status_owners({"Finder": "a"}, status),
+                {"acme/webapp#12": "a"},
             )
 
     def test_status_owners_ignores_unreadable_files(self):
@@ -164,24 +164,24 @@ class PrTabsTest(IsolatedTestCase):
             tooling = status / "Tooling.md"
             finder.write_text("## Open PRs\nhttps://github.com/acme/webapp/pull/12\n")
             tooling.write_text("## Open PRs\nhttps://github.com/acme/docs/pull/23\n")
-            original = Path.read_text
+            original = Path.open
 
-            def read(path, *args, **kwargs):
+            def open_file(path, *args, **kwargs):
                 if path == tooling:
                     raise OSError("unreadable fixture")
                 return original(path, *args, **kwargs)
 
-            with patch.object(Path, "read_text", read):
+            with patch.object(Path, "open", open_file):
                 self.assertEqual(
-                    discovery.status_owners({"Finder", "Tooling"}, status),
-                    {"acme/webapp#12": "Finder"},
+                    discovery.status_owners({"Finder": "a", "Tooling": "b"}, status),
+                    {"acme/webapp#12": "a"},
                 )
 
     def test_status_owners_propagates_directory_enumeration_failures(self):
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(Path, "iterdir", side_effect=PermissionError("denied")):
                 with self.assertRaisesRegex(discovery.Unavailable, "status directory"):
-                    discovery.status_owners({"Finder"}, Path(directory))
+                    discovery.status_owners({"Finder": "a"}, Path(directory))
 
     def test_status_owners_omits_ambiguous_prs(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -190,7 +190,89 @@ class PrTabsTest(IsolatedTestCase):
                 (status / f"{label}.md").write_text(
                     "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
                 )
-            self.assertEqual(discovery.status_owners({"Finder", "Tooling"}, status), {})
+            self.assertEqual(
+                discovery.status_owners({"Finder": "a", "Tooling": "b"}, status),
+                {},
+            )
+
+    def test_status_owners_keeps_duplicate_stems_for_one_workspace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            for name in ("agent-tooling-1018", "Architect::Agent::Tooling"):
+                (status / f"{name}.md").write_text(
+                    "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+                )
+            self.assertEqual(
+                discovery.status_owners(
+                    {"agent-tooling-1018": "a", "Architect::Agent::Tooling": "a"},
+                    status,
+                ),
+                {"acme/webapp#12": "a"},
+            )
+
+    def test_status_owners_accepts_case_insensitive_open_prs_heading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_text(
+                "## OPEN PRS\nhttps://github.com/acme/webapp/pull/12\n"
+            )
+            self.assertEqual(
+                discovery.status_owners({"Finder": "a"}, status),
+                {"acme/webapp#12": "a"},
+            )
+
+    def test_status_owners_ignores_missing_directory_and_non_markdown_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.txt").write_text(
+                "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+            )
+            self.assertEqual(discovery.status_owners({"Finder": "a"}, status), {})
+            self.assertEqual(
+                discovery.status_owners({"Finder": "a"}, status / "missing"), {}
+            )
+
+    def test_status_owners_lowercases_pr_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_text(
+                "## Open PRs\nhttps://github.com/Acme/WebApp/pull/12\n"
+            )
+            self.assertEqual(
+                discovery.status_owners({"Finder": "a"}, status),
+                {"acme/webapp#12": "a"},
+            )
+
+    def test_status_owners_skips_files_over_256_kib(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_bytes(
+                b"## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+                + b"x" * (256 * 1024)
+            )
+            original = Path.open
+            reads = []
+
+            class BoundedStream:
+                def __init__(self, stream):
+                    self.stream = stream
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    self.stream.close()
+
+                def read(self, size=-1):
+                    reads.append(size)
+                    return self.stream.read(size)
+
+            def open_file(path, *args, **kwargs):
+                return BoundedStream(original(path, *args, **kwargs))
+
+            with patch.object(Path, "open", open_file):
+                self.assertEqual(discovery.status_owners({"Finder": "a"}, status), {})
+            self.assertEqual(reads, [discovery.MAX_STATUS_FILE_BYTES + 1])
 
     def test_host_merges_status_owners_without_overriding_branch_owners(self):
         work = {
@@ -200,7 +282,7 @@ class PrTabsTest(IsolatedTestCase):
             ]
         }
         branch = {"acme/webapp:feature": "Finder", "acme/webapp#12": "Branch"}
-        status = {"acme/webapp#12": "Finder", "acme/docs#23": "Finder"}
+        status = {"acme/webapp#12": "a", "acme/docs#23": "a"}
         with (
             patch.object(discovery, "open_work", return_value=work),
             patch.object(discovery, "branch_owners", return_value=branch) as branches,
@@ -222,7 +304,9 @@ class PrTabsTest(IsolatedTestCase):
                 },
             )
         self.assertEqual(branches.call_args.args[1], work)
-        self.assertEqual(statuses.call_args.args, ({"Finder"}, Path("/fixture/status")))
+        self.assertEqual(
+            statuses.call_args.args, ({"Finder": "a"}, Path("/fixture/status"))
+        )
 
     def test_host_ignores_status_file_named_after_a_worker_label(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -273,6 +357,22 @@ class PrTabsTest(IsolatedTestCase):
                     host.discover_owners(ROOT, {"ORCH_ENV": "herdr"}),
                     {"acme/webapp#12": "example-app"},
                 )
+
+    def test_host_ignores_architect_without_a_workspace_label(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_text(
+                "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+            )
+            with (
+                patch.object(discovery, "open_work", return_value={"workspaces": []}),
+                patch.object(discovery, "branch_owners", return_value={}),
+                patch.object(
+                    discovery, "architect_owners", return_value={"Finder": "a"}
+                ),
+                patch.object(discovery, "status_directory", return_value=status),
+            ):
+                self.assertEqual(host.discover_owners(ROOT, {"ORCH_ENV": "herdr"}), {})
 
     def test_host_preserves_last_good_ownership_when_architect_lookup_fails(self):
         work = {"workspaces": [{"id": "a", "label": "Finder"}]}

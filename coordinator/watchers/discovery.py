@@ -19,6 +19,7 @@ GITHUB_REMOTE = orch_settings.GITHUB_REMOTE
 NO_REMOTE = re.compile(r"No such remote", re.I)
 GONE = re.compile(r"cannot change to .*: No such file or directory", re.I)
 OPEN_PRS = "## open prs"
+MAX_STATUS_FILE_BYTES = 256 * 1024
 PR_URL = re.compile(
     r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)(?![0-9A-Za-z_-])",
     re.I,
@@ -135,22 +136,27 @@ def status_directory():
     )
 
 
-def status_owners(labels, directory):
-    """Architect labels for owner/repo#number URLs under each matching Open PRs heading."""
-    owners, ambiguous = {}, set()
+def status_owners(workspace_owners, directory):
+    """Architect workspace ids for owner/repo#number URLs under each matching Open PRs heading."""
+    found, ambiguous = {}, set()
     try:
         files = sorted(
             path for path in Path(directory).iterdir() if path.suffix == ".md"
         )
     except FileNotFoundError:
-        return owners
+        return found
     except OSError as error:
         raise Unavailable(f"status directory unreadable: {str(error)[:200]}") from error
     for path in files:
-        if path.stem not in labels:
+        owner = workspace_owners.get(path.stem)
+        if owner is None:
             continue
         try:
-            lines = path.read_text().splitlines()
+            with path.open("rb") as stream:
+                content = stream.read(MAX_STATUS_FILE_BYTES + 1)
+            if len(content) > MAX_STATUS_FILE_BYTES:
+                continue
+            lines = content.decode().splitlines()
         except (OSError, ValueError):
             continue
         section = False
@@ -162,10 +168,10 @@ def status_owners(labels, directory):
             elif section:
                 for repo, number in PR_URL.findall(line):
                     key = f"{repo.lower()}#{number}"
-                    if key in owners and owners[key] != path.stem:
+                    if key in found and found[key] != owner:
                         ambiguous.add(key)
-                    owners[key] = path.stem
-    return {key: label for key, label in owners.items() if key not in ambiguous}
+                    found[key] = owner
+    return {key: owner for key, owner in found.items() if key not in ambiguous}
 
 
 def upstream_repo(command, clone, failed):
