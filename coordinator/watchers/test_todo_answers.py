@@ -177,7 +177,7 @@ class TodoAnswerTests(IsolatedTestCase):
         hidden = view.Hidden(self.base / "hidden.json", self.base / "feed.log")
         from todo_test_support import FakeHerdr
 
-        FakeHerdr(self, OWNER, fail=True)
+        FakeHerdr(self, OWNER, fail=True, view=view)
         app = view.App(
             hidden,
             False,

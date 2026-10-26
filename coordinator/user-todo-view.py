@@ -461,6 +461,13 @@ def architect_target(owner, rows):
     return matches[0] if len(matches) == 1 else None
 
 
+def same_architect(owner, expected, current):
+    return owner in architect_labels(current) and all(
+        current.get(key) == expected.get(key)
+        for key in ("pane_id", "name", "workspace_id")
+    )
+
+
 SNAPSHOT_MAX_AGE = 0.25
 
 
@@ -495,12 +502,7 @@ def answer_item(owner, text, answer, generation):
         candidate = architect_target(owner, result("agent", "list")["agents"])
         if candidate and candidate.get("pane_id") and candidate.get("workspace_id"):
             current = result("agent", "get", candidate["pane_id"])["agent"]
-            if (
-                architect_target(owner, [current])
-                and current.get("pane_id") == candidate["pane_id"]
-                and current.get("name") == candidate.get("name")
-                and current.get("workspace_id") == candidate["workspace_id"]
-            ):
+            if same_architect(owner, candidate, current):
                 target = current
                 status = current.get("agent_status")
                 if status in ("idle", "done", "working"):
@@ -588,8 +590,17 @@ def answer_item(owner, text, answer, generation):
             )
     if target:
         try:
-            run("agent", "focus", target["pane_id"])
-        except (OSError, subprocess.TimeoutExpired):
+            current = result("agent", "get", target["pane_id"])["agent"]
+            if same_architect(owner, target, current):
+                run("agent", "focus", target["pane_id"])
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+            subprocess.TimeoutExpired,
+        ):
             pass
     return "type it in the pane: " + pane_text(answer)
 

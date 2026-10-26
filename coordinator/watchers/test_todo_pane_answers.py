@@ -23,7 +23,7 @@ class PaneAnswerTests(IsolatedTestCase):
 
     def fake(self, app, view, *, status="idle", screen=EMPTY, rows=None, fail=False):
         self.herdr = FakeHerdr(
-            self, OWNER, status=status, screen=screen, rows=rows, fail=fail
+            self, OWNER, status=status, screen=screen, rows=rows, fail=fail, view=view
         )
 
     def prompts(self):
@@ -360,3 +360,29 @@ class PaneAnswerTests(IsolatedTestCase):
             ),
             {},
         )
+
+    def test_reused_pane_during_lock_wait_is_not_focused(self):
+        import contextlib
+
+        app, view = self.view_app()
+        self.fake(app, view)
+        queue_lock = a.queue_lock
+        clock = [0.0]
+
+        @contextlib.contextmanager
+        def replace_while_waiting():
+            with queue_lock():
+                self.herdr.agent["name"] = "replacement-worker"
+                self.herdr.agent["tokens"] = dict(role="worker")
+                clock[0] = 1.0
+                yield
+
+        with (
+            patch.object(a, "queue_lock", replace_while_waiting),
+            patch.object(view, "mono", lambda: clock[0]),
+        ):
+            app.feed("a1")
+        self.assertEqual(self.prompts(), [])
+        self.assertFalse(any(c[1:3] == ["agent", "focus"] for c in self.herdr.calls))
+        self.assertEqual(a.records(), [])
+        self.assertEqual(len(app.rows), 1)

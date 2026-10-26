@@ -12,7 +12,15 @@ TYPED_SCREEN = (Path(__file__).parent / "fixtures/claude-typed-screen.txt").read
 
 class FakeHerdr:
     def __init__(
-        self, case, owner, *, status="idle", screen=EMPTY_SCREEN, rows=None, fail=False
+        self,
+        case,
+        owner,
+        *,
+        status="idle",
+        screen=EMPTY_SCREEN,
+        rows=None,
+        fail=False,
+        view=None,
     ):
         self.case, self.screen = case, screen
         self.calls, self.prompt_timeouts = [], []
@@ -37,6 +45,10 @@ class FakeHerdr:
         stub = patch.object(subprocess, "run", self.run)
         stub.start()
         case.addCleanup(stub.stop)
+        if view is not None:
+            clock = patch.object(view, "mono", return_value=0.0)
+            clock.start()
+            case.addCleanup(clock.stop)
 
     def assert_unlocked(self):
         for path in (
