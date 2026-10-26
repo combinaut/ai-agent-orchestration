@@ -36,13 +36,13 @@
     "message": "Ouvrir toutes mes PR ouvertes"
   },
   "checkNowButton": {
-    "message": "Fermer fusionnées"
+    "message": "Fusionnées"
   },
   "checkNowHint": {
     "message": "Fermer les PR fusionnées"
   },
   "closeDuplicatesButton": {
-    "message": "Fermer doublons"
+    "message": "Doublons"
   },
   "closeDuplicatesHint": {
     "message": "Fermer les onglets en double"

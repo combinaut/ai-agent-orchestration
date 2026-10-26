@@ -36,13 +36,13 @@
     "message": "Alle meine offenen PRs öffnen"
   },
   "checkNowButton": {
-    "message": "Gemergte schließen"
+    "message": "Gemergte zu"
   },
   "checkNowHint": {
     "message": "Gemergte PRs schließen"
   },
   "closeDuplicatesButton": {
-    "message": "Duplikate schließen"
+    "message": "Duplikate zu"
   },
   "closeDuplicatesHint": {
     "message": "Doppelte Tabs schließen"
