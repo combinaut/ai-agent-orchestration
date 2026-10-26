@@ -3,8 +3,8 @@
 @import "tailwindcss-primeui";
 @import "./tokens.css";
 
-@utility scrollbar-gutter-stable {
-  scrollbar-gutter: stable;
+@utility scrollbar-gutter-both-edges {
+  scrollbar-gutter: stable both-edges;
 }
 
 @theme inline {

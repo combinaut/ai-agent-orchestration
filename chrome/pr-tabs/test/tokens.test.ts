@@ -141,7 +141,10 @@ test("no two @theme tokens claim the same Tailwind utility", () => {
 test("the popup content owns a stable scrollbar gutter before groups expand", () => {
   const tailwind = readFileSync(join(SRC, "popup/tailwind.css"), "utf8");
 
-  assert.match(tailwind, /@utility scrollbar-gutter-stable\s*\{\s*scrollbar-gutter: stable;/);
+  assert.match(
+    tailwind,
+    /@utility scrollbar-gutter-both-edges\s*\{\s*scrollbar-gutter: stable both-edges;/,
+  );
   assert.doesNotMatch(tailwind, /@layer base\s*\{\s*html\s*\{/);
 });
 

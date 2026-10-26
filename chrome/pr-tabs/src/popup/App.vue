@@ -73,7 +73,7 @@ onMounted(handlePopupMounted);
 <template>
   <main
     id="popup-content"
-    class="box-border max-h-popup-content w-popup scrollbar-gutter-stable overflow-y-auto p-popup-padding"
+    class="box-border max-h-popup-content w-popup scrollbar-gutter-both-edges overflow-y-auto p-popup-padding"
   >
     <GoToForm
       v-model:input="input"
