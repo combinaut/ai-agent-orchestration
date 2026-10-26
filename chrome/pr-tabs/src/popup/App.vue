@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { useOpeningProgress } from "#/composables/useOpeningProgress";
 import { useMessages } from "#/composables/useMessages";
 import { usePanes } from "#/composables/usePanes";
 import { useGoTo } from "#/composables/useGoTo";
@@ -11,9 +12,12 @@ import { useTabActions } from "#/composables/useTabActions";
 import ActionButton from "./components/ActionButton.vue";
 import GoToForm from "./components/GoToForm.vue";
 import GroupList from "./components/GroupList.vue";
+import OpeningProgress from "./components/OpeningProgress.vue";
 import StatusLine from "./components/StatusLine.vue";
 
 const {
+  openReviewsButton,
+  openReviewsHint,
   openAllButton,
   openAllHint,
   checkNowButton,
@@ -21,6 +25,8 @@ const {
   closeDuplicatesButton,
   closeDuplicatesHint,
 } = useMessages([
+  "openReviewsButton",
+  "openReviewsHint",
   "openAllButton",
   "openAllHint",
   "checkNowButton",
@@ -37,8 +43,15 @@ const input = ref("");
 const picker = useRepoPicker(ask, input);
 const { repos, repo, visible: isRepoPickerVisible } = picker;
 const { busy: isGoToBusy, go } = useGoTo({ ask, status, picker }, input);
-const { openAll, checkNow, closeDuplicates } = useTabActions({ ask, status, refresh });
+const { openAll, openReviews, checkNow, closeDuplicates } = useTabActions({ ask, status, refresh });
 const { busy: isOpeningAll } = openAll;
+const { busy: isOpeningReviews } = openReviews;
+const workerProgress = useOpeningProgress(ask);
+const openingProgress = computed(() => ({
+  ...workerProgress.value,
+  active: workerProgress.value.active || isOpeningAll.value || isOpeningReviews.value,
+}));
+const isOpeningBatch = computed(() => openingProgress.value.active);
 const { busy: isCheckingNow } = checkNow;
 const { busy: isClosingDuplicates } = closeDuplicates;
 
@@ -52,6 +65,10 @@ function handleRepoPick(): void {
 
 function handleOpenAllRun(): void {
   void openAll.run();
+}
+
+function handleOpenReviewsRun(): void {
+  void openReviews.run();
 }
 
 function handleCheckNowRun(): void {
@@ -86,8 +103,15 @@ onMounted(handlePopupMounted);
       primary
       :label="openAllButton"
       :hint="openAllHint"
-      :busy="isOpeningAll"
+      :busy="isOpeningBatch"
       @run="handleOpenAllRun"
+    />
+    <ActionButton
+      id="open-reviews"
+      :label="openReviewsButton"
+      :hint="openReviewsHint"
+      :busy="isOpeningBatch"
+      @run="handleOpenReviewsRun"
     />
     <ActionButton
       id="check-now"
@@ -104,6 +128,7 @@ onMounted(handlePopupMounted);
       @run="handleCloseDuplicatesRun"
     />
   </div>
+  <OpeningProgress :progress="openingProgress" />
   <StatusLine :text="statusText" :error="isStatusError" />
   <GroupList :groups="groups" :panes="panes" />
 </template>

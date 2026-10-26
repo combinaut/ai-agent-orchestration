@@ -59,6 +59,12 @@ const ACTIONS: readonly ActionCase[] = [
     status: "Opened 1. 2 PRs in 1 group",
   },
   {
+    button: "#open-reviews",
+    request: { type: "openReviews" },
+    reply: { opened: 1, remaining: 0, estimated: false },
+    status: "Opened 1. 2 PRs in 1 group",
+  },
+  {
     button: "#check-now",
     request: { type: "checkNow" },
     reply: {
@@ -186,5 +192,17 @@ test("the first expanded group looks up panes once; go to pane focuses and close
   assert.deepEqual(sent.at(-1), { type: "focusPane", head });
   assert.equal(close.mock.calls.length, 1);
 
+  wrapper.unmount();
+});
+
+test("reopening the popup displays the active batch and disables both opening actions", async () => {
+  const { wrapper } = await popup([], {
+    openingProgress: { active: true, opened: 3, planned: 10 },
+  });
+
+  assert.equal(wrapper.find("[role=progressbar]").attributes("aria-valuenow"), "30");
+  assert.equal(wrapper.find("#opening-progress [aria-live=polite]").text(), "Opened 3 of 10");
+  assert.equal(wrapper.find("#open-all").attributes("disabled"), "");
+  assert.equal(wrapper.find("#open-reviews").attributes("disabled"), "");
   wrapper.unmount();
 });

@@ -458,6 +458,10 @@ export interface GroupRow {
 }
 
 // Component props.
+export interface OpeningProgressProps {
+  progress: OpeningProgress;
+}
+
 export interface ActionButtonProps {
   label: string;
   hint: string;

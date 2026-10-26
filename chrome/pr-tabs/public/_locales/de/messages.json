@@ -325,5 +325,22 @@
   },
   "agentWaiting": {
     "message": "wartet"
+  },
+  "openReviewsButton": {
+    "message": "Reviews öffnen"
+  },
+  "openReviewsHint": {
+    "message": "PRs öffnen, für die meine Review angefordert wurde"
+  },
+  "openingProgress": {
+    "message": "$OPENED$ von $PLANNED$ geöffnet",
+    "placeholders": {
+      "opened": {
+        "content": "$1"
+      },
+      "planned": {
+        "content": "$2"
+      }
+    }
   }
 }
