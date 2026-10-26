@@ -1,6 +1,6 @@
 /* The popup's own design tokens, for what the Aura preset (--p-*) lacks. */
 :root {
-  --pr-tabs-popup-width: 300px;
+  --pr-tabs-popup-width: 460px;
   --pr-tabs-font-family: ui-sans-serif, system-ui, sans-serif;
   --pr-tabs-font-size: 13px;
   --pr-tabs-label-font-weight: 600;

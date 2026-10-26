@@ -6,9 +6,13 @@ import ActionButton from "#popup/components/ActionButton.vue";
 import { mountPopup } from "./mountPopup";
 
 test("a click runs the action, and a busy button is disabled", async () => {
-  const wrapper = mountPopup(ActionButton, { props: { label: "Close merged PRs", busy: false } });
+  const wrapper = mountPopup(ActionButton, {
+    props: { label: "Close merged", hint: "Close merged PRs", busy: false },
+  });
 
-  assert.equal(wrapper.text(), "Close merged PRs");
+  assert.equal(wrapper.text(), "Close merged");
+  assert.equal(wrapper.find("button").attributes("aria-label"), "Close merged PRs");
+  assert.equal(wrapper.find("button").attributes("title"), "Close merged PRs");
 
   await wrapper.find("button").trigger("click");
 
@@ -19,14 +23,20 @@ test("a click runs the action, and a busy button is disabled", async () => {
   assert.equal(wrapper.find("button").attributes("disabled"), "");
 });
 
-test("the primary button has more space above and the default colour", () => {
-  const primary = mountPopup(ActionButton, { props: { label: "a", busy: false, primary: true } });
+test("the primary button has the default colour, the others are secondary", () => {
+  const primary = mountPopup(ActionButton, {
+    props: { label: "a", hint: "a", busy: false, primary: true },
+  });
 
-  assert.ok(primary.classes().includes("mt-3"));
   assert.equal(primary.findComponent(Button).props("severity"), null);
 
-  const secondary = mountPopup(ActionButton, { props: { label: "b", busy: false } });
+  const secondary = mountPopup(ActionButton, { props: { label: "b", hint: "b", busy: false } });
 
-  assert.ok(secondary.classes().includes("mt-2"));
   assert.equal(secondary.findComponent(Button).props("severity"), "secondary");
+});
+
+test("the button shares the row width with its siblings", () => {
+  const wrapper = mountPopup(ActionButton, { props: { label: "a", hint: "a", busy: false } });
+
+  assert.ok(wrapper.classes().includes("flex-1"));
 });

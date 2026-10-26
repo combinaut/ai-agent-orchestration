@@ -30,12 +30,21 @@
     "message": "Nenhum repositório disponível"
   },
   "openAllButton": {
+    "message": "Abrir todos"
+  },
+  "openAllHint": {
     "message": "Abrir todos os meus PRs abertos"
   },
   "checkNowButton": {
+    "message": "Fechar mesclados"
+  },
+  "checkNowHint": {
     "message": "Fechar PRs mesclados"
   },
   "closeDuplicatesButton": {
+    "message": "Fechar duplicadas"
+  },
+  "closeDuplicatesHint": {
     "message": "Fechar abas duplicadas"
   },
   "groupsLabel": {
