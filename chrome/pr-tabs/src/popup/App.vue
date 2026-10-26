@@ -89,47 +89,52 @@ onMounted(handlePopupMounted);
 </script>
 
 <template>
-  <GoToForm
-    v-model:input="input"
-    v-model:repo="repo"
-    :busy="isGoToBusy"
-    :repos="repos"
-    :show-repo="isRepoPickerVisible"
-    @go="handleGoToSubmit"
-    @pick="handleRepoPick"
-  />
-  <div class="mt-3 grid grid-cols-2 gap-2">
-    <ActionButton
-      id="open-all"
-      primary
-      :label="openAllButton"
-      :hint="openAllHint"
-      :busy="isOpeningBatch"
-      @run="handleOpenAllRun"
+  <main
+    id="popup-content"
+    class="box-border max-h-popup-content w-popup scrollbar-gutter-both-edges overflow-y-auto p-popup-padding"
+  >
+    <GoToForm
+      v-model:input="input"
+      v-model:repo="repo"
+      :busy="isGoToBusy"
+      :repos="repos"
+      :show-repo="isRepoPickerVisible"
+      @go="handleGoToSubmit"
+      @pick="handleRepoPick"
     />
-    <ActionButton
-      id="open-reviews"
-      :label="openReviewsButton"
-      :hint="openReviewsHint"
-      :busy="isOpeningBatch"
-      @run="handleOpenReviewsRun"
-    />
-    <ActionButton
-      id="check-now"
-      :label="checkNowButton"
-      :hint="checkNowHint"
-      :busy="isCheckingNow"
-      @run="handleCheckNowRun"
-    />
-    <ActionButton
-      id="close-duplicates"
-      :label="closeDuplicatesButton"
-      :hint="closeDuplicatesHint"
-      :busy="isClosingDuplicates"
-      @run="handleCloseDuplicatesRun"
-    />
-  </div>
-  <OpeningProgress :progress="openingProgress" />
-  <StatusLine :text="statusText" :error="isStatusError" />
-  <GroupList :groups="groups" :panes="panes" />
+    <div class="mt-3 grid grid-cols-2 gap-2">
+      <ActionButton
+        id="open-all"
+        primary
+        :label="openAllButton"
+        :hint="openAllHint"
+        :busy="isOpeningBatch"
+        @run="handleOpenAllRun"
+      />
+      <ActionButton
+        id="open-reviews"
+        :label="openReviewsButton"
+        :hint="openReviewsHint"
+        :busy="isOpeningBatch"
+        @run="handleOpenReviewsRun"
+      />
+      <ActionButton
+        id="check-now"
+        :label="checkNowButton"
+        :hint="checkNowHint"
+        :busy="isCheckingNow"
+        @run="handleCheckNowRun"
+      />
+      <ActionButton
+        id="close-duplicates"
+        :label="closeDuplicatesButton"
+        :hint="closeDuplicatesHint"
+        :busy="isClosingDuplicates"
+        @run="handleCloseDuplicatesRun"
+      />
+    </div>
+    <OpeningProgress :progress="openingProgress" />
+    <StatusLine :text="statusText" :error="isStatusError" />
+    <GroupList :groups="groups" :panes="panes" />
+  </main>
 </template>

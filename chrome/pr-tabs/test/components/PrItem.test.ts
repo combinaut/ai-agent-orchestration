@@ -73,3 +73,21 @@ test("the agent state shows as a tag with an aria label; none without an agent",
     false,
   );
 });
+
+test("a PR row has an Aura hover background for pointer and keyboard interaction", () => {
+  const row = item({}).wrapper.find("li");
+
+  assert.equal(row.classes().includes("hover:bg-row-hover"), true);
+  assert.equal(row.classes().includes("focus-within:bg-row-hover"), true);
+  assert.equal(row.classes().includes("-mx-popup-padding"), true);
+  assert.equal(row.classes().includes("px-popup-padding"), true);
+});
+
+test("the go-to-pane icon uses the Aura icon size inside the small button target", () => {
+  const button = item({ "acme/webapp:feature": { state: "working" } }).wrapper.findComponent(
+    Button,
+  );
+
+  assert.equal(button.props("size"), "small");
+  assert.equal(button.find(".size-pane-icon").exists(), true);
+});
