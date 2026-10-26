@@ -83,3 +83,15 @@ test("Open reviews reports the shared batch result after refreshing", async () =
   assert.equal(all.openReviews.busy.value, false);
   assert.equal(all.refreshes(), 1);
 });
+
+for (const type of ["openAll", "openReviews"] as const) {
+  test(`${type} refreshes once at the end of a failed batch and keeps the error`, async () => {
+    const all = actions({ [type]: { error: "batch failed" } });
+
+    await all[type].run();
+
+    assert.equal(all.refreshes(), 1);
+    assert.equal(all.status.statusText.value, "batch failed");
+    assert.equal(all.status.isStatusError.value, true);
+  });
+}

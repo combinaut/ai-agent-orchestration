@@ -23,6 +23,10 @@ function useTabAction<K extends TabActionType>(
     const result = await ask(spec.request);
 
     if (failed(result)) {
+      if (spec.refreshOnFailure) {
+        await refresh();
+      }
+
       status.error(result.error);
 
       return;
@@ -55,12 +59,14 @@ export function useTabActions(context: TabActionContext): TabActions {
   const openAll = useTabAction(context, {
     request: { type: "openAll" },
     pending: getPlainMessage("pendingOpening"),
+    refreshOnFailure: true,
     report: reportOpenAll,
   });
 
   const openReviews = useTabAction(context, {
     request: { type: "openReviews" },
     pending: getPlainMessage("pendingOpening"),
+    refreshOnFailure: true,
     report: reportOpenAll,
   });
 

@@ -59,3 +59,29 @@ test("a final refresh queues behind an active progress refresh without overlap",
   assert.equal(maximum, 1);
   assert.equal(base.sent.length, 2);
 });
+
+for (const reply of [{ prs: 2, groups }, { error: "stale summary error" }]) {
+  test(`a pending summary preserves a newer batch error: ${JSON.stringify(reply)}`, async () => {
+    const held = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const base = fakeAsk({ summary: reply });
+    const ask: Ask = async (message) => {
+      started.resolve();
+      await held.promise;
+
+      return base.ask(message);
+    };
+    const status = useStatus();
+    const summary = useSummary(ask, status);
+    status.info("Opening…");
+    const pending = summary.refresh();
+    await started.promise;
+    const queued = summary.refresh();
+    status.error("batch failed");
+    held.resolve();
+    await Promise.all([pending, queued]);
+
+    assert.equal(status.statusText.value, "batch failed");
+    assert.equal(status.isStatusError.value, true);
+  });
+}

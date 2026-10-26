@@ -1,20 +1,23 @@
 import { useAsyncState } from "@vueuse/core";
 import { failed } from "#/messages";
 import { summaryText } from "#/texts";
-import type { Ask, GroupSummary, Status, SummaryList } from "#/types";
+import type { Ask, GroupSummary, Status, StatusRevision, SummaryList } from "#/types";
 
 // A failed refresh keeps the groups it had.
-export function useSummary(ask: Ask, status: Pick<Status, "info" | "error">): SummaryList {
-  async function loadGroups(): Promise<GroupSummary[]> {
+export function useSummary(
+  ask: Ask,
+  status: Pick<Status, "info" | "error" | "revision">,
+): SummaryList {
+  async function loadGroups(revision: StatusRevision): Promise<GroupSummary[]> {
     const summary = await ask({ type: "summary" });
 
     if (failed(summary)) {
-      status.error(summary.error);
+      status.error(summary.error, revision);
 
       return groups.value;
     }
 
-    status.info(summaryText(summary));
+    status.info(summaryText(summary), revision);
 
     return summary.groups;
   }
@@ -26,11 +29,13 @@ export function useSummary(ask: Ask, status: Pick<Status, "info" | "error">): Su
 
   let refreshing: Promise<void> = Promise.resolve();
 
-  async function refreshNow(): Promise<void> {
-    await executeImmediate();
-  }
-
   function refresh(): Promise<void> {
+    const revision = status.revision.value;
+
+    async function refreshNow(): Promise<void> {
+      await executeImmediate(revision);
+    }
+
     refreshing = refreshing.then(refreshNow, refreshNow);
 
     return refreshing;

@@ -15,9 +15,10 @@ async function reportCompletion(
   result: Reply<"openAll">,
 ): Promise<void> {
   const { status, refresh, localBusy } = context;
+  const revision = status.revision.value;
   await refresh();
 
-  if (localBusy.value) {
+  if (localBusy.value || status.revision.value !== revision) {
     return;
   }
 

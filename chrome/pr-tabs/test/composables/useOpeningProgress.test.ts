@@ -69,3 +69,32 @@ test("an observed local opening keeps its own completion report", async () => {
     vi.useRealTimers();
   }
 });
+
+test("an observed completion cannot overwrite a newer local error while refreshing", async () => {
+  vi.useFakeTimers();
+  const scope = effectScope();
+  const held = Promise.withResolvers<void>();
+  const replies: FakeReplies = { openingProgress: { active: true, opened: 0, planned: 3 } };
+  const fake = fakeAsk(replies);
+  const status = useStatus();
+  const refresh = vi.fn<SummaryList["refresh"]>(() => held.promise);
+
+  try {
+    scope.run(() => useOpeningProgress({ ask: fake.ask, status, localBusy: ref(false), refresh }));
+    await flushPromises();
+    const result = { opened: 3, remaining: 0, estimated: false };
+    replies.openingProgress = { active: false, opened: 0, planned: 0, result };
+    await vi.advanceTimersByTimeAsync(250);
+    assert.equal(refresh.mock.calls.length, 1);
+    status.error("newer local failure");
+    held.resolve();
+    await flushPromises();
+
+    assert.equal(status.statusText.value, "newer local failure");
+    assert.equal(status.isStatusError.value, true);
+  } finally {
+    held.resolve();
+    scope.stop();
+    vi.useRealTimers();
+  }
+});

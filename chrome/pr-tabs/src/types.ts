@@ -369,11 +369,14 @@ export interface StatusLine {
   readonly text: string;
 }
 
+export type StatusRevision = number;
+
 export interface Status {
   statusText: ComputedRef<string>;
   isStatusError: ComputedRef<boolean>;
-  info: (text: string) => void;
-  error: (text: string) => void;
+  revision: Readonly<Ref<StatusRevision>>;
+  info: (text: string, revision?: StatusRevision) => void;
+  error: (text: string, revision?: StatusRevision) => void;
 }
 
 export interface ServiceWorker {
@@ -434,7 +437,7 @@ export type TabActionType = OpenBatchAction | "checkNow" | "closeDuplicates";
 
 export interface TabActionContext {
   ask: Ask;
-  status: Pick<Status, "statusText" | "info" | "error">;
+  status: Pick<Status, "statusText" | "info" | "error" | "revision">;
   refresh: () => Promise<void>;
 }
 
@@ -447,6 +450,7 @@ export interface OpeningProgressContext extends TabActionContext {
 export interface TabActionSpec<K extends TabActionType> {
   request: PlainRequest<K>;
   pending: string;
+  refreshOnFailure?: boolean;
   report: (result: Replies[K]) => string;
 }
 
