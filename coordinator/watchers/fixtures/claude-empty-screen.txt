@@ -1,0 +1,5 @@
+─────────────────────────────────────────────────────────────────────────────────── Architect::Orchestration ─
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 5.5 | 89% 106k | ai-agent-orchestration |  main | Brain Fried ✔ Update installed · Restart to update
+  ⏵⏵ auto mode on (shift+tab to cycle)                                                                   /rc

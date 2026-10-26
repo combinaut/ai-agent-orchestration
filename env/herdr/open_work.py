@@ -3,7 +3,11 @@
 import json
 import os
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+from herdr_identity import architect_labels  # noqa: E402
 
 NOT_A_CHECKOUT = re.compile(
     r"not a git repository \(or any (of the parent directories|parent up to mount point)",
@@ -102,15 +106,10 @@ def architect_owners(command):
         raise ValueError("agents is not a list of records")
     owners, ambiguous = {}, set()
     for row in rows:
-        name, workspace = row.get("name"), row.get("workspace_id")
-        role = (row.get("tokens") or {}).get("role")
-        if (
-            not workspace
-            or not name
-            or (role != "architect" and not name.startswith("Architect::"))
-        ):
+        workspace = row.get("workspace_id")
+        if not workspace:
             continue
-        for label in {name, row.get("terminal_title_stripped")} - {None, ""}:
+        for label in architect_labels(row):
             if label in owners and owners[label] != workspace:
                 ambiguous.add(label)
             owners[label] = workspace

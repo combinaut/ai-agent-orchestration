@@ -3,7 +3,6 @@
 import ast
 import importlib.util
 import json
-import subprocess
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
@@ -11,10 +10,11 @@ from test_support import IsolatedTestCase
 import test_todo_answers as existing
 import todo_answers as a
 import watchers as w
+from todo_test_support import EMPTY_SCREEN, TYPED_SCREEN, FakeHerdr
 
 OWNER, TEXT = existing.OWNER, existing.TEXT
 
-EMPTY = "Earlier output\n" + "─" * 50 + "\n❯ \n" + "─" * 50 + "\n  ? for shortcuts"
+EMPTY = EMPTY_SCREEN
 
 
 class PaneAnswerTests(IsolatedTestCase):
@@ -22,58 +22,12 @@ class PaneAnswerTests(IsolatedTestCase):
     view_app = existing.TodoAnswerTests.view_app
 
     def fake(self, app, view, *, status="idle", screen=EMPTY, rows=None, fail=False):
-        self.calls = []
-        self.screen = screen
-        self.prompt_timeouts = []
-        self.timeout_prompt = False
-        self.interrupt_prompt = False
-        agent = dict(
-            name="tooling",
-            terminal_title_stripped=OWNER,
-            workspace_id="w1",
-            pane_id="w1:p2",
-            agent="claude",
-            agent_status=status,
-            tokens=dict(role="architect"),
+        self.herdr = FakeHerdr(
+            self, OWNER, status=status, screen=screen, rows=rows, fail=fail
         )
-        self.agent = agent
-        self.rows = [agent] if rows is None else rows
-
-        def run(argv, **kwargs):
-            self.assertIsInstance(argv, list)
-            self.assertFalse(kwargs.get("shell"))
-            self.calls.append(argv)
-            command = argv[1:3]
-            data = {}
-            code = 0
-            if command == ["agent", "list"]:
-                data = dict(agents=self.rows)
-            elif command == ["agent", "get"]:
-                data = dict(agent=agent)
-            elif command == ["pane", "read"]:
-                self.assertEqual(
-                    argv[3:], ["w1:p2", "--source", "visible", "--format", "text"]
-                )
-                data = dict(read=dict(text=self.screen))
-            elif command == ["agent", "prompt"]:
-                self.prompt_timeouts.append(kwargs.get("timeout"))
-                if self.interrupt_prompt:
-                    raise SystemExit(143)
-                if self.timeout_prompt:
-                    raise subprocess.TimeoutExpired(argv, 5)
-                code = int(fail)
-            elif command != ["agent", "focus"]:
-                self.fail(f"Unexpected fake Herdr call: {argv}")
-            return subprocess.CompletedProcess(
-                argv, code, json.dumps(dict(result=data)), ""
-            )
-
-        stub = patch.object(subprocess, "run", run)
-        stub.start()
-        self.addCleanup(stub.stop)
 
     def prompts(self):
-        return [call for call in self.calls if call[1:3] == ["agent", "prompt"]]
+        return [call for call in self.herdr.calls if call[1:3] == ["agent", "prompt"]]
 
     def test_choice_sends_exact_argv_and_records_delivery(self):
         app, view = self.view_app()
@@ -125,7 +79,9 @@ class PaneAnswerTests(IsolatedTestCase):
             view.answer_item(OWNER, item, dirty, 1)
         expected = (
             "Mario (to-do panel): "
-            + ("Item " + "y" * 700)[:512]
+            + ("Item " + "y" * 700 + " [1: yes]")[:254]
+            + " … "
+            + ("Item " + "y" * 700 + " [1: yes]")[-255:]
             + " -> "
             + ("hi " + "x" * 700)[:512]
         )
@@ -133,10 +89,10 @@ class PaneAnswerTests(IsolatedTestCase):
 
     def test_nonempty_composer_focuses_and_keeps_item(self):
         app, view = self.view_app()
-        self.fake(app, view, screen=EMPTY.replace("❯ ", "❯ unfinished input"))
+        self.fake(app, view, screen=TYPED_SCREEN)
         app.feed("a1")
         self.assertEqual(self.prompts(), [])
-        self.assertIn(["agent", "focus", "w1:p2"], [c[1:] for c in self.calls])
+        self.assertIn(["agent", "focus", "w1:p2"], [c[1:] for c in self.herdr.calls])
         self.assertEqual(app.status, "type it in the pane: now")
         self.assertEqual(a.records(), [])
         self.assertEqual(len(app.rows), 1)
@@ -145,26 +101,28 @@ class PaneAnswerTests(IsolatedTestCase):
         app, view = self.view_app()
         for screen in (
             "❯\nunrecognized dialog",
-            EMPTY.replace("? for shortcuts", "Approve command?"),
+            "a screen without a composer",
         ):
             self.fake(app, view, screen=screen)
             app.feed("a1")
             self.assertEqual(app.status, "type it in the pane: now")
             self.assertEqual(self.prompts(), [])
-            self.assertIn(["agent", "focus", "w1:p2"], [c[1:] for c in self.calls])
+            self.assertIn(
+                ["agent", "focus", "w1:p2"], [c[1:] for c in self.herdr.calls]
+            )
             self.assertEqual(len(app.rows), 1)
 
     def test_blocked_and_unknown_status_focus_without_send(self):
         app, view = self.view_app()
         self.fake(app, view)
         for status in ("blocked", "unknown", "waiting", None):
-            self.agent["agent_status"] = status
+            self.herdr.agent["agent_status"] = status
             app.feed("a1")
             self.assertEqual(app.status, "type it in the pane: now")
             self.assertEqual(self.prompts(), [])
             self.assertEqual(len(app.rows), 1)
         self.assertEqual(
-            len([c for c in self.calls if c[1:3] == ["agent", "focus"]]), 4
+            len([c for c in self.herdr.calls if c[1:3] == ["agent", "focus"]]), 4
         )
 
     def test_working_queues_with_busy_wording(self):
@@ -173,9 +131,7 @@ class PaneAnswerTests(IsolatedTestCase):
             app,
             view,
             status="working",
-            screen=EMPTY.replace(
-                "? for shortcuts", "⏵⏵ bypass permissions on (shift+tab to cycle)"
-            ),
+            screen=EMPTY,
         )
         app.feed("a1")
         self.assertEqual(app.status, "sent to Architect::Tooling (queued while busy)")
@@ -185,19 +141,19 @@ class PaneAnswerTests(IsolatedTestCase):
         app, view = self.view_app()
         self.fake(app, view)
         for role in ("worker", "coordinator"):
-            self.agent["tokens"]["role"] = role
-            self.agent["name"] = OWNER
+            self.herdr.agent["tokens"]["role"] = role
+            self.herdr.agent["name"] = OWNER
             app.feed("a1")
             self.assertEqual(app.status, "type it in the pane: now")
             self.assertEqual(self.prompts(), [])
             self.assertEqual(a.records(), [])
-        self.agent["tokens"]["role"] = "architect"
-        self.rows.append(dict(self.agent, name="other", pane_id="w1:p3"))
+        self.herdr.agent["tokens"]["role"] = "architect"
+        self.herdr.rows.append(dict(self.herdr.agent, name="other", pane_id="w1:p3"))
         app.feed("a1")
         self.assertEqual(app.status, "type it in the pane: now")
         self.assertEqual(self.prompts(), [])
-        self.assertFalse(any(c[1:3] == ["agent", "focus"] for c in self.calls))
-        self.rows.clear()
+        self.assertFalse(any(c[1:3] == ["agent", "focus"] for c in self.herdr.calls))
+        self.herdr.rows.clear()
         app.feed("a1")
         self.assertEqual(app.status, "type it in the pane: now")
         self.assertEqual(self.prompts(), [])
@@ -267,14 +223,19 @@ class PaneAnswerTests(IsolatedTestCase):
         app, view = self.view_app()
         self.fake(app, view)
         queue_lock = a.queue_lock
+        clock = [0.0]
 
         @contextlib.contextmanager
         def draft_while_waiting():
             with queue_lock():
-                self.screen = EMPTY.replace("❯ ", "❯ draft typed during lock wait")
+                self.herdr.screen = TYPED_SCREEN
+                clock[0] = 1.0
                 yield
 
-        with patch.object(a, "queue_lock", draft_while_waiting):
+        with (
+            patch.object(a, "queue_lock", draft_while_waiting),
+            patch.object(view, "mono", lambda: clock[0]),
+        ):
             app.feed("a1")
         self.assertEqual(self.prompts(), [])
         self.assertEqual(a.records(), [])
@@ -284,19 +245,19 @@ class PaneAnswerTests(IsolatedTestCase):
     def test_identity_mismatch_never_focuses_stale_pane(self):
         app, view = self.view_app()
         self.fake(app, view)
-        self.rows[0] = dict(self.agent)
-        self.agent["name"] = "replacement-worker"
-        self.agent["tokens"] = dict(role="worker")
+        self.herdr.rows[0] = dict(self.herdr.agent)
+        self.herdr.agent["name"] = "replacement-worker"
+        self.herdr.agent["tokens"] = dict(role="worker")
         app.feed("a1")
         self.assertEqual(self.prompts(), [])
-        self.assertFalse(any(c[1:3] == ["agent", "focus"] for c in self.calls))
+        self.assertFalse(any(c[1:3] == ["agent", "focus"] for c in self.herdr.calls))
         self.assertEqual(a.records(), [])
         self.assertEqual(len(app.rows), 1)
 
     def test_prompt_timeout_keeps_item_without_native_relay(self):
         app, view = self.view_app()
         self.fake(app, view)
-        self.timeout_prompt = True
+        self.herdr.timeout_prompt = True
         app.feed("a1")
         self.assertEqual(app.status, "delivery unknown; check the pane: now")
         self.assertEqual(len(app.rows), 1)
@@ -310,7 +271,7 @@ class PaneAnswerTests(IsolatedTestCase):
         module.merge(self.base / "status", view.TODO, module.answer_state_path())
         app.refresh()
         self.assertEqual(len(app.rows), 1)
-        self.timeout_prompt = False
+        self.herdr.timeout_prompt = False
         app.feed("a1")
         self.assertEqual(app.status, "delivery unknown; check the pane: now")
         self.assertEqual(len(self.prompts()), 1)
@@ -318,7 +279,7 @@ class PaneAnswerTests(IsolatedTestCase):
     def test_interrupted_dispatch_never_becomes_native_relay(self):
         app, view = self.view_app()
         self.fake(app, view)
-        self.interrupt_prompt = True
+        self.herdr.interrupt_prompt = True
         with self.assertRaises(SystemExit):
             app.feed("a1")
         self.assertEqual(a.collect(w.command), ([], []))
@@ -330,9 +291,9 @@ class PaneAnswerTests(IsolatedTestCase):
     def test_unknown_retry_reports_original_answer(self):
         app, view = self.view_app()
         self.fake(app, view)
-        self.timeout_prompt = True
+        self.herdr.timeout_prompt = True
         app.feed("a1")
-        self.timeout_prompt = False
+        self.herdr.timeout_prompt = False
         app.feed("a2")
         self.assertEqual(app.status, "delivery unknown; check the pane: now")
         self.assertEqual(len(self.prompts()), 1)
@@ -346,3 +307,56 @@ class PaneAnswerTests(IsolatedTestCase):
         self.assertEqual(a.collect(w.command), ([], []))
         self.assertTrue(a.records()[0]["pane_delivery_unknown_at"])
         self.assertEqual(len(app.rows), 1)
+
+    def test_captured_real_empty_screen_and_typed_nbsp(self):
+        _, view = self.view_app()
+        self.assertTrue(view.empty_composer({"agent": "claude"}, EMPTY_SCREEN))
+        self.assertFalse(view.empty_composer({"agent": "claude"}, TYPED_SCREEN))
+        self.assertIn("❯\xa0ok", TYPED_SCREEN)
+        self.assertTrue(
+            view.empty_composer(
+                {"agent": "claude"}, TYPED_SCREEN.replace("❯\xa0ok", "❯\xa0")
+            )
+        )
+
+    def test_reads_and_focus_run_outside_both_locks(self):
+        app, view = self.view_app()
+        self.fake(app, view, screen=TYPED_SCREEN)
+        self.herdr.check_locks = True
+        app.feed("a1")
+        self.assertEqual(app.status, "type it in the pane: now")
+        self.assertTrue(any(c[1:3] == ["agent", "focus"] for c in self.herdr.calls))
+        self.assertEqual(a.records(), [])
+        self.herdr.screen = EMPTY_SCREEN
+        app.feed("a1")
+        self.assertEqual(len(self.prompts()), 1)
+
+    def test_unclassified_prompt_failure_is_unknown(self):
+        app, view = self.view_app()
+        self.fake(app, view, fail=True)
+        self.herdr.error_code = "transport_error"
+        app.feed("a1")
+        self.assertEqual(app.status, "delivery unknown; check the pane: now")
+        self.assertEqual(a.collect(w.command), ([], []))
+        self.assertEqual(len(app.rows), 1)
+
+    def test_item_context_preserves_both_ends_within_cap(self):
+        _, view = self.view_app()
+        text = "Recognizable start " + "x" * 800 + " [1: now] -> Architect::Tooling"
+        context = view.pane_text(text, middle=True)
+        self.assertLessEqual(len(context), a.ANSWER_MAX)
+        self.assertTrue(context.startswith("Recognizable start "))
+        self.assertTrue(context.endswith("[1: now] -> Architect::Tooling"))
+        self.assertIn(" … ", context)
+
+    def test_identity_rule_is_shared_with_owner_discovery(self):
+        _, view = self.view_app()
+        adapter = a.discovery.adapter()
+        self.assertIs(view.architect_labels, adapter.architect_labels)
+        worker = dict(name=OWNER, workspace_id="one", tokens=dict(role="worker"))
+        self.assertEqual(
+            adapter.architect_owners(
+                lambda *_: json.dumps(dict(result=dict(agents=[worker])))
+            ),
+            {},
+        )

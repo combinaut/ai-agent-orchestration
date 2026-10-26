@@ -175,38 +175,9 @@ class TodoAnswerTests(IsolatedTestCase):
         env.start()
         self.addCleanup(env.stop)
         hidden = view.Hidden(self.base / "hidden.json", self.base / "feed.log")
-        import subprocess
+        from todo_test_support import FakeHerdr
 
-        agent = dict(
-            name="tooling",
-            terminal_title_stripped=OWNER,
-            workspace_id="w1",
-            pane_id="w1:p2",
-            agent="claude",
-            agent_status="idle",
-            tokens=dict(role="architect"),
-        )
-
-        def relay_only(argv, **kwargs):
-            if argv[1:3] == ["agent", "list"]:
-                result = dict(agents=[agent])
-            elif argv[1:3] == ["agent", "get"]:
-                result = dict(agent=agent)
-            elif argv[1:3] == ["pane", "read"]:
-                result = dict(
-                    read=dict(text="────────────\n❯\n────────────\n? for shortcuts")
-                )
-            else:
-                return subprocess.CompletedProcess(
-                    argv, 1, "", "fake submission failure"
-                )
-            return subprocess.CompletedProcess(
-                argv, 0, json.dumps(dict(result=result)), ""
-            )
-
-        stub = patch.object(subprocess, "run", relay_only)
-        stub.start()
-        self.addCleanup(stub.stop)
+        FakeHerdr(self, OWNER, fail=True)
         app = view.App(
             hidden,
             False,
@@ -421,7 +392,11 @@ class TodoAnswerTests(IsolatedTestCase):
         output = self.base / "moved" / "todo.md"
         state = self.base / ".claude/coordinator/user-todo.state.json"
         module.merge(self.base / "status", output, state, now=100)
-        module.answer_from_view(OWNER, TEXT, "now", output)
+        app, view = self.view_app()
+        view.TODO = output
+        with patch.dict(os.environ, ORCH_USER_TODO_STATE=str(state)):
+            app.refresh()
+            app.feed("a1")
         self.assertEqual(a.records()[0]["generation"], 100)
         source = self.base / "status" / f"{OWNER}.md"
         original = source.read_text()

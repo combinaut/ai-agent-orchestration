@@ -50,25 +50,32 @@ existing behavior. In text mode, letters such as q, n and p are answer text. If 
 The buttons view submits an answer synchronously from your choice click/key press or
 Enter in the answer editor, as typed input to the owning architect's pane:
 `Mario (to-do panel): <item text> -> <chosen answer>`. Both parts have controls
-removed, whitespace collapsed, and a 512-character cap. The status-file stem
+removed, whitespace collapsed, and a 512-character cap. Long item text keeps its
+start and end with the middle elided. The status-file stem
 selects the architect using its role/name and title; the `->` target still
 controls ordinary jumps. Workers, the Coordinator, unknown owners and ambiguous
 matches never receive typed answers.
 
-After acquiring the answer queue and item-state locks, the view checks the current
-architect identity, idle/done/working status, and a visible Claude screen with
-an empty composer between its horizontal borders and a recognized footer. Herdr
-currently exposes no composer-state field; an unfamiliar screen or agent cannot
-establish emptiness. A non-empty or uncertain composer, or blocked/unknown agent
-status, keeps the item and focuses the resolved architect with
-`type it in the pane: <answer>`. An unresolved or ambiguous owner keeps the item
-without focusing another pane. The view does not overwrite unfinished input or
-answer an approval dialog.
+The view reads the architect identity, status and visible Claude screen before
+acquiring the answer locks. It requires idle, done or working status and a bare
+`❯` prompt line immediately above the last pure horizontal border. The upper
+border may contain a title; anything below the lower border is footer or status
+text. A nonbreaking space after the prompt glyph counts as whitespace. An
+unrecognized screen cannot establish emptiness.
+
+Under the queue and item-state locks, the handler rechecks the item's generation,
+existing delivery records, and that the snapshot is at most 250 ms old. A stale
+snapshot, non-empty or uncertain composer, or blocked/unknown status keeps the
+item. After releasing the locks, the view focuses the resolved architect and
+shows `type it in the pane: <answer>`. Unknown or ambiguous owners receive no
+focus. Only the prompt subprocess runs under the locks, serializing dispatch and
+bookkeeping across views; reads and focus never wait on Herdr under either lock.
+The screen check is a snapshot, so changes after it remain a terminal-input race.
 
 A successful submission removes the item and shows `sent to <architect>`, adding
 `(queued while busy)` for a working architect. Claude Code queues that typed
-input. A failed submission uses the existing queue/native relay and shows
-`relayed; the architect may ask again`. A prompt timeout leaves delivery
+input. Only a documented pre-send rejection (`agent_blocked`) uses the queue/native relay and shows
+`relayed; the architect may ask again`. A prompt timeout, other non-zero exit, or process-start error leaves delivery
 unknown. The view records unknown delivery before dispatch, so an interrupted
 submission also keeps the item and cannot become a duplicate native relay. It
 suppresses automatic relay and repeat pane
@@ -76,8 +83,9 @@ submission, and shows `delivery unknown; check the pane: <answer>`. A later atte
 answer, even when you choose a different option. Check the architect's pane before
 responding manually. The unknown-delivery record expires
 after the retention window or when the status item changes. The simple `user-todo.py --follow` editor
-continues to use that relay. No CLI flag, environment variable, file or feed event
-can request a pane submission; only the interactive buttons view sends input.
+continues to use that relay. Only the view's key/click handler requests pane input. Keys sent to the view's
+pane by another process count as its input, just like typed keys. CLI flags,
+environment variables, files and feed events have no direct pane-send path.
 
 Successful typed submissions are recorded as delivered. The watcher still emits
 `TODO ANSWER` for the Coordinator, while the notifier suppresses the architect's

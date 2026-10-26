@@ -436,11 +436,6 @@ def answer_item(item, answer, state_path, output, generation=CURRENT_GENERATION)
     return "answer queued (removed)"
 
 
-def answer_from_view(owner, text, answer, output, generation=CURRENT_GENERATION):
-    item = dict(source=owner + ".md", text=text, id=todo_answers.item_id(owner, text))
-    return answer_item(item, answer, answer_state_path(), output, generation)
-
-
 def item_display(item):
     return item.get("display", item["text"])
 
