@@ -106,7 +106,6 @@ function usePaneFocus(ask: Ask, status: PaneStatus, close: () => void): Panes["f
   };
 }
 
-// Each popup looks up at most MAX_PANE_LOOKUPS distinct heads, one request at a time.
 export function usePanes(ask: Ask, status: PaneStatus, close: () => void = closePopup): Panes {
   return { ...usePaneLookup(ask, status), focus: usePaneFocus(ask, status, close) };
 }
