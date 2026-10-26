@@ -21,12 +21,12 @@ test("opening progress is hidden when idle and while a completed summary is show
   wrapper.unmount();
 });
 
-test("search progress has a finite zero value before the plan is known", () => {
+test("search progress is indeterminate before the plan is known", () => {
   const wrapper = mountPopup(OpeningProgress, {
     props: { progress: { active: true, opened: 0, planned: 0 } },
   });
 
-  assert.equal(wrapper.find("[role=progressbar]").attributes("aria-valuenow"), "0");
-  assert.equal(wrapper.find("[aria-live=polite]").text(), "Opened 0 of 0");
+  assert.equal(wrapper.findComponent(ProgressBar).props("mode"), "indeterminate");
+  assert.equal(wrapper.find("[aria-live=polite]").text(), "Searching…");
   wrapper.unmount();
 });

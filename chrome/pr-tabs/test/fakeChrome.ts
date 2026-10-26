@@ -144,7 +144,7 @@ const windows = {
   update: async () => {},
 } satisfies FakeWindows;
 
-const action = { setBadgeText: async () => {} } satisfies FakeAction;
+const action: FakeAction = { setBadgeText: async () => {} };
 
 export const fakeChrome = {
   i18n: createI18n("en"),

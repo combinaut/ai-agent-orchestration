@@ -9,6 +9,7 @@ import type {
   GroupId,
   HostReply,
   HostRequest,
+  OpenBatchAction,
   PaneLookup,
   Panes,
   PlainRequest,
@@ -215,3 +216,5 @@ export interface OpeningBatchFixture {
   release: () => void;
   restore: () => void;
 }
+
+export type PendingOpeningReplies = Partial<Record<OpenBatchAction, Promise<Reply<"openAll">>>>;

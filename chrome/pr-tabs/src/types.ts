@@ -469,6 +469,8 @@ export interface GroupRow {
 }
 
 // Component props.
+export type ProgressMode = "determinate" | "indeterminate";
+
 export interface OpeningProgressProps {
   progress: OpeningProgress;
 }

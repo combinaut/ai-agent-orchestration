@@ -4,7 +4,7 @@ import { flushPromises } from "@vue/test-utils";
 import Select from "primevue/select";
 import { afterEach, test, vi } from "vitest";
 import type { RepoName, Replies, Request, Rules, Summary } from "#/types";
-import type { ActionCase, FakeReplies } from "#test/types";
+import type { ActionCase, FakeReplies, PendingOpeningReplies } from "#test/types";
 import { effectiveRepos, pickedRepo, showRepoPicker } from "#/core";
 import App from "#popup/App.vue";
 import { mountPopup } from "#test/components/mountPopup";
@@ -22,7 +22,11 @@ const SUMMARY: Summary = {
   groups: [{ title: "Finder", color: "yellow", count: 2, prs: [] }],
 };
 
-async function popup(repos: RepoName[], replies: Partial<Replies> = {}) {
+async function popup(
+  repos: RepoName[],
+  replies: Partial<Replies> = {},
+  pending: PendingOpeningReplies = {},
+) {
   const rules: Rules = { org: "acme", defaultRepo: "", openAll: "", repos };
   const choices = {
     repos: effectiveRepos(rules),
@@ -35,7 +39,12 @@ async function popup(repos: RepoName[], replies: Partial<Replies> = {}) {
   async function handleSendMessage(message: Request): Promise<unknown> {
     sent.push(message);
 
-    return answers[message.type] ?? { error: "unexpected" };
+    const held =
+      message.type === "openAll" || message.type === "openReviews"
+        ? pending[message.type]
+        : undefined;
+
+    return held ?? answers[message.type] ?? { error: "unexpected" };
   }
 
   vi.stubGlobal("chrome", {
@@ -276,3 +285,48 @@ test("progress refreshes counts and groups before an observed batch finishes", a
     vi.useRealTimers();
   }
 });
+
+for (const type of ["openAll", "openReviews"] as const) {
+  test(`${type} shows searching before the next progress poll`, async () => {
+    vi.useFakeTimers();
+    const batch = Promise.withResolvers<Replies["openAll"]>();
+    const { wrapper } = await popup([], {}, { [type]: batch.promise });
+    const selector = type === "openAll" ? "#open-all" : "#open-reviews";
+
+    try {
+      await wrapper.find(selector).trigger("click");
+      assert.equal(wrapper.find(".p-progressbar-indeterminate").exists(), true);
+      assert.equal(wrapper.find("#opening-progress [aria-live=polite]").text(), "Searching…");
+      batch.resolve({ opened: 0, remaining: 0, estimated: false });
+      await flushPromises();
+      assert.equal(wrapper.find("[role=progressbar]").exists(), false);
+    } finally {
+      batch.resolve({ opened: 0, remaining: 0, estimated: false });
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  test(`${type} keeps the last counts until its local action settles`, async () => {
+    vi.useFakeTimers();
+    const batch = Promise.withResolvers<Replies["openAll"]>();
+    const { wrapper, answers } = await popup([], {}, { [type]: batch.promise });
+    const selector = type === "openAll" ? "#open-all" : "#open-reviews";
+
+    try {
+      await wrapper.find(selector).trigger("click");
+      answers.openingProgress = { active: true, opened: 2, planned: 3 };
+      await vi.advanceTimersByTimeAsync(250);
+      answers.openingProgress = { active: false, opened: 0, planned: 0 };
+      await vi.advanceTimersByTimeAsync(250);
+      assert.equal(wrapper.find("#opening-progress [aria-live=polite]").text(), "Opened 2 of 3");
+      batch.resolve({ opened: 2, remaining: 0, estimated: false });
+      await flushPromises();
+      assert.equal(wrapper.find("[role=progressbar]").exists(), false);
+    } finally {
+      batch.resolve({ opened: 2, remaining: 0, estimated: false });
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+}

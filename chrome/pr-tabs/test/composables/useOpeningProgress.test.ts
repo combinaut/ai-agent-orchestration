@@ -98,3 +98,35 @@ test("an observed completion cannot overwrite a newer local error while refreshi
     vi.useRealTimers();
   }
 });
+
+for (const stage of ["ask", "refresh"] as const) {
+  test(`progress reads stay single-flight while ${stage} is held`, async () => {
+    vi.useFakeTimers();
+    const scope = effectScope();
+    const held = Promise.withResolvers<void>();
+    const base = fakeAsk({ openingProgress: { active: true, opened: 1, planned: 3 } });
+    let reads = 0;
+    const askHold = stage === "ask" ? held.promise : Promise.resolve();
+    const refreshHold = stage === "refresh" ? held.promise : Promise.resolve();
+    const ask: typeof base.ask = async (message) => {
+      reads++;
+      await askHold;
+
+      return base.ask(message);
+    };
+    const refresh = (): Promise<void> => refreshHold;
+    const context = { ask, refresh, status: useStatus(), localBusy: ref(false) };
+
+    try {
+      scope.run(() => useOpeningProgress(context));
+      await vi.advanceTimersByTimeAsync(1000);
+      assert.equal(reads, 1);
+      held.resolve();
+      await flushPromises();
+    } finally {
+      held.resolve();
+      scope.stop();
+      vi.useRealTimers();
+    }
+  });
+}

@@ -1,5 +1,5 @@
 import { useIntervalFn } from "@vueuse/core";
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import type { Ref } from "vue";
 import { failed } from "#/messages";
 import { openAllText } from "#/texts";
@@ -29,6 +29,28 @@ async function reportCompletion(
   }
 }
 
+function visibleProgress(
+  reply: OpeningProgress,
+  previous: OpeningProgress,
+  local: boolean,
+): OpeningProgress {
+  if (!reply.active && local) {
+    return { ...reply, opened: previous.opened, planned: previous.planned };
+  }
+
+  return reply;
+}
+
+function trackLocalStart(context: OpeningProgressContext, progress: Ref<OpeningProgress>): void {
+  function handleLocalBusyChange(busy: boolean): void {
+    if (busy && !progress.value.active) {
+      progress.value = { active: false, opened: 0, planned: 0 };
+    }
+  }
+
+  watch(context.localBusy, handleLocalBusyChange, { flush: "sync" });
+}
+
 function observeProgress(
   context: OpeningProgressContext,
   progress: Ref<OpeningProgress>,
@@ -38,7 +60,7 @@ function observeProgress(
   async function recordProgress(reply: OpeningProgress): Promise<void> {
     const local = context.localBusy.value;
     const advanced = reply.active && reply.opened > progress.value.opened;
-    progress.value = reply;
+    progress.value = visibleProgress(reply, progress.value, local);
 
     if (advanced) {
       await context.refresh();
@@ -63,6 +85,7 @@ export function useOpeningProgress(
   const { ask } = context;
   const progress = ref<OpeningProgress>({ active: false, opened: 0, planned: 0 });
   const recordProgress = observeProgress(context, progress);
+  trackLocalStart(context, progress);
   let reading = false;
 
   async function handleProgressTick(): Promise<void> {

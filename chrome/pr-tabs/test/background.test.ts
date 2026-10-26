@@ -669,3 +669,13 @@ test("focusing a pane sends repo and branch; a host error rejects with its text"
 
   await assert.rejects(focusPane({ repo: "acme/webapp", branch: "x" }), /no Herdr pane/);
 });
+
+test("Open reviews requires only the organization setting", async () => {
+  world.hostSettings = { ...CONFIGURED, org: "", openAll: "" };
+  const worker = await freshWorker("review-org-hint");
+
+  assert.deepEqual(await worker.openReviews(), { error: "Set pr_tabs.org in orchestration.toml" });
+  assert.deepEqual(await worker.openAll(), {
+    error: "Set pr_tabs.org and pr_tabs.open_all in orchestration.toml",
+  });
+});

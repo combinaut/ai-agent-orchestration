@@ -661,10 +661,11 @@ async function openPlanned(plan: Planned[], rules: Rules): Promise<Planned[]> {
 
   for (const planned of plan) {
     if (await openPr(planned, rules)) {
-      await updateMeta((meta) => seedOpen(meta, [planned]));
+      await updateMeta((meta) => seedOpen(meta, [planned])).catch(warn);
       opened.push(planned);
-      progress = { ...progress, opened: opened.length };
     }
+
+    progress = { ...progress, opened: progress.opened + 1 };
   }
 
   return opened;
@@ -689,14 +690,17 @@ async function openBatchOnce(action: OpenBatchAction): Promise<Reply<"openAll">>
       : configured;
 
   if (!rules.org || !rules.openAll) {
-    return { error: getMessage("errSetOrgAndOpenAll") };
+    return { error: getMessage(action === "openReviews" ? "errSetOrg" : "errSetOrgAndOpenAll") };
   }
 
   const openKeys = new Set((await prEntries(rules)).map((entry) => entry.pr.key));
   const plan = planOpenAll(await searchOpenPrs(rules, openKeys), openKeys, rules.org);
   const opened = await openPlanned(plan.open, rules);
 
-  await chrome.action.setBadgeText({ text: badgeText(plan) });
+  if (action === "openAll") {
+    await chrome.action.setBadgeText({ text: badgeText(plan) });
+  }
+
   await ensureAlarm();
 
   return { opened: opened.length, remaining: plan.remaining, estimated: plan.estimated };
