@@ -27,7 +27,7 @@ const prRows = computed(() => props.group.prs);
         <Badge class="mr-2 ml-auto" severity="secondary" :value="count" :aria-label="countLabel" />
       </span>
     </AccordionHeader>
-    <AccordionContent>
+    <AccordionContent class="grid-cols-1">
       <ul class="list-none p-0">
         <PrItem v-for="(row, rowIndex) in prRows" :key="rowIndex" :pr="row" :panes="panes" />
       </ul>

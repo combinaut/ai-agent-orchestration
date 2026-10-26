@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import Badge from "primevue/badge";
 import { test } from "vitest";
 import GroupList from "#popup/components/GroupList.vue";
-import type { GroupSummary } from "#/types";
+import type { GroupSummary, PrRow } from "#/types";
 import { fakePanes } from "./fakePanes";
 import { mountPopup } from "./mountPopup";
 
@@ -18,4 +18,16 @@ test("a row shows the group's colour dot, title and PR count", () => {
 
   assert.equal(badge.props("value"), 2);
   assert.equal(badge.attributes("aria-label"), "2 PRs");
+});
+
+test("the expanded content is a shrinkable grid column, so a long PR title cannot widen the popup", async () => {
+  const prs: PrRow[] = [
+    { key: "acme/webapp#1", label: "webapp#1", title: "T".repeat(200), head: null },
+  ];
+  const groups: GroupSummary[] = [{ title: "Finder", count: 1, prs }];
+  const wrapper = mountPopup(GroupList, { props: { groups, panes: fakePanes() } });
+
+  await wrapper.find("button[aria-expanded]").trigger("click");
+
+  assert.ok(wrapper.find("[data-pc-name=accordioncontent]").classes().includes("grid-cols-1"));
 });
