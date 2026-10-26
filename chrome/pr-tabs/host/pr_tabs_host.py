@@ -525,7 +525,7 @@ def resolve_panes(keys):
         except discovery.Unavailable as error:
             raise RequestError(f"Herdr unavailable: {error}") from None
         chosen = branch_panes(discovery, command, work, keys)
-    return chosen, herdr, values
+    return chosen, herdr, values, work
 
 
 def panes(request):
@@ -533,7 +533,7 @@ def panes(request):
     if not isinstance(prs, list) or not 1 <= len(prs) <= MAX_PANE_LOOKUPS:
         raise RequestError(f"prs must list 1 to {MAX_PANE_LOOKUPS} branches")
     keys = [head_key(pr, f" at index {i}") for i, pr in enumerate(prs)]
-    chosen, _, _ = resolve_panes(set(keys))
+    chosen, _, _, _ = resolve_panes(set(keys))
     try:
         asking = asking_panes(time.time())
     except Exception:  # Question records only refine the state.
@@ -559,6 +559,27 @@ def focus_argv(herdr, row, pane):
     return [herdr, "workspace", "focus", target]
 
 
+def focus_target(row, pane, work):
+    """Route owned workers to their architect using the existing discovery snapshot."""
+    owner = next(
+        (item for item in work["workspaces"] if item.get("id") == row.get("owner")),
+        None,
+    )
+    if owner is None or owner.get("id") == row.get("id"):
+        return row, pane
+    architect = next(
+        (
+            item
+            for item in work["panes"]
+            if item.get("workspace") == owner["id"]
+            and item.get("role") == "architect"
+            and item.get("agent")
+        ),
+        {},
+    )
+    return owner, architect
+
+
 def raise_terminal(values):
     """Brings pr_tabs.terminal_app to the front on macOS; nothing when unset."""
     app = values.get("ORCH_PR_TABS_TERMINAL_APP") or ""
@@ -571,10 +592,11 @@ def raise_terminal(values):
 
 def focus_pane(request):
     key = head_key(request, "")
-    chosen, herdr, values = resolve_panes({key})
+    chosen, herdr, values, work = resolve_panes({key})
     if key not in chosen:
         raise RequestError(f"no Herdr pane has {key} checked out")
     _, row, pane = chosen[key]
+    row, pane = focus_target(row, pane, work)
     with discovery_settings(values):
         bounded_command(time.monotonic() + HERDR_TIMEOUT_SECONDS)(
             *focus_argv(herdr, row, pane)

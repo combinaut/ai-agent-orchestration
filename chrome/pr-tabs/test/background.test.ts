@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "vitest";
+import { afterEach, test, vi } from "vitest";
 import type * as Background from "#/background";
 import { MAX_PANE_LOOKUPS } from "#/core";
 import type { HostRequest, Meta } from "#/types";
@@ -26,6 +26,7 @@ const {
 const realNow = Date.now;
 
 afterEach(() => {
+  vi.restoreAllMocks();
   Date.now = realNow;
   world.hostSettings = CONFIGURED;
 });
@@ -652,6 +653,8 @@ test("a pane lookup is one host request for at most the cap; none for no heads",
 
 test("focusing a pane sends repo and branch; a host error rejects with its text", async () => {
   const sent: HostRequest[] = [];
+  const info = vi.spyOn(console, "info");
+  const warn = vi.spyOn(console, "warn");
 
   world.nativeHandler = async (message) => {
     sent.push(message);
@@ -668,4 +671,8 @@ test("focusing a pane sends repo and branch; a host error rejects with its text"
   });
 
   await assert.rejects(focusPane({ repo: "acme/webapp", branch: "x" }), /no Herdr pane/);
+
+  assert.equal(info.mock.calls.filter((call) => call[0] === "PR tabs focusPane send").length, 2);
+  assert.equal(info.mock.calls.filter((call) => call[0] === "PR tabs focusPane reply").length, 1);
+  assert.equal(warn.mock.calls[0]?.[0], "PR tabs focusPane failed");
 });

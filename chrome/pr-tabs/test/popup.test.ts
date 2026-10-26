@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { flushPromises } from "@vue/test-utils";
 import Select from "primevue/select";
 import { afterEach, test, vi } from "vitest";
-import type { RepoName, Replies, Request, Rules, Summary } from "#/types";
+import type { RepoName, Replies, Reply, Request, Rules, Summary } from "#/types";
 import type { ActionCase } from "#test/types";
 import { effectiveRepos, pickedRepo, showRepoPicker } from "#/core";
 import App from "#popup/App.vue";
@@ -22,14 +22,16 @@ const SUMMARY: Summary = {
   groups: [{ title: "Finder", color: "yellow", count: 2, prs: [] }],
 };
 
-async function popup(repos: RepoName[], replies: Partial<Replies> = {}) {
+type PopupReplies = { [K in keyof Replies]?: Reply<K> };
+
+async function popup(repos: RepoName[], replies: PopupReplies = {}) {
   const rules: Rules = { org: "acme", defaultRepo: "", openAll: "", repos };
   const choices = {
     repos: effectiveRepos(rules),
     selected: pickedRepo(rules),
     show: showRepoPicker(rules),
   };
-  const answers: Partial<Replies> = { repos: choices, summary: SUMMARY, ...replies };
+  const answers: PopupReplies = { repos: choices, summary: SUMMARY, ...replies };
   const sent: Request[] = [];
 
   async function handleSendMessage(message: Request): Promise<unknown> {
@@ -185,6 +187,35 @@ test("the first expanded group looks up panes once; go to pane focuses and close
 
   assert.deepEqual(sent.at(-1), { type: "focusPane", head });
   assert.equal(close.mock.calls.length, 1);
+
+  wrapper.unmount();
+});
+
+test("a terminal focus failure is visible in the popup error status", async () => {
+  const head = { repo: "acme/webapp", branch: "feature" };
+  const summary: Summary = {
+    prs: 1,
+    groups: [
+      { title: "A", count: 1, prs: [{ key: "acme/webapp#1", label: "webapp#1", title: "", head }] },
+    ],
+  };
+  const { wrapper, sent } = await popup([], {
+    summary,
+    panes: { "acme/webapp:feature": { state: "working" } },
+    focusPane: { error: "Native focus failed: diagnostic reason" },
+  });
+
+  await wrapper.find("button[aria-expanded]").trigger("click");
+  await flushPromises();
+  await wrapper.find("li button:not([aria-expanded])").trigger("click");
+  await flushPromises();
+
+  assert.deepEqual(sent.at(-1), { type: "focusPane", head });
+  assert.equal(
+    wrapper.find("#status .p-message-error").text(),
+    "Native focus failed: diagnostic reason",
+  );
+  assert.equal(wrapper.find("#status .p-message-error").isVisible(), true);
 
   wrapper.unmount();
 });

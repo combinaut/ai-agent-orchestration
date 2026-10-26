@@ -503,18 +503,72 @@ class PaneJumpTest(IsolatedTestCase):
         )
         self.assertEqual(self.calls(), ["workspace list", "pane list"])
 
-    def test_focus_prefers_the_worker_workspace_then_its_agent_pane(self):
+    def test_focus_routes_worker_to_owner_architect(self):
         self.herdr(
-            [("wArch", None, self.web), ("wWork", "wArch", self.web)],
             [
-                ("wArch", "wArch:p1", {"agent": "claude"}),
+                ("wOther", None, self.other),
+                ("wArch", None, self.web),
+                ("wWork", "wArch", self.web),
+            ],
+            [
+                (
+                    "wOther",
+                    "wOther:p1",
+                    {"agent": "claude", "tokens": {"role": "architect"}},
+                ),
+                ("wArch", "wArch:p0", {"agent": "claude"}),
+                (
+                    "wArch",
+                    "wArch:p1",
+                    {
+                        "agent": "claude",
+                        "agent_status": "idle",
+                        "tokens": {"role": "architect"},
+                    },
+                ),
                 ("wWork", "wWork:p1", {}),
-                ("wWork", "wWork:p2", {"agent": "claude"}),
+                ("wWork", "wWork:p2", {"agent": "claude", "agent_status": "working"}),
             ],
         )
+        lookup = host.panes({"prs": [{"repo": "acme/webapp", "branch": "feature"}]})
+        self.assertEqual(lookup["panes"], {"acme/webapp:feature": {"state": "working"}})
+        (self.base / "calls").write_text("")
+
         reply = host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
-        self.assertEqual(reply, {"ok": True, "pane": "wWork:p2"})
-        self.assertEqual(self.focus_calls(), ["agent focus wWork:p2"])
+        self.assertEqual(reply, {"ok": True, "pane": "wArch:p1"})
+        self.assertEqual(
+            self.calls(), ["workspace list", "pane list", "agent focus wArch:p1"]
+        )
+
+    def test_owner_without_architect_agent_focuses_owner_workspace(self):
+        for extra in [{"agent": "claude"}, {"tokens": {"role": "architect"}}]:
+            with self.subTest(extra=extra):
+                (self.base / "calls").write_text("")
+                self.herdr(
+                    [("wArch", None, self.other), ("wWork", "wArch", self.web)],
+                    [
+                        ("wArch", "wArch:p1", extra),
+                        ("wWork", "wWork:p1", {"agent": "claude"}),
+                    ],
+                )
+                reply = host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+                self.assertEqual(reply, {"ok": True, "pane": None})
+                self.assertEqual(
+                    self.calls(),
+                    ["workspace list", "pane list", "workspace focus wArch"],
+                )
+
+    def test_missing_owner_retains_worker_agent_focus(self):
+        for owner in [None, "closed-architect"]:
+            with self.subTest(owner=owner):
+                (self.base / "calls").write_text("")
+                self.herdr(
+                    [("wWork", owner, self.web)],
+                    [("wWork", "wWork:p1", {"agent": "claude"})],
+                )
+                reply = host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+                self.assertEqual(reply["pane"], "wWork:p1")
+                self.assertEqual(self.focus_calls(), ["agent focus wWork:p1"])
 
     def test_self_owned_workspace_is_not_a_worker_and_order_breaks_ties(self):
         self.herdr(
@@ -734,7 +788,8 @@ class PaneJumpTest(IsolatedTestCase):
             ],
         )
         reply = host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
-        self.assertEqual(reply["pane"], "wWorker:p1")
+        self.assertIsNone(reply["pane"])
+        self.assertEqual(self.focus_calls(), ["workspace focus wArch"])
 
     def test_a_long_valid_branch_does_not_reject_the_lookup(self):
         self.herdr([("wA", None, self.web)], [("wA", "wA:p1", {})])
