@@ -32,6 +32,35 @@ function closeFocus(tabId: TabId): CloseFocus {
   };
 }
 
+function useCloseQueue(send: PrClose["close"]): PrClose["close"] {
+  const pending = new Map<PrKey, Promise<void>>();
+  let closing: Promise<void> = Promise.resolve();
+
+  function close(key: PrKey, tabId: TabId): Promise<void> {
+    const existing = pending.get(key);
+
+    if (existing) {
+      return existing;
+    }
+
+    async function closeNow(): Promise<void> {
+      await send(key, tabId);
+    }
+
+    function forget(): void {
+      pending.delete(key);
+    }
+
+    const queued = closing.then(closeNow, closeNow).finally(forget);
+    pending.set(key, queued);
+    closing = queued;
+
+    return queued;
+  }
+
+  return close;
+}
+
 export function usePrClose(context: PrCloseContext): PrClose {
   async function send(key: PrKey, tabId: TabId): Promise<void> {
     const focus = closeFocus(tabId);
@@ -48,15 +77,9 @@ export function usePrClose(context: PrCloseContext): PrClose {
     focus();
   }
 
-  const { isLoading: busy, executeImmediate } = useAsyncState(send, undefined, {
+  const { executeImmediate } = useAsyncState(send, undefined, {
     immediate: false,
   });
 
-  async function close(key: PrKey, tabId: TabId): Promise<void> {
-    if (!busy.value) {
-      await executeImmediate(key, tabId);
-    }
-  }
-
-  return { close };
+  return { close: useCloseQueue(executeImmediate) };
 }

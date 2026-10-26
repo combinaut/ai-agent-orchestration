@@ -10,6 +10,7 @@ import type {
   HostReply,
   HostRequest,
   OpenBatchAction,
+  PrClose,
   PaneLookup,
   Panes,
   PlainRequest,
@@ -219,3 +220,10 @@ export interface OpeningBatchFixture {
 }
 
 export type PendingOpeningReplies = Partial<Record<OpenBatchAction, Promise<Reply<"openAll">>>>;
+
+export interface CloseQueueFixture {
+  flow: PrClose;
+  held: PromiseWithResolvers<void>;
+  tabs: Set<TabId>;
+  sent: Request[];
+}
