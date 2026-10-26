@@ -198,6 +198,7 @@ class PrTabsTest(IsolatedTestCase):
         with (
             patch.object(discovery, "open_work", return_value=work),
             patch.object(discovery, "branch_owners", return_value=branch) as branches,
+            patch.object(discovery, "architect_owners", return_value={"Finder": "a"}),
             patch.object(discovery, "status_owners", return_value=status) as statuses,
         ):
             self.assertEqual(
@@ -235,6 +236,29 @@ class PrTabsTest(IsolatedTestCase):
             with (
                 patch.object(discovery, "open_work", return_value=work),
                 patch.object(discovery, "branch_owners", return_value={}),
+                patch.object(
+                    discovery, "architect_owners", return_value={"Finder": "a"}
+                ),
+                patch.object(discovery, "status_directory", return_value=status),
+            ):
+                self.assertEqual(
+                    host.discover_owners(ROOT, {"ORCH_ENV": "herdr"}),
+                    {"acme/webapp#12": "Finder"},
+                )
+
+    def test_host_includes_an_architect_status_file_without_workers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_text(
+                "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+            )
+            work = {"workspaces": [{"id": "a", "label": "Finder"}]}
+            with (
+                patch.object(discovery, "open_work", return_value=work),
+                patch.object(discovery, "branch_owners", return_value={}),
+                patch.object(
+                    discovery, "architect_owners", return_value={"Finder": "a"}
+                ),
                 patch.object(discovery, "status_directory", return_value=status),
             ):
                 self.assertEqual(
@@ -409,8 +433,8 @@ class PrTabsTest(IsolatedTestCase):
                     self.assertEqual(host.ownership(), {})
                 self.assertEqual(
                     run.call_count,
-                    4,
-                    "each changed config takes a fresh shared workspace/pane snapshot",
+                    6,
+                    "each changed config takes fresh workspace, pane and architect snapshots",
                 )
             self.assertEqual(list(base.glob("owners*.json")), [base / "owners.json"])
             self.assertEqual(unrelated.read_text(), "keep")
@@ -522,7 +546,7 @@ class PrTabsTest(IsolatedTestCase):
             )
         self.assertEqual(
             [args[1:] for args in calls if args[0] != "git"],
-            [("workspace", "list"), ("pane", "list")],
+            [("workspace", "list"), ("pane", "list"), ("agent", "list")],
         )
         self.assertEqual(before, {key: os.environ.get(key) for key in before})
 

@@ -279,9 +279,14 @@ def discover_owners(root, values):
         work = discovery.open_work(command)
         branch = discovery.branch_owners(command, work)
         workspace_labels = {row["id"]: row.get("label") for row in work["workspaces"]}
-        labels = {
-            workspace_labels.get(row.get("owner")) for row in work["workspaces"]
-        } - {None, ""}
+        try:
+            labels = {
+                name
+                for name, workspace in discovery.architect_owners(command).items()
+                if workspace in workspace_labels
+            }
+        except Exception:
+            labels = set()
         return {
             **discovery.status_owners(labels, discovery.status_directory()),
             **branch,
