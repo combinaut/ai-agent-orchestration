@@ -2,7 +2,7 @@
 import AccordionContent, {
   type AccordionContentPassThroughOptions,
 } from "primevue/accordioncontent";
-import AccordionHeader from "primevue/accordionheader";
+import AccordionHeader, { type AccordionHeaderPassThroughOptions } from "primevue/accordionheader";
 import AccordionPanel from "primevue/accordionpanel";
 import Badge from "primevue/badge";
 import { computed } from "vue";
@@ -17,11 +17,14 @@ const prRows = computed(() => props.group.prs);
 const accordionContentPassThrough: AccordionContentPassThroughOptions = {
   content: { class: "p-0" },
 };
+const accordionHeaderPassThrough: AccordionHeaderPassThroughOptions = {
+  root: { class: "-mx-popup-padding px-popup-padding" },
+};
 </script>
 
 <template>
   <AccordionPanel :value="value">
-    <AccordionHeader>
+    <AccordionHeader :pt="accordionHeaderPassThrough">
       <span class="flex flex-auto items-center gap-2">
         <span
           class="size-dot flex-none rounded-dot shadow-dot-ring"

@@ -74,6 +74,7 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   "messages.ts": ["error", "object", "message", "string", "type", "reply"],
   "popup/components/ActionButton.vue": ["secondary", "run"],
   "popup/components/GoToForm.vue": ["input", "repo", "go", "pick"],
+  "popup/components/GroupItem.vue": ["-mx-popup-padding px-popup-padding"],
   "popup/components/PrInput.vue": ["field"],
   "popup/components/RepoSelect.vue": ["pick"],
   "popup/primevue.ts": ["none"],
