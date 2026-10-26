@@ -142,8 +142,10 @@ def status_owners(labels, directory):
         files = sorted(
             path for path in Path(directory).iterdir() if path.suffix == ".md"
         )
-    except OSError:
+    except FileNotFoundError:
         return owners
+    except OSError as error:
+        raise Unavailable(f"status directory unreadable: {str(error)[:200]}") from error
     for path in files:
         if path.stem not in labels:
             continue

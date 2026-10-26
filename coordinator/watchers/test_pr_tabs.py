@@ -177,6 +177,12 @@ class PrTabsTest(IsolatedTestCase):
                     {"acme/webapp#12": "Finder"},
                 )
 
+    def test_status_owners_propagates_directory_enumeration_failures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(Path, "iterdir", side_effect=PermissionError("denied")):
+                with self.assertRaisesRegex(discovery.Unavailable, "status directory"):
+                    discovery.status_owners({"Finder"}, Path(directory))
+
     def test_status_owners_omits_ambiguous_prs(self):
         with tempfile.TemporaryDirectory() as directory:
             status = Path(directory)
