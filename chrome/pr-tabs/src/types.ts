@@ -429,7 +429,7 @@ export interface SummaryList {
   refresh: () => Promise<void>;
 }
 
-export type TabActionType = "openAll" | "checkNow" | "closeDuplicates";
+export type TabActionType = OpenBatchAction | "checkNow" | "closeDuplicates";
 
 export interface TabActionContext {
   ask: Ask;

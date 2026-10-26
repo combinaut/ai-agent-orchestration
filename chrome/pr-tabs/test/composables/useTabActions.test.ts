@@ -73,3 +73,13 @@ test("a failed action shows its error without a refresh", async () => {
   assert.equal(all.checkNow.busy.value, false);
   assert.equal(all.refreshes(), 0);
 });
+
+test("Open reviews reports the shared batch result after refreshing", async () => {
+  const all = actions({ openReviews: { opened: 1, remaining: 0, estimated: false } });
+
+  await all.openReviews.run();
+
+  assert.equal(all.status.statusText.value, "Opened 1. 3 PRs in 2 groups");
+  assert.equal(all.openReviews.busy.value, false);
+  assert.equal(all.refreshes(), 1);
+});

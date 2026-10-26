@@ -58,6 +58,12 @@ export function useTabActions(context: TabActionContext): TabActions {
     report: reportOpenAll,
   });
 
+  const openReviews = useTabAction(context, {
+    request: { type: "openReviews" },
+    pending: getPlainMessage("pendingOpening"),
+    report: reportOpenAll,
+  });
+
   const checkNow = useTabAction(context, {
     request: { type: "checkNow" },
     pending: getPlainMessage("pendingChecking"),
@@ -70,5 +76,5 @@ export function useTabActions(context: TabActionContext): TabActions {
     report: reportDuplicates,
   });
 
-  return { openAll, checkNow, closeDuplicates };
+  return { openAll, openReviews, checkNow, closeDuplicates };
 }
