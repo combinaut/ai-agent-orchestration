@@ -24,8 +24,16 @@ export function useSummary(ask: Ask, status: Pick<Status, "info" | "error">): Su
     resetOnExecute: false,
   });
 
-  async function refresh(): Promise<void> {
+  let refreshing: Promise<void> = Promise.resolve();
+
+  async function refreshNow(): Promise<void> {
     await executeImmediate();
+  }
+
+  function refresh(): Promise<void> {
+    refreshing = refreshing.then(refreshNow, refreshNow);
+
+    return refreshing;
   }
 
   return { groups, refresh };

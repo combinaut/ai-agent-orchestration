@@ -35,9 +35,15 @@ function observeProgress(
   let observing = false;
 
   async function recordProgress(reply: OpeningProgress): Promise<void> {
+    const local = context.localBusy.value;
+    const advanced = reply.active && reply.opened > progress.value.opened;
     progress.value = reply;
 
-    if (context.localBusy.value) {
+    if (advanced) {
+      await context.refresh();
+    }
+
+    if (local || context.localBusy.value) {
       observing = false;
     } else if (reply.active) {
       observing = true;

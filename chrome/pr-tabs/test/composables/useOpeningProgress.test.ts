@@ -62,7 +62,7 @@ test("an observed local opening keeps its own completion report", async () => {
     replies.openingProgress = { active: false, opened: 0, planned: 0, result };
     await vi.advanceTimersByTimeAsync(250);
 
-    assert.equal(refresh.mock.calls.length, 0);
+    assert.equal(refresh.mock.calls.length, 1);
     assert.equal(status.statusText.value, "Local action completed");
   } finally {
     scope.stop();

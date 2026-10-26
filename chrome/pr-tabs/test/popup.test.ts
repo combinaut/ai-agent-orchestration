@@ -224,7 +224,7 @@ test("actions use a two-column grid with opening actions before closing actions"
 for (const result of [{ opened: 3, remaining: 0, estimated: false }, { error: "offline" }]) {
   test(`an observed batch refreshes on completion and reports ${JSON.stringify(result)}`, async () => {
     vi.useFakeTimers();
-    const { wrapper, answers } = await popup([], {
+    const { wrapper, answers, sent } = await popup([], {
       openingProgress: { active: true, opened: 1, planned: 3 },
     });
 
@@ -240,9 +240,39 @@ for (const result of [{ opened: 3, remaining: 0, estimated: false }, { error: "o
         wrapper.find("#status").text(),
         "error" in result ? "offline" : "Opened 3. 3 PRs in 1 group",
       );
+      await vi.advanceTimersByTimeAsync(500);
+      assert.equal(sent.filter((message) => message.type === "summary").length, 1);
     } finally {
       wrapper.unmount();
       vi.useRealTimers();
     }
   });
 }
+
+test("progress refreshes counts and groups before an observed batch finishes", async () => {
+  vi.useFakeTimers();
+  const { wrapper, answers, sent } = await popup([], {
+    openingProgress: { active: true, opened: 0, planned: 3 },
+  });
+
+  try {
+    answers.summary = {
+      prs: 3,
+      groups: [{ title: "During batch", color: "blue", count: 3, prs: [] }],
+    };
+    answers.openingProgress = { active: true, opened: 1, planned: 3 };
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    assert.ok(wrapper.text().includes("During batch"));
+    assert.equal(wrapper.find("#status").text(), "3 PRs in 1 group");
+    assert.equal(wrapper.find("[role=progressbar]").exists(), true);
+    assert.equal(sent.filter((message) => message.type === "summary").length, 1);
+
+    await vi.advanceTimersByTimeAsync(500);
+    assert.equal(sent.filter((message) => message.type === "summary").length, 1);
+  } finally {
+    wrapper.unmount();
+    vi.useRealTimers();
+  }
+});
