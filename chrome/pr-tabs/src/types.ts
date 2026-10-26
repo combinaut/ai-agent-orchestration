@@ -13,7 +13,7 @@ export type GroupId = number;
 export type PrKey = `${OrgName}/${RepoName}#${PrNumber}`;
 export type PrUrl = `https://github.com/${OrgName}/${RepoName}/pull/${PrNumber}`;
 export type HeadKey = `${string}:${BranchName}`;
-export type OwnerKey = HeadKey;
+export type OwnerKey = HeadKey | PrKey;
 export type PrStateName = "OPEN" | "CLOSED" | "MERGED";
 export type GroupColor = `${chrome.tabGroups.Color}`;
 export type Tab = chrome.tabs.Tab;
@@ -106,7 +106,7 @@ export interface PollBatch {
   nextCursor: number;
 }
 
-export interface PrBranch extends Pick<PrRef, "owner" | "repo"> {
+export interface PrBranch extends Pick<PrRef, "owner" | "repo" | "number"> {
   branch?: BranchName;
   headRepository?: HeadRepository | null;
 }

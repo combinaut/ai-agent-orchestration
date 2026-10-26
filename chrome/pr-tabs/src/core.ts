@@ -263,9 +263,11 @@ export function groupColor(name: GroupTitle): GroupColor {
 }
 
 export function groupForPr(owners: Owners, pr: PrBranch): GroupPlacement {
-  const { owner, repo, branch = "", headRepository } = pr;
+  const { owner, repo, number, branch = "", headRepository } = pr;
   const repository = (headRepository?.nameWithOwner || `${owner}/${repo}`).toLowerCase();
-  const name = (headRepository !== null && owners[`${repository}:${branch}`]) || repo;
+  const statusKey = (`${owner}/${repo}`.toLowerCase() + `#${number}`) as PrKey;
+  const name =
+    (headRepository !== null && owners[`${repository}:${branch}`]) || owners[statusKey] || repo;
 
   return { name, color: groupColor(name) };
 }

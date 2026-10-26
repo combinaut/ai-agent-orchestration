@@ -45,10 +45,11 @@ After an update, run the install command, then click the reload icon on the exte
 
 `pr_tabs.org` selects the organization, `pr_tabs.default_repo` is the repo for bare numbers, `pr_tabs.repos` adds more repos to pick from (environment form: comma-separated `ORCH_PR_TABS_REPOS`), `pr_tabs.open_all` is the GitHub search behind the button, and `pr_tabs.terminal_app` is the macOS app go to pane brings forward. Their environment overrides are `ORCH_PR_TABS_ORG`, `ORCH_PR_TABS_DEFAULT_REPO`, `ORCH_PR_TABS_REPOS`, `ORCH_PR_TABS_OPEN_ALL` and `ORCH_PR_TABS_TERMINAL_APP`. Reload the extension after changing settings.
 
-The native host asks the selected env adapter, through shared open-work discovery, for checked-out branches and their workspace owners. It caches the results for 30 seconds. Herdr resolves the worker workspace's `owner` token to the architect workspace label.
+The native host asks the selected env adapter, through shared open-work discovery, for checked-out branches and their workspace owners, then reads full `https://github.com/<owner>/<repo>/pull/<number>` URLs under a case-insensitive `## Open PRs` heading in matching architect status files. It caches the results for 30 seconds. Herdr resolves the worker workspace's `owner` token to the architect workspace label.
 
 - Repository identity and branch must both match.
 - Missing owners, unavailable adapters and conflicting ownership fall back to the repo name.
+- A PR listed by two architects gets no status-file group.
 - A failed scan keeps the last good owner map until a check succeeds. A successful scan with no owners restores repo grouping.
 - Pinned tabs stay untouched.
 - The installer removes retired topic rules from existing personal config and prints one migration line.

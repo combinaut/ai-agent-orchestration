@@ -18,6 +18,12 @@ import orch_settings  # noqa: E402
 GITHUB_REMOTE = orch_settings.GITHUB_REMOTE
 NO_REMOTE = re.compile(r"No such remote", re.I)
 GONE = re.compile(r"cannot change to .*: No such file or directory", re.I)
+OPEN_PRS = "## open prs"
+MAX_STATUS_FILE_BYTES = 256 * 1024
+PR_URL = re.compile(
+    r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)(?![0-9A-Za-z_-])",
+    re.I,
+)
 READ_ERRORS = (
     OSError,
     ValueError,
@@ -121,6 +127,51 @@ def branch_owners(command, work=None):
             ambiguous.add(key)
         owners[key] = label
     return {key: label for key, label in owners.items() if key not in ambiguous}
+
+
+def status_directory():
+    return Path(
+        os.environ.get("ORCH_USER_TODO_STATUS_DIR")
+        or Path.home() / ".claude/coordinator/status"
+    )
+
+
+def status_owners(workspace_owners, directory):
+    """Architect workspace ids for owner/repo#number URLs under each matching Open PRs heading."""
+    found, ambiguous = {}, set()
+    try:
+        files = sorted(
+            path for path in Path(directory).iterdir() if path.suffix == ".md"
+        )
+    except FileNotFoundError:
+        return found
+    except OSError as error:
+        raise Unavailable(f"status directory unreadable: {str(error)[:200]}") from error
+    for path in files:
+        owner = workspace_owners.get(path.stem)
+        if owner is None:
+            continue
+        try:
+            with path.open("rb") as stream:
+                content = stream.read(MAX_STATUS_FILE_BYTES + 1)
+            if len(content) > MAX_STATUS_FILE_BYTES:
+                continue
+            lines = content.decode().splitlines()
+        except (OSError, ValueError):
+            continue
+        section = False
+        for line in lines:
+            if line.rstrip().casefold() == OPEN_PRS:
+                section = True
+            elif section and line.startswith("## "):
+                break
+            elif section:
+                for repo, number in PR_URL.findall(line):
+                    key = f"{repo.lower()}#{number}"
+                    if key in found and found[key] != owner:
+                        ambiguous.add(key)
+                    found[key] = owner
+    return {key: owner for key, owner in found.items() if key not in ambiguous}
 
 
 def upstream_repo(command, clone, failed):
