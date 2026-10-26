@@ -516,13 +516,15 @@ def answer_item(owner, text, answer, generation):
         existing,
     ):
         unknown = "delivery unknown; check the pane: " + pane_text(answer)
-        if any(
-            record["item_id"] == item["id"]
-            and record.get("generation") == expected
-            and record.get("pane_delivery_unknown_at")
-            for record in existing
-        ):
-            return unknown
+        for record in existing:
+            if (
+                record["item_id"] == item["id"]
+                and record.get("generation") == expected
+                and record.get("pane_delivery_unknown_at")
+            ):
+                return "delivery unknown; check the pane: " + pane_text(
+                    record["answer"]
+                )
         target = None
         status, safe = None, False
         try:
@@ -565,34 +567,31 @@ def answer_item(owner, text, answer, generation):
                     pass
             return "type it in the pane: " + pane_text(answer)
 
-        record = todo_answers.submit_locked(owner, text, answer, expected, existing)
+        record = todo_answers.submit_locked(
+            owner, text, answer, expected, existing, pane_dispatch=True
+        )
         try:
-            sent = (
-                run(
-                    "agent",
-                    "prompt",
-                    target["pane_id"],
-                    f"Mario (to-do panel): {pane_text(text)} -> {pane_text(answer)}",
-                ).returncode
-                == 0
+            prompt = run(
+                "agent",
+                "prompt",
+                target["pane_id"],
+                f"Mario (to-do panel): {pane_text(text)} -> {pane_text(answer)}",
             )
+            if prompt.returncode < 0:
+                return unknown
+            sent = prompt.returncode == 0
         except subprocess.TimeoutExpired:
-            record["pane_delivery_unknown_at"] = time.time()
-            todo_answers.write(
-                todo_answers.directory() / (record["key"] + ".json"), record
-            )
             return unknown
         except OSError:
             sent = False
+        record.pop("pane_delivery_unknown_at", None)
         if sent:
             record.update(
                 pane_delivered=True,
                 delivered_at=time.time(),
                 owner=target["workspace_id"],
             )
-            todo_answers.write(
-                todo_answers.directory() / (record["key"] + ".json"), record
-            )
+        todo_answers.write(todo_answers.directory() / (record["key"] + ".json"), record)
         module.dismiss_locked(item, state_path, TODO, state)
     if not sent:
         return "relayed; the architect may ask again"

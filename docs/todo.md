@@ -69,9 +69,12 @@ A successful submission removes the item and shows `sent to <architect>`, adding
 `(queued while busy)` for a working architect. Claude Code queues that typed
 input. A failed submission uses the existing queue/native relay and shows
 `relayed; the architect may ask again`. A prompt timeout leaves delivery
-unknown: the view keeps the item, suppresses automatic relay and repeat pane
-submission, and shows `delivery unknown; check the pane: <answer>`. Check the
-architect's pane before responding manually. The unknown-delivery record expires
+unknown. The view records unknown delivery before dispatch, so an interrupted
+submission also keeps the item and cannot become a duplicate native relay. It
+suppresses automatic relay and repeat pane
+submission, and shows `delivery unknown; check the pane: <answer>`. A later attempt reports the original stored
+answer, even when you choose a different option. Check the architect's pane before
+responding manually. The unknown-delivery record expires
 after the retention window or when the status item changes. The simple `user-todo.py --follow` editor
 continues to use that relay. No CLI flag, environment variable, file or feed event
 can request a pane submission; only the interactive buttons view sends input.

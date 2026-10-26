@@ -26,6 +26,7 @@ class PaneAnswerTests(IsolatedTestCase):
         self.screen = screen
         self.prompt_timeouts = []
         self.timeout_prompt = False
+        self.interrupt_prompt = False
         agent = dict(
             name="tooling",
             terminal_title_stripped=OWNER,
@@ -56,6 +57,8 @@ class PaneAnswerTests(IsolatedTestCase):
                 data = dict(read=dict(text=self.screen))
             elif command == ["agent", "prompt"]:
                 self.prompt_timeouts.append(kwargs.get("timeout"))
+                if self.interrupt_prompt:
+                    raise SystemExit(143)
                 if self.timeout_prompt:
                     raise subprocess.TimeoutExpired(argv, 5)
                 code = int(fail)
@@ -311,3 +314,35 @@ class PaneAnswerTests(IsolatedTestCase):
         app.feed("a1")
         self.assertEqual(app.status, "delivery unknown; check the pane: now")
         self.assertEqual(len(self.prompts()), 1)
+
+    def test_interrupted_dispatch_never_becomes_native_relay(self):
+        app, view = self.view_app()
+        self.fake(app, view)
+        self.interrupt_prompt = True
+        with self.assertRaises(SystemExit):
+            app.feed("a1")
+        self.assertEqual(a.collect(w.command), ([], []))
+        self.assertTrue(a.records()[0]["pane_delivery_unknown_at"])
+        self.assertFalse(a.records()[0].get("delivered_at"))
+        app.refresh()
+        self.assertEqual(len(app.rows), 1)
+
+    def test_unknown_retry_reports_original_answer(self):
+        app, view = self.view_app()
+        self.fake(app, view)
+        self.timeout_prompt = True
+        app.feed("a1")
+        self.timeout_prompt = False
+        app.feed("a2")
+        self.assertEqual(app.status, "delivery unknown; check the pane: now")
+        self.assertEqual(len(self.prompts()), 1)
+        self.assertEqual(a.records()[0]["answer"], "now")
+
+    def test_signaled_prompt_process_keeps_unknown_delivery(self):
+        app, view = self.view_app()
+        self.fake(app, view, fail=-15)
+        app.feed("a1")
+        self.assertEqual(app.status, "delivery unknown; check the pane: now")
+        self.assertEqual(a.collect(w.command), ([], []))
+        self.assertTrue(a.records()[0]["pane_delivery_unknown_at"])
+        self.assertEqual(len(app.rows), 1)

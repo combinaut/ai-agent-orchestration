@@ -215,7 +215,7 @@ def submit(owner, text, answer, generation=None):
         return submit_locked(owner, text, answer, generation, existing)
 
 
-def submit_locked(owner, text, answer, generation, existing):
+def submit_locked(owner, text, answer, generation, existing, *, pane_dispatch=False):
     """Caller holds the queue lock; prune before acquiring a to-do state lock."""
     from watchers import todo_module
 
@@ -252,6 +252,8 @@ def submit_locked(owner, text, answer, generation, existing):
         answer=answer,
         at=now,
     )
+    if pane_dispatch:
+        record["pane_delivery_unknown_at"] = now
     write(directory() / (record["key"] + ".json"), record)
     return record
 
