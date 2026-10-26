@@ -137,3 +137,18 @@ test("no two @theme tokens claim the same Tailwind utility", () => {
   assert.deepEqual(duplicates(utilities(theme)), []);
   assert.deepEqual(duplicates(utilities("--color-popup: a; --text-popup: b;")), ["text-popup"]);
 });
+
+test("the popup root reserves the scrollbar gutter before groups expand", () => {
+  const tokens = readFileSync(join(SRC, TOKENS), "utf8");
+
+  assert.match(tokens, /html\s*\{\s*scrollbar-gutter:\s*stable;/);
+});
+
+test("PR rows use Aura's hover colour for pointer and keyboard interaction", () => {
+  const tokens = readFileSync(join(SRC, TOKENS), "utf8");
+
+  assert.match(
+    tokens,
+    /\.pr-tab-row:hover,\s*\.pr-tab-row:focus-within\s*\{\s*background-color: var\(--p-content-hover-background\);/,
+  );
+});
