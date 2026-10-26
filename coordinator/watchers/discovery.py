@@ -20,7 +20,7 @@ NO_REMOTE = re.compile(r"No such remote", re.I)
 GONE = re.compile(r"cannot change to .*: No such file or directory", re.I)
 OPEN_PRS = "## open prs"
 PR_URL = re.compile(
-    r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)(?=$|[/?#])",
+    r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)(?![0-9A-Za-z_-])",
     re.I,
 )
 READ_ERRORS = (

@@ -137,6 +137,26 @@ class PrTabsTest(IsolatedTestCase):
                 {"acme/webapp#12": "Finder", "acme/docs#23": "Finder"},
             )
 
+    def test_status_owners_accepts_markdown_and_prose_url_terminators(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            url = "https://github.com/acme/webapp/pull/12"
+            (status / "Finder.md").write_text(
+                "## Open PRs\n"
+                f"- {url} — waits\n"
+                f"| {url} | x\n"
+                f"- {url}, follow-up\n"
+                f"- {url}. Done\n"
+                f"- ({url})\n"
+                f"- `{url}`\n"
+                f"- {url}\tstill open\n"
+                f"- [#12]({url})\n"
+            )
+            self.assertEqual(
+                discovery.status_owners({"Finder"}, status),
+                {"acme/webapp#12": "Finder"},
+            )
+
     def test_status_owners_ignores_unreadable_files(self):
         with tempfile.TemporaryDirectory() as directory:
             status = Path(directory)
@@ -196,6 +216,31 @@ class PrTabsTest(IsolatedTestCase):
             )
         self.assertEqual(branches.call_args.args[1], work)
         self.assertEqual(statuses.call_args.args, ({"Finder"}, Path("/fixture/status")))
+
+    def test_host_ignores_status_file_named_after_a_worker_label(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_text(
+                "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+            )
+            (status / "Worker.md").write_text(
+                "## Open PRs\nhttps://github.com/acme/docs/pull/23\n"
+            )
+            work = {
+                "workspaces": [
+                    {"id": "a", "label": "Finder"},
+                    {"id": "w", "label": "Worker", "owner": "a"},
+                ]
+            }
+            with (
+                patch.object(discovery, "open_work", return_value=work),
+                patch.object(discovery, "branch_owners", return_value={}),
+                patch.object(discovery, "status_directory", return_value=status),
+            ):
+                self.assertEqual(
+                    host.discover_owners(ROOT, {"ORCH_ENV": "herdr"}),
+                    {"acme/webapp#12": "Finder"},
+                )
 
     def test_host_cache_expires_and_missing_or_broken_adapter_falls_back(self):
         with tempfile.TemporaryDirectory() as directory:
