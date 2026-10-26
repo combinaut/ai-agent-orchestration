@@ -55,7 +55,8 @@ selects the architect using its role/name and title; the `->` target still
 controls ordinary jumps. Workers, the Coordinator, unknown owners and ambiguous
 matches never receive typed answers.
 
-The view requires idle, done or working status and a visible Claude screen with
+After acquiring the answer queue and item-state locks, the view checks the current
+architect identity, idle/done/working status, and a visible Claude screen with
 an empty composer between its horizontal borders and a recognized footer. Herdr
 currently exposes no composer-state field; an unfamiliar screen or agent cannot
 establish emptiness. A non-empty or uncertain composer, or blocked/unknown agent
@@ -67,7 +68,11 @@ answer an approval dialog.
 A successful submission removes the item and shows `sent to <architect>`, adding
 `(queued while busy)` for a working architect. Claude Code queues that typed
 input. A failed submission uses the existing queue/native relay and shows
-`relayed; the architect may ask again`. The simple `user-todo.py --follow` editor
+`relayed; the architect may ask again`. A prompt timeout leaves delivery
+unknown: the view keeps the item, suppresses automatic relay and repeat pane
+submission, and shows `delivery unknown; check the pane: <answer>`. Check the
+architect's pane before responding manually. The unknown-delivery record expires
+after the retention window or when the status item changes. The simple `user-todo.py --follow` editor
 continues to use that relay. No CLI flag, environment variable, file or feed event
 can request a pane submission; only the interactive buttons view sends input.
 

@@ -408,8 +408,7 @@ def answer_generation(owner, text, state_path=None):
 
 
 @contextmanager
-def answer_submission(item, answer, state_path, generation=CURRENT_GENERATION):
-    owner = item["source"].removesuffix(".md")
+def answer_context(item, state_path, generation=CURRENT_GENERATION):
     state_path = Path(state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     # Queue -> state matches pruning's lock order; the producer cannot replace a generation in between.
@@ -425,14 +424,14 @@ def answer_submission(item, answer, state_path, generation=CURRENT_GENERATION):
             expected = current if generation is CURRENT_GENERATION else generation
             if current is None or expected != current:
                 raise ValueError(STALE_ANSWER)
-            record = todo_answers.submit_locked(
-                owner, item["text"], answer, expected, existing
-            )
-            yield record, state
+            yield state, expected, existing
 
 
 def answer_item(item, answer, state_path, output, generation=CURRENT_GENERATION):
-    with answer_submission(item, answer, state_path, generation) as (_, state):
+    with answer_context(item, state_path, generation) as (state, expected, existing):
+        todo_answers.submit_locked(
+            item["source"].removesuffix(".md"), item["text"], answer, expected, existing
+        )
         dismiss_locked(item, state_path, output, state)
     return "answer queued (removed)"
 

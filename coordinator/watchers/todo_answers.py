@@ -67,6 +67,7 @@ def pending_item_ids(generations=None):
         record["item_id"]
         for record in records()
         if not record.get("discarded")
+        and not record.get("pane_delivery_unknown_at")
         and (
             generations is None
             or record.get("generation") is None
@@ -149,11 +150,14 @@ def prune(now):
             and str(status_directory()) not in unreadable
             and str(source) not in unreadable
         )
-        expired = (
-            record.get("delivered_at") and now - record["delivered_at"] > KEEP_SECONDS
+        retained_at = record.get("delivered_at") or record.get(
+            "pane_delivery_unknown_at"
         )
+        expired = retained_at and now - retained_at > KEEP_SECONDS
         if record.get("discarded"):
             current.append(record)
+        elif record.get("pane_delivery_unknown_at") and (changed or expired):
+            (directory() / (record["key"] + ".json")).unlink(missing_ok=True)
         elif changed and not record.get("delivered_at"):
             undo_dismissal(record)
             record["discarded"] = True
@@ -170,7 +174,9 @@ def filter_canceled(text):
     current = {
         record["id"]
         for record in records()
-        if not record.get("discarded") and not record.get("pane_delivered")
+        if not record.get("discarded")
+        and not record.get("pane_delivered")
+        and not record.get("pane_delivery_unknown_at")
     }
     kept = []
     for line in text.splitlines():
@@ -267,6 +273,7 @@ def collect(command):
             for record in pruned
             if (not record.get("delivered_at") or record.get("pane_delivered"))
             and not record.get("discarded")
+            and not record.get("pane_delivery_unknown_at")
         ]
     if not current:
         return [], notices

@@ -508,52 +508,64 @@ def answer_item(owner, text, answer, generation):
             raise ValueError("Herdr read failed")
         return json.loads(response.stdout)["result"]
 
-    target = None
-    status, safe = None, False
-    try:
-        target = architect_target(owner, result("agent", "list")["agents"])
-        if target and target.get("pane_id") and target.get("workspace_id"):
-            current = result("agent", "get", target["pane_id"])["agent"]
-            if (
-                architect_target(owner, [current])
-                and current.get("pane_id") == target["pane_id"]
-                and current.get("name") == target.get("name")
-            ):
-                status = current.get("agent_status")
-                if status in ("idle", "done", "working"):
-                    screen = result(
-                        "pane",
-                        "read",
-                        target["pane_id"],
-                        "--source",
-                        "visible",
-                        "--format",
-                        "text",
-                    )["read"]["text"]
-                    safe = empty_composer(current, screen)
-    except (
-        OSError,
-        ValueError,
-        KeyError,
-        TypeError,
-        AttributeError,
-        subprocess.TimeoutExpired,
-    ):
-        pass
-    if not safe:
-        if target and target.get("pane_id"):
-            try:
-                run("agent", "focus", target["pane_id"])
-            except (OSError, subprocess.TimeoutExpired):
-                pass
-        return "type it in the pane: " + pane_text(answer)
-
     item = dict(source=owner + ".md", text=text, id=todo_answers.item_id(owner, text))
     state_path = module.answer_state_path()
-    with module.answer_submission(item, answer, state_path, generation) as (
-        record,
+    with module.answer_context(item, state_path, generation) as (
         state,
+        expected,
+        existing,
     ):
+        unknown = "delivery unknown; check the pane: " + pane_text(answer)
+        if any(
+            record["item_id"] == item["id"]
+            and record.get("generation") == expected
+            and record.get("pane_delivery_unknown_at")
+            for record in existing
+        ):
+            return unknown
+        target = None
+        status, safe = None, False
+        try:
+            candidate = architect_target(owner, result("agent", "list")["agents"])
+            if candidate and candidate.get("pane_id") and candidate.get("workspace_id"):
+                current = result("agent", "get", candidate["pane_id"])["agent"]
+                if (
+                    architect_target(owner, [current])
+                    and current.get("pane_id") == candidate["pane_id"]
+                    and current.get("name") == candidate.get("name")
+                    and current.get("workspace_id") == candidate["workspace_id"]
+                ):
+                    target = current
+                    status = current.get("agent_status")
+                    if status in ("idle", "done", "working"):
+                        screen = result(
+                            "pane",
+                            "read",
+                            target["pane_id"],
+                            "--source",
+                            "visible",
+                            "--format",
+                            "text",
+                        )["read"]["text"]
+                        safe = empty_composer(current, screen)
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+            subprocess.TimeoutExpired,
+        ):
+            pass
+        if not safe:
+            if target:
+                try:
+                    run("agent", "focus", target["pane_id"])
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            return "type it in the pane: " + pane_text(answer)
+
+        record = todo_answers.submit_locked(owner, text, answer, expected, existing)
         try:
             sent = (
                 run(
@@ -564,7 +576,13 @@ def answer_item(owner, text, answer, generation):
                 ).returncode
                 == 0
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except subprocess.TimeoutExpired:
+            record["pane_delivery_unknown_at"] = time.time()
+            todo_answers.write(
+                todo_answers.directory() / (record["key"] + ".json"), record
+            )
+            return unknown
+        except OSError:
             sent = False
         if sent:
             record.update(

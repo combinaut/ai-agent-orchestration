@@ -23,6 +23,9 @@ class PaneAnswerTests(IsolatedTestCase):
 
     def fake(self, app, view, *, status="idle", screen=EMPTY, rows=None, fail=False):
         self.calls = []
+        self.screen = screen
+        self.prompt_timeouts = []
+        self.timeout_prompt = False
         agent = dict(
             name="tooling",
             terminal_title_stripped=OWNER,
@@ -50,8 +53,11 @@ class PaneAnswerTests(IsolatedTestCase):
                 self.assertEqual(
                     argv[3:], ["w1:p2", "--source", "visible", "--format", "text"]
                 )
-                data = dict(read=dict(text=screen))
+                data = dict(read=dict(text=self.screen))
             elif command == ["agent", "prompt"]:
+                self.prompt_timeouts.append(kwargs.get("timeout"))
+                if self.timeout_prompt:
+                    raise subprocess.TimeoutExpired(argv, 5)
                 code = int(fail)
             elif command != ["agent", "focus"]:
                 self.fail(f"Unexpected fake Herdr call: {argv}")
@@ -107,11 +113,12 @@ class PaneAnswerTests(IsolatedTestCase):
         module = w.todo_module()
         with (
             patch.object(view, "generator", return_value=module),
-            patch.object(module, "answer_submission") as transaction,
+            patch.object(module, "answer_context") as transaction,
+            patch.object(a, "submit_locked", return_value={"key": "fake"}),
             patch.object(module, "dismiss_locked"),
             patch.object(a, "write"),
         ):
-            transaction.return_value.__enter__.return_value = ({"key": "fake"}, {})
+            transaction.return_value.__enter__.return_value = ({}, 1, [])
             view.answer_item(OWNER, item, dirty, 1)
         expected = (
             "Mario (to-do panel): "
@@ -250,3 +257,57 @@ class PaneAnswerTests(IsolatedTestCase):
                         part.value for part in parts if isinstance(part, ast.Constant)
                     ]
                     self.assertNotEqual(words[:2], ["agent", "prompt"], str(path))
+
+    def test_lock_wait_revalidates_before_reserving_or_sending(self):
+        import contextlib
+
+        app, view = self.view_app()
+        self.fake(app, view)
+        queue_lock = a.queue_lock
+
+        @contextlib.contextmanager
+        def draft_while_waiting():
+            with queue_lock():
+                self.screen = EMPTY.replace("❯ ", "❯ draft typed during lock wait")
+                yield
+
+        with patch.object(a, "queue_lock", draft_while_waiting):
+            app.feed("a1")
+        self.assertEqual(self.prompts(), [])
+        self.assertEqual(a.records(), [])
+        self.assertEqual(len(app.rows), 1)
+        self.assertEqual(app.status, "type it in the pane: now")
+
+    def test_identity_mismatch_never_focuses_stale_pane(self):
+        app, view = self.view_app()
+        self.fake(app, view)
+        self.rows[0] = dict(self.agent)
+        self.agent["name"] = "replacement-worker"
+        self.agent["tokens"] = dict(role="worker")
+        app.feed("a1")
+        self.assertEqual(self.prompts(), [])
+        self.assertFalse(any(c[1:3] == ["agent", "focus"] for c in self.calls))
+        self.assertEqual(a.records(), [])
+        self.assertEqual(len(app.rows), 1)
+
+    def test_prompt_timeout_keeps_item_without_native_relay(self):
+        app, view = self.view_app()
+        self.fake(app, view)
+        self.timeout_prompt = True
+        app.feed("a1")
+        self.assertEqual(app.status, "delivery unknown; check the pane: now")
+        self.assertEqual(len(app.rows), 1)
+        self.assertTrue(a.records()[0]["pane_delivery_unknown_at"])
+        self.assertFalse(a.records()[0].get("delivered_at"))
+        self.assertEqual(a.collect(w.command), ([], []))
+        self.assertEqual(
+            a.filter_canceled(a.event_line(dict(a.records()[0], owner="w1"))), ""
+        )
+        module = w.todo_module()
+        module.merge(self.base / "status", view.TODO, module.answer_state_path())
+        app.refresh()
+        self.assertEqual(len(app.rows), 1)
+        self.timeout_prompt = False
+        app.feed("a1")
+        self.assertEqual(app.status, "delivery unknown; check the pane: now")
+        self.assertEqual(len(self.prompts()), 1)
