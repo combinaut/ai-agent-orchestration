@@ -28,7 +28,9 @@ function handleGoClick(): void {
 </script>
 
 <template>
-  <li class="flex items-center gap-2 py-group-row focus-within:bg-row-hover hover:bg-row-hover">
+  <li
+    class="-mx-popup-padding flex items-center gap-2 px-popup-padding py-group-row focus-within:bg-row-hover hover:bg-row-hover"
+  >
     <span class="min-w-0 flex-auto truncate" :title="title">{{ label }} {{ title }}</span>
     <Tag
       v-if="isStateVisible"
@@ -49,7 +51,7 @@ function handleGoClick(): void {
         @click="handleGoClick"
       >
         <template #icon>
-          <span class="size-dot">
+          <span class="size-pane-icon">
             <PaneIcon />
           </span>
         </template>

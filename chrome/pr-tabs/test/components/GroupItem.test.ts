@@ -1,11 +1,33 @@
 // @vitest-environment happy-dom
 import assert from "node:assert/strict";
 import Badge from "primevue/badge";
+import AccordionContent from "primevue/accordioncontent";
 import { test } from "vitest";
 import GroupList from "#popup/components/GroupList.vue";
 import type { GroupSummary, PrRow } from "#/types";
 import { fakePanes } from "./fakePanes";
 import { mountPopup } from "./mountPopup";
+
+interface AccordionContentPassThrough {
+  readonly content: {
+    readonly class: string;
+  };
+}
+
+function hasContentClass(value: unknown): value is AccordionContentPassThrough {
+  if (typeof value !== "object" || value === null || !("content" in value)) {
+    return false;
+  }
+
+  const { content } = value;
+
+  return (
+    typeof content === "object" &&
+    content !== null &&
+    "class" in content &&
+    typeof content.class === "string"
+  );
+}
 
 test("a row shows the group's colour dot, title and PR count", () => {
   const groups: GroupSummary[] = [{ title: "Finder", color: "yellow", count: 2, prs: [] }];
@@ -30,4 +52,8 @@ test("the expanded content is a shrinkable grid column, so a long PR title canno
   await wrapper.find("button[aria-expanded]").trigger("click");
 
   assert.ok(wrapper.find("[data-pc-name=accordioncontent]").classes().includes("grid-cols-1"));
+  const passThrough = wrapper.findComponent(AccordionContent).props("pt");
+
+  assert.ok(hasContentClass(passThrough));
+  assert.equal(passThrough.content.class, "p-0");
 });

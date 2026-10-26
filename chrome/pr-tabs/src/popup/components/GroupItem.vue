@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import AccordionContent from "primevue/accordioncontent";
+import AccordionContent, {
+  type AccordionContentPassThroughOptions,
+} from "primevue/accordioncontent";
 import AccordionHeader from "primevue/accordionheader";
 import AccordionPanel from "primevue/accordionpanel";
 import Badge from "primevue/badge";
@@ -12,6 +14,9 @@ const props = defineProps<GroupItemProps>();
 const { title, count, dotClass, countLabel } = useGroupItem(() => props.group);
 const value = computed(() => String(props.index));
 const prRows = computed(() => props.group.prs);
+const accordionContentPassThrough: AccordionContentPassThroughOptions = {
+  content: { class: "p-0" },
+};
 </script>
 
 <template>
@@ -27,7 +32,7 @@ const prRows = computed(() => props.group.prs);
         <Badge class="mr-2 ml-auto" severity="secondary" :value="count" :aria-label="countLabel" />
       </span>
     </AccordionHeader>
-    <AccordionContent class="grid-cols-1">
+    <AccordionContent class="grid-cols-1" :pt="accordionContentPassThrough">
       <ul class="list-none p-0">
         <PrItem v-for="(row, rowIndex) in prRows" :key="rowIndex" :pr="row" :panes="panes" />
       </ul>

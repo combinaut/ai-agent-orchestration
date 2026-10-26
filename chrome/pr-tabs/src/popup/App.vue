@@ -71,39 +71,44 @@ onMounted(handlePopupMounted);
 </script>
 
 <template>
-  <GoToForm
-    v-model:input="input"
-    v-model:repo="repo"
-    :busy="isGoToBusy"
-    :repos="repos"
-    :show-repo="isRepoPickerVisible"
-    @go="handleGoToSubmit"
-    @pick="handleRepoPick"
-  />
-  <div class="mt-3 flex gap-2">
-    <ActionButton
-      id="open-all"
-      primary
-      :label="openAllButton"
-      :hint="openAllHint"
-      :busy="isOpeningAll"
-      @run="handleOpenAllRun"
+  <main
+    id="popup-content"
+    class="box-border max-h-popup-content w-popup scrollbar-gutter-stable overflow-y-auto p-popup-padding"
+  >
+    <GoToForm
+      v-model:input="input"
+      v-model:repo="repo"
+      :busy="isGoToBusy"
+      :repos="repos"
+      :show-repo="isRepoPickerVisible"
+      @go="handleGoToSubmit"
+      @pick="handleRepoPick"
     />
-    <ActionButton
-      id="check-now"
-      :label="checkNowButton"
-      :hint="checkNowHint"
-      :busy="isCheckingNow"
-      @run="handleCheckNowRun"
-    />
-    <ActionButton
-      id="close-duplicates"
-      :label="closeDuplicatesButton"
-      :hint="closeDuplicatesHint"
-      :busy="isClosingDuplicates"
-      @run="handleCloseDuplicatesRun"
-    />
-  </div>
-  <StatusLine :text="statusText" :error="isStatusError" />
-  <GroupList :groups="groups" :panes="panes" />
+    <div class="mt-3 flex gap-2">
+      <ActionButton
+        id="open-all"
+        primary
+        :label="openAllButton"
+        :hint="openAllHint"
+        :busy="isOpeningAll"
+        @run="handleOpenAllRun"
+      />
+      <ActionButton
+        id="check-now"
+        :label="checkNowButton"
+        :hint="checkNowHint"
+        :busy="isCheckingNow"
+        @run="handleCheckNowRun"
+      />
+      <ActionButton
+        id="close-duplicates"
+        :label="closeDuplicatesButton"
+        :hint="closeDuplicatesHint"
+        :busy="isClosingDuplicates"
+        @run="handleCloseDuplicatesRun"
+      />
+    </div>
+    <StatusLine :text="statusText" :error="isStatusError" />
+    <GroupList :groups="groups" :panes="panes" />
+  </main>
 </template>

@@ -138,16 +138,18 @@ test("no two @theme tokens claim the same Tailwind utility", () => {
   assert.deepEqual(duplicates(utilities("--color-popup: a; --text-popup: b;")), ["text-popup"]);
 });
 
-test("the popup root reserves the scrollbar gutter before groups expand", () => {
+test("the popup content owns a stable scrollbar gutter before groups expand", () => {
   const tailwind = readFileSync(join(SRC, "popup/tailwind.css"), "utf8");
-  const tokens = readFileSync(join(SRC, TOKENS), "utf8");
 
-  assert.match(tailwind, /@layer base\s*\{\s*html\s*\{\s*scrollbar-gutter:\s*stable;/);
-  assert.doesNotMatch(tokens, /(?:^|\n)(?:html|\.pr-tab-row)/);
+  assert.match(tailwind, /@utility scrollbar-gutter-stable\s*\{\s*scrollbar-gutter: stable;/);
+  assert.doesNotMatch(tailwind, /@layer base\s*\{\s*html\s*\{/);
 });
 
 test("PR rows use Aura's hover colour for pointer and keyboard interaction", () => {
   const tailwind = readFileSync(join(SRC, "popup/tailwind.css"), "utf8");
 
   assert.match(tailwind, /--color-row-hover: var\(--p-content-hover-background\);/);
+  assert.match(tailwind, /--spacing-popup-content: var\(--pr-tabs-popup-max-height\);/);
+  assert.match(tailwind, /--spacing-popup-padding: var\(--pr-tabs-popup-padding\);/);
+  assert.match(tailwind, /--spacing-pane-icon: var\(--pr-tabs-pane-icon-size\);/);
 });

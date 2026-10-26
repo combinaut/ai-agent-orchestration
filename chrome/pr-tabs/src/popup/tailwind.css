@@ -3,10 +3,8 @@
 @import "tailwindcss-primeui";
 @import "./tokens.css";
 
-@layer base {
-  html {
-    scrollbar-gutter: stable;
-  }
+@utility scrollbar-gutter-stable {
+  scrollbar-gutter: stable;
 }
 
 @theme inline {
@@ -23,9 +21,12 @@
   --color-group-cyan: var(--pr-tabs-group-cyan);
   --color-group-orange: var(--pr-tabs-group-orange);
   --spacing-popup: var(--pr-tabs-popup-width);
+  --spacing-popup-content: var(--pr-tabs-popup-max-height);
+  --spacing-popup-padding: var(--pr-tabs-popup-padding);
   --spacing-status: var(--pr-tabs-status-min-height);
   --spacing-group-row: var(--pr-tabs-group-row-padding);
   --spacing-dot: var(--pr-tabs-dot-size);
+  --spacing-pane-icon: var(--pr-tabs-pane-icon-size);
   --font-popup: var(--pr-tabs-font-family);
   --font-weight-label: var(--pr-tabs-label-font-weight);
   --radius-dot: var(--pr-tabs-dot-radius);
