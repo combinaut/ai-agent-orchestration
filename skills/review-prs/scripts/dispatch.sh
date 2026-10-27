@@ -99,7 +99,20 @@ for try in 1 2 3 4 5; do
   sleep 3
 done
 herdr agent wait "$agent" --until idle --timeout 120000 >/dev/null 2>&1 || sleep 15
-if herdr agent read "$agent" --source recent-unwrapped --lines 30 | grep -qi "update"; then
+start_screen=$(herdr agent read "$agent" --source recent-unwrapped --lines 30 2>/dev/null || true)
+if grep -Eqi 'hooks? need review before they can run|hooks? (are )?untrusted|review .*hooks?|hooks? .*review|authentication required|sign in to|access denied|permission denied|agent blocked|cannot start' <<<"$start_screen"; then
+  if grep -Eqi 'hooks? need review before they can run|hooks? (are )?untrusted|review .*hooks?|hooks? .*review' <<<"$start_screen"; then
+    hook_list=$(printf '%s\n' "$start_screen" | grep -Eo '(Pre|Post)ToolUse|Session(Start|End)|UserPromptSubmit' | sort -u | paste -sd ' ' -)
+    echo "HOOKS UNTRUSTED ${hook_list:-unknown hooks}"
+  else
+    echo "START BLOCKED $(printf '%s\n' "$start_screen" | tr '\n' ' ' | sed 's/  */ /g')"
+  fi
+  close_opened || true
+  [ -n "$opened" ] || remove_worktree || true
+  release
+  exit 1
+fi
+if grep -qi "update" <<<"$start_screen"; then
   echo "UPDATE BANNER"
   herdr agent send-keys "$agent" down
   herdr agent send-keys "$agent" enter

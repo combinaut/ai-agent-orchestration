@@ -23,6 +23,7 @@ case "$1 $2" in
     exit "${PROMPT_STATUS:-0}" ;;
   'agent read')
     [ -z "${AGENT_READ_FAILS:-}" ] || exit 1
+    [ -z "${AGENT_START_SCREEN:-}" ] || { printf '%s\n' "$AGENT_START_SCREEN"; exit 0; }
     [ -z "${PROMPT_DELIVERED:-}" ] || printf 'Head SHA: %s\n' "$SHA"
     printf 'APPROVE — https://github.com/acme/app/pull/7\n' ;;
   'agent wait') [ -z "${AGENT_BUSY:-}" ] || exit 1 ;;
@@ -90,6 +91,32 @@ dispatch() {
   contains "$output" 'LEFT OPEN w9-p2'
   run grep -q 'pane close' "$TMP/review-herdr.calls"
   [ "$status" -eq 1 ]
+}
+
+@test "dispatch releases a hook-review screen before it marks or prompts" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  AGENT_START_SCREEN=$'3 hooks need review before they can run\nPreToolUse\nSessionStart\nUserPromptSubmit' dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'HOOKS UNTRUSTED PreToolUse SessionStart UserPromptSubmit'
+  contains "$output" "RELEASED $SHA"
+  [ -e "$TMP/closed/w9-p2" ]
+  [ ! -e "$TMP/review.prompt" ]
+  run grep -q 'agent send-keys' "$TMP/review-herdr.calls"
+  [ "$status" -eq 1 ]
+  [ "$(dispatch_state)" = 'True null' ]
+}
+
+@test "dispatch releases another blocking start screen before it prompts" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  AGENT_START_SCREEN='Authentication required before the agent can start' dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'START BLOCKED Authentication required before the agent can start'
+  contains "$output" "RELEASED $SHA"
+  [ -e "$TMP/closed/w9-p2" ]
+  [ ! -e "$TMP/review.prompt" ]
+  [ "$(dispatch_state)" = 'True null' ]
 }
 
 @test "dispatch starts Codex on the configured worker model" {
