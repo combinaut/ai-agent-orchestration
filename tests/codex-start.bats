@@ -29,10 +29,10 @@ teardown() {
   [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind codex --pane w1-p2 -- --no-daemon --dangerously-bypass-hook-trust --model worker-model" ]
 }
 
-@test "the smart tier uses the smart model" {
+@test "the smart tier uses the smart model at medium reasoning effort" {
   run "$SCRIPT" w1 w1-p2 smart
   [ "$status" -eq 0 ]
-  [[ "$(cat "$HERDR_CALLS")" == *"--model smart-model" ]] || false
+  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind codex --pane w1-p2 -- --no-daemon --dangerously-bypass-hook-trust --model smart-model -c model_reasoning_effort=medium" ]
 }
 
 @test "extra arguments are refused" {

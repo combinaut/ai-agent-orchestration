@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Starts a Codex worker in an existing herdr pane: codex-start.sh <agent-name> <pane-id> <worker|smart>
-# Takes no extra arguments. The model comes from models.codex_worker or models.codex_smart; an empty one falls back to the other tier.
+# Takes no extra arguments; the smart tier adds -c model_reasoning_effort=medium. The model comes from models.codex_worker or models.codex_smart; an empty one falls back to the other tier.
 case ${ZSH_EVAL_CONTEXT:-} in *:file*) echo "run it, do not source it" >&2; return 1 ;; esac
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
@@ -26,4 +26,6 @@ case "$model" in "" | "<"*">" | -*) echo "codex-start.sh: set models.codex_$tier
 
 herdr_bin=${ORCH_HERDR_BIN:-herdr}
 orch_need_cmd "$herdr_bin"
-exec "$herdr_bin" agent start "$name" --kind codex --pane "$pane" -- --no-daemon --dangerously-bypass-hook-trust --model "$model"
+extra=()
+[ "$tier" != smart ] || extra=(-c model_reasoning_effort=medium)
+exec "$herdr_bin" agent start "$name" --kind codex --pane "$pane" -- --no-daemon --dangerously-bypass-hook-trust --model "$model" ${extra[@]+"${extra[@]}"}
