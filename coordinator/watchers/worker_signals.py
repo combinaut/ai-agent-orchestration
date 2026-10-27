@@ -68,10 +68,33 @@ def identity():
     if not pane or not workspace:
         raise ValueError("HERDR_PANE_ID and HERDR_WORKSPACE_ID are required")
     work = discovery.open_work(command)
-    if not any(
-        row["pane"] == pane and row["workspace"] == workspace for row in work["panes"]
-    ):
-        raise ValueError("caller pane does not belong to its workspace")
+    panes = work["panes"]
+    if not any(row["pane"] == pane and row["workspace"] == workspace for row in panes):
+        claimed_pane = next((row for row in panes if row["pane"] == pane), None)
+        if claimed_pane is None:
+            cwd = os.path.realpath(os.getcwd())
+            candidates = [
+                row
+                for row in panes
+                if row.get("cwd") and os.path.realpath(row["cwd"]) == cwd
+            ]
+            if len(candidates) == 1:
+                pane, workspace = candidates[0]["pane"], candidates[0]["workspace"]
+            else:
+                raise ValueError(
+                    "caller pane does not belong to its workspace "
+                    f"(pane={pane!r}, workspace={workspace!r}, "
+                    f"socket={os.environ.get('HERDR_SOCKET_PATH', '<default>')!r}, "
+                    f"panes={len(panes)}, cwd={cwd!r}, cwd_matches={len(candidates)})"
+                )
+        else:
+            raise ValueError(
+                "caller pane does not belong to its workspace "
+                f"(pane={pane!r} is in workspace={claimed_pane['workspace']!r}, "
+                f"not workspace={workspace!r}; "
+                f"socket={os.environ.get('HERDR_SOCKET_PATH', '<default>')!r}, "
+                f"panes={len(panes)})"
+            )
     row = next((row for row in work["workspaces"] if row["id"] == workspace), {})
     return dict(pane=pane, workspace=workspace, owner=row.get("owner"))
 

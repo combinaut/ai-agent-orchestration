@@ -241,6 +241,55 @@ class SignalTests(IsolatedTestCase):
         with self.assertRaises(ValueError):
             s.worker_identity(s.identity())
 
+    def test_identity_recovers_a_missing_stale_pane_from_its_unique_cwd(self):
+        self.work["panes"] = [
+            dict(pane="live-pane", workspace="worker", cwd="/worktree"),
+            dict(pane="architect", workspace="owner", cwd="/architect"),
+        ]
+        with (
+            patch.dict(
+                os.environ,
+                HERDR_PANE_ID="stale-pane",
+                HERDR_WORKSPACE_ID="stale-workspace",
+            ),
+            patch.object(s.os, "getcwd", return_value="/worktree"),
+        ):
+            self.assertEqual(
+                s.identity(), dict(pane="live-pane", workspace="worker", owner="owner")
+            )
+
+    def test_identity_does_not_recover_a_present_pane_in_another_workspace(self):
+        self.work["panes"][0]["cwd"] = "/worktree"
+        with (
+            patch.dict(os.environ, HERDR_WORKSPACE_ID="owner"),
+            patch.object(s.os, "getcwd", return_value="/worktree"),
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "pane='pane:1' is in workspace='worker'.*socket=.*panes=2",
+            ):
+                s.identity()
+
+    def test_identity_reports_ambiguous_stale_pane_recovery(self):
+        self.work["panes"] = [
+            dict(pane="one", workspace="worker", cwd="/worktree"),
+            dict(pane="two", workspace="owner", cwd="/worktree"),
+        ]
+        with (
+            patch.dict(
+                os.environ,
+                HERDR_PANE_ID="stale-pane",
+                HERDR_WORKSPACE_ID="stale-workspace",
+                HERDR_SOCKET_PATH="/socket",
+            ),
+            patch.object(s.os, "getcwd", return_value="/worktree"),
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "pane='stale-pane'.*workspace='stale-workspace'.*socket='/socket'.*panes=2.*cwd_matches=2",
+            ):
+                s.identity()
+
     def test_completion_backlog_bound_and_expiry(self):
         ident = s.identity()
         with patch.object(s.time, "time", return_value=100):
