@@ -654,13 +654,13 @@ print(" ".join(s + "=" + h["state"] for s, h in sorted(prs.heads(e).items())))
   contains "$output" "WORKTREE $wt"
 }
 
-@test "an undelivered prompt in a caller's pane is blocked without cleanup" {
+@test "an undelivered prompt in a caller's pane stays pending without cleanup" {
   stub_review_tools
   : >"$TMP/none.toml"
   PANE=w9-p5 PROMPT_REJECTED=1 GH_NO_REVIEW=1 dispatch
   not_contains "$output" 'RELEASED'
   contains "$output" 'LEFT OPEN w9-p5'
-  [ "$(dispatch_state)" = 'False "blocked"' ]
+  [ "$(dispatch_state)" = 'False "pending"' ]
 }
 
 @test "a head still pending behind a newer mark is not offered again" {
