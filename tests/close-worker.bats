@@ -35,10 +35,10 @@ teardown() {
   rm -rf "$TMP"
 }
 
-# agent <pane> <name> <workspace> <role> <session> <cwd> [kind]
+# agent <pane> <name> <workspace> <role> <session> <cwd> [kind] [title]
 agent() {
-  printf '{"result":{"agent":{"pane_id":"%s","name":"%s","workspace_id":"%s","cwd":"%s","tokens":{"role":"%s"},"agent_session":{"agent":"%s","value":"%s"}}}}\n' \
-    "$1" "$2" "$3" "$6" "$4" "${7:-claude}" "$5" >"$FX/agent-${1//:/_}.json"
+  printf '{"result":{"agent":{"pane_id":"%s","name":"%s","workspace_id":"%s","cwd":"%s","terminal_title_stripped":"%s","tokens":{"role":"%s"},"agent_session":{"agent":"%s","value":"%s"}}}}\n' \
+    "$1" "$2" "$3" "$6" "${8:-}" "$4" "${7:-claude}" "$5" >"$FX/agent-${1//:/_}.json"
 }
 
 # workspace <id> <owner> <checkout>
@@ -83,6 +83,13 @@ close_worker() {
   [ "$status" -eq 3 ]
   not_closed
   [ "$(cat "$STATUS")" = "$before" ]
+}
+
+@test "closes a worker with a decorated architect title" {
+  agent wW:p1 fix-it wW "" s "$TMP/wt" claude "Architect::Frontend::Migration fm-30619"
+  close_worker wW:p1 --task t
+  [ "$status" -eq 0 ]
+  grep -qx 'pane close wW:p1' "$HERDR_CALLS"
 }
 
 @test "refuses a caller whose name is a path" {

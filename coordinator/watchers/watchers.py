@@ -162,11 +162,12 @@ def workspace_owners(raw):
 
 def architect_like(agent):
     """An architect or the Coordinator, by role tag or by name; never a worker."""
-    label = agent.get("name") or agent.get("terminal_title_stripped") or ""
+    name = agent.get("name") or ""
+    title = agent.get("terminal_title_stripped") or ""
     return (
-        label.startswith("Architect::")
-        or (agent.get("tokens") or {}).get("role") in ("architect", "coordinator")
-        or "Architect::" in (agent.get("terminal_title_stripped") or "")
+        (agent.get("tokens") or {}).get("role") in ("architect", "coordinator")
+        or bool(re.fullmatch(r"Architect::\S+", name))
+        or bool(re.fullmatch(r"Architect::\S+", title))
     )
 
 

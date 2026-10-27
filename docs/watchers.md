@@ -74,9 +74,10 @@ through the intentional-close helper, leaving the question file available to ret
 A session in an owner-tagged workspace that stays `done` or `idle` for more than
 `workers.wait_s` seconds (default 600) emits
 `WORKER WAITING <name> pane=<pane> owner=<workspace> <minutes>m session=<id>`.
-Architect and Coordinator role panes, and panes with an `Architect::` name or
-title, are excluded. The start line goes only to
-`prod-context/coordinator-fyi.log`, with no native message to the architect.
+Architect and Coordinator role panes, and panes whose name or stripped title is
+exactly an `Architect::` name (with no whitespace), are excluded. The start
+line goes only to `prod-context/coordinator-fyi.log`, with no native message to
+the architect.
 There is one repeat at `workers.wait_repeat_s` seconds after the initial alert
 (default 1800), also only in the fyi file, then one `ESCALATE` after another such
 interval. The escalation goes to the feed and natively to the Coordinator through

@@ -31,6 +31,35 @@ def workspace_snapshot(owner):
     }
 
 
+class ArchitectLikeTests(IsolatedTestCase):
+    def test_only_bare_architect_names_and_titles_match_without_a_role(self):
+        cases = (
+            (
+                {"terminal_title_stripped": "Architect::Frontend::Migration fm-30619"},
+                False,
+            ),
+            ({"name": "Architect::Foo::Bar worker"}, False),
+            ({"terminal_title_stripped": "busy Architect::Frontend::Migration"}, False),
+            ({"name": "Architect::Foo::Bar"}, True),
+            ({"terminal_title_stripped": "Architect::Foo::Bar"}, True),
+        )
+        for agent, expected in cases:
+            with self.subTest(agent=agent):
+                self.assertIs(w.architect_like(agent), expected)
+
+    def test_architect_and_coordinator_roles_match_regardless_of_title(self):
+        for role in ("architect", "coordinator"):
+            with self.subTest(role=role):
+                self.assertTrue(
+                    w.architect_like(
+                        {
+                            "terminal_title_stripped": "worker title",
+                            "tokens": {"role": role},
+                        }
+                    )
+                )
+
+
 class WaitingTests(IsolatedTestCase):
     def setUp(self):
         self.state = None
@@ -277,10 +306,9 @@ class WaitingTests(IsolatedTestCase):
         self.assertEqual(self.scan(1300), [])
         self.assertIn("session=s1", self.scan(1301)[0])
 
-    def test_architect_names_and_titles_never_alert(self):
+    def test_bare_architect_names_and_titles_never_alert(self):
         for fields in (
             dict(name="Architect::Tooling"),
-            dict(name="worker", terminal_title_stripped="busy Architect::Tooling"),
             dict(name=None, terminal_title_stripped="Architect::Tooling"),
         ):
             with self.subTest(fields=fields):
