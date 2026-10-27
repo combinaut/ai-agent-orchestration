@@ -476,7 +476,7 @@ export type TabActionType = OpenBatchAction | "checkNow" | "closeDuplicates";
 
 export interface TabActionContext {
   ask: Ask;
-  status: Pick<Status, "statusText" | "info" | "error" | "revision">;
+  status: Pick<Status, "statusText" | "isStatusError" | "info" | "error" | "revision">;
   refresh: () => Promise<void>;
 }
 

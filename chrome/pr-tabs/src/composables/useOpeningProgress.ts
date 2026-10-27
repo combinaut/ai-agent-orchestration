@@ -29,6 +29,17 @@ async function reportCompletion(
   }
 }
 
+async function refreshKeepingError(context: OpeningProgressContext): Promise<void> {
+  const { status, refresh } = context;
+  const revision = status.revision.value;
+  const error = status.isStatusError.value ? status.statusText.value : null;
+  await refresh();
+
+  if (error !== null && status.revision.value === revision && status.statusText.value !== error) {
+    status.error(error);
+  }
+}
+
 function visibleProgress(
   reply: OpeningProgress,
   previous: OpeningProgress,
@@ -74,7 +85,7 @@ function observeProgress(
     progress.value = visibleProgress(reply, progress.value, local);
 
     if (advanced) {
-      await context.refresh();
+      await refreshKeepingError(context);
     }
 
     if (local || context.localBusy.value) {

@@ -6,6 +6,7 @@ import { test, vi } from "vitest";
 import type { SummaryList } from "#/types";
 import type { FakeReplies } from "#test/types";
 import { useStatus } from "#/composables/useStatus";
+import { useSummary } from "#/composables/useSummary";
 import { useOpeningProgress } from "#/composables/useOpeningProgress";
 import { fakeAsk } from "./fakeAsk";
 
@@ -130,3 +131,34 @@ for (const stage of ["ask", "refresh"] as const) {
     }
   });
 }
+
+test("metadata hydration finishing after a failure keeps the failure message", async () => {
+  vi.useFakeTimers();
+  const scope = effectScope();
+  const replies: FakeReplies = {
+    openingProgress: { active: false, opened: 0, planned: 0, metadataRevision: 0 },
+    summary: { prs: 1, groups: [] },
+  };
+  const fake = fakeAsk(replies);
+  const status = useStatus();
+
+  try {
+    scope.run(() => {
+      const { refresh } = useSummary(fake.ask, status);
+
+      return useOpeningProgress({ ask: fake.ask, status, localBusy: ref(false), refresh });
+    });
+    await flushPromises();
+    status.error("Couldn't open: foo");
+    replies.openingProgress = { active: false, opened: 0, planned: 0, metadataRevision: 1 };
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    assert.equal(fake.sent.filter((message) => message.type === "summary").length, 1);
+    assert.equal(status.statusText.value, "Couldn't open: foo");
+    assert.equal(status.isStatusError.value, true);
+  } finally {
+    scope.stop();
+    vi.useRealTimers();
+  }
+});
