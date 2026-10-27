@@ -19,6 +19,8 @@ When that stale pane ID is absent from Herdr, `orch-signal` recovers only a
 single live Codex pane whose Git worktree matches the shell's current directory;
 a present pane in another workspace is still refused. Identity failures name the
 claimed pane, workspace, Herdr socket and pane count.
+Recovery applies only to worker `heartbeat`, `done` and `ask` signals, never to
+the architect-facing `answer` or `list` commands.
 
 ```bash
 orch-signal heartbeat --new-job  # first command in every dispatched job

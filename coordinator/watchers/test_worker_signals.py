@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -43,6 +44,12 @@ class SignalTests(IsolatedTestCase):
 
     def record(self, **kw):
         return s.new_question(s.identity(), "Which?", "a,b", **kw)
+
+    def git_repo(self, name):
+        path = self.base / name
+        path.mkdir()
+        subprocess.run(["git", "init", "-q", path], check=True)
+        return path
 
     def test_pending_bound(self):
         self.record(timeout=60)
@@ -156,6 +163,17 @@ class SignalTests(IsolatedTestCase):
             s.record_signal(ident, "heartbeat", new_job=True)["job"], first["job"]
         )
 
+    def test_recovered_signal_keeps_its_stale_pane_in_the_done_event(self):
+        record = s.record_signal(
+            dict(s.identity(), recovered_from="stale-pane"),
+            "done",
+            outcome="succeeded",
+            report="/report",
+            summary="recovered",
+        )
+        self.assertEqual(record["recovered_from"], "stale-pane")
+        self.assertIn("recovered_from=stale-pane", s.event_line(record))
+
     def test_prune_closed_and_answered_records(self):
         s.record_signal(s.identity(), "done", outcome="succeeded")
         q = self.record(timeout=60)
@@ -242,14 +260,19 @@ class SignalTests(IsolatedTestCase):
             s.worker_identity(s.identity())
 
     def test_identity_recovers_a_missing_stale_pane_from_its_worktree(self):
+        worktree = self.git_repo("worker")
+        pane_cwd = worktree / "lib"
+        caller_cwd = worktree / "app/models"
+        pane_cwd.mkdir(parents=True)
+        caller_cwd.mkdir(parents=True)
         self.work["panes"] = [
             dict(
                 pane="live-pane",
                 workspace="worker",
-                cwd="/worktree/worker",
+                cwd=str(pane_cwd),
                 agent="codex",
             ),
-            dict(pane="architect", workspace="owner", cwd="/worktree/architect"),
+            dict(pane="architect", workspace="owner", cwd=str(self.git_repo("owner"))),
         ]
         with (
             patch.dict(
@@ -257,19 +280,16 @@ class SignalTests(IsolatedTestCase):
                 HERDR_PANE_ID="stale-pane",
                 HERDR_WORKSPACE_ID="stale-workspace",
             ),
-            patch.object(s.os, "getcwd", return_value="/worktree/worker/lib/task"),
-            patch.object(
-                s,
-                "worktree_of",
-                side_effect=lambda path: (
-                    "/worktree/worker"
-                    if path.startswith("/worktree/worker")
-                    else "/worktree/architect"
-                ),
-            ),
+            patch.object(s.os, "getcwd", return_value=str(caller_cwd)),
         ):
             self.assertEqual(
-                s.identity(), dict(pane="live-pane", workspace="worker", owner="owner")
+                s.identity(recover=True),
+                dict(
+                    pane="live-pane",
+                    workspace="worker",
+                    owner="owner",
+                    recovered_from="stale-pane",
+                ),
             )
 
     def test_identity_does_not_recover_a_present_pane_in_another_workspace(self):
@@ -297,8 +317,8 @@ class SignalTests(IsolatedTestCase):
             patch.object(s.os, "getcwd", return_value="/worktree/subdirectory"),
             patch.object(s, "worktree_of", return_value="/worktree"),
         ):
-            with self.assertRaisesRegex(ValueError, "worktree_matches=0"):
-                s.identity()
+            with self.assertRaisesRegex(ValueError, "worktree_matches=1"):
+                s.identity(recover=True)
 
     def test_identity_reports_ambiguous_stale_pane_recovery(self):
         self.work["panes"] = [
@@ -319,7 +339,107 @@ class SignalTests(IsolatedTestCase):
                 ValueError,
                 "pane='stale-pane'.*workspace='stale-workspace'.*socket='/socket'.*panes=2.*worktree_matches=2",
             ):
+                s.identity(recover=True)
+
+    def test_identity_does_not_recover_a_codex_pane_in_another_worktree(self):
+        caller, other = self.git_repo("caller"), self.git_repo("other")
+        self.work["panes"] = [
+            dict(pane="live-pane", workspace="worker", cwd=str(other), agent="codex"),
+        ]
+        with (
+            patch.dict(
+                os.environ,
+                HERDR_PANE_ID="stale-pane",
+                HERDR_WORKSPACE_ID="stale-workspace",
+            ),
+            patch.object(s.os, "getcwd", return_value=str(caller)),
+        ):
+            with self.assertRaisesRegex(ValueError, "worktree_matches=0"):
+                s.identity(recover=True)
+
+    def test_identity_does_not_recover_when_caller_or_pane_is_not_in_git(self):
+        caller, pane = self.base / "caller", self.base / "pane"
+        caller.mkdir()
+        pane.mkdir()
+        self.work["panes"] = [
+            dict(pane="live-pane", workspace="worker", cwd=str(pane), agent="codex"),
+        ]
+        with (
+            patch.dict(
+                os.environ,
+                HERDR_PANE_ID="stale-pane",
+                HERDR_WORKSPACE_ID="stale-workspace",
+            ),
+            patch.object(s.os, "getcwd", return_value=str(caller)),
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "worktree=None.*worktree_matches=0"
+            ):
+                s.identity(recover=True)
+
+    def test_identity_does_not_recover_from_a_workspace_repo_root(self):
+        root = self.git_repo("main-clone")
+        self.work["workspaces"][0]["repo_root"] = str(root)
+        self.work["panes"] = [
+            dict(pane="live-pane", workspace="worker", cwd=str(root), agent="codex"),
+        ]
+        with (
+            patch.dict(
+                os.environ,
+                HERDR_PANE_ID="stale-pane",
+                HERDR_WORKSPACE_ID="stale-workspace",
+            ),
+            patch.object(s.os, "getcwd", return_value=str(root)),
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "worktree is a workspace repo_root"
+            ):
+                s.identity(recover=True)
+
+    def test_worktree_of_times_out_and_ignores_git_environment(self):
+        timeout = subprocess.TimeoutExpired(["git"], 5)
+        with (
+            patch.dict(os.environ, GIT_DIR="/wrong", GIT_WORK_TREE="/wrong"),
+            patch.object(s.subprocess, "run", side_effect=timeout) as run,
+        ):
+            self.assertIsNone(s.worktree_of("/repo"))
+        self.assertEqual(run.call_args.kwargs["timeout"], 5)
+        self.assertFalse(
+            any(key.startswith("GIT_") for key in run.call_args.kwargs["env"])
+        )
+
+    def test_strict_identity_does_not_recover_stale_panes(self):
+        root = self.git_repo("worker")
+        self.work["panes"] = [
+            dict(pane="live-pane", workspace="worker", cwd=str(root), agent="codex"),
+        ]
+        with (
+            patch.dict(
+                os.environ,
+                HERDR_PANE_ID="stale-pane",
+                HERDR_WORKSPACE_ID="stale-workspace",
+            ),
+            patch.object(s.os, "getcwd", return_value=str(root)),
+        ):
+            with self.assertRaisesRegex(ValueError, "caller pane does not belong"):
                 s.identity()
+
+    def test_answer_does_not_recover_a_stale_codex_pane(self):
+        question = self.record(timeout=60)
+        root = self.git_repo("architect")
+        self.work["panes"] = [
+            dict(pane="live-pane", workspace="owner", cwd=str(root), agent="codex"),
+        ]
+        with (
+            patch.dict(
+                os.environ,
+                HERDR_PANE_ID="stale-pane",
+                HERDR_WORKSPACE_ID="stale-workspace",
+            ),
+            patch.object(s.os, "getcwd", return_value=str(root)),
+        ):
+            with self.assertRaisesRegex(ValueError, "caller pane does not belong"):
+                s.answer(question["id"], "a")
 
     def test_completion_backlog_bound_and_expiry(self):
         ident = s.identity()
@@ -640,7 +760,7 @@ class SignalTests(IsolatedTestCase):
 
         for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             with self.subTest(signal=signum):
-                code = 'import worker_signals as s; s.identity=lambda:dict(pane="pane:1",workspace="worker",owner="owner"); raise SystemExit(s.main())'
+                code = 'import worker_signals as s; s.identity=lambda **_:dict(pane="pane:1",workspace="worker",owner="owner"); raise SystemExit(s.main())'
                 process = subprocess.Popen(
                     [
                         sys.executable,
