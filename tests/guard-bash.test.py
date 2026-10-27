@@ -1583,11 +1583,36 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "double-quoted substitution in a commit message",
             'git commit -m "docs: $(pi --provider deepseek) is denied"',
         ),
+        (
+            "nested shell running a bypassed codex start",
+            'bash -c "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --dangerously-bypass-hook-trust"',
+        ),
         ("double-quoted backticks running pi", 'echo "`pi --provider deepseek`"'),
         (
             "nested shell running herdr pi start",
             "bash -c \"sh -c 'herdr agent start w --kind pi --pane w1:p2'\"",
         ),
+    ]:
+        case(name, command, True)
+    for name, command in [
+        (
+            f"herdr codex start with {flag}",
+            f"herdr agent start w --kind codex --pane w1:p2 -- --no-daemon {flag} --model m",
+        )
+        for flag in [
+            "--dangerously-bypass-hook-trust",
+            "-s danger-full-access",
+            "-sdanger-full-access",
+            "--sandbox danger-full-access",
+            "--sandbox=danger-full-access",
+            "--add-dir /",
+            "--add-dir=/",
+            "-c sandbox_mode=danger-full-access",
+            "-csandbox_mode=danger-full-access",
+            "--config sandbox_permissions=[]",
+            "--config=sandbox_mode=x",
+            "--dangerously-bypass-approvals-and-sandbox",
+        ]
     ]:
         case(name, command, True)
     for name, command in [
@@ -1598,9 +1623,10 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --model m",
         ),
         (
-            "herdr codex worker start with hook trust bypassed",
-            "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --dangerously-bypass-hook-trust --model m",
+            "herdr codex start with a project doc setting",
+            "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --model m -c project_doc_max_bytes=0",
         ),
+        ("codex launcher", "~/.claude/coordinator/codex-start.sh w w1:p2 worker"),
         ("herdr agent list", "herdr agent list"),
         (
             "herdr prompt to a pi worker",

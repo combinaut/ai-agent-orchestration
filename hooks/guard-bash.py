@@ -28,6 +28,38 @@ BIG_REPO_REASON = (
 )
 BIG_REPO_BATCH_REASON = "No whole-tree cat-file batch read in a configured big repo. Use rg scoped to the directories you need."
 PI_REASON = "pi starts only through ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart>; DeepSeek is off unless the repo opted in, and a live pi never switches model."
+CODEX_REASON = "A raw codex start may not carry --dangerously-bypass-hook-trust, a sandbox option (-s, --sandbox, --add-dir, -c sandbox_*) or --dangerously-bypass-approvals-and-sandbox; start a bypassed Codex worker with ~/.claude/coordinator/codex-start.sh <name> <pane> <worker|smart>."
+CODEX_FLAGS = (
+    "--dangerously-bypass-hook-trust",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--add-dir",
+    "--sandbox",
+)
+
+
+def codex_widened(agent_args):
+    """True when a codex start's own arguments bypass hook trust or touch the sandbox."""
+    skip = False
+    for index, arg in enumerate(agent_args):
+        if skip:
+            skip = False
+            continue
+        if arg in ("--cd", "-C", "--model", "-m"):
+            skip = True
+        elif arg.startswith(CODEX_FLAGS) or (
+            arg.startswith("-s") and not arg.startswith("--")
+        ):
+            return True
+        elif arg in ("-c", "--config"):
+            value = agent_args[index + 1 : index + 2]
+            if value and value[0].lower().startswith("sandbox_"):
+                return True
+            skip = True
+        elif arg.startswith(("-c", "--config=")) and "sandbox_" in arg.lower():
+            return True
+    return False
+
+
 MODEL_COMMAND = re.compile(r"\s*/(?:model|models|scoped-models|settings)\b", re.I)
 BAD_ATTR = re.compile(
     r"co-authored-by:\s*(?:Claude|Codex|ChatGPT|OpenAI|Copilot|Gemini)|co-authored-by:[^\n]*(?:anthropic\.com|openai\.com|chatgpt\.com)|generated-by:\s*(?:Claude|Codex|ChatGPT|OpenAI|Copilot|Gemini)|Generated (?:with|using) (?:\[?(?:Claude Code|Codex|ChatGPT|OpenAI|Copilot|Gemini)\]?)|🤖\s*Generated|claude\.ai/code/session_",
@@ -1273,6 +1305,8 @@ def guard_pi(executable, args, where=".", disabled=()):
         if pair == ("agent", "start"):
             kinds = pi_kind(args)
             agent_args = rest[rest.index("--") + 1 :] if "--" in rest else []
+            if "codex" in kinds and codex_widened(agent_args):
+                return CODEX_REASON
             agent_args = [
                 a
                 for i, a in enumerate(agent_args)

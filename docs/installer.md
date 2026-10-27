@@ -74,6 +74,7 @@ macOS or Linux, Bash 3.2 or newer; `git`, `jq`, `python3`, `curl`; `gh` for the 
 | `worker-reports/machine-rules.md` | `~/.claude/worker-reports/` | Template of machine rules to paste into every worker brief |
 | `hooks/orch-update-check.sh` | `~/.claude/hooks/` | SessionStart hook: says when this setup is out of date |
 | `hooks/guard-bash.py` | `~/.claude/hooks/` | PreToolUse Bash guard: blocks unsafe Git commands, including every `git grep` (even path-scoped) in configured big repos |
+| `coordinator/codex-start.sh` | `~/.claude/coordinator/` | Starts a Codex worker in a Herdr pane from `models.codex_worker` or `models.codex_smart`, with hook trust bypassed; takes no extra arguments |
 | `coordinator/pi-start.sh` | `~/.claude/coordinator/` | Starts a pi worker in a Herdr pane from `models.pi_worker` or `models.pi_smart`; refuses DeepSeek unless the repo's `.orchestration.local.toml` sets `pi.deepseek = true` |
 | `coordinator/legacy-map.sh` | `~/.claude/coordinator/` | Writes `legacy-map.tsv` (files on the configured project's `origin/main` its legacy rules count); architects run it per task for the legacy check |
 | `coordinator/service/<platform>/*.template` | linked like the rest of `coordinator/`; with `watchers.service = true` and a repo to map also rendered beside the link | daily legacy map job (launchd plist, or systemd service and timer), registered for login by the installer; the repo is `legacy.map_repo`, else the first clone of an open workspace, at install time, whose repo settings set `legacy.scan = true` |
