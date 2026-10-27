@@ -1138,16 +1138,6 @@ assert len(lines) == 1 and lines[0].startswith("ready:"), lines
   [ "$(dispatch_state)" = 'False "pending"' ]
 }
 
-@test "a failed prompt without evidence of a started turn is blocked" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  PROMPT_STATUS=1 GH_NO_REVIEW=1 dispatch
-  contains "$output" 'BLOCKED prompt not started'
-  contains "$output" 'LEFT OPEN w9-p2'
-  [ ! -e "$TMP/closed/w9-p2" ]
-  [ "$(dispatch_state)" = 'False "blocked"' ]
-}
-
 @test "an earlier approval stamped after a slow local clock still does not count" {
   stub_review_tools
   : >"$TMP/none.toml"

@@ -5,8 +5,8 @@
   prs.py watch         [scope] [--interval S]     one line per change, forever
   prs.py dispatch-queue [scope]                   JSON: Ready PRs needing (re)review
   prs.py mark-dispatched --url U --sha S [--state pending|blocked|done] [--reason R] [--agent N] [--pane P]
-  prs.py claim-dispatched --url U --sha S [--agent N]   marks S pending; exit 3 when S is already pending or done
-  prs.py release-dispatched --url U --sha S       drops S while it is pending
+  prs.py claim-dispatched --url U --sha S [--agent N]   marks S pending; exit 3 when S is already pending, blocked, or done
+  prs.py release-dispatched --url U --sha S       drops S while it is pending or blocked
   prs.py remote --cwd C --repo R                  the remote of clone C (origin or upstream) that is the GitHub repo R
   prs.py review-ids --login L                     stdin: gh api --paginate --slurp .../reviews; ids of L's submitted reviews
   prs.py last-review --login L --sha S --seen IDS stdin: the same; L's newest submitted review of S not in IDS
@@ -891,7 +891,9 @@ def main():
         default="done",
         help="mark-dispatched: pending while the review runs, blocked when it cannot start, done once posted",
     )
-    parser.add_argument("--reason", help="mark-dispatched: reason for a blocked dispatch")
+    parser.add_argument(
+        "--reason", help="mark-dispatched: reason for a blocked dispatch"
+    )
     parser.add_argument("--agent", help="mark-dispatched: herdr agent name")
     parser.add_argument("--pane", help="mark-dispatched: herdr pane id")
     args = parser.parse_args()

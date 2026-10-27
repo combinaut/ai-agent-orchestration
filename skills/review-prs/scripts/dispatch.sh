@@ -99,13 +99,13 @@ for try in 1 2 3 4 5; do
   sleep 3
 done
 herdr agent wait "$agent" --until idle --timeout 120000 >/dev/null 2>&1 || sleep 15
+mark() {
+  "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane" --state "$1" --reason "${2:-}"
+}
 start_screen=$(herdr agent read "$agent" --source recent-unwrapped --lines 30 2>/dev/null || true)
 if grep -Fqi 'hooks need review before they can run' <<<"$start_screen"; then
   hook_list=$(printf '%s\n' "$start_screen" | grep -Eo '(Pre|Post)ToolUse|Session(Start|End)|UserPromptSubmit' | sort -u | paste -sd ' ' -)
   echo "HOOKS UNTRUSTED ${hook_list:-unknown hooks}"
-  mark() {
-    "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane" --state "$1" --reason "${2:-}"
-  }
   mark blocked "hooks need review"
   if [ -n "$opened" ]; then close_opened || true; else echo "LEFT OPEN $pane"; fi
   exit 1
@@ -116,9 +116,6 @@ if grep -qi "update" <<<"$start_screen"; then
   herdr agent send-keys "$agent" enter
   sleep 5
 fi
-mark() {
-  "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane" --state "$1" --reason "${2:-}"
-}
 mark pending
 
 repo_rules=""
