@@ -40,9 +40,15 @@ CODEX_FLAGS = (
     "--sandbox",
 )
 CODEX_SHORT = re.compile(r"-[sa]")
-CODEX_KEY = re.compile(
-    r"""[\s=]*["']?\s*(?:sandbox|approval|default_permissions|permissions)""", re.I
-)
+CODEX_KEY = ("sandbox", "approval", "default_permissions", "permissions")
+
+
+def codex_key_widened(override):
+    """True when a -c override sets a sandbox, approval or permissions key, also under profiles.<name>."""
+    key = override.lstrip("= \t").split("=", 1)[0]
+    return any(
+        part.strip(" \t\"'").lower().startswith(CODEX_KEY) for part in key.split(".")
+    )
 
 
 def codex_widened(agent_args):
@@ -57,15 +63,15 @@ def codex_widened(agent_args):
         elif arg.startswith(CODEX_FLAGS) or CODEX_SHORT.match(arg):
             return True
         elif arg in ("-c", "--config"):
-            if CODEX_KEY.match("".join(agent_args[index + 1 : index + 2])):
+            if codex_key_widened("".join(agent_args[index + 1 : index + 2])):
                 return True
             skip = True
-        elif arg.startswith("--config=") and CODEX_KEY.match(arg[len("--config=") :]):
+        elif arg.startswith("--config=") and codex_key_widened(arg[len("--config=") :]):
             return True
         elif (
             arg.startswith("-c")
             and not arg.startswith("--")
-            and CODEX_KEY.match(arg[2:])
+            and codex_key_widened(arg[2:])
         ):
             return True
     return False
