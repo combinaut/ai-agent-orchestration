@@ -93,30 +93,28 @@ dispatch() {
   [ "$status" -eq 1 ]
 }
 
-@test "dispatch releases a hook-review screen before it marks or prompts" {
+@test "dispatch blocks a hook-review screen before it prompts" {
   stub_review_tools
   : >"$TMP/none.toml"
   AGENT_START_SCREEN=$'3 hooks need review before they can run\nPreToolUse\nSessionStart\nUserPromptSubmit' dispatch
   [ "$status" -ne 0 ]
   contains "$output" 'HOOKS UNTRUSTED PreToolUse SessionStart UserPromptSubmit'
-  contains "$output" "RELEASED $SHA"
+  contains "$output" '"state": "blocked"'
+  contains "$output" '"reason": "hooks need review"'
   [ -e "$TMP/closed/w9-p2" ]
   [ ! -e "$TMP/review.prompt" ]
   run grep -q 'agent send-keys' "$TMP/review-herdr.calls"
   [ "$status" -eq 1 ]
-  [ "$(dispatch_state)" = 'True null' ]
+  [ "$(dispatch_state)" = 'False "blocked"' ]
 }
 
-@test "dispatch releases another blocking start screen before it prompts" {
+@test "dispatch prompts when a normal start screen mentions hooks and review" {
   stub_review_tools
   : >"$TMP/none.toml"
-  AGENT_START_SCREEN='Authentication required before the agent can start' dispatch
-  [ "$status" -ne 0 ]
-  contains "$output" 'START BLOCKED Authentication required before the agent can start'
-  contains "$output" "RELEASED $SHA"
-  [ -e "$TMP/closed/w9-p2" ]
-  [ ! -e "$TMP/review.prompt" ]
-  [ "$(dispatch_state)" = 'True null' ]
+  AGENT_START_SCREEN='Hooks and review are available from the help menu' dispatch
+  [ "$status" -eq 0 ]
+  [ -e "$TMP/review.prompt" ]
+  [ "$(dispatch_state)" = 'False "done"' ]
 }
 
 @test "dispatch starts Codex on the configured worker model" {
@@ -521,6 +519,14 @@ print(prs.needs_dispatch(pr, data)[0], json.dumps(prs.heads(data.get(pr["url"], 
   [ "$(dispatch_state)" = 'False "pending"' ]
 }
 
+@test "a prompt that never starts is blocked instead of staying pending" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PROMPT_STATUS=1 GH_NO_REVIEW=1 dispatch
+  contains "$output" 'BLOCKED prompt not started'
+  [ "$(dispatch_state)" = 'False "blocked"' ]
+}
+
 @test "a posted review marks the head done" {
   stub_review_tools
   : >"$TMP/none.toml"
@@ -540,16 +546,16 @@ print(prs.needs_dispatch(pr, data)[0], json.dumps(prs.heads(data.get(pr["url"], 
   printf '%s\n' "$output" | grep -q "^collision  *$HOME/.agents/skills/coordinate "
 }
 
-@test "a failed prompt keeps the head reserved while the agent is busy or unreadable" {
+@test "a failed prompt without a started turn is blocked" {
   stub_review_tools
   : >"$TMP/none.toml"
   PROMPT_STATUS=1 GH_NO_REVIEW=1 AGENT_BUSY=1 dispatch
-  not_contains "$output" 'RELEASED'
-  [ "$(dispatch_state)" = 'False "pending"' ]
+  contains "$output" 'BLOCKED prompt not started'
+  [ "$(dispatch_state)" = 'False "blocked"' ]
   rm "$HOME/.cache/review-prs/dispatched.json"
   PROMPT_STATUS=1 GH_NO_REVIEW=1 AGENT_READ_FAILS=1 dispatch
-  not_contains "$output" 'RELEASED'
-  [ "$(dispatch_state)" = 'False "pending"' ]
+  contains "$output" 'BLOCKED prompt not started'
+  [ "$(dispatch_state)" = 'False "blocked"' ]
 }
 
 @test "overlapping heads keep every reservation through claims, completion and release" {
@@ -633,13 +639,13 @@ print(" ".join(s + "=" + h["state"] for s, h in sorted(prs.heads(e).items())))
   contains "$output" "WORKTREE $wt"
 }
 
-@test "an undelivered prompt in a caller's pane keeps the head reserved" {
+@test "an undelivered prompt in a caller's pane is blocked without cleanup" {
   stub_review_tools
   : >"$TMP/none.toml"
   PANE=w9-p5 PROMPT_REJECTED=1 GH_NO_REVIEW=1 dispatch
   not_contains "$output" 'RELEASED'
   contains "$output" 'LEFT OPEN w9-p5'
-  [ "$(dispatch_state)" = 'False "pending"' ]
+  [ "$(dispatch_state)" = 'False "blocked"' ]
 }
 
 @test "a head still pending behind a newer mark is not offered again" {
@@ -649,6 +655,55 @@ print(" ".join(s + "=" + h["state"] for s, h in sorted(prs.heads(e).items())))
   prs mark-dispatched --url "$u" --sha "$SHA" --state pending
   prs mark-dispatched --url "$u" --sha older --state pending
   [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "a blocked head is omitted until it is released or replaced" {
+  stub_review_tools
+  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
+  u=https://github.com/acme/app/pull/7
+  prs mark-dispatched --url "$u" --sha "$SHA" --state blocked --reason 'hooks need review'
+  [ "$(dispatch_state)" = 'False "blocked"' ]
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+base = {"url": url, "isDraft": False, "mergeable": "MERGEABLE",
+        "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}}
+dispatched = {url: {"heads": {"A": {"state": "blocked", "reason": "hooks need review"}}}}
+assert prs.needs_dispatch({**base, "headRefOid": "A"}, dispatched) == (False, None)
+assert prs.needs_dispatch({**base, "headRefOid": "B"}, dispatched) == (True, "re-review")
+' "$ROOT/$SKILL_DIR/scripts"
+  [ "$status" -eq 0 ]
+  prs release-dispatched --url "$u" --sha "$SHA"
+  [ "$(dispatch_state)" = 'True null' ]
+}
+
+@test "dispatch-queue reports a blocked current head once with its reason" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import io, json, sys
+from contextlib import redirect_stdout
+from types import SimpleNamespace
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "number": 7, "title": "Fix", "author": {"login": "author"},
+      "repository": {"nameWithOwner": "acme/app"}, "isDraft": False,
+      "mergeable": "MERGEABLE", "headRefOid": "A",
+      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}}
+prs.codex_enabled = lambda: True
+prs.worker_model = lambda: "model"
+prs.fetch = lambda scope: ([pr], "reviewer")
+prs.load_dispatched = lambda: {url: {"heads": {"A": {"state": "blocked", "reason": "hooks need review"}}}}
+out = io.StringIO()
+with redirect_stdout(out): prs.cmd_dispatch_queue(SimpleNamespace(), "repo:acme/app", "acme/app")
+result = json.loads(out.getvalue())
+assert result["queue"] == []
+assert result["blocked"] == [{"url": url, "sha": "A", "reason": "hooks need review"}]
+' "$ROOT/$SKILL_DIR/scripts"
+  [ "$status" -eq 0 ]
 }
 
 @test "dispatch-queue finds the clone from a subdirectory of it" {
@@ -1083,14 +1138,14 @@ assert len(lines) == 1 and lines[0].startswith("ready:"), lines
   [ "$(dispatch_state)" = 'False "pending"' ]
 }
 
-@test "a failed prompt whose text scrolled out of the transcript stays pending and open" {
+@test "a failed prompt without evidence of a started turn is blocked" {
   stub_review_tools
   : >"$TMP/none.toml"
   PROMPT_STATUS=1 GH_NO_REVIEW=1 dispatch
-  not_contains "$output" 'RELEASED'
+  contains "$output" 'BLOCKED prompt not started'
   contains "$output" 'LEFT OPEN w9-p2'
   [ ! -e "$TMP/closed/w9-p2" ]
-  [ "$(dispatch_state)" = 'False "pending"' ]
+  [ "$(dispatch_state)" = 'False "blocked"' ]
 }
 
 @test "an earlier approval stamped after a slow local clock still does not count" {

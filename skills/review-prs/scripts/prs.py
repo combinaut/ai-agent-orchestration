@@ -4,7 +4,7 @@
   prs.py list          [scope] [--actionable]     markdown tables + snapshot for watch
   prs.py watch         [scope] [--interval S]     one line per change, forever
   prs.py dispatch-queue [scope]                   JSON: Ready PRs needing (re)review
-  prs.py mark-dispatched --url U --sha S [--state pending|done] [--agent N] [--pane P]
+  prs.py mark-dispatched --url U --sha S [--state pending|blocked|done] [--reason R] [--agent N] [--pane P]
   prs.py claim-dispatched --url U --sha S [--agent N]   marks S pending; exit 3 when S is already pending or done
   prs.py release-dispatched --url U --sha S       drops S while it is pending
   prs.py remote --cwd C --repo R                  the remote of clone C (origin or upstream) that is the GitHub repo R
@@ -700,16 +700,28 @@ def cmd_dispatch_queue(args, scope, label):
         nodes, _login = fetch(scope)
     dispatched = load_dispatched()
     queue = []
+    blocked = []
     for pr in nodes:
         ok, kind = needs_dispatch(pr, dispatched)
         if ok:
             queue.append(dispatch_entry(pr, kind, model))
+        else:
+            record = dispatched_records(pr, dispatched).get(pr.get("headRefOid") or "")
+            if (record or {}).get("state") == "blocked":
+                blocked.append(
+                    {
+                        "url": pr["url"],
+                        "sha": pr.get("headRefOid") or "",
+                        "reason": record.get("reason") or "unknown",
+                    }
+                )
     print(
         json.dumps(
             {
                 "scope": label,
                 "model": model,
                 "queue": queue,
+                "blocked": blocked,
                 "skipped": sum(1 for p in nodes if bucket(p) == "ready") - len(queue),
             },
             indent=2,
@@ -744,7 +756,7 @@ def heads(entry):
 
 
 def set_head(data, url, sha, record):
-    """Stores one head's record; the newest HEADS_KEPT done heads and every pending head stay."""
+    """Stores one head's record; the newest HEADS_KEPT done heads and active records stay."""
     known = dict(heads(data.get(url) or {}))
     known[sha] = record
     done = sorted(
@@ -757,12 +769,15 @@ def set_head(data, url, sha, record):
 
 
 def head_record(args, state):
-    return {
+    record = {
         "state": state,
         "agent": args.agent,
         "pane": args.pane,
         "at": datetime.now(timezone.utc).isoformat(),
     }
+    if args.reason:
+        record["reason"] = args.reason
+    return record
 
 
 def cmd_claim_dispatched(args, _scope, _label):
@@ -796,7 +811,7 @@ def cmd_release_dispatched(args, _scope, _label):
 
     def release(data):
         known = dict(heads(data.get(args.url) or {}))
-        if (known.get(args.sha) or {}).get("state") != "pending":
+        if (known.get(args.sha) or {}).get("state") not in ("pending", "blocked"):
             return
         del known[args.sha]
         if known:
@@ -872,10 +887,11 @@ def main():
     parser.add_argument("--sha", help="mark-dispatched: head SHA that was dispatched")
     parser.add_argument(
         "--state",
-        choices=["pending", "done"],
+        choices=["pending", "blocked", "done"],
         default="done",
-        help="mark-dispatched: pending while the review runs, done once it is posted",
+        help="mark-dispatched: pending while the review runs, blocked when it cannot start, done once posted",
     )
+    parser.add_argument("--reason", help="mark-dispatched: reason for a blocked dispatch")
     parser.add_argument("--agent", help="mark-dispatched: herdr agent name")
     parser.add_argument("--pane", help="mark-dispatched: herdr pane id")
     args = parser.parse_args()

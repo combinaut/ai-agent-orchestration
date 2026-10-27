@@ -100,16 +100,14 @@ for try in 1 2 3 4 5; do
 done
 herdr agent wait "$agent" --until idle --timeout 120000 >/dev/null 2>&1 || sleep 15
 start_screen=$(herdr agent read "$agent" --source recent-unwrapped --lines 30 2>/dev/null || true)
-if grep -Eqi 'hooks? need review before they can run|hooks? (are )?untrusted|review .*hooks?|hooks? .*review|authentication required|sign in to|access denied|permission denied|agent blocked|cannot start' <<<"$start_screen"; then
-  if grep -Eqi 'hooks? need review before they can run|hooks? (are )?untrusted|review .*hooks?|hooks? .*review' <<<"$start_screen"; then
-    hook_list=$(printf '%s\n' "$start_screen" | grep -Eo '(Pre|Post)ToolUse|Session(Start|End)|UserPromptSubmit' | sort -u | paste -sd ' ' -)
-    echo "HOOKS UNTRUSTED ${hook_list:-unknown hooks}"
-  else
-    echo "START BLOCKED $(printf '%s\n' "$start_screen" | tr '\n' ' ' | sed 's/  */ /g')"
-  fi
-  close_opened || true
-  [ -n "$opened" ] || remove_worktree || true
-  release
+if grep -Fqi 'hooks need review before they can run' <<<"$start_screen"; then
+  hook_list=$(printf '%s\n' "$start_screen" | grep -Eo '(Pre|Post)ToolUse|Session(Start|End)|UserPromptSubmit' | sort -u | paste -sd ' ' -)
+  echo "HOOKS UNTRUSTED ${hook_list:-unknown hooks}"
+  mark() {
+    "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane" --state "$1" --reason "${2:-}"
+  }
+  mark blocked "hooks need review"
+  if [ -n "$opened" ]; then close_opened || true; else echo "LEFT OPEN $pane"; fi
   exit 1
 fi
 if grep -qi "update" <<<"$start_screen"; then
@@ -119,7 +117,7 @@ if grep -qi "update" <<<"$start_screen"; then
   sleep 5
 fi
 mark() {
-  "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane" --state "$1"
+  "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane" --state "$1" --reason "${2:-}"
 }
 mark pending
 
@@ -155,7 +153,8 @@ prompt_out=$(herdr agent prompt "$agent" "$prompt" --wait --timeout 1800000 2>&1
 status=$?
 [ -z "$prompt_out" ] || printf '%s\n' "$prompt_out"
 echo "PROMPT_EXIT $status"
-herdr agent read "$agent" --source recent-unwrapped --lines 80 | tail -25
+turn_screen=$(herdr agent read "$agent" --source recent-unwrapped --lines 80 2>/dev/null || true)
+printf '%s\n' "$turn_screen" | tail -25
 # Your newest submitted review of the dispatched head that was not there before this dispatch.
 if ! reviews=$(gh_bounded api --paginate --slurp "repos/$repo/pulls/$num/reviews") ||
   ! review=$(printf '%s' "$reviews" | "$py" "$here/prs.py" last-review --login "$me" --sha "$sha" --seen "$seen"); then
@@ -174,6 +173,10 @@ else
   if [ "$status" -ne 0 ] && [ -n "$opened" ] && grep -q agent_blocked <<<"$prompt_out"; then
     echo "UNDELIVERED agent_blocked"
     close_opened && release
+  elif [ "$status" -ne 0 ] && ! grep -q 'Head SHA:' <<<"$turn_screen"; then
+    echo "BLOCKED prompt not started"
+    mark blocked "prompt not started"
+    echo "LEFT OPEN $pane"
   else
     echo "LEFT OPEN $pane"
   fi
