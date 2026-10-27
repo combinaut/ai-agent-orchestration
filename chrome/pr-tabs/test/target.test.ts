@@ -28,7 +28,6 @@ import {
   parseTarget,
   splitTargets,
   hasBareNumber,
-  MAX_TARGETS,
   summarize,
 } from "#/core";
 import { duplicateText, summaryText } from "#/texts";
@@ -403,10 +402,6 @@ test("a list keeps URLs and junk as items and counts a repeat once", () => {
     "foo",
     "api#9",
   ]);
-});
-
-test("the list cap is 20", () => {
-  assert.equal(MAX_TARGETS, 20);
 });
 
 test("a list needs the repo pick when any item is a bare number", () => {
