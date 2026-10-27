@@ -27,6 +27,7 @@ CLEANUP_SECONDS = 2
 DONE_EVENTS_MAX = 200
 DONE_EVENTS_KEEP_SECONDS = 3600
 ID = re.compile(r"signal-[a-f0-9]{32}\Z")
+IDENTITY_KEYS = ("pane", "workspace", "owner")
 
 
 def directory():
@@ -162,7 +163,7 @@ def record_signal(ident, kind, new_job=False, **fields):
     with answers_lock():
         path, now = pane_path(ident["pane"]), time.time()
         old = read(path)
-        same = old and all(old.get(key) == ident[key] for key in ident)
+        same = old and all(old.get(key) == ident[key] for key in IDENTITY_KEYS)
         if same and not new_job:
             if old["kind"] == "done":
                 if kind != "done":

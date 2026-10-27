@@ -174,6 +174,21 @@ class SignalTests(IsolatedTestCase):
         self.assertEqual(record["recovered_from"], "stale-pane")
         self.assertIn("recovered_from=stale-pane", s.event_line(record))
 
+    def test_recovered_done_does_not_duplicate_a_current_completion(self):
+        ident = s.identity()
+        first = s.record_signal(
+            ident, "done", outcome="succeeded", report="/report", summary="done"
+        )
+        repeated = s.record_signal(
+            dict(ident, recovered_from="stale-pane"),
+            "done",
+            outcome="succeeded",
+            report="/report",
+            summary="done",
+        )
+        self.assertEqual(repeated, first)
+        self.assertEqual(len(repeated["done_events"]), 1)
+
     def test_prune_closed_and_answered_records(self):
         s.record_signal(s.identity(), "done", outcome="succeeded")
         q = self.record(timeout=60)
