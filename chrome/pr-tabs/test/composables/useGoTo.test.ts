@@ -102,3 +102,15 @@ test("row navigation focuses only the existing PR and reports a closed-tab error
   assert.equal(gone.closes(), 0);
   assert.equal(gone.status.isStatusError.value, true);
 });
+
+test("a pasted list goes as one request with the one picked repo, and a partial failure stays in the popup", async () => {
+  const text = "7, 8\nhttps://github.com/acme/api/pull/9";
+  const fake = fakeAsk({ goTo: { error: "Couldn't open: 8" } });
+  const flow = goTo(fake.ask, true, text);
+
+  await flow.go();
+
+  assert.deepEqual(fake.sent, [{ type: "goTo", input: text, repo: "api" }]);
+  assert.equal(flow.status.statusText.value, "Couldn't open: 8");
+  assert.equal(flow.closes(), 0);
+});

@@ -4,8 +4,10 @@ import {
   findOpenTab,
   tabUpdateMatters,
   nextDelaySeconds,
+  isBareNumber,
   parsePrUrl,
   parseTarget,
+  splitTargets,
   planOpenAll,
   pollBatch,
   pruneMeta,
@@ -15,6 +17,7 @@ import {
   summarize,
   MAX_SEARCH_PAGES,
   OPEN_ALL_CAP,
+  MAX_TARGETS,
   FIRST_POLL_SECONDS,
   tabsToClose,
   groupForPr,
@@ -755,9 +758,9 @@ export function openReviews(): Promise<Reply<"openReviews">> {
 }
 
 // Focuses the PR's open tab (window, group, tab) or opens it in its architect group, one request at
-// a time.
+// a time. A pasted list does this for each item in order.
 export function goTo(input?: string, repo?: RepoName): Promise<Reply<"goTo">> {
-  return serial(() => findOrOpen(input, repo));
+  return serial(() => findOrOpenEach(input, repo));
 }
 
 async function focusKnownPr(key: PrKey): Promise<Reply<"focusPr">> {
@@ -878,6 +881,45 @@ async function findOrOpen(input?: string, repo?: RepoName): Promise<Reply<"goTo"
   await focusTab(entry.tab);
 
   return { focused: pr.key };
+}
+
+async function openEach(items: string[], repo?: RepoName): Promise<Reply<"goTo">> {
+  const failed: string[] = [];
+  let last: Reply<"goTo"> | undefined;
+
+  for (const item of items) {
+    const reply = await findOrOpen(item, repo);
+
+    if ("error" in reply) {
+      failed.push(item);
+    } else {
+      last = reply;
+    }
+  }
+
+  if (last && !failed.length) {
+    return last;
+  }
+
+  return {
+    error: getMessage("errCouldntOpen", { items: (failed.length ? failed : items).join(", ") }),
+  };
+}
+
+async function findOrOpenEach(input?: string, repo?: RepoName): Promise<Reply<"goTo">> {
+  const items = splitTargets(input);
+
+  if (items.length < 2) {
+    return findOrOpen(items[0] ?? input, repo);
+  }
+
+  if (items.length > MAX_TARGETS) {
+    return { error: getMessage("errTooManyPrs", { max: String(MAX_TARGETS) }) };
+  }
+
+  const problem = configProblem(await loadRules(), items.find(isBareNumber));
+
+  return problem ? { error: problem } : openEach(items, repo);
 }
 
 // Closes id when it is still a duplicate of the PR it showed at the first scan.

@@ -757,3 +757,63 @@ test("closePr uses pending URLs for loading tabs and pending navigation away", a
   assert.deepEqual(await worker.closePr("acme/webapp#7", 2), { closed: 0 });
   assert.deepEqual(ids(), [2]);
 });
+
+test("goTo opens every item of a pasted list in order, each once, in the one picked repo", async () => {
+  const multi = await multiRepoWorker("list-open");
+
+  world.tabs = [
+    { id: 1, url: "https://github.com/acme/api/pull/5/files", windowId: 1, groupId: -1 },
+  ];
+
+  const reply = await multi.goTo("7, 5 8\nhttps://github.com/acme/webapp/pull/9 7 docs#3", "api");
+
+  assert.deepEqual(reply, { opened: "acme/docs#3" });
+  assert.deepEqual(
+    world.tabs.map((tab) => tab.url),
+    [
+      "https://github.com/acme/api/pull/5/files",
+      "https://github.com/acme/api/pull/7",
+      "https://github.com/acme/api/pull/8",
+      "https://github.com/acme/webapp/pull/9",
+      "https://github.com/acme/docs/pull/3",
+    ],
+  );
+});
+
+test("goTo opens the valid items of a list and names the ones that failed", async () => {
+  const multi = await multiRepoWorker("list-partial");
+
+  assert.deepEqual(await multi.goTo("7 12a foo other#1 8"), {
+    error: "Couldn't open: 12a, foo, other#1",
+  });
+  assert.deepEqual(
+    world.tabs.map((tab) => tab.url),
+    ["https://github.com/acme/webapp/pull/7", "https://github.com/acme/webapp/pull/8"],
+  );
+});
+
+test("goTo opens nothing for a list above the cap", async () => {
+  const multi = await multiRepoWorker("list-cap");
+  const over = Array.from({ length: 21 }, (_, index) => index + 1).join(", ");
+  const atCap = Array.from({ length: 20 }, (_, index) => index + 1).join(", ");
+
+  assert.deepEqual(await multi.goTo(over), { error: "Too many PRs. Paste at most 20 at a time." });
+  assert.deepEqual(world.tabs, []);
+  assert.deepEqual(await multi.goTo(atCap), { opened: "acme/webapp#20" });
+  assert.equal(world.tabs.length, 20);
+});
+
+test("a one-item list behaves as a single goTo", async () => {
+  const multi = await multiRepoWorker("list-single");
+
+  assert.deepEqual(await multi.goTo("other#1,"), { error: "Not a acme PR number or URL" });
+  assert.deepEqual(await multi.goTo(" 7 "), { opened: "acme/webapp#7" });
+});
+
+test("a list names the missing setting instead of listing every item as failed", async () => {
+  world.hostSettings = { ...CONFIGURED, org: "" };
+
+  const noOrg = await freshWorker("list-missing-org");
+
+  assert.deepEqual(await noOrg.goTo("7 8"), { error: "Set pr_tabs.org in orchestration.toml" });
+});

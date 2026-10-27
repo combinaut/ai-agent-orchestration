@@ -151,6 +151,18 @@ export function isBareNumber(input: string): boolean {
   return /^\d+$/.test(input.trim());
 }
 
+export const MAX_TARGETS = 20;
+
+// The distinct items of a pasted list, split on commas, whitespace and new lines, in first-seen
+// order.
+export function splitTargets(input: string | undefined): string[] {
+  return [...new Set((input || "").split(/[\s,]+/).filter(Boolean))];
+}
+
+export function hasBareNumber(input: string): boolean {
+  return splitTargets(input).some(isBareNumber);
+}
+
 // The popup shows a repo dropdown only when there is a choice.
 export function showRepoPicker(rules: RepoRules): boolean {
   return effectiveRepos(rules).length >= 2;

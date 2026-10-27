@@ -26,6 +26,9 @@ import {
   tabUpdateMatters,
   parsePrUrl,
   parseTarget,
+  splitTargets,
+  hasBareNumber,
+  MAX_TARGETS,
   summarize,
 } from "#/core";
 import { duplicateText, summaryText } from "#/texts";
@@ -376,4 +379,39 @@ test("<repo>#<number> is accepted for listed repos only", () => {
 
   assert.equal(parseTarget("api#1", rules), null);
   assert.equal(parseTarget("api#1", { ...multi, org: "" }), null);
+});
+
+test("a pasted list splits on commas, whitespace and new lines, mixed", () => {
+  assert.deepEqual(splitTargets("33048, 33023,32461\n25069\t 31105  ,\r\n30032"), [
+    "33048",
+    "33023",
+    "32461",
+    "25069",
+    "31105",
+    "30032",
+  ]);
+  assert.deepEqual(splitTargets(" 7 "), ["7"]);
+  assert.deepEqual(splitTargets(""), []);
+  assert.deepEqual(splitTargets(undefined), []);
+  assert.deepEqual(splitTargets(" , ,\n"), []);
+});
+
+test("a list keeps URLs and junk as items and counts a repeat once", () => {
+  assert.deepEqual(splitTargets("7 https://github.com/acme/webapp/pull/8,foo 7, api#9 foo"), [
+    "7",
+    "https://github.com/acme/webapp/pull/8",
+    "foo",
+    "api#9",
+  ]);
+});
+
+test("the list cap is 20", () => {
+  assert.equal(MAX_TARGETS, 20);
+});
+
+test("a list needs the repo pick when any item is a bare number", () => {
+  assert.equal(hasBareNumber("76"), true);
+  assert.equal(hasBareNumber("https://github.com/acme/webapp/pull/1, 76"), true);
+  assert.equal(hasBareNumber("#76, api#2"), false);
+  assert.equal(hasBareNumber(""), false);
 });

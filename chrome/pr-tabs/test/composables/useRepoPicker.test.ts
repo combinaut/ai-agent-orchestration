@@ -43,6 +43,9 @@ test("a listed choice selects the stored pick and is visible only for a bare num
     ["sparkle#76", false],
     ["https://github.com/acme/webapp/pull/76", false],
     ["76a", false],
+    ["76, 77", true],
+    ["#76\nhttps://github.com/acme/webapp/pull/76 78", true],
+    ["#76, sparkle#77", false],
   ] as const) {
     input.value = text;
     assert.equal(picker.visible.value, visible, JSON.stringify(text));

@@ -271,6 +271,22 @@
       }
     }
   },
+  "errCouldntOpen": {
+    "message": "Konnte nicht geöffnet werden: $ITEMS$",
+    "placeholders": {
+      "items": {
+        "content": "$1"
+      }
+    }
+  },
+  "errTooManyPrs": {
+    "message": "Zu viele PRs. Füge höchstens $MAX$ auf einmal ein.",
+    "placeholders": {
+      "max": {
+        "content": "$1"
+      }
+    }
+  },
   "errNoAnswer": {
     "message": "Keine Antwort vom Orch-Tabs-Service-Worker. Lade die Erweiterung unter chrome://extensions neu."
   },

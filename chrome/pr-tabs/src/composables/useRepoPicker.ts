@@ -1,6 +1,6 @@
 import { useAsyncState } from "@vueuse/core";
 import { computed, ref, toValue, type MaybeRefOrGetter } from "vue";
-import { isBareNumber } from "#/core";
+import { hasBareNumber } from "#/core";
 import { failed } from "#/messages";
 import type { Ask, RepoChoices, RepoName, RepoPicker } from "#/types";
 
@@ -30,7 +30,7 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPi
 
   const repos = computed(() => [...(choices.value?.repos ?? [])]);
   const available = computed(() => choices.value !== null);
-  const visible = computed(() => available.value && isBareNumber(toValue(input)));
+  const visible = computed(() => available.value && hasBareNumber(toValue(input)));
 
   async function load(): Promise<void> {
     await executeImmediate();

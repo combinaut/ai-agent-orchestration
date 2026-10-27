@@ -271,6 +271,22 @@
       }
     }
   },
+  "errCouldntOpen": {
+    "message": "Impossible d'ouvrir : $ITEMS$",
+    "placeholders": {
+      "items": {
+        "content": "$1"
+      }
+    }
+  },
+  "errTooManyPrs": {
+    "message": "Trop de PR. Collez-en $MAX$ au plus à la fois.",
+    "placeholders": {
+      "max": {
+        "content": "$1"
+      }
+    }
+  },
   "errNoAnswer": {
     "message": "Aucune réponse du service worker d'Orch Tabs. Rechargez l'extension sur chrome://extensions."
   },
