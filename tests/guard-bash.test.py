@@ -1597,6 +1597,10 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "herdr codex start",
             "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --model m",
         ),
+        (
+            "herdr codex worker start with hook trust bypassed",
+            "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --dangerously-bypass-hook-trust --model m",
+        ),
         ("herdr agent list", "herdr agent list"),
         (
             "herdr prompt to a pi worker",

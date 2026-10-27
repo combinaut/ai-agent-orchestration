@@ -99,6 +99,14 @@ dispatch() {
   grep -q -- 'agent start rev7 --kind codex --pane w9-p2 -- --no-daemon --model test-worker-model' "$TMP/review-herdr.calls"
 }
 
+@test "dispatch starts Codex without the hook trust bypass" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  dispatch
+  run grep -q -- 'dangerously-bypass-hook-trust' "$TMP/review-herdr.calls"
+  [ "$status" -eq 1 ]
+}
+
 @test "dispatch refuses a placeholder worker model" {
   stub_review_tools
   : >"$TMP/none.toml"
