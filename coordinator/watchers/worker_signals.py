@@ -130,11 +130,15 @@ def identity(recover=False):
                     f"worktree_matches={len(candidates)}{root_detail})"
                 )
         else:
-            actual_workspace = claimed_pane["workspace"] if claimed_pane else None
+            location = (
+                f"pane={pane!r} is in workspace={claimed_pane['workspace']!r}, "
+                f"not workspace={workspace!r}"
+                if claimed_pane
+                else f"pane={pane!r} is not live; expected workspace={workspace!r}"
+            )
             raise ValueError(
                 "caller pane does not belong to its workspace "
-                f"(pane={pane!r} is in workspace={actual_workspace!r}, "
-                f"not workspace={workspace!r}; recovery={'disabled' if not recover else 'unavailable'}; "
+                f"({location}; recovery={'disabled' if not recover else 'unavailable'}; "
                 f"socket={os.environ.get('HERDR_SOCKET_PATH', '<default>')!r}, "
                 f"panes={len(panes)})"
             )

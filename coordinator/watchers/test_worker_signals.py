@@ -293,16 +293,20 @@ class SignalTests(IsolatedTestCase):
             )
 
     def test_identity_does_not_recover_a_present_pane_in_another_workspace(self):
-        self.work["panes"][0]["cwd"] = "/worktree"
+        root = self.git_repo("worker")
+        self.work["panes"] = [
+            dict(pane="pane:1", workspace="worker", cwd=str(root), agent="codex"),
+            dict(pane="architect", workspace="owner", cwd=str(self.git_repo("owner"))),
+        ]
         with (
             patch.dict(os.environ, HERDR_WORKSPACE_ID="owner"),
-            patch.object(s.os, "getcwd", return_value="/worktree"),
+            patch.object(s.os, "getcwd", return_value=str(root)),
         ):
             with self.assertRaisesRegex(
                 ValueError,
                 "pane='pane:1' is in workspace='worker'.*socket=.*panes=2",
             ):
-                s.identity()
+                s.identity(recover=True)
 
     def test_identity_does_not_recover_a_non_codex_worktree_match(self):
         self.work["panes"] = [
@@ -421,7 +425,7 @@ class SignalTests(IsolatedTestCase):
             ),
             patch.object(s.os, "getcwd", return_value=str(root)),
         ):
-            with self.assertRaisesRegex(ValueError, "caller pane does not belong"):
+            with self.assertRaisesRegex(ValueError, "pane='stale-pane' is not live"):
                 s.identity()
 
     def test_answer_does_not_recover_a_stale_codex_pane(self):
