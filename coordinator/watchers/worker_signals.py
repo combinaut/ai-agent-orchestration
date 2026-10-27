@@ -58,6 +58,18 @@ def answer_path(identifier):
     return question_path(identifier).with_suffix(".answer")
 
 
+def worktree_of(path):
+    try:
+        result = subprocess.run(
+            ["git", "-C", path, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    return os.path.realpath(result.stdout.strip()) if result.returncode == 0 else None
+
+
 def identity():
     from watchers import command
 
@@ -72,11 +84,14 @@ def identity():
     if not any(row["pane"] == pane and row["workspace"] == workspace for row in panes):
         claimed_pane = next((row for row in panes if row["pane"] == pane), None)
         if claimed_pane is None:
-            cwd = os.path.realpath(os.getcwd())
+            cwd, worktree = os.getcwd(), worktree_of(os.getcwd())
             candidates = [
                 row
                 for row in panes
-                if row.get("cwd") and os.path.realpath(row["cwd"]) == cwd
+                if row.get("agent") == "codex"
+                and worktree
+                and row.get("cwd")
+                and worktree_of(row["cwd"]) == worktree
             ]
             if len(candidates) == 1:
                 pane, workspace = candidates[0]["pane"], candidates[0]["workspace"]
@@ -85,7 +100,8 @@ def identity():
                     "caller pane does not belong to its workspace "
                     f"(pane={pane!r}, workspace={workspace!r}, "
                     f"socket={os.environ.get('HERDR_SOCKET_PATH', '<default>')!r}, "
-                    f"panes={len(panes)}, cwd={cwd!r}, cwd_matches={len(candidates)})"
+                    f"panes={len(panes)}, cwd={cwd!r}, worktree={worktree!r}, "
+                    f"worktree_matches={len(candidates)})"
                 )
         else:
             raise ValueError(

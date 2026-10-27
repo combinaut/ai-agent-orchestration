@@ -241,10 +241,15 @@ class SignalTests(IsolatedTestCase):
         with self.assertRaises(ValueError):
             s.worker_identity(s.identity())
 
-    def test_identity_recovers_a_missing_stale_pane_from_its_unique_cwd(self):
+    def test_identity_recovers_a_missing_stale_pane_from_its_worktree(self):
         self.work["panes"] = [
-            dict(pane="live-pane", workspace="worker", cwd="/worktree"),
-            dict(pane="architect", workspace="owner", cwd="/architect"),
+            dict(
+                pane="live-pane",
+                workspace="worker",
+                cwd="/worktree/worker",
+                agent="codex",
+            ),
+            dict(pane="architect", workspace="owner", cwd="/worktree/architect"),
         ]
         with (
             patch.dict(
@@ -252,7 +257,16 @@ class SignalTests(IsolatedTestCase):
                 HERDR_PANE_ID="stale-pane",
                 HERDR_WORKSPACE_ID="stale-workspace",
             ),
-            patch.object(s.os, "getcwd", return_value="/worktree"),
+            patch.object(s.os, "getcwd", return_value="/worktree/worker/lib/task"),
+            patch.object(
+                s,
+                "worktree_of",
+                side_effect=lambda path: (
+                    "/worktree/worker"
+                    if path.startswith("/worktree/worker")
+                    else "/worktree/architect"
+                ),
+            ),
         ):
             self.assertEqual(
                 s.identity(), dict(pane="live-pane", workspace="worker", owner="owner")
@@ -270,10 +284,26 @@ class SignalTests(IsolatedTestCase):
             ):
                 s.identity()
 
+    def test_identity_does_not_recover_a_non_codex_worktree_match(self):
+        self.work["panes"] = [
+            dict(pane="live-pane", workspace="worker", cwd="/worktree", agent="claude"),
+        ]
+        with (
+            patch.dict(
+                os.environ,
+                HERDR_PANE_ID="stale-pane",
+                HERDR_WORKSPACE_ID="stale-workspace",
+            ),
+            patch.object(s.os, "getcwd", return_value="/worktree/subdirectory"),
+            patch.object(s, "worktree_of", return_value="/worktree"),
+        ):
+            with self.assertRaisesRegex(ValueError, "worktree_matches=0"):
+                s.identity()
+
     def test_identity_reports_ambiguous_stale_pane_recovery(self):
         self.work["panes"] = [
-            dict(pane="one", workspace="worker", cwd="/worktree"),
-            dict(pane="two", workspace="owner", cwd="/worktree"),
+            dict(pane="one", workspace="worker", cwd="/worktree", agent="codex"),
+            dict(pane="two", workspace="owner", cwd="/worktree", agent="codex"),
         ]
         with (
             patch.dict(
@@ -283,10 +313,11 @@ class SignalTests(IsolatedTestCase):
                 HERDR_SOCKET_PATH="/socket",
             ),
             patch.object(s.os, "getcwd", return_value="/worktree"),
+            patch.object(s, "worktree_of", return_value="/worktree"),
         ):
             with self.assertRaisesRegex(
                 ValueError,
-                "pane='stale-pane'.*workspace='stale-workspace'.*socket='/socket'.*panes=2.*cwd_matches=2",
+                "pane='stale-pane'.*workspace='stale-workspace'.*socket='/socket'.*panes=2.*worktree_matches=2",
             ):
                 s.identity()
 

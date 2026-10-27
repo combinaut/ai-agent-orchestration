@@ -13,10 +13,11 @@ How the roles fit together: [`architecture.md`](architecture.md).
 
 `orch-signal` works for Claude, Codex and pi. Identity is the caller's
 `HERDR_PANE_ID`, `HERDR_WORKSPACE_ID` and the workspace's `owner` token, read
-through the env adapter. It needs no Claude session ID. When a Codex shell has
-a stale pane ID that is absent from Herdr, `orch-signal` recovers only a single
-live pane whose reported working directory matches its current directory; a
-present pane in another workspace is still refused. Identity failures name the
+through the env adapter. It needs no Claude session ID. A shared Codex
+app-server daemon can retain a dead pane environment for later tool shells.
+When that stale pane ID is absent from Herdr, `orch-signal` recovers only a
+single live Codex pane whose Git worktree matches the shell's current directory;
+a present pane in another workspace is still refused. Identity failures name the
 claimed pane, workspace, Herdr socket and pane count.
 
 ```bash
