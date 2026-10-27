@@ -886,25 +886,30 @@ async function findOrOpen(input?: string, repo?: RepoName, quiet = false): Promi
   return { focused: pr.key };
 }
 
-async function openQuietly(item: string, repo?: RepoName): Promise<boolean> {
+async function openQuietly(item: string, repo?: RepoName): Promise<Reply<"goTo">> {
   try {
-    return !("error" in (await findOrOpen(item, repo, true)));
-  } catch {
-    return false;
+    return await findOrOpen(item, repo, true);
+  } catch (error) {
+    return { error: errorText(error) };
   }
 }
 
 async function openEach(items: string[], repo?: RepoName): Promise<Reply<"goTo">> {
   const failed: string[] = [];
+  let tabsOpened = 0;
 
   for (const item of items) {
-    if (!(await openQuietly(item, repo))) {
+    const reply = await openQuietly(item, repo);
+
+    if ("error" in reply) {
       failed.push(item);
+    } else if ("opened" in reply) {
+      tabsOpened++;
     }
   }
 
   if (failed.length) {
-    return { error: getMessage("errCouldntOpen", { items: failed.join(", ") }) };
+    return { error: getMessage("errCouldntOpen", { items: failed.join(", ") }), tabsOpened };
   }
 
   return findOrOpen(items[items.length - 1], repo);

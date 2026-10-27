@@ -26,6 +26,10 @@ export function useGoTo(
     const result = await context.ask(request);
 
     if (failed(result)) {
+      if (result.tabsOpened) {
+        await context.refresh();
+      }
+
       context.status.error(result.error);
 
       return;

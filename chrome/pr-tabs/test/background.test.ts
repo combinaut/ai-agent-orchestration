@@ -785,6 +785,7 @@ test("goTo opens the valid items of a list and names the ones that failed", asyn
 
   assert.deepEqual(await multi.goTo("7 12a foo other#1 8"), {
     error: "Couldn't open: 12a, foo, other#1",
+    tabsOpened: 2,
   });
   assert.deepEqual(
     world.tabs.map((tab) => tab.url),
@@ -823,7 +824,7 @@ test("a list opens its new tabs in the background and a failed item does not sto
 
   world.tabs = [{ id: 1, url: `${PR}/5`, windowId: 2, groupId: -1, active: false }];
 
-  assert.deepEqual(await multi.goTo("5 foo 8"), { error: "Couldn't open: foo" });
+  assert.deepEqual(await multi.goTo("5 foo 8"), { error: "Couldn't open: foo", tabsOpened: 1 });
   assert.equal(tabWithId(1).active, false, "an open PR is not focused while an item failed");
   assert.deepEqual(
     world.tabs.map((tab) => tab.active),
@@ -847,7 +848,7 @@ test("a list with a URL still opens when bare numbers have no repo to go to", as
 
   const noRepo = await freshWorker("list-no-repo");
 
-  assert.deepEqual(await noRepo.goTo(`7 ${PR}/8`), { error: "Couldn't open: 7" });
+  assert.deepEqual(await noRepo.goTo(`7 ${PR}/8`), { error: "Couldn't open: 7", tabsOpened: 1 });
   assert.deepEqual(
     world.tabs.map((tab) => tab.url),
     [`${PR}/8`],

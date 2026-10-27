@@ -11,15 +11,20 @@ function noop() {}
 function goTo(ask: Ask, available: boolean, text: string) {
   const status = useStatus();
   let closed = 0;
+  const refreshes: string[] = [];
   const picker = { available: ref(available), repo: ref("api") };
 
   function countClose() {
     closed++;
   }
 
-  const flow = useGoTo({ ask, status, picker }, ref(text), countClose);
+  async function refresh() {
+    refreshes.push(status.statusText.value);
+  }
 
-  return { ...flow, status, closes: () => closed };
+  const flow = useGoTo({ ask, status, picker, refresh }, ref(text), countClose);
+
+  return { ...flow, status, closes: () => closed, refreshes };
 }
 
 test("blank input sends nothing", async () => {
@@ -113,4 +118,25 @@ test("a pasted list goes as one request with the one picked repo, and a partial 
   assert.deepEqual(fake.sent, [{ type: "goTo", input: text, repo: "api" }]);
   assert.equal(flow.status.statusText.value, "Couldn't open: 8");
   assert.equal(flow.closes(), 0);
+});
+
+test("a list that opened tabs before failing refreshes first, then shows the error", async () => {
+  const fake = fakeAsk({ goTo: { error: "Couldn't open: foo", tabsOpened: 1 } });
+  const flow = goTo(fake.ask, false, "7 foo");
+
+  await flow.go();
+
+  assert.deepEqual(flow.refreshes, [""]);
+  assert.equal(flow.status.statusText.value, "Couldn't open: foo");
+  assert.equal(flow.status.isStatusError.value, true);
+  assert.equal(flow.closes(), 0);
+});
+
+test("an error that opened nothing does not refresh", async () => {
+  const fake = fakeAsk({ goTo: { error: "Couldn't open: foo, bar", tabsOpened: 0 } });
+  const flow = goTo(fake.ask, false, "foo bar");
+
+  await flow.go();
+
+  assert.deepEqual(flow.refreshes, []);
 });
