@@ -829,8 +829,8 @@ function configProblem(rules: Rules, input: string | undefined): string | null {
   return null;
 }
 
-async function openTarget(pr: Pr): Promise<Reply<"goTo">> {
-  const tab = withId(await chrome.tabs.create({ url: pr.url, active: true }));
+async function openTarget(pr: Pr, active: boolean): Promise<Reply<"goTo">> {
+  const tab = withId(await chrome.tabs.create({ url: pr.url, active }));
 
   await groupTab(tab, pr, await readMeta());
   await ensureAlarm();
@@ -856,7 +856,8 @@ async function focusTab(tab: IdTab): Promise<void> {
   await chrome.tabs.update(tab.id, { active: true });
 }
 
-async function findOrOpen(input?: string, repo?: RepoName): Promise<Reply<"goTo">> {
+// quiet: a new tab opens in the background and an open one is not focused, so the popup stays up.
+async function findOrOpen(input?: string, repo?: RepoName, quiet = false): Promise<Reply<"goTo">> {
   const rules = await loadRules();
   const problem = configProblem(rules, input);
 
@@ -875,35 +876,38 @@ async function findOrOpen(input?: string, repo?: RepoName): Promise<Reply<"goTo"
   const entry = findOpenTab(await prEntries(rules), pr.key, focused);
 
   if (!entry) {
-    return openTarget(pr);
+    return openTarget(pr, !quiet);
   }
 
-  await focusTab(entry.tab);
+  if (!quiet) {
+    await focusTab(entry.tab);
+  }
 
   return { focused: pr.key };
 }
 
+async function openQuietly(item: string, repo?: RepoName): Promise<boolean> {
+  try {
+    return !("error" in (await findOrOpen(item, repo, true)));
+  } catch {
+    return false;
+  }
+}
+
 async function openEach(items: string[], repo?: RepoName): Promise<Reply<"goTo">> {
   const failed: string[] = [];
-  let last: Reply<"goTo"> | undefined;
 
   for (const item of items) {
-    const reply = await findOrOpen(item, repo);
-
-    if ("error" in reply) {
+    if (!(await openQuietly(item, repo))) {
       failed.push(item);
-    } else {
-      last = reply;
     }
   }
 
-  if (last && !failed.length) {
-    return last;
+  if (failed.length) {
+    return { error: getMessage("errCouldntOpen", { items: failed.join(", ") }) };
   }
 
-  return {
-    error: getMessage("errCouldntOpen", { items: (failed.length ? failed : items).join(", ") }),
-  };
+  return findOrOpen(items[items.length - 1], repo);
 }
 
 async function findOrOpenEach(input?: string, repo?: RepoName): Promise<Reply<"goTo">> {
@@ -917,7 +921,8 @@ async function findOrOpenEach(input?: string, repo?: RepoName): Promise<Reply<"g
     return { error: getMessage("errTooManyPrs", { max: String(MAX_TARGETS) }) };
   }
 
-  const problem = configProblem(await loadRules(), items.find(isBareNumber));
+  const rules = await loadRules();
+  const problem = configProblem(rules, items.every(isBareNumber) ? items[0] : undefined);
 
   return problem ? { error: problem } : openEach(items, repo);
 }

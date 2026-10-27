@@ -767,7 +767,7 @@ test("goTo opens every item of a pasted list in order, each once, in the one pic
 
   const reply = await multi.goTo("7, 5 8\nhttps://github.com/acme/webapp/pull/9 7 docs#3", "api");
 
-  assert.deepEqual(reply, { opened: "acme/docs#3" });
+  assert.deepEqual(reply, { focused: "acme/docs#3" });
   assert.deepEqual(
     world.tabs.map((tab) => tab.url),
     [
@@ -799,7 +799,7 @@ test("goTo opens nothing for a list above the cap", async () => {
 
   assert.deepEqual(await multi.goTo(over), { error: "Too many PRs. Paste at most 20 at a time." });
   assert.deepEqual(world.tabs, []);
-  assert.deepEqual(await multi.goTo(atCap), { opened: "acme/webapp#20" });
+  assert.deepEqual(await multi.goTo(atCap), { focused: "acme/webapp#20" });
   assert.equal(world.tabs.length, 20);
 });
 
@@ -816,4 +816,43 @@ test("a list names the missing setting instead of listing every item as failed",
   const noOrg = await freshWorker("list-missing-org");
 
   assert.deepEqual(await noOrg.goTo("7 8"), { error: "Set pr_tabs.org in orchestration.toml" });
+});
+
+test("a list opens its new tabs in the background and a failed item does not stop the rest", async () => {
+  const multi = await multiRepoWorker("list-quiet");
+
+  world.tabs = [{ id: 1, url: `${PR}/5`, windowId: 2, groupId: -1, active: false }];
+
+  assert.deepEqual(await multi.goTo("5 foo 8"), { error: "Couldn't open: foo" });
+  assert.equal(tabWithId(1).active, false, "an open PR is not focused while an item failed");
+  assert.deepEqual(
+    world.tabs.map((tab) => tab.active),
+    [false, false],
+  );
+  assert.equal(world.tabs.length, 2);
+});
+
+test("a list focuses its last PR once every item opened", async () => {
+  const multi = await multiRepoWorker("list-focus-last");
+
+  assert.deepEqual(await multi.goTo("7 8"), { focused: "acme/webapp#8" });
+  assert.equal(world.tabs.length, 2);
+  assert.equal(world.tabs[1]?.active, true);
+});
+
+test("a list with a URL still opens when bare numbers have no repo to go to", async () => {
+  world.tabs = [];
+  world.store = {};
+  world.hostSettings = { ...CONFIGURED, defaultRepo: "", repos: [] };
+
+  const noRepo = await freshWorker("list-no-repo");
+
+  assert.deepEqual(await noRepo.goTo(`7 ${PR}/8`), { error: "Couldn't open: 7" });
+  assert.deepEqual(
+    world.tabs.map((tab) => tab.url),
+    [`${PR}/8`],
+  );
+  assert.deepEqual(await noRepo.goTo("7 9"), {
+    error: "Set pr_tabs.default_repo in orchestration.toml",
+  });
 });
