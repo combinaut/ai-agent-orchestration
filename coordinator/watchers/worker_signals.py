@@ -72,6 +72,8 @@ def worktree_of(path):
                 if not key.startswith("GIT_")
             },
         )
+    except TimeoutError:
+        raise
     except (OSError, subprocess.TimeoutExpired):
         return None
     return os.path.realpath(result.stdout.strip()) if result.returncode == 0 else None

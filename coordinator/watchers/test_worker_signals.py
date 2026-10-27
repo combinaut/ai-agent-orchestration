@@ -427,6 +427,11 @@ class SignalTests(IsolatedTestCase):
             any(key.startswith("GIT_") for key in run.call_args.kwargs["env"])
         )
 
+    def test_worktree_of_propagates_the_worker_deadline(self):
+        with patch.object(s.subprocess, "run", side_effect=TimeoutError("deadline")):
+            with self.assertRaisesRegex(TimeoutError, "deadline"):
+                s.worktree_of("/repo")
+
     def test_strict_identity_does_not_recover_stale_panes(self):
         root = self.git_repo("worker")
         self.work["panes"] = [
