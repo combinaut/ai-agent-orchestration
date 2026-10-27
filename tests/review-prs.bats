@@ -23,7 +23,11 @@ case "$1 $2" in
     exit "${PROMPT_STATUS:-0}" ;;
   'agent read')
     [ -z "${AGENT_READ_FAILS:-}" ] || exit 1
-    [ -z "${AGENT_START_SCREEN:-}" ] || { printf '%s\n' "$AGENT_START_SCREEN"; exit 0; }
+    reads=$(cat "$TMP/read-count" 2>/dev/null || echo 0)
+    reads=$((reads + 1))
+    printf '%s' "$reads" >"$TMP/read-count"
+    if [ "$reads" -eq 1 ] && [ -n "${AGENT_START_SCREEN:-}" ]; then printf '%s\n' "$AGENT_START_SCREEN"; exit 0; fi
+    if [ "$reads" -eq 2 ] && [ -n "${AGENT_START_SCREEN_AFTER_UPDATE:-}" ]; then printf '%s\n' "$AGENT_START_SCREEN_AFTER_UPDATE"; exit 0; fi
     [ -z "${PROMPT_DELIVERED:-}" ] || printf 'Head SHA: %s\n' "$SHA"
     printf 'APPROVE — https://github.com/acme/app/pull/7\n' ;;
   'agent wait') [ -z "${AGENT_BUSY:-}" ] || exit 1 ;;
@@ -115,6 +119,17 @@ dispatch() {
   [ "$status" -eq 0 ]
   [ -e "$TMP/review.prompt" ]
   [ "$(dispatch_state)" = 'False "done"' ]
+}
+
+@test "dispatch blocks a hook screen shown after dismissing an update banner" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  AGENT_START_SCREEN='Update available' AGENT_START_SCREEN_AFTER_UPDATE='3 hooks need review before they can run' dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'UPDATE BANNER'
+  contains "$output" 'HOOKS UNTRUSTED'
+  [ ! -e "$TMP/review.prompt" ]
+  [ "$(dispatch_state)" = 'False "blocked"' ]
 }
 
 @test "dispatch starts Codex on the configured worker model" {
@@ -519,12 +534,12 @@ print(prs.needs_dispatch(pr, data)[0], json.dumps(prs.heads(data.get(pr["url"], 
   [ "$(dispatch_state)" = 'False "pending"' ]
 }
 
-@test "a prompt that never starts is blocked instead of staying pending" {
+@test "a prompt without reliable start evidence stays pending" {
   stub_review_tools
   : >"$TMP/none.toml"
   PROMPT_STATUS=1 GH_NO_REVIEW=1 dispatch
-  contains "$output" 'BLOCKED prompt not started'
-  [ "$(dispatch_state)" = 'False "blocked"' ]
+  not_contains "$output" 'BLOCKED prompt not started'
+  [ "$(dispatch_state)" = 'False "pending"' ]
 }
 
 @test "a posted review marks the head done" {
@@ -546,16 +561,16 @@ print(prs.needs_dispatch(pr, data)[0], json.dumps(prs.heads(data.get(pr["url"], 
   printf '%s\n' "$output" | grep -q "^collision  *$HOME/.agents/skills/coordinate "
 }
 
-@test "a failed prompt without a started turn is blocked" {
+@test "a failed prompt stays pending while the agent is busy or unreadable" {
   stub_review_tools
   : >"$TMP/none.toml"
   PROMPT_STATUS=1 GH_NO_REVIEW=1 AGENT_BUSY=1 dispatch
-  contains "$output" 'BLOCKED prompt not started'
-  [ "$(dispatch_state)" = 'False "blocked"' ]
+  not_contains "$output" 'BLOCKED prompt not started'
+  [ "$(dispatch_state)" = 'False "pending"' ]
   rm "$HOME/.cache/review-prs/dispatched.json"
   PROMPT_STATUS=1 GH_NO_REVIEW=1 AGENT_READ_FAILS=1 dispatch
-  contains "$output" 'BLOCKED prompt not started'
-  [ "$(dispatch_state)" = 'False "blocked"' ]
+  not_contains "$output" 'BLOCKED prompt not started'
+  [ "$(dispatch_state)" = 'False "pending"' ]
 }
 
 @test "overlapping heads keep every reservation through claims, completion and release" {

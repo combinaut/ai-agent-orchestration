@@ -102,12 +102,15 @@ herdr agent wait "$agent" --until idle --timeout 120000 >/dev/null 2>&1 || sleep
 mark() {
   "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane" --state "$1" --reason "${2:-}"
 }
-start_screen=$(herdr agent read "$agent" --source recent-unwrapped --lines 30 2>/dev/null || true)
-if grep -Fqi 'hooks need review before they can run' <<<"$start_screen"; then
-  hook_list=$(printf '%s\n' "$start_screen" | grep -Eo '(Pre|Post)ToolUse|Session(Start|End)|UserPromptSubmit' | sort -u | paste -sd ' ' -)
+block_hook_screen() {
+  hook_list=$(printf '%s\n' "$1" | grep -Eo '(Pre|Post)ToolUse|Session(Start|End)|UserPromptSubmit' | sort -u | paste -sd ' ' -)
   echo "HOOKS UNTRUSTED ${hook_list:-unknown hooks}"
   mark blocked "hooks need review"
   if [ -n "$opened" ]; then close_opened || true; else echo "LEFT OPEN $pane"; fi
+}
+start_screen=$(herdr agent read "$agent" --source recent-unwrapped --lines 30 2>/dev/null || true)
+if grep -Fqi 'hooks need review before they can run' <<<"$start_screen"; then
+  block_hook_screen "$start_screen"
   exit 1
 fi
 if grep -qi "update" <<<"$start_screen"; then
@@ -115,6 +118,11 @@ if grep -qi "update" <<<"$start_screen"; then
   herdr agent send-keys "$agent" down
   herdr agent send-keys "$agent" enter
   sleep 5
+  start_screen=$(herdr agent read "$agent" --source recent-unwrapped --lines 30 2>/dev/null || true)
+  if grep -Fqi 'hooks need review before they can run' <<<"$start_screen"; then
+    block_hook_screen "$start_screen"
+    exit 1
+  fi
 fi
 mark pending
 
@@ -170,10 +178,6 @@ else
   if [ "$status" -ne 0 ] && [ -n "$opened" ] && grep -q agent_blocked <<<"$prompt_out"; then
     echo "UNDELIVERED agent_blocked"
     close_opened && release
-  elif [ "$status" -ne 0 ] && ! grep -q 'Head SHA:' <<<"$turn_screen"; then
-    echo "BLOCKED prompt not started"
-    mark blocked "prompt not started"
-    echo "LEFT OPEN $pane"
   else
     echo "LEFT OPEN $pane"
   fi
