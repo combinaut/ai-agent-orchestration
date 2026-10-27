@@ -1,7 +1,7 @@
 import { useAsyncState } from "@vueuse/core";
 import { computed, type Ref } from "vue";
 import { failed } from "#/messages";
-import type { GoTo, GoToContext, GoToRequest, PrKey, PrNavigationRequest } from "#/types";
+import type { Failure, GoTo, GoToContext, GoToRequest, PrKey, PrNavigationRequest } from "#/types";
 
 function closePopup(): void {
   window.close();
@@ -15,6 +15,14 @@ function goToRequest(input: string, picker: GoToContext["picker"]): GoToRequest 
   return { type: "goTo", input };
 }
 
+async function showFailure(context: GoToContext, failure: Failure): Promise<void> {
+  if (failure.tabsOpened) {
+    await context.refresh();
+  }
+
+  context.status.error(failure.error);
+}
+
 export function useGoTo(
   context: GoToContext,
   input: Ref<string>,
@@ -26,11 +34,7 @@ export function useGoTo(
     const result = await context.ask(request);
 
     if (failed(result)) {
-      if (result.tabsOpened) {
-        await context.refresh();
-      }
-
-      context.status.error(result.error);
+      await showFailure(context, result);
 
       return;
     }

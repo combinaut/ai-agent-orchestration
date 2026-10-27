@@ -39,6 +39,7 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
     "error",
     "search",
     "panes",
+    "opened",
   ],
   "composables/useFuzzyFilter.ts": ["title", "label", "repo", "number", "branch"],
   "highlight.ts": ["label", "title"],
