@@ -38,9 +38,10 @@ CODEX_FLAGS = (
     "--ask-for-approval",
     "--add-dir",
     "--sandbox",
+    "--profile",
 )
-CODEX_SHORT = re.compile(r"-[sa]")
-CODEX_KEY = ("sandbox", "approval", "default_permissions", "permissions")
+CODEX_SHORT = re.compile(r"-[sap]")
+CODEX_KEY = ("sandbox", "approval", "default_permissions", "permissions", "profiles")
 
 
 def codex_key_widened(override):
