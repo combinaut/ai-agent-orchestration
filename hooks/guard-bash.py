@@ -28,17 +28,25 @@ BIG_REPO_REASON = (
 )
 BIG_REPO_BATCH_REASON = "No whole-tree cat-file batch read in a configured big repo. Use rg scoped to the directories you need."
 PI_REASON = "pi starts only through ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart>; DeepSeek is off unless the repo opted in, and a live pi never switches model."
-CODEX_REASON = "A raw codex start may not carry --dangerously-bypass-hook-trust, a sandbox option (-s, --sandbox, --add-dir, -c sandbox_*) or --dangerously-bypass-approvals-and-sandbox; start a bypassed Codex worker with ~/.claude/coordinator/codex-start.sh <name> <pane> <worker|smart>."
+CODEX_REASON = "A raw codex start may not carry --dangerously-bypass-hook-trust, an approval or sandbox option (-a, -s, --yolo, --full-auto, --add-dir, -c sandbox_*, -c approval_*) or --dangerously-bypass-approvals-and-sandbox; start a bypassed Codex worker with ~/.claude/coordinator/codex-start.sh <name> <pane> <worker|smart>."
 CODEX_FLAGS = (
     "--dangerously-bypass-hook-trust",
     "--dangerously-bypass-approvals-and-sandbox",
+    "--yolo",
+    "--full-auto",
+    "--approve-for-me",
+    "--ask-for-approval",
     "--add-dir",
     "--sandbox",
+)
+CODEX_SHORT = re.compile(r"-[sa]")
+CODEX_KEY = re.compile(
+    r"""[\s=]*["']?\s*(?:sandbox|approval|default_permissions|permissions)""", re.I
 )
 
 
 def codex_widened(agent_args):
-    """True when a codex start's own arguments bypass hook trust or touch the sandbox."""
+    """True when a codex start's own arguments bypass hook trust, approvals or the sandbox."""
     skip = False
     for index, arg in enumerate(agent_args):
         if skip:
@@ -46,16 +54,19 @@ def codex_widened(agent_args):
             continue
         if arg in ("--cd", "-C", "--model", "-m"):
             skip = True
-        elif arg.startswith(CODEX_FLAGS) or (
-            arg.startswith("-s") and not arg.startswith("--")
-        ):
+        elif arg.startswith(CODEX_FLAGS) or CODEX_SHORT.match(arg):
             return True
         elif arg in ("-c", "--config"):
-            value = agent_args[index + 1 : index + 2]
-            if value and value[0].lower().startswith("sandbox_"):
+            if CODEX_KEY.match("".join(agent_args[index + 1 : index + 2])):
                 return True
             skip = True
-        elif arg.startswith(("-c", "--config=")) and "sandbox_" in arg.lower():
+        elif arg.startswith("--config=") and CODEX_KEY.match(arg[len("--config=") :]):
+            return True
+        elif (
+            arg.startswith("-c")
+            and not arg.startswith("--")
+            and CODEX_KEY.match(arg[2:])
+        ):
             return True
     return False
 
@@ -1377,7 +1388,7 @@ def guard_pi_text(text, where, disabled, depth, direct=True, strict=False):
                     and os.path.basename(candidate[0]) == "pi"
                     and not pi_info(candidate[1:])
                 ):
-                    return PI_REASON
+                    return reason or PI_REASON
         for nested in [
             body for word in segment for body in word_substitutions(word)
         ] + shell_programs(words):

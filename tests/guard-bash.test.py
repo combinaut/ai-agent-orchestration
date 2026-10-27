@@ -1612,6 +1612,20 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "--config sandbox_permissions=[]",
             "--config=sandbox_mode=x",
             "--dangerously-bypass-approvals-and-sandbox",
+            "--yolo",
+            "--full-auto",
+            "--approve-for-me",
+            "-a never",
+            "-anever",
+            "--ask-for-approval never",
+            "--ask-for-approval=never",
+            "-c ' sandbox_mode=x'",
+            "-c ' \"sandbox_mode\"=x'",
+            "-c approval_policy=never",
+            "-c permissions.p.x=1",
+            "-c=sandbox_mode=x",
+            "--config ' approval_policy=never'",
+            "--config=' sandbox_mode=x'",
         ]
     ]:
         case(name, command, True)
@@ -1872,6 +1886,11 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         entry,
     ), entry
     print("Fail-open log:", entry.strip())
+    for command in [
+        "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --yolo",
+        'bash -c "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --yolo"',
+    ]:
+        assert "codex-start.sh" in guard.evaluate(command, repo), command
     start = time.perf_counter()
     guard.evaluate("pgrep -f vite | xargs " + "-pp " * 40 + "ki", repo)
     assert time.perf_counter() - start < 2, "xargs option scan is not linear"
