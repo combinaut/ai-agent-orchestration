@@ -27,9 +27,5 @@ case "$model" in "" | "<"*">" | -*) echo "codex-start.sh: set models.codex_$tier
 herdr_bin=${ORCH_HERDR_BIN:-herdr}
 orch_need_cmd "$herdr_bin"
 extra=()
-if [ "$tier" = smart ]; then
-  effort=${ORCH_CODEX_SMART_REASONING_EFFORT:-medium}
-  [[ "$effort" =~ ^[a-z]+$ ]] || { echo "codex-start.sh: models.codex_smart_reasoning_effort (ORCH_CODEX_SMART_REASONING_EFFORT) must be one lowercase word, not '$effort'" >&2; exit 1; }
-  extra=(-c "model_reasoning_effort=$effort")
-fi
+[ "$tier" != smart ] || extra=(-c "model_reasoning_effort=${ORCH_CODEX_SMART_REASONING_EFFORT:-medium}")
 exec "$herdr_bin" agent start "$name" --kind codex --pane "$pane" -- --no-daemon --dangerously-bypass-hook-trust --model "$model" ${extra[@]+"${extra[@]}"}

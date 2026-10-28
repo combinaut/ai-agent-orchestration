@@ -52,7 +52,8 @@ teardown() {
 @test "a reasoning effort that is not one lowercase word is refused" {
   for bad in "high xhigh" "-x" "High" ""; do
     run env ORCH_CODEX_SMART_REASONING_EFFORT="$bad" "$SCRIPT" w1 w1-p2 smart
-    [ "$status" -ne 0 ]
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"* ]]
   done
   [ ! -e "$HERDR_CALLS" ]
 }
