@@ -185,33 +185,61 @@ class RuntimeTests(IsolatedTestCase):
         self.assertIn("watcher deadline exceeded: context", result.stderr)
         self.assertIn("session_usage", result.stderr)
 
-    def test_sleep_watchdog_exits_when_wait_never_returns(self):
-        result = self.child(
-            "import watcher_runtime as r; import time\n"
-            "guard = r.deadline\n"
-            "r.deadline = lambda seconds, label: guard(0.1, label)\n"
-            "r.sleep(0.01, wait=lambda seconds: time.sleep(1))\n"
-        )
-        self.assertEqual(result.returncode, 70, result.stderr)
-        self.assertIn("loop sleep", result.stderr)
-
-    def test_sleep_uses_monotonic_and_bounds_clock_reset(self):
+    def test_sleep_bounds_clock_reset(self):
         values = iter([100, 50, 108, 111])
         waits = []
         with (
             patch.object(
-                w.runtime,
-                "deadline",
-                return_value=__import__("contextlib").nullcontext(),
+                w.runtime.time, "time", side_effect=AssertionError("wall clock")
             ),
-            patch.object(w.runtime.time, "monotonic", side_effect=lambda: next(values)),
+            patch.object(w.runtime.time, "sleep", side_effect=waits.append),
+        ):
+            w.runtime.sleep(10, clock=lambda: next(values))
+        self.assertEqual(waits, [5, 2])
+
+    def test_sleep_uses_suspend_aware_clock_and_returns_after_sleep(self):
+        values = iter([100, 105, 305])
+        waits = []
+        with (
+            patch.object(w.runtime.sys, "platform", "darwin"),
+            patch.object(
+                w.runtime.time,
+                "clock_gettime",
+                side_effect=lambda clock_id: next(values),
+            ) as clock_gettime,
             patch.object(
                 w.runtime.time, "time", side_effect=AssertionError("wall clock")
             ),
             patch.object(w.runtime.time, "sleep", side_effect=waits.append),
         ):
             w.runtime.sleep(10)
-        self.assertEqual(waits, [5, 2])
+        self.assertEqual(waits, [5])
+        self.assertEqual(clock_gettime.call_args_list[0].args, (time.CLOCK_MONOTONIC,))
+
+    def test_feed_follower_heartbeat_uses_suspend_aware_clock(self):
+        follower = self.module("feed_follow.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            feed, beat = Path(tmp) / "feed", Path(tmp) / "beat"
+            feed.touch()
+            beat.touch()
+            stream = feed.open("rb")
+            try:
+                with (
+                    patch.object(follower, "attach", return_value=stream),
+                    patch.object(follower, "action_patterns", return_value=[]),
+                    patch.object(
+                        follower.runtime, "loop_clock", side_effect=[0, 60, 60]
+                    ),
+                    patch.object(
+                        follower.runtime, "iterations", return_value=iter([None])
+                    ),
+                    patch.object(follower.runtime, "sleep"),
+                    patch.object(follower.os, "utime") as utime,
+                ):
+                    follower.follow(feed, beat)
+            finally:
+                stream.close()
+        utime.assert_called_once_with(beat)
 
     def test_feed_lock_has_deadline(self):
         import fcntl

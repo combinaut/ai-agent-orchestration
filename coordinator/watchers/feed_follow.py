@@ -4,7 +4,6 @@ The feed is opened at its end before the heartbeat is touched, so no line betwee
 
 import os
 import sys
-import time
 from pathlib import Path
 
 import watcher_runtime as runtime
@@ -38,9 +37,9 @@ def follow(feed, beat, out=sys.stdout.buffer):
         patterns = action_patterns()
         stream = attach(feed, beat)
     attached, previous = stream.tell(), 0
-    beat_at = time.monotonic()
+    beat_at = runtime.loop_clock()
     for _ in runtime.iterations(0, label="feed follower"):
-        if time.monotonic() - beat_at >= BEAT_SECONDS:
+        if runtime.loop_clock() - beat_at >= BEAT_SECONDS:
             try:
                 os.utime(beat)
             except FileNotFoundError:
@@ -56,7 +55,7 @@ def follow(feed, beat, out=sys.stdout.buffer):
                     stream.tell(),
                     previous,
                 )
-            beat_at = time.monotonic()
+            beat_at = runtime.loop_clock()
         line = stream.readline()
         if line.endswith(b"\n"):
             text = line.decode(errors="replace").rstrip("\n")

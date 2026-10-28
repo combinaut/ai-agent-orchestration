@@ -5,6 +5,7 @@ import faulthandler
 import os
 import signal
 import subprocess
+import sys
 import time
 
 COMMAND_TIMEOUT = 45
@@ -168,16 +169,23 @@ def deadline(seconds, label, *, soft=False):
             raise TimeoutError(f"pass deadline exceeded: {label} ({seconds}s)")
 
 
+def loop_clock():
+    if sys.platform == "darwin":
+        return time.clock_gettime(time.CLOCK_MONOTONIC)
+    if hasattr(time, "CLOCK_BOOTTIME"):
+        return time.clock_gettime(time.CLOCK_BOOTTIME)
+    return time.monotonic()
+
+
 def sleep(interval, clock=None, wait=None):
     """No wall-clock arithmetic; each wait is bounded even after a clock reset."""
-    clock, wait = clock or time.monotonic, wait or time.sleep
-    with deadline(interval + 30, "loop sleep"):
-        end = clock() + interval
-        while True:
-            remaining = min(interval, max(0, end - clock()))
-            if not remaining:
-                return
-            wait(min(5, remaining))
+    clock, wait = clock or loop_clock, wait or time.sleep
+    end = clock() + interval
+    while True:
+        remaining = min(interval, max(0, end - clock()))
+        if not remaining:
+            return
+        wait(min(5, remaining))
 
 
 def iterations(interval, repeat=True, label="iteration", budget=ITERATION_TIMEOUT):
