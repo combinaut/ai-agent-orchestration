@@ -812,6 +812,7 @@ case "\$*" in
     printf '%s\n' "\$*" >>"$TMP/fetch.calls"
     [ "\$5" = upstream ] || exit
     [ "\$6" != pull/7/head ] || : >"$TMP/pull-head-fetched"
+    exit 0
     ;;
 esac
 exec "$real_git" "\$@"
