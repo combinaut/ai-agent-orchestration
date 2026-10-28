@@ -912,7 +912,11 @@ async function openEach(items: string[], repo?: RepoName): Promise<Reply<"goTo">
     return { error: getMessage("errCouldntOpen", { items: failed.join(", ") }), tabsOpened };
   }
 
-  return findOrOpen(items[items.length - 1], repo);
+  try {
+    return await findOrOpen(items[items.length - 1], repo);
+  } catch (error) {
+    return { error: errorText(error), tabsOpened };
+  }
 }
 
 async function findOrOpenEach(input?: string, repo?: RepoName): Promise<Reply<"goTo">> {

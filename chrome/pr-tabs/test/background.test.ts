@@ -857,3 +857,15 @@ test("a list with a URL still opens when bare numbers have no repo to go to", as
     error: "Set pr_tabs.default_repo in orchestration.toml",
   });
 });
+
+test("a list whose closing focus rejects reports the error and the tabs it opened", async () => {
+  const multi = await multiRepoWorker("list-focus-rejects");
+
+  vi.spyOn(chrome.windows, "update").mockRejectedValue(new Error("window gone"));
+
+  const reply = await multi.goTo("7 8");
+
+  assert.ok("error" in reply && reply.error.includes("window gone"));
+  assert.equal("tabsOpened" in reply && reply.tabsOpened, 2);
+  assert.equal(world.tabs.length, 2);
+});
