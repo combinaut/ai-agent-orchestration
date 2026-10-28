@@ -38,6 +38,10 @@ EOF
 case "$*" in
   'api user --jq .login') echo reviewer ;;
   'api repos/acme/app/pulls/7 --jq .base.ref') [ -z "${BASE_READ_FAILS:-}" ] || exit 1; echo main ;;
+  'api repos/acme/app/pulls/7 --jq [.head.repo.owner.login, .head.repo.name, .head.ref] | @tsv')
+    [ -z "${HEAD_READ_FAILS:-}" ] || exit 1
+    printf 'alexsavio\tai-agent-orchestration\tfeat/usage-ledger\n'
+    ;;
   *'/reviews'*)
     r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "$2" "$1"; }
     old=""
@@ -68,12 +72,63 @@ dispatch() {
     git -C "$TMP/app" remote add origin https://github.com/acme/app.git
     mkdir -p "$TMP/fetch-ok"
     # shellcheck disable=SC2016 # The stub's own text.
-    printf '#!/usr/bin/env bash\ncase "$*" in *" fetch -q "*) exit 0 ;; esac\nPATH=${PATH#"%s":} exec git "$@"\n' "$TMP/fetch-ok" >"$TMP/fetch-ok/git"
+    cat >"$TMP/fetch-ok/git" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *'fetch -q https://github.com/alexsavio/ai-agent-orchestration.git feat/usage-ledger'*)
+    printf '%s\n' "$*" >>"$TMP/fetch.calls"
+    [ -n "${FORK_FETCH_FAILS:-}" ] && exit 1
+    args=()
+    for arg in "$@"; do
+      [ "$arg" != https://github.com/alexsavio/ai-agent-orchestration.git ] || arg="file://$FORK_ORIGIN"
+      args+=("$arg")
+    done
+    PATH=${PATH#"$TMP/fetch-ok":} exec git "${args[@]}"
+    ;;
+  *" fetch -q "*) exit 0 ;;
+esac
+PATH=${PATH#"$TMP/fetch-ok":} exec git "$@"
+EOF
     chmod +x "$TMP/fetch-ok/git"
     export PATH="$TMP/fetch-ok:$PATH"
   fi
   run env ORCH_CONFIG="$TMP/none.toml" bash "$ROOT/$SKILL_DIR/scripts/dispatch.sh" \
     https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" review rev7 "$TMP/app" acme/app
+}
+
+fork_head_missing_from_pull_ref() {
+  git clone -q "$TMP/app" "$TMP/fork-source"
+  printf 'fork head\n' >"$TMP/fork-source/fork.txt"
+  git -C "$TMP/fork-source" add fork.txt
+  git -C "$TMP/fork-source" -c user.email=test@example.invalid -c user.name=test commit -qm fork-head
+  git -C "$TMP/fork-source" branch -M feat/usage-ledger
+  git init --bare -q "$TMP/fork.git"
+  git -C "$TMP/fork.git" symbolic-ref HEAD refs/heads/feat/usage-ledger
+  git -C "$TMP/fork.git" fetch -q "$TMP/fork-source" feat/usage-ledger:feat/usage-ledger
+  FORK_ORIGIN="$TMP/fork.git"
+  SHA=$(git -C "$TMP/fork-source" rev-parse HEAD)
+  export FORK_ORIGIN SHA
+}
+
+@test "dispatch fetches the fork head when pull head is stale" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_head_missing_from_pull_ref
+  dispatch
+  [ "$status" -eq 0 ]
+  grep -q 'fetch -q https://github.com/alexsavio/ai-agent-orchestration.git feat/usage-ledger' "$TMP/fetch.calls"
+  [ "$(dispatch_state)" = 'False "done"' ]
+}
+
+@test "dispatch reports HEAD FAILED and releases its claim when neither head fetch provides it" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_head_missing_from_pull_ref
+  FORK_FETCH_FAILS=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" "HEAD FAILED $SHA not fetchable from pull/7/head or alexsavio/ai-agent-orchestration:feat/usage-ledger"
+  contains "$output" "RELEASED $SHA"
+  [ "$(dispatch_state)" = 'True null' ]
 }
 
 @test "dispatch closes the finished review pane through close-pane.sh" {

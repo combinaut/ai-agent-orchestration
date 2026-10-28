@@ -59,10 +59,37 @@ fi
 # A worktree left at this path is stale: this dispatch holds the claim on its head.
 wt="${XDG_CACHE_HOME:-$HOME/.cache}/review-prs/worktrees/$agent"
 if [ ! -d "$wt" ]; then
-  if ! { git -C "$cwd" cat-file -e "$sha^{commit}" 2>/dev/null ||
-    { [ -n "$remote" ] && git -C "$cwd" fetch -q "$remote" "pull/$num/head"; }; } ||
-    ! mkdir -p "$(dirname "$wt")" || ! git -C "$cwd" worktree prune ||
-    ! git -C "$cwd" worktree add -q --detach "$wt" "$sha"; then
+  if ! git -C "$cwd" cat-file -e "$sha^{commit}" 2>/dev/null; then
+    git -C "$cwd" fetch -q "$remote" "pull/$num/head" 2>/dev/null || true
+  fi
+  if ! git -C "$cwd" cat-file -e "$sha^{commit}" 2>/dev/null; then
+    head=$(gh_bounded api "repos/$repo/pulls/$num" --jq '[.head.repo.owner.login, .head.repo.name, .head.ref] | @tsv') || head=""
+    IFS=$'\t' read -r head_owner head_repo head_ref <<EOF
+$head
+EOF
+    if [[ "$head_owner" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] &&
+      [[ "$head_repo" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] &&
+      git check-ref-format --branch "$head_ref" >/dev/null 2>&1; then
+      git -C "$cwd" fetch -q "https://github.com/$head_owner/$head_repo.git" "$head_ref" 2>/dev/null || true
+    fi
+    if ! git -C "$cwd" cat-file -e "$sha^{commit}" 2>/dev/null; then
+      echo "HEAD FAILED $sha not fetchable from pull/$num/head or ${head_owner:-unknown}/${head_repo:-unknown}:${head_ref:-unknown}"
+      release
+      exit 1
+    fi
+  fi
+  if ! mkdir -p "$(dirname "$wt")"; then
+    echo "WORKTREE FAILED could not create parent for $wt"
+    release
+    exit 1
+  fi
+  if ! git -C "$cwd" worktree prune; then
+    echo "WORKTREE FAILED could not prune stale worktrees"
+    release
+    exit 1
+  fi
+  if ! git -C "$cwd" worktree add -q --detach "$wt" "$sha"; then
+    echo "WORKTREE FAILED could not add $wt at $sha"
     release
     exit 1
   fi
