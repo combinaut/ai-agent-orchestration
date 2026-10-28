@@ -28,7 +28,7 @@ BIG_REPO_REASON = (
 )
 BIG_REPO_BATCH_REASON = "No whole-tree cat-file batch read in a configured big repo. Use rg scoped to the directories you need."
 PI_REASON = "pi starts only through ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart>; DeepSeek is off unless the repo opted in, and a live pi never switches model."
-CODEX_REASON = "A raw codex start may not carry --dangerously-bypass-hook-trust, an approval or sandbox option (-a, -s, --yolo, --full-auto, --add-dir, -c sandbox_*, -c approval_*) or --dangerously-bypass-approvals-and-sandbox; start a bypassed Codex worker with ~/.claude/coordinator/codex-start.sh <name> <pane> <worker|smart>."
+CODEX_REASON = "A raw codex start may not carry --dangerously-bypass-hook-trust, --dangerously-bypass-approvals-and-sandbox, --yolo, --full-auto, --approve-for-me, -a/--ask-for-approval, -s/--sandbox, --add-dir, -p/--profile, --disable hooks, -c/--config keys starting sandbox, approval, permissions, default_permissions, profiles or hooks, or a $ or backtick in its agent arguments; start a bypassed Codex worker with ~/.claude/coordinator/codex-start.sh <name> <pane> <worker|smart>."
 CODEX_FLAGS = (
     "--dangerously-bypass-hook-trust",
     "--dangerously-bypass-approvals-and-sandbox",
@@ -39,9 +39,17 @@ CODEX_FLAGS = (
     "--add-dir",
     "--sandbox",
     "--profile",
+    "--disable=hook",
 )
 CODEX_SHORT = re.compile(r"-[sap]")
-CODEX_KEY = ("sandbox", "approval", "default_permissions", "permissions", "profiles")
+CODEX_KEY = (
+    "sandbox",
+    "approval",
+    "default_permissions",
+    "permissions",
+    "profiles",
+    "hooks",
+)
 
 
 def codex_key_widened(override):
@@ -60,6 +68,10 @@ def codex_widened(agent_args):
             skip = False
             continue
         if arg in ("--cd", "-C", "--model", "-m"):
+            skip = True
+        elif arg == "--disable":
+            if "hook" in "".join(agent_args[index + 1 : index + 2]).lower():
+                return True
             skip = True
         elif arg.startswith(CODEX_FLAGS) or CODEX_SHORT.match(arg):
             return True
@@ -1323,7 +1335,10 @@ def guard_pi(executable, args, where=".", disabled=()):
         if pair == ("agent", "start"):
             kinds = pi_kind(args)
             agent_args = rest[rest.index("--") + 1 :] if "--" in rest else []
-            if "codex" in kinds and codex_widened(agent_args):
+            if "codex" in kinds and (
+                codex_widened(agent_args)
+                or any(re.search(r"[$`]", a) for a in agent_args)
+            ):
                 return CODEX_REASON
             agent_args = [
                 a
