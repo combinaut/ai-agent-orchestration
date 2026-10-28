@@ -38,9 +38,9 @@ EOF
 case "$*" in
   'api user --jq .login') echo reviewer ;;
   'api repos/acme/app/pulls/7 --jq .base.ref') [ -z "${BASE_READ_FAILS:-}" ] || exit 1; echo main ;;
-  'api repos/acme/app/pulls/7 --jq [.head.repo.owner.login, .head.repo.name, .head.ref] | @tsv')
+  'api repos/acme/app/pulls/7 --jq [.head.repo.owner.login // "-", .head.repo.name // "-", .head.ref // "-"] | @tsv')
     [ -z "${HEAD_READ_FAILS:-}" ] || exit 1
-    printf 'alexsavio\t%s\tfeat/usage-ledger\n' "${HEAD_REPO:-ai-agent-orchestration}"
+    printf '%s\t%s\t%s\n' "${HEAD_OWNER:-alexsavio}" "${HEAD_REPO:-ai-agent-orchestration}" "${HEAD_REF:-feat/usage-ledger}"
     ;;
   *'/reviews'*)
     r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "$2" "$1"; }
@@ -75,7 +75,7 @@ dispatch() {
     cat >"$TMP/fetch-ok/git" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
-  *'fetch -q https://github.com/alexsavio/'*' feat/usage-ledger'*)
+  *'fetch -q -- https://github.com/alexsavio/'*' refs/heads/'*)
     printf '%s\n' "$*" >>"$TMP/fetch.calls"
     [ -n "${FORK_FETCH_FAILS:-}" ] && exit 1
     args=()
@@ -116,7 +116,7 @@ fork_head_missing_from_pull_ref() {
   fork_head_missing_from_pull_ref
   dispatch
   [ "$status" -eq 0 ]
-  grep -q 'fetch -q https://github.com/alexsavio/ai-agent-orchestration.git feat/usage-ledger' "$TMP/fetch.calls"
+  grep -q 'fetch -q -- https://github.com/alexsavio/ai-agent-orchestration.git refs/heads/feat/usage-ledger' "$TMP/fetch.calls"
   [ "$(dispatch_state)" = 'False "done"' ]
 }
 
@@ -835,7 +835,38 @@ GIT
   fork_head_missing_from_pull_ref
   HEAD_REPO=.github dispatch
   [ "$status" -eq 0 ]
-  grep -q 'fetch -q https://github.com/alexsavio/.github.git feat/usage-ledger' "$TMP/fetch.calls"
+  grep -q 'fetch -q -- https://github.com/alexsavio/.github.git refs/heads/feat/usage-ledger' "$TMP/fetch.calls"
+}
+
+@test "dispatch rejects an option-like fork branch without fetching it" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_head_missing_from_pull_ref
+  HEAD_REF=--upload-pack=x dispatch
+  [ "$status" -ne 0 ]
+  [ ! -e "$TMP/fetch.calls" ]
+  contains "$output" "HEAD FAILED $SHA not fetchable from pull/7/head or alexsavio/ai-agent-orchestration:--upload-pack=x"
+  contains "$output" "RELEASED $SHA"
+}
+
+@test "dispatch rejects a dot-dot fork repository without fetching it" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_head_missing_from_pull_ref
+  HEAD_REPO=.. dispatch
+  [ "$status" -ne 0 ]
+  [ ! -e "$TMP/fetch.calls" ]
+  contains "$output" "HEAD FAILED $SHA not fetchable from pull/7/head or alexsavio/..:feat/usage-ledger"
+  contains "$output" "RELEASED $SHA"
+}
+
+@test "dispatch preserves null fork metadata fields in HEAD FAILED output" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_head_missing_from_pull_ref
+  HEAD_OWNER=- HEAD_REPO=- dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" "HEAD FAILED $SHA not fetchable from pull/7/head or -/-:feat/usage-ledger"
 }
 
 @test "a fork review reads its instructions from the upstream base, whether or not the head is cached" {
