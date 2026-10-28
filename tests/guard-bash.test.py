@@ -1666,6 +1666,11 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --model m -c project_doc_max_bytes=0",
         ),
         ("codex launcher", "~/.claude/coordinator/codex-start.sh w w1:p2 worker"),
+        ("codex smart launcher", "~/.claude/coordinator/codex-start.sh w w1:p2 smart"),
+        (
+            "herdr codex start with a reasoning effort",
+            "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --model m -c model_reasoning_effort=high",
+        ),
         ("herdr agent list", "herdr agent list"),
         (
             "herdr prompt to a pi worker",

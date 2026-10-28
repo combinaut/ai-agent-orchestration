@@ -289,4 +289,4 @@ Read [references/background.md](references/background.md) when you need the move
 
 ## Codex model tiers
 
-The Codex smart model is `$ORCH_CODEX_SMART_MODEL` with reasoning effort `$ORCH_CODEX_SMART_REASONING_EFFORT` (default `medium`). Use `--model $ORCH_CODEX_SMART_MODEL -c model_reasoning_effort=$ORCH_CODEX_SMART_REASONING_EFFORT` for smart starts/resumes. The routine worker tier remains `$ORCH_CODEX_WORKER_MODEL`. With one Codex model set, `orch-settings` prints it for both tiers. Carry this policy through briefs and recycles; preserve session names and native messaging.
+The Codex smart model is `$ORCH_CODEX_SMART_MODEL` with reasoning effort `$ORCH_CODEX_SMART_REASONING_EFFORT` (default `medium`). Start a smart Codex worker with `codex-start.sh <name> <pane> smart`, which applies both; raw smart starts/resumes use `--model $ORCH_CODEX_SMART_MODEL -c model_reasoning_effort=$ORCH_CODEX_SMART_REASONING_EFFORT`. The routine worker tier remains `$ORCH_CODEX_WORKER_MODEL`. With one Codex model set, `orch-settings` prints it for both tiers. Carry this policy through briefs and recycles; preserve session names and native messaging.
