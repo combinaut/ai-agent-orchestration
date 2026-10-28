@@ -185,7 +185,7 @@ class RuntimeTests(IsolatedTestCase):
         self.assertIn("watcher deadline exceeded: context", result.stderr)
         self.assertIn("session_usage", result.stderr)
 
-    def test_sleep_bounds_clock_reset(self):
+    def test_sleep_uses_its_clock_and_chunks_waits(self):
         values = iter([100, 50, 108, 111])
         waits = []
         with (
@@ -196,6 +196,15 @@ class RuntimeTests(IsolatedTestCase):
         ):
             w.runtime.sleep(10, clock=lambda: next(values))
         self.assertEqual(waits, [5, 2])
+
+    def test_loop_clock_uses_boottime_on_linux(self):
+        with (
+            patch.object(w.runtime.sys, "platform", "linux"),
+            patch.object(w.runtime.time, "CLOCK_BOOTTIME", 7, create=True),
+            patch.object(w.runtime.time, "clock_gettime", return_value=100) as clock,
+        ):
+            self.assertEqual(w.runtime.loop_clock(), 100)
+        clock.assert_called_once_with(7)
 
     def test_sleep_uses_suspend_aware_clock_and_returns_after_sleep(self):
         values = iter([100, 105, 305])

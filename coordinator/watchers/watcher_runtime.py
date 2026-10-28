@@ -178,11 +178,11 @@ def loop_clock():
 
 
 def sleep(interval, clock=None, wait=None):
-    """No wall-clock arithmetic; each wait is bounded even after a clock reset."""
+    """No wall-clock arithmetic; waits are capped at five seconds."""
     clock, wait = clock or loop_clock, wait or time.sleep
     end = clock() + interval
     while True:
-        remaining = min(interval, max(0, end - clock()))
+        remaining = max(0, end - clock())
         if not remaining:
             return
         wait(min(5, remaining))
