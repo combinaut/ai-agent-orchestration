@@ -40,7 +40,7 @@ case "$*" in
   'api repos/acme/app/pulls/7 --jq .base.ref') [ -z "${BASE_READ_FAILS:-}" ] || exit 1; echo main ;;
   'api repos/acme/app/pulls/7 --jq [.head.repo.owner.login, .head.repo.name, .head.ref] | @tsv')
     [ -z "${HEAD_READ_FAILS:-}" ] || exit 1
-    printf 'alexsavio\tai-agent-orchestration\tfeat/usage-ledger\n'
+    printf 'alexsavio\t%s\tfeat/usage-ledger\n' "${HEAD_REPO:-ai-agent-orchestration}"
     ;;
   *'/reviews'*)
     r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "$2" "$1"; }
@@ -75,12 +75,12 @@ dispatch() {
     cat >"$TMP/fetch-ok/git" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
-  *'fetch -q https://github.com/alexsavio/ai-agent-orchestration.git feat/usage-ledger'*)
+  *'fetch -q https://github.com/alexsavio/'*' feat/usage-ledger'*)
     printf '%s\n' "$*" >>"$TMP/fetch.calls"
     [ -n "${FORK_FETCH_FAILS:-}" ] && exit 1
     args=()
     for arg in "$@"; do
-      [ "$arg" != https://github.com/alexsavio/ai-agent-orchestration.git ] || arg="file://$FORK_ORIGIN"
+      case "$arg" in https://github.com/alexsavio/*.git) arg="file://$FORK_ORIGIN" ;; esac
       args+=("$arg")
     done
     PATH=${PATH#"$TMP/fetch-ok":} exec git "${args[@]}"
@@ -807,8 +807,12 @@ fork_layout() {
   cat >"$BIN/git" <<GIT
 #!/usr/bin/env bash
 case "\$*" in
-  *' cat-file -e '*) exit 1 ;;
-  *' fetch -q '*) printf '%s\n' "\$*" >>"$TMP/fetch.calls"; [ "\$5" = upstream ]; exit ;;
+  *' cat-file -e '*) [ -e "$TMP/pull-head-fetched" ] || exit 1 ;;
+  *' fetch -q '*)
+    printf '%s\n' "\$*" >>"$TMP/fetch.calls"
+    [ "\$5" = upstream ] || exit
+    [ "\$6" != pull/7/head ] || : >"$TMP/pull-head-fetched"
+    ;;
 esac
 exec "$real_git" "\$@"
 GIT
@@ -822,6 +826,15 @@ GIT
   dispatch
   not_contains "$output" 'RELEASED'
   grep -qF -- "-C $TMP/app fetch -q upstream pull/7/head" "$TMP/fetch.calls"
+}
+
+@test "dispatch fetches a leading-dot fork repository name" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_head_missing_from_pull_ref
+  HEAD_REPO=.github dispatch
+  [ "$status" -eq 0 ]
+  grep -q 'fetch -q https://github.com/alexsavio/.github.git feat/usage-ledger' "$TMP/fetch.calls"
 }
 
 @test "a fork review reads its instructions from the upstream base, whether or not the head is cached" {

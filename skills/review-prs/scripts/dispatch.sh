@@ -68,7 +68,7 @@ if [ ! -d "$wt" ]; then
 $head
 EOF
     if [[ "$head_owner" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] &&
-      [[ "$head_repo" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] &&
+      [[ "$head_repo" =~ ^[A-Za-z0-9._-]+$ ]] && [[ "$head_repo" != . ]] && [[ "$head_repo" != .. ]] &&
       git check-ref-format --branch "$head_ref" >/dev/null 2>&1; then
       git -C "$cwd" fetch -q "https://github.com/$head_owner/$head_repo.git" "$head_ref" 2>/dev/null || true
     fi
