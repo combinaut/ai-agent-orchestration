@@ -112,6 +112,17 @@ dispatch() {
   [ "$(dispatch_state)" = 'False "blocked"' ]
 }
 
+@test "a hook-review screen in a caller's pane stays open and blocks the head" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PANE=w9-p5 AGENT_START_SCREEN='3 hooks need review before they can run' dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'LEFT OPEN w9-p5'
+  not_contains "$output" 'REMOVED'
+  [ ! -e "$TMP/closed/w9-p5" ]
+  [ "$(dispatch_state)" = 'False "blocked"' ]
+}
+
 @test "dispatch prompts when a normal start screen mentions hooks and review" {
   stub_review_tools
   : >"$TMP/none.toml"
@@ -534,14 +545,6 @@ print(prs.needs_dispatch(pr, data)[0], json.dumps(prs.heads(data.get(pr["url"], 
   [ "$(dispatch_state)" = 'False "pending"' ]
 }
 
-@test "a prompt without reliable start evidence stays pending" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  PROMPT_STATUS=1 GH_NO_REVIEW=1 dispatch
-  not_contains "$output" 'BLOCKED prompt not started'
-  [ "$(dispatch_state)" = 'False "pending"' ]
-}
-
 @test "a posted review marks the head done" {
   stub_review_tools
   : >"$TMP/none.toml"
@@ -565,11 +568,13 @@ print(prs.needs_dispatch(pr, data)[0], json.dumps(prs.heads(data.get(pr["url"], 
   stub_review_tools
   : >"$TMP/none.toml"
   PROMPT_STATUS=1 GH_NO_REVIEW=1 AGENT_BUSY=1 dispatch
-  not_contains "$output" 'BLOCKED prompt not started'
+  contains "$output" 'LEFT OPEN w9-p2'
+  [ ! -e "$TMP/closed/w9-p2" ]
   [ "$(dispatch_state)" = 'False "pending"' ]
   rm "$HOME/.cache/review-prs/dispatched.json"
   PROMPT_STATUS=1 GH_NO_REVIEW=1 AGENT_READ_FAILS=1 dispatch
-  not_contains "$output" 'BLOCKED prompt not started'
+  contains "$output" 'LEFT OPEN w9-p2'
+  [ ! -e "$TMP/closed/w9-p2" ]
   [ "$(dispatch_state)" = 'False "pending"' ]
 }
 

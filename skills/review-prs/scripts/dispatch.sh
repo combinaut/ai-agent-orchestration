@@ -158,8 +158,7 @@ prompt_out=$(herdr agent prompt "$agent" "$prompt" --wait --timeout 1800000 2>&1
 status=$?
 [ -z "$prompt_out" ] || printf '%s\n' "$prompt_out"
 echo "PROMPT_EXIT $status"
-turn_screen=$(herdr agent read "$agent" --source recent-unwrapped --lines 80 2>/dev/null || true)
-printf '%s\n' "$turn_screen" | tail -25
+herdr agent read "$agent" --source recent-unwrapped --lines 80 | tail -25
 # Your newest submitted review of the dispatched head that was not there before this dispatch.
 if ! reviews=$(gh_bounded api --paginate --slurp "repos/$repo/pulls/$num/reviews") ||
   ! review=$(printf '%s' "$reviews" | "$py" "$here/prs.py" last-review --login "$me" --sha "$sha" --seen "$seen"); then
