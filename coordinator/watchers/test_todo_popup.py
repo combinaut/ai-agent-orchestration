@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import subprocess
@@ -121,26 +122,76 @@ class PopupTest(IsolatedTestCase):
         self.assertIsNotNone(identity)
         self.assertIn(str(self.popup.VIEW), identity["command"])
 
-    def test_open_action_replaces_before_launch_and_waits_for_registration(self):
+    def test_open_closes_live_recorded_popup_before_launch_and_registration(self):
         events = []
         with (
             patch.object(self.popup, "pidfile", return_value=self.path),
             patch.object(
-                self.popup, "replace", side_effect=lambda _: events.append("replace")
+                self.popup, "process_identity", side_effect=[self.identity, None]
             ),
+            patch.object(
+                self.popup, "rpc", side_effect=lambda *args: events.append("close")
+            ) as rpc,
+            patch.object(self.popup.os, "kill") as kill,
             patch.object(self.popup.subprocess, "run") as run,
             patch.object(self.popup.uuid, "uuid4") as token,
             patch.object(
-                self.popup, "read_record", return_value={**self.record, "token": "new"}
+                self.popup,
+                "read_record",
+                side_effect=[self.record, {**self.record, "token": "new"}],
             ),
         ):
             token.return_value.hex = "new"
             run.side_effect = lambda *a, **k: (
-                events.append("open") or subprocess.CompletedProcess([], 0)
+                events.append("open")
+                or subprocess.CompletedProcess([], 0, stdout="", stderr="")
             )
             self.assertEqual(self.popup.open_popup(), 0)
-        self.assertEqual(events, ["replace", "open"])
+        self.assertEqual(events, ["close", "open"])
+        rpc.assert_called_once_with("popup.close", {})
+        kill.assert_not_called()
         self.assertIn("ORCH_TODO_POPUP_TOKEN=new", run.call_args.args[0])
+
+    def test_open_retries_busy_during_previous_popup_process_exit(self):
+        busy = subprocess.CompletedProcess(
+            [], 1, stdout=json.dumps({"error": {"code": "ui_busy"}}), stderr=""
+        )
+        opened = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with (
+            patch.object(self.popup, "pidfile", return_value=self.path),
+            patch.object(self.popup, "replace") as replace,
+            patch.object(self.popup.uuid, "uuid4") as token,
+            patch.object(
+                self.popup, "read_record", return_value={**self.record, "token": "new"}
+            ),
+            patch.object(
+                self.popup.subprocess, "run", side_effect=[busy, opened]
+            ) as run,
+            patch.object(self.popup.time, "sleep"),
+        ):
+            token.return_value.hex = "new"
+            self.assertEqual(self.popup.open_popup(), 0)
+        replace.assert_called_once_with(self.path)
+        self.assertEqual(run.call_count, 2)
+
+    def test_unowned_busy_popup_is_not_closed_and_retries_are_bounded(self):
+        busy = subprocess.CompletedProcess(
+            [], 1, stdout=json.dumps({"error": {"code": "ui_busy"}}), stderr=""
+        )
+        with (
+            patch.object(self.popup, "pidfile", return_value=self.path),
+            patch.object(self.popup, "read_record", return_value=None),
+            patch.object(self.popup, "rpc") as rpc,
+            patch.object(self.popup.os, "kill") as kill,
+            patch.object(self.popup.subprocess, "run", return_value=busy) as run,
+            patch.object(self.popup.time, "monotonic", side_effect=[0, 0, 4]),
+            patch.object(self.popup.time, "sleep"),
+            patch.object(self.popup.sys, "stdout", io.StringIO()),
+        ):
+            self.assertEqual(self.popup.open_popup(), 1)
+        self.assertEqual(run.call_count, 2)
+        rpc.assert_not_called()
+        kill.assert_not_called()
 
     def test_pane_check_distinguishes_gone_from_transient_errors(self):
         for reply, expected in (

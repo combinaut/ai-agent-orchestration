@@ -158,23 +158,37 @@ def open_popup():
         fcntl.flock(lock, fcntl.LOCK_EX)
         replace(path)
         token = uuid.uuid4().hex
-        result = subprocess.run(
-            [
-                os.environ.get("HERDR_BIN_PATH", "herdr"),
-                "plugin",
-                "pane",
-                "open",
-                "--plugin",
-                "combinaut.todo",
-                "--entrypoint",
-                "view",
-                "--env",
-                f"ORCH_TODO_POPUP_TOKEN={token}",
-            ],
-            check=False,
-        )
-        if result.returncode:
-            return result.returncode
+        command = [
+            os.environ.get("HERDR_BIN_PATH", "herdr"),
+            "plugin",
+            "pane",
+            "open",
+            "--plugin",
+            "combinaut.todo",
+            "--entrypoint",
+            "view",
+            "--env",
+            f"ORCH_TODO_POPUP_TOKEN={token}",
+        ]
+        deadline = time.monotonic() + 3
+        while True:
+            result = subprocess.run(
+                command, capture_output=True, text=True, timeout=5, check=False
+            )
+            try:
+                error = json.loads(result.stdout or result.stderr or "{}").get(
+                    "error", {}
+                )
+            except ValueError:
+                error = {}
+            if error.get("code") == "ui_busy" and time.monotonic() < deadline:
+                time.sleep(0.05)
+                continue
+            sys.stdout.write(result.stdout)
+            sys.stderr.write(result.stderr)
+            if result.returncode or error:
+                return result.returncode or 1
+            break
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             record = read_record(path)

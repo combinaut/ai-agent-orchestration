@@ -887,21 +887,23 @@ def main():
         except OSError:
             pass
     finally:
-        todo_popup.unregister(registration)
-        if old is not None:
-            for restore in (
-                lambda: out.write(LEAVE),
-                lambda: termios.tcsetattr(fd, termios.TCSANOW, old),
-            ):
-                try:
-                    restore()
-                except (OSError, ValueError):
-                    pass
-            os.set_blocking(out.fd, blocking)
-        for number, handler in previous.items():
-            signal.signal(number, handler)
-        if scratch:
-            shutil.rmtree(scratch, ignore_errors=True)
+        try:
+            if old is not None:
+                for restore in (
+                    lambda: out.write(LEAVE),
+                    lambda: termios.tcsetattr(fd, termios.TCSANOW, old),
+                ):
+                    try:
+                        restore()
+                    except (OSError, ValueError):
+                        pass
+                os.set_blocking(out.fd, blocking)
+            for number, handler in previous.items():
+                signal.signal(number, handler)
+            if scratch:
+                shutil.rmtree(scratch, ignore_errors=True)
+        finally:
+            todo_popup.unregister(registration)
 
 
 if __name__ == "__main__":

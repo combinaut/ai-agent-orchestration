@@ -1251,6 +1251,13 @@ if os.environ.get("VIEW_FAIL"):
     v.tty.setcbreak = boom
 if os.environ.get("VIEW_PANE_GONE"):
     v.todo_popup.pane_exists = lambda *_: False
+if os.environ.get("VIEW_CHECK_CLEANUP"):
+    write = v.BoundedOut.write
+    def checked(out, text):
+        if text == v.LEAVE:
+            assert v.todo_popup.read_record(v.todo_popup.pidfile()), "ownership cleared before terminal cleanup"
+        write(out, text)
+    v.BoundedOut.write = checked
 code = 0
 try:
     v.main()
@@ -1329,7 +1336,7 @@ class PtyTest(IsolatedTestCase):
                 self.assertIn("\x1b[?1000l", out)
                 self.assertRegex(out, r"RESULT 0 True True")
 
-    def test_unknown_process_identity_does_not_prevent_popup_use(self):
+    def test_unknown_identity_keeps_popup_usable_and_owned_through_cleanup(self):
         with tempfile.TemporaryDirectory() as state:
 
             def act(pid, fd, read):
@@ -1342,6 +1349,7 @@ class PtyTest(IsolatedTestCase):
                     "COLUMNS": "80",
                     "HERDR_SOCKET_PATH": "/test/no-server.sock",
                     "HERDR_PLUGIN_STATE_DIR": state,
+                    "VIEW_CHECK_CLEANUP": "1",
                 },
                 act,
             )
