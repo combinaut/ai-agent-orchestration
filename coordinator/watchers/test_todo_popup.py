@@ -32,7 +32,9 @@ class PopupTest(IsolatedTestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
 
-    def test_replacement_closes_and_terminates_only_the_recorded_popup(self):
+    def test_replacement_terminates_recorded_child_without_closing_reused_popup_slot(
+        self,
+    ):
         with (
             patch.object(
                 self.popup,
@@ -45,7 +47,7 @@ class PopupTest(IsolatedTestCase):
             patch.object(self.popup.os, "kill") as kill,
         ):
             self.popup.replace(self.path)
-        rpc.assert_called_once_with("popup.close", {})
+        rpc.assert_not_called()
         kill.assert_called_once_with(12345, self.popup.signal.SIGTERM)
 
     def test_stale_dead_reused_or_foreign_pidfiles_never_signal_or_close(self):
@@ -122,17 +124,23 @@ class PopupTest(IsolatedTestCase):
         self.assertIsNotNone(identity)
         self.assertIn(str(self.popup.VIEW), identity["command"])
 
-    def test_open_closes_live_recorded_popup_before_launch_and_registration(self):
+    def test_open_terminates_recorded_child_before_launch_and_registration(self):
         events = []
         with (
             patch.object(self.popup, "pidfile", return_value=self.path),
             patch.object(
-                self.popup, "process_identity", side_effect=[self.identity, None]
+                self.popup,
+                "process_identity",
+                side_effect=[self.identity, self.identity, None],
             ),
             patch.object(
                 self.popup, "rpc", side_effect=lambda *args: events.append("close")
             ) as rpc,
-            patch.object(self.popup.os, "kill") as kill,
+            patch.object(
+                self.popup.os,
+                "kill",
+                side_effect=lambda *args: events.append("terminate"),
+            ) as kill,
             patch.object(self.popup.subprocess, "run") as run,
             patch.object(self.popup.uuid, "uuid4") as token,
             patch.object(
@@ -147,9 +155,9 @@ class PopupTest(IsolatedTestCase):
                 or subprocess.CompletedProcess([], 0, stdout="", stderr="")
             )
             self.assertEqual(self.popup.open_popup(), 0)
-        self.assertEqual(events, ["close", "open"])
-        rpc.assert_called_once_with("popup.close", {})
-        kill.assert_not_called()
+        self.assertEqual(events, ["terminate", "open"])
+        rpc.assert_not_called()
+        kill.assert_called_once_with(12345, self.popup.signal.SIGTERM)
         self.assertIn("ORCH_TODO_POPUP_TOKEN=new", run.call_args.args[0])
 
     def test_open_retries_busy_during_previous_popup_process_exit(self):

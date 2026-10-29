@@ -93,11 +93,6 @@ def replace(path):
     record = read_record(path)
     if not owns(record):
         return
-    # Popups have no public pane ID in Herdr 0.9; popup.close releases their UI slot.
-    try:
-        rpc("popup.close", {})
-    except (OSError, ValueError):
-        pass
     for number in (signal.SIGTERM, signal.SIGKILL):
         if not owns(record):
             return
