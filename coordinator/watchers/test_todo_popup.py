@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -198,6 +199,130 @@ class PopupTest(IsolatedTestCase):
         self.assertEqual(run.call_count, 2)
         rpc.assert_not_called()
         kill.assert_not_called()
+
+    def legacy_receipt(self):
+        started = time.mktime(
+            time.strptime(self.identity["started"], "%a %b %d %H:%M:%S %Y")
+        )
+        return started - 0.1, {
+            **self.record,
+            "token": None,
+            "registered_at": started + 0.1,
+        }
+
+    def test_rejected_env_retries_once_without_env_and_accepts_new_child(self):
+        opened_at, record = self.legacy_receipt()
+        for rejection in (
+            subprocess.CompletedProcess(
+                [], 2, stdout="", stderr="error: unexpected argument '--env'"
+            ),
+            subprocess.CompletedProcess(
+                [],
+                1,
+                stdout=json.dumps(
+                    {
+                        "error": {
+                            "code": "invalid_params",
+                            "message": "unknown parameter: env",
+                        }
+                    }
+                ),
+                stderr="",
+            ),
+            subprocess.CompletedProcess(
+                [],
+                1,
+                stdout=json.dumps(
+                    {
+                        "error": {
+                            "code": "invalid_params",
+                            "message": "unknown parameter",
+                        }
+                    }
+                ),
+                stderr="",
+            ),
+        ):
+            with (
+                self.subTest(rejection=rejection),
+                patch.object(self.popup, "pidfile", return_value=self.path),
+                patch.object(self.popup, "replace"),
+                patch.object(
+                    self.popup.subprocess,
+                    "run",
+                    side_effect=[
+                        rejection,
+                        subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+                    ],
+                ) as run,
+                patch.object(self.popup, "read_record", return_value=record),
+                patch.object(self.popup.time, "time", return_value=opened_at),
+                patch.object(self.popup.time, "monotonic", side_effect=[0, 0, 0, 6]),
+                patch.object(self.popup.time, "sleep"),
+                patch.object(self.popup.sys, "stderr", io.StringIO()),
+                patch.object(self.popup.sys, "stdout", io.StringIO()),
+            ):
+                self.assertEqual(self.popup.open_popup(), 0)
+                self.assertEqual(run.call_count, 2)
+                self.assertIn("--env", run.call_args_list[0].args[0])
+                self.assertNotIn("--env", run.call_args_list[1].args[0])
+
+    def test_ignored_env_accepts_new_tokenless_child_without_another_open(self):
+        opened_at, record = self.legacy_receipt()
+        with (
+            patch.object(self.popup, "pidfile", return_value=self.path),
+            patch.object(self.popup, "replace"),
+            patch.object(
+                self.popup.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+            ) as run,
+            patch.object(self.popup, "read_record", return_value=record),
+            patch.object(self.popup.time, "time", return_value=opened_at),
+            patch.object(self.popup.time, "monotonic", side_effect=[0, 0, 0, 6]),
+            patch.object(self.popup.time, "sleep"),
+            patch.object(self.popup.sys, "stderr", io.StringIO()),
+        ):
+            self.assertEqual(self.popup.open_popup(), 0)
+        run.assert_called_once()
+
+    def test_tokenless_fallback_rejects_stale_registration_or_old_process(self):
+        opened_at, record = self.legacy_receipt()
+        self.assertTrue(self.popup.registered_after(record, opened_at))
+        for candidate in (
+            {**record, "registered_at": opened_at - 1},
+            {
+                **record,
+                "identity": {
+                    **record["identity"],
+                    "started": "Wed Oct 28 10:00:00 2026",
+                },
+            },
+            {**record, "token": "another-launch"},
+            {**record, "identity": None},
+        ):
+            with self.subTest(record=candidate):
+                self.assertFalse(self.popup.registered_after(candidate, opened_at))
+        self.assertTrue(
+            self.popup.registered_after(
+                {**record, "registered_at": opened_at + 1}, opened_at + 0.5
+            )
+        )
+
+    def test_env_compatibility_retry_is_only_attempted_once(self):
+        rejection = subprocess.CompletedProcess(
+            [], 2, stdout="", stderr="unknown parameter env"
+        )
+        with (
+            patch.object(self.popup, "pidfile", return_value=self.path),
+            patch.object(self.popup, "replace"),
+            patch.object(self.popup.subprocess, "run", return_value=rejection) as run,
+            patch.object(self.popup.sys, "stderr", io.StringIO()),
+        ):
+            self.assertEqual(self.popup.open_popup(), 2)
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("--env", run.call_args_list[0].args[0])
+        self.assertNotIn("--env", run.call_args_list[1].args[0])
 
     def test_pane_check_distinguishes_gone_from_transient_errors(self):
         for reply, expected in (

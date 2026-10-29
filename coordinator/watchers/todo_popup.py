@@ -112,12 +112,14 @@ def register():
     if not os.environ.get("HERDR_SOCKET_PATH"):
         return None
     path = pidfile()
+    registered_at = time.time()
     identity = process_identity(os.getpid())
     record = {
         "pid": os.getpid(),
         "identity": identity,
         "socket": os.environ["HERDR_SOCKET_PATH"],
         "token": os.environ.get("ORCH_TODO_POPUP_TOKEN"),
+        "registered_at": registered_at,
     }
     fd, name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".")
     try:
@@ -134,6 +136,18 @@ def pane_exists(pane):
         return reply.get("error", {}).get("code") != "pane_not_found"
     except (OSError, ValueError, KeyError):
         return True
+
+
+def registered_after(record, opened_at):
+    if record.get("token") is not None:
+        return False
+    try:
+        started = time.mktime(
+            time.strptime(record["identity"]["started"], "%a %b %d %H:%M:%S %Y")
+        )
+        return record["registered_at"] >= opened_at and started >= int(opened_at)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
 
 
 def open_popup():
@@ -154,6 +168,7 @@ def open_popup():
             "--env",
             f"ORCH_TODO_POPUP_TOKEN={token}",
         ]
+        opened_at = time.time()
         deadline = time.monotonic() + 3
         while True:
             result = subprocess.run(
@@ -165,6 +180,19 @@ def open_popup():
                 )
             except ValueError:
                 error = {}
+            message = (result.stdout + result.stderr).lower()
+            if (
+                (result.returncode or error)
+                and "--env" in command
+                and (
+                    "env" in message
+                    or re.search(
+                        r"unknown[ _]+(?:parameter|field|option|argument)", message
+                    )
+                )
+            ):
+                command = command[:-2]
+                continue
             if error.get("code") == "ui_busy" and time.monotonic() < deadline:
                 time.sleep(0.05)
                 continue
@@ -176,7 +204,9 @@ def open_popup():
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             record = read_record(path)
-            if record and record.get("token") == token:
+            if record and (
+                record.get("token") == token or registered_after(record, opened_at)
+            ):
                 return 0
             time.sleep(0.05)
         print("to-do popup did not register its process", file=sys.stderr)
