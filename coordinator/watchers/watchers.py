@@ -1574,7 +1574,9 @@ def answer_order(path):
         return 0, path.name
 
 
-def open_question(slug, question, timeout=question_remind.OPEN_TIMEOUT):
+def open_question(
+    slug, question, timeout=question_remind.OPEN_TIMEOUT, *, reopening=False
+):
     if slug == "close":
         from question_lock import run_group
 
@@ -1586,11 +1588,11 @@ def open_question(slug, question, timeout=question_remind.OPEN_TIMEOUT):
             quiet=True,
         )
     argv = ["/usr/bin/env", f"{HELD}=1"]
-    try:
-        asker_pane = Path(question).with_suffix(".asker-pane").read_text().strip()
-    except FileNotFoundError:
-        asker_pane = ""
-    if asker_pane:
+    if reopening:
+        try:
+            asker_pane = Path(question).with_suffix(".asker-pane").read_text().strip()
+        except FileNotFoundError:
+            asker_pane = ""
         argv.append(f"HERDR_PANE_ID={asker_pane}")
     argv += [
         str(ROOT.parents[1] / "ask-user-question"),
@@ -1647,7 +1649,11 @@ def collect_answers(before, consume=True):
             unreadable.append(str(processing))
     if consume:
         try:
-            question_remind.reopen_due(directory, time.time(), open_question)
+            question_remind.reopen_due(
+                directory,
+                time.time(),
+                lambda slug, question: open_question(slug, question, reopening=True),
+            )
         except (OSError, subprocess.SubprocessError):
             pass
     return {"answers": answers, "unreadable": unreadable}

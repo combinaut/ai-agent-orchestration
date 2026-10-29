@@ -379,7 +379,7 @@ class ReopenTest(IsolatedTestCase):
         base = self.dir / "state"
         attempts = []
 
-        def slow(slug, question):
+        def slow(slug, question, **kwargs):
             attempts.append(slug)
             raise subprocess.TimeoutExpired("ask-user-question", 10)
 
@@ -409,7 +409,9 @@ class ReopenTest(IsolatedTestCase):
         calls = []
         with (
             patch.dict(os.environ, {"ORCH_USER_QUESTIONS_DIR": str(self.dir)}),
-            patch.object(w, "open_question", lambda *args: calls.append(args) or 0),
+            patch.object(
+                w, "open_question", lambda *args, **kwargs: calls.append(args) or 0
+            ),
         ):
             w.collect_answers(None, consume=False)
             self.assertEqual(calls, [])

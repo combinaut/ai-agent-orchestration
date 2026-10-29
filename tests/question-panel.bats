@@ -270,6 +270,28 @@ EOF
   [ ! -e "$questions/due.remind" ]
 }
 
+@test "a legacy reminder ignores the watcher caller and uses the to-do fallback" {
+  questions="$HOME/.claude/coordinator/questions"
+  printf due >"$questions/due.md"
+  printf '%s\n' 1 >"$questions/due.remind"
+  panes='{"result":{"panes":[{"pane_id":"watcher"},{"pane_id":"todo","label":"To-do"}]}}'
+  run env HERDR_PANE_ID=watcher ORCH_USER_QUESTIONS_DIR="$questions" HERDR_PANES="$panes" "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --state-dir "$TMP/state"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane split todo --direction down --no-focus' "$TMP/question-herdr.calls"
+  [ ! -e "$questions/due.asker-pane" ]
+}
+
+@test "an initial worker escalation through the watcher helper retains the caller" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf release >"$question"
+  printf todo >"${question%.md}.asker-pane"
+  panes='{"result":{"panes":[{"pane_id":"architect"},{"pane_id":"todo","label":"To-do"}]}}'
+  run env HERDR_PANE_ID=architect HERDR_PANES="$panes" "$ORCH_PYTHON3" -c 'import sys; sys.path.insert(0, sys.argv[1]); import watchers; sys.exit(watchers.open_question("release", sys.argv[2]))' "$ROOT/coordinator/watchers" "$question"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane split architect --direction down --no-focus' "$TMP/question-herdr.calls"
+  [ "$(cat "${question%.md}.asker-pane")" = architect ]
+}
+
 @test "a failed reopen keeps the reminder for the next pass" {
   questions="$HOME/.claude/coordinator/questions"
   printf due >"$questions/due.md"

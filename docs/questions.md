@@ -51,6 +51,6 @@ The option id is the digit `1`-`9`, consecutive from `1`; the label is the rest 
 
 ## Remind
 
-A pick writes `answers: REMIND <slug> <YYYY-MM-DD HH:MM>` to the feed and stores the time (epoch seconds) in `<slug>.remind` next to the question. The pane then runs `ask-user-question hide <slug>`. On its next cycle after that time, the answers watcher reopens the pane and removes the file. The opener records a live caller in `<slug>.asker-pane`; the watcher supplies that pane as `HERDR_PANE_ID` when reopening, with the same fallback if it has disappeared. Close removes this metadata; hide keeps it. A failed open retries on the next cycle. If the feed cannot be written, nothing changes and the panel stays open.
+A pick writes `answers: REMIND <slug> <YYYY-MM-DD HH:MM>` to the feed and stores the time (epoch seconds) in `<slug>.remind` next to the question. The pane then runs `ask-user-question hide <slug>`. On its next cycle after that time, the answers watcher reopens the pane and removes the file. The opener records a live caller in `<slug>.asker-pane`; the watcher supplies that pane as `HERDR_PANE_ID` when reopening, with the same fallback if it has disappeared. A reminder without saved metadata clears the watcher’s caller pane and uses the legacy fallback. Close removes this metadata; hide keeps it. A failed open retries on the next cycle. If the feed cannot be written, nothing changes and the panel stays open.
 
 See [watchers.md](watchers.md) for how the answers watcher claims and publishes answers.
