@@ -3,6 +3,7 @@ import importlib.util
 import io
 import os
 import pty
+import re
 import signal
 import subprocess
 import sys
@@ -189,7 +190,9 @@ class MarkdownTest(PanelCase):
             ) as render,
         ):
             self.panel.show()
-        self.assertEqual(render.call_args.kwargs["input"], clean)
+        self.assertEqual(
+            render.call_args.kwargs["input"], clean.replace("1. Yes", "1\\. Yes") + "  "
+        )
         with (
             patch.object(pane.shutil, "which", return_value=None),
             patch.object(pane.os, "access", return_value=False),
@@ -203,6 +206,38 @@ class MarkdownTest(PanelCase):
             pane.answer_path(self.question).read_text().strip(), '1 "Yes please"'
         )
         self.assertIn('Sent: 1 "Yes please"', other.out.getvalue())
+
+    def test_renderer_preserves_duplicate_ids_and_lines_only_in_options(self):
+        self.question.write_text(
+            "# Pick\n1. Context\n1. More context\n\n## Options\n1. A\n1. B\n2. C\n\n## Notes\n1. Note\n1. Another note"
+        )
+        with (
+            patch.object(pane.shutil, "which", return_value="/bin/mdcat"),
+            patch.object(
+                pane.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout="Rendered\n"),
+            ) as render,
+        ):
+            self.panel.show()
+            self.press("2", "3")
+        self.assertEqual(
+            render.call_args.kwargs["input"],
+            "# Pick\n1. Context\n1. More context\n\n## Options\n1\\. A  \n1\\. B  \n2\\. C  \n\n## Notes\n1. Note\n1. Another note",
+        )
+        self.assertEqual(pane.answer_path(self.question).read_text().strip(), '2 "C"')
+        self.assertIn("No option 3.", self.out.getvalue())
+
+    def test_real_mdcat_displays_source_option_ids(self):
+        executable = pane.shutil.which("mdcat") or "/opt/homebrew/bin/mdcat"
+        if not os.access(executable, os.X_OK):
+            self.skipTest("mdcat is not installed")
+        self.question.write_text("# Pick\n\n## Options\n1. A\n1. B\n2. C\n")
+        self.panel.show()
+        rendered = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", self.out.getvalue())
+        lines = [line.strip() for line in rendered.splitlines()]
+        for option in ("1. A", "1. B", "2. C"):
+            self.assertIn(option, lines)
 
     def test_homebrew_mdcat_is_used_when_missing_from_path(self):
         with (
