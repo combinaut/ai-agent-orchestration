@@ -1339,6 +1339,40 @@ class PtyTest(IsolatedTestCase):
                 self.assertIn("\x1b[?1000l", out)
                 self.assertRegex(out, r"RESULT 143 True True")
 
+    def test_a_lost_terminal_ends_the_popup(self):
+        path = str(w.ROOT.parent / "user-todo-view.py")
+        script = (
+            "import importlib.util, os, sys, signal\n"
+            "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+            f"spec = importlib.util.spec_from_file_location('v', {path!r})\n"
+            "v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v)\n"
+            "sys.argv = ['x', '--demo', '--popup']\n"
+            "v.main()\n"
+        )
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execvp(sys.executable, [sys.executable, "-I", "-c", script])
+        status = None
+        try:
+            end = time.time() + 8
+            seen = ""
+            while "3 open" not in seen and time.time() < end:
+                ready, _, _ = select.select([fd], [], [], 0.5)
+                if ready:
+                    seen += os.read(fd, 65536).decode(errors="ignore")
+            os.close(fd)
+            while time.time() < end and status is None:
+                done, status_code = os.waitpid(pid, os.WNOHANG)
+                if done:
+                    status = status_code
+                else:
+                    time.sleep(0.1)
+        finally:
+            if status is None:
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+        self.assertIsNotNone(status, "the popup outlived its terminal")
+
     def test_a_setup_failure_after_the_mode_change_restores_it(self):
         out = run_in_pty({"VIEW_FAIL": "1"}, lambda pid, fd, read: read(until="RESULT"))
         self.assertRegex(out, r"RESULT oserror True True")

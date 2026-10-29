@@ -829,21 +829,29 @@ def main():
         sys.stdout.flush()
         app = App(hidden, demo, sys.stdout, os.get_terminal_size, popup=popup)
         decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
-        while not app.closing:
-            app.tick()
-            ready, _, _ = select.select([fd], [], [], 0.3 if app.buf == "\x1b" else 1)
-            if not ready:
-                app.lone_escape()
-                continue
-            data = os.read(fd, 64)
-            if not data:
-                break
-            app.feed(decoder.decode(data))
+        try:
+            while not app.closing:
+                app.tick()
+                ready, _, _ = select.select(
+                    [fd], [], [], 0.3 if app.buf == "\x1b" else 1
+                )
+                if not ready:
+                    app.lone_escape()
+                    continue
+                data = os.read(fd, 64)
+                if not data:
+                    break
+                app.feed(decoder.decode(data))
+        except OSError:
+            pass
     finally:
         if old is not None:
-            sys.stdout.write(LEAVE)
-            sys.stdout.flush()
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            try:
+                sys.stdout.write(LEAVE)
+                sys.stdout.flush()
+                termios.tcsetattr(fd, termios.TCSANOW, old)
+            except (OSError, ValueError):
+                pass
         for number, handler in previous.items():
             signal.signal(number, handler)
         if scratch:
