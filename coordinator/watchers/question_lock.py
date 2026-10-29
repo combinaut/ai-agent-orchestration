@@ -134,6 +134,7 @@ def close_question(slug, helper, pane):
         for name in (
             f"{slug}.md",
             f"{slug}.remind",
+            f"{slug}.asker-pane",
             f"{slug}.answer",
             f"{slug}.answer.seen",
             f"{slug}.answer.processing",

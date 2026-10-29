@@ -79,6 +79,64 @@ class PanelCase(IsolatedTestCase):
         return self.question.with_suffix(".remind")
 
 
+class MarkdownTest(PanelCase):
+    def test_question_is_rendered_with_mdcat_and_controls_stay_interactive(self):
+        with (
+            patch.object(pane.shutil, "which", return_value="/bin/mdcat"),
+            patch.object(
+                pane.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout="Rendered question\n"),
+            ) as render,
+        ):
+            self.panel.show()
+            self.press("2")
+        self.assertEqual(render.call_args.args[0][0], "/bin/mdcat")
+        self.assertEqual(
+            render.call_args.kwargs["input"], self.question.read_text().rstrip()
+        )
+        self.assertIn("Rendered question", self.out.getvalue())
+        self.assertIn(pane.HINT, self.out.getvalue())
+        self.assertEqual(pane.answer_path(self.question).read_text().strip(), "2")
+
+    def test_missing_mdcat_renders_plain_text_with_one_warning(self):
+        with (
+            patch.object(pane.shutil, "which", return_value=None),
+            patch.object(pane.os, "access", return_value=False),
+            patch.object(pane.sys, "stderr", new_callable=io.StringIO) as err,
+        ):
+            self.panel.show()
+            self.panel.show()
+        self.assertIn("Ship it?", self.out.getvalue())
+        self.assertEqual(len(err.getvalue().splitlines()), 1)
+        self.assertIn("mdcat", err.getvalue())
+
+    def test_failed_mdcat_keeps_the_panel_interactive(self):
+        with (
+            patch.object(pane.shutil, "which", return_value="/bin/mdcat"),
+            patch.object(pane.subprocess, "run", side_effect=OSError("gone")),
+            patch.object(pane.sys, "stderr", new_callable=io.StringIO) as err,
+        ):
+            self.panel.show()
+            self.press("1")
+        self.assertIn("Ship it?", self.out.getvalue())
+        self.assertEqual(len(err.getvalue().splitlines()), 1)
+        self.assertEqual(pane.answer_path(self.question).read_text().strip(), "1")
+
+    def test_homebrew_mdcat_is_used_when_missing_from_path(self):
+        with (
+            patch.object(pane.shutil, "which", return_value=None),
+            patch.object(pane.os, "access", return_value=True),
+            patch.object(
+                pane.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout="Rendered\n"),
+            ) as render,
+        ):
+            self.panel.show()
+        self.assertEqual(render.call_args.args[0][0], "/opt/homebrew/bin/mdcat")
+
+
 class DismissTest(PanelCase):
     def test_d_writes_the_dismissed_line_and_closes_the_question(self):
         self.press("d")

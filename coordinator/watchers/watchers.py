@@ -1585,9 +1585,14 @@ def open_question(slug, question, timeout=question_remind.OPEN_TIMEOUT):
             check=False,
             quiet=True,
         )
-    argv = [
-        "/usr/bin/env",
-        f"{HELD}=1",
+    argv = ["/usr/bin/env", f"{HELD}=1"]
+    try:
+        asker_pane = Path(question).with_suffix(".asker-pane").read_text().strip()
+    except FileNotFoundError:
+        asker_pane = ""
+    if asker_pane:
+        argv.append(f"HERDR_PANE_ID={asker_pane}")
+    argv += [
         str(ROOT.parents[1] / "ask-user-question"),
         slug,
         str(question),

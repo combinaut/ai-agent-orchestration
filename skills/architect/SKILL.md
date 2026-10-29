@@ -166,7 +166,7 @@ Never, without an explicit request: **merge**, assign or reassign people beyond 
 
 - routine implementation problem → worker → smart model
 - architectural uncertainty → worker → you
-- product or requirement ambiguity that cannot be resolved from the repo or issues → you → user. To ask the user, write the question file `~/.claude/coordinator/questions/<slug>.md` in the [questions format](../../docs/questions.md), then send the Coordinator one line `QUESTION <slug> ~/.claude/coordinator/questions/<slug>.md`.
+- product or requirement ambiguity that cannot be resolved from the repo or issues → you → user. To ask the user, write the question file `~/.claude/coordinator/questions/<slug>.md` in the [questions format](../../docs/questions.md), run `ask-user-question <slug> ~/.claude/coordinator/questions/<slug>.md` from your own pane (with your `HERDR_PANE_ID`) to host the question beside you, then send the Coordinator one line `QUESTION <slug> ~/.claude/coordinator/questions/<slug>.md` to register yourself as the asker for answer relay. Keep the question in your status file’s `## Waits on the user` until answered; the Coordinator still relays the shared watcher’s answer verbatim.
 
 A worker's failure does not go straight to the user.
 

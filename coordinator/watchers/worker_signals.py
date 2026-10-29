@@ -218,7 +218,7 @@ def remove_question(record, close_panel=True, close_timeout=CLEANUP_SECONDS):
     question_path(identifier).unlink(missing_ok=True)
     answer_path(identifier).unlink(missing_ok=True)
     directory = questions_directory()
-    for suffix in ("md", "remind", "answer", "answer.seen", "opening"):
+    for suffix in ("md", "remind", "asker-pane", "answer", "answer.seen", "opening"):
         (directory / f"{identifier}.{suffix}").unlink(missing_ok=True)
     for path in directory.glob(f"{identifier}.*.answer.*"):
         path.unlink(missing_ok=True)

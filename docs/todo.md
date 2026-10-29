@@ -28,7 +28,7 @@ The Coordinator opens this view itself at start, in a pane labelled `To-do` besi
 
 `install.sh` (herdr env) also makes `prefix+t` open the buttons view as a popup titled "Your to-do". It links the Herdr plugin in `env/herdr/todo-plugin` and adds a marked `[[keys.command]]` block to Herdr's `config.toml`. To turn the popup off, set `todo_popup = false` under `[herdr]` in `~/.claude/orchestration.toml` and run `install.sh`; that removes both. See [docs/settings.md](settings.md).
 
-Question panes (`ask-user-question`) stack below the pane labelled `To-do`.
+Question panes (`ask-user-question`) open below the asking architect’s pane using `HERDR_PANE_ID`; a missing or vanished caller falls back to the last question pane, then `To-do`.
 
 ## Answer an item
 

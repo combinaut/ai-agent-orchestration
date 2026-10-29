@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Opens or closes one Coordinator user-question pane.
+# Opens or closes one user-question pane.
 set -euo pipefail
 
 self=${BASH_SOURCE[0]}
@@ -84,7 +84,17 @@ case $action in
       fi
       rm -f "$opening"
     fi
-    anchor=$(find_pane "Q: " prefix)
+    anchor=
+    if [ -n "${HERDR_PANE_ID:-}" ]; then
+      anchor=$(pane_rows | "${ORCH_PYTHON3:-python3}" -c '
+import json, sys
+caller = sys.argv[1]
+rows = json.load(sys.stdin).get("result", {}).get("panes", [])
+print(caller if any(isinstance(row, dict) and row.get("pane_id") == caller for row in rows) else "")
+' "$HERDR_PANE_ID")
+      [ -z "$anchor" ] || printf '%s\n' "$anchor" >"$questions/$slug.asker-pane"
+    fi
+    [ -n "$anchor" ] || anchor=$(find_pane "Q: " prefix)
     [ -n "$anchor" ] || anchor=$(find_pane "To-do")
     if [ -z "$anchor" ]; then
       anchor=$(pane_rows | "${ORCH_PYTHON3:-python3}" -c '

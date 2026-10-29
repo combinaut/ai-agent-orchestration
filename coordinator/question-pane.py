@@ -77,6 +77,7 @@ class Panel:
             clock,
         )
         self.launcher, self.feed = launcher, Path(feed)
+        self.markdown_warning = False
         self.slug = self.question.stem
         self.status, self.picker, self.done, self.pending = "", None, False, None
 
@@ -98,6 +99,36 @@ class Panel:
                 in_options = True
         return found if in_options else None
 
+    def markdown(self, text):
+        executable = shutil.which("mdcat")
+        if not executable and os.access("/opt/homebrew/bin/mdcat", os.X_OK):
+            executable = "/opt/homebrew/bin/mdcat"
+        if executable:
+            try:
+                return subprocess.run(
+                    [
+                        executable,
+                        "--ansi",
+                        "--local",
+                        "--no-pager",
+                        "--columns",
+                        str(max(1, self.columns() - 1)),
+                    ],
+                    input=text,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                    timeout=5,
+                ).stdout.rstrip()
+            except (OSError, subprocess.SubprocessError):
+                pass
+        if not self.markdown_warning:
+            print(
+                "question-pane: mdcat unavailable; showing plain text.", file=sys.stderr
+            )
+            self.markdown_warning = True
+        return text
+
     def show(self, status=None):
         self.status = self.status if status is None else status
         text = (
@@ -105,12 +136,12 @@ class Panel:
             .rstrip()
             .replace("Answer in the Coordinator pane.", "")
         )
-        lines = [text, "", HINT]
+        lines = [self.markdown(text), "", HINT]
         if self.picker:
             lines += [""] + picker_lines(self.picker, max(1, self.columns() - 1))[0]
         if self.status:
             lines += ["", self.status]
-        self.out.write("\033[H\033[2J" + "\r\n".join(lines))
+        self.out.write("\033[H\033[2J" + "\n".join(lines).replace("\n", "\r\n"))
         self.out.flush()
 
     def record(self, text):
