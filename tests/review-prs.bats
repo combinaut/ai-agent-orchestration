@@ -259,9 +259,10 @@ fork_head_missing_from_pull_ref() {
   prompt=$(cat "$TMP/review.prompt")
   contains "$prompt" '"event":"APPROVE|REQUEST_CHANGES|COMMENT"'
   contains "$prompt" '"comments":[{"path":"...","line":123,"side":"RIGHT","body":"..."}]'
-  contains "$prompt" 'mktemp -d'
-  contains "$prompt" 'review.json'
-  contains "$prompt" "gh api repos/acme/app/pulls/7/reviews --input \"\$review_json\""
+  contains "$prompt" 'gh api -X POST repos/acme/app/pulls/7/reviews --input -'
+  contains "$prompt" 'quoted heredoc'
+  not_contains "$prompt" 'mktemp'
+  not_contains "$prompt" 'review_dir'
   contains "$prompt" 'APPROVE|COMMENT|REQUEST_CHANGES'
 }
 
