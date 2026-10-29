@@ -1,5 +1,54 @@
 # Changelog
 
+## [1.1.0](https://github.com/combinaut/ai-agent-orchestration/compare/v1.0.0...v1.1.0) (2026-10-29)
+
+
+### Features
+
+* **architect:** evidence-format reviewer template ([#125](https://github.com/combinaut/ai-agent-orchestration/issues/125)) ([fc8fa6b](https://github.com/combinaut/ai-agent-orchestration/commit/fc8fa6baba9b2c9e49bef187f5f97d8e7531c2ff))
+* **architect:** start Codex workers with hook trust bypassed ([#120](https://github.com/combinaut/ai-agent-orchestration/issues/120)) ([ae0bf05](https://github.com/combinaut/ai-agent-orchestration/commit/ae0bf051c800a7b39482fe1e53aacdf79c5855ad))
+* **heavy-slot:** --note and feed lines for wait, fail, kill and long runs ([#117](https://github.com/combinaut/ai-agent-orchestration/issues/117)) ([33d6c56](https://github.com/combinaut/ai-agent-orchestration/commit/33d6c56fd81856669140e90a3b113b3b417af8a6))
+* **pi:** pick a pi model per task from models.pi_models ([#91](https://github.com/combinaut/ai-agent-orchestration/issues/91)) ([5803bfc](https://github.com/combinaut/ai-agent-orchestration/commit/5803bfce15274ca2cca04a3921664a6a3585439c))
+* **pr-tabs:** i18n in en, es, de, fr, pt and rename to Orch Tabs ([#95](https://github.com/combinaut/ai-agent-orchestration/issues/95)) ([00b5f98](https://github.com/combinaut/ai-agent-orchestration/commit/00b5f9801dfd2390d01b03578502e4351b90a4a4))
+* **pr-tabs:** icon for Orch Tabs ([#97](https://github.com/combinaut/ai-agent-orchestration/issues/97)) ([8f64780](https://github.com/combinaut/ai-agent-orchestration/commit/8f64780c348f357f6e5d910cae4dd25bcfbdb086))
+* **pr-tabs:** jump from a PR to its Herdr pane ([#100](https://github.com/combinaut/ai-agent-orchestration/issues/100)) ([d081c80](https://github.com/combinaut/ai-agent-orchestration/commit/d081c803eef33fd208ae9c8c0becccbe7d8ac7c8))
+* **pr-tabs:** open a pasted list of PRs ([#119](https://github.com/combinaut/ai-agent-orchestration/issues/119)) ([f53bed6](https://github.com/combinaut/ai-agent-orchestration/commit/f53bed6736cd38d7be05cc829950d4f098e8719d))
+* **pr-tabs:** search, review and manage PR tabs ([#107](https://github.com/combinaut/ai-agent-orchestration/issues/107)) ([a499b81](https://github.com/combinaut/ai-agent-orchestration/commit/a499b811137371a893ba5bd41a6c386f6791d78a))
+* **providers:** add cursor family for Grok via Cursor CLI ([#113](https://github.com/combinaut/ai-agent-orchestration/issues/113)) ([5633c51](https://github.com/combinaut/ai-agent-orchestration/commit/5633c51f762b9db00eb6afca078c4dfa9c456f95))
+* **questions:** answer with the asker's own option id and label ([#102](https://github.com/combinaut/ai-agent-orchestration/issues/102)) ([ee724dd](https://github.com/combinaut/ai-agent-orchestration/commit/ee724ddbf76e0756872d0683c5ae7d5b8f9ddbca))
+* **recycle:** soft and hard worker thresholds ([#85](https://github.com/combinaut/ai-agent-orchestration/issues/85)) ([a63e3e2](https://github.com/combinaut/ai-agent-orchestration/commit/a63e3e22c37a2e3af6352b2e8f4f0a2e77971773))
+* **settings:** effort level per role ([#116](https://github.com/combinaut/ai-agent-orchestration/issues/116)) ([c98dc5b](https://github.com/combinaut/ai-agent-orchestration/commit/c98dc5bbbd42ce966d878a8423bed360bf6681e0))
+* **settings:** make Codex smart reasoning effort configurable ([#106](https://github.com/combinaut/ai-agent-orchestration/issues/106)) ([eaed8f3](https://github.com/combinaut/ai-agent-orchestration/commit/eaed8f3d2f3bf37277c1186bd8b40b87aa9fc3d6))
+* **skills:** finalize skills in every repo ([#89](https://github.com/combinaut/ai-agent-orchestration/issues/89)) ([fc4ad88](https://github.com/combinaut/ai-agent-orchestration/commit/fc4ad885967fa633b4e01b0706355a62e705f03b))
+* **todo:** Dismiss replaces Ignore and keeps the action wanted ([#135](https://github.com/combinaut/ai-agent-orchestration/issues/135)) ([fea57aa](https://github.com/combinaut/ai-agent-orchestration/commit/fea57aa52bead593a884c44feab6255ceca04257))
+* **usage:** cost ledger per closed session and orch-usage weekly read ([#92](https://github.com/combinaut/ai-agent-orchestration/issues/92)) ([a5e67f7](https://github.com/combinaut/ai-agent-orchestration/commit/a5e67f75fbe73567b50f5a59db7836bb791c8fc4))
+* **watchers:** COMMENTED event for a review whose findings are only in its body ([#88](https://github.com/combinaut/ai-agent-orchestration/issues/88)) ([0760a72](https://github.com/combinaut/ai-agent-orchestration/commit/0760a72249d9649a541c03842b9c9cf04470a171))
+
+
+### Bug Fixes
+
+* **codex-start:** use the configured smart reasoning effort ([#127](https://github.com/combinaut/ai-agent-orchestration/issues/127)) ([de593d2](https://github.com/combinaut/ai-agent-orchestration/commit/de593d271261675884a01d57a10728084f6b62f9))
+* follow-ups from the [#117](https://github.com/combinaut/ai-agent-orchestration/issues/117), [#106](https://github.com/combinaut/ai-agent-orchestration/issues/106) and [#92](https://github.com/combinaut/ai-agent-orchestration/issues/92) reviews ([#131](https://github.com/combinaut/ai-agent-orchestration/issues/131)) ([e71e9ad](https://github.com/combinaut/ai-agent-orchestration/commit/e71e9ad5cc201c834f814d5bbdc1192a8dc08932))
+* **guard-bash:** close the printf and append fail-open from [#121](https://github.com/combinaut/ai-agent-orchestration/issues/121) ([#132](https://github.com/combinaut/ai-agent-orchestration/issues/132)) ([140d226](https://github.com/combinaut/ai-agent-orchestration/commit/140d22685d7e0cb3590b13d3ed89bd3a116ed977))
+* **guard-bash:** scan scripts a command writes and runs for broad kills ([#121](https://github.com/combinaut/ai-agent-orchestration/issues/121)) ([dad01b0](https://github.com/combinaut/ai-agent-orchestration/commit/dad01b0ae44b812a24d9f46b6dc79959fb41b0c3))
+* **orch-signal:** recognize Codex worker panes in the sandbox ([#114](https://github.com/combinaut/ai-agent-orchestration/issues/114)) ([495b421](https://github.com/combinaut/ai-agent-orchestration/commit/495b421908b65311c9df34a56c8adbd18c7dc117))
+* **pr-tabs:** group PRs listed in an architect's status file ([#109](https://github.com/combinaut/ai-agent-orchestration/issues/109)) ([a5c7120](https://github.com/combinaut/ai-agent-orchestration/commit/a5c71204e65aac6f076e4eb1e01fd5e414b18ed3))
+* **pr-tabs:** keep expanded PR rows inside the group card ([#104](https://github.com/combinaut/ai-agent-orchestration/issues/104)) ([1fc5fe8](https://github.com/combinaut/ai-agent-orchestration/commit/1fc5fe8d0a85535dd61bd0b6ee60856c51d1e690))
+* **pr-tabs:** never open a duplicate PR tab ([#105](https://github.com/combinaut/ai-agent-orchestration/issues/105)) ([c5308db](https://github.com/combinaut/ai-agent-orchestration/commit/c5308dbcbdbe02084e6013086210edbdc20af38e))
+* **pr-tabs:** terminal icon focuses the owning architect ([#111](https://github.com/combinaut/ai-agent-orchestration/issues/111)) ([d2e4829](https://github.com/combinaut/ai-agent-orchestration/commit/d2e48290591b12990a61ce3f3429f034353e7257))
+* **review-prs:** clear a watched PR only after a confirmed absence ([#134](https://github.com/combinaut/ai-agent-orchestration/issues/134)) ([dfd6aee](https://github.com/combinaut/ai-agent-orchestration/commit/dfd6aee139d027778032c816ca4b03f9a2d29b6e))
+* **review-prs:** fetch a fork head when pull/&lt;n&gt;/head lags ([#128](https://github.com/combinaut/ai-agent-orchestration/issues/128)) ([71328c0](https://github.com/combinaut/ai-agent-orchestration/commit/71328c084ef46863f0bf01c2595146598f92fdf7))
+* **review-prs:** post Codex reviews with one plain gh api call ([#133](https://github.com/combinaut/ai-agent-orchestration/issues/133)) ([004be51](https://github.com/combinaut/ai-agent-orchestration/commit/004be51919d582d862e9d026e0e25cf3708a97f2))
+* **review-prs:** release the claim when a review pane never starts ([#118](https://github.com/combinaut/ai-agent-orchestration/issues/118)) ([54fc9a2](https://github.com/combinaut/ai-agent-orchestration/commit/54fc9a25cc6bd520ea2d0ac348ecba82b4c2cef2))
+* **todo:** Escape ends the popup and a new open replaces a stale one ([#136](https://github.com/combinaut/ai-agent-orchestration/issues/136)) ([76d97e6](https://github.com/combinaut/ai-agent-orchestration/commit/76d97e6fd90d38d33feef973c876f44349ae3798))
+* **watchers:** count sleep in loop intervals ([#130](https://github.com/combinaut/ai-agent-orchestration/issues/130)) ([448bd15](https://github.com/combinaut/ai-agent-orchestration/commit/448bd157ca636a4f6402272af176b6db6b7f954c))
+* **watchers:** match only exact architect identities ([#112](https://github.com/combinaut/ai-agent-orchestration/issues/112)) ([fa89b2c](https://github.com/combinaut/ai-agent-orchestration/commit/fa89b2c721d6e3fb492897f268b7d167f20b92b9))
+
+
+### Performance Improvements
+
+* **pr-tabs:** generate Aura styles during the build ([#94](https://github.com/combinaut/ai-agent-orchestration/issues/94)) ([50ce0f9](https://github.com/combinaut/ai-agent-orchestration/commit/50ce0f9ebe744dd93a1bd61d00bc15f980048767))
+
 ## 1.0.0 (2026-10-24)
 
 
