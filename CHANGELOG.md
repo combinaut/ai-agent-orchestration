@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/combinaut/ai-agent-orchestration/compare/v1.1.0...v1.2.0) (2026-10-29)
+
+
+### Features
+
+* **questions:** open question panes beside the asker and render them with mdcat ([#137](https://github.com/combinaut/ai-agent-orchestration/issues/137)) ([583cd7c](https://github.com/combinaut/ai-agent-orchestration/commit/583cd7cffd16deeae66cb5633a7e9ec0c989ee39))
+
+
+### Bug Fixes
+
+* **watchers:** fire APPROVED-OLDHEAD once per approval, not per push ([#139](https://github.com/combinaut/ai-agent-orchestration/issues/139)) ([da82eb1](https://github.com/combinaut/ai-agent-orchestration/commit/da82eb1a4f27c4456e8e1b25c152b1855daee6a4))
+
 ## [1.1.0](https://github.com/combinaut/ai-agent-orchestration/compare/v1.0.0...v1.1.0) (2026-10-29)
 
 
