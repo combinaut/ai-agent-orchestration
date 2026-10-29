@@ -898,6 +898,20 @@ class KeyboardTest(AppCase):
                 self.assertTrue(app.closing)
                 self.assertFalse((self.root / "state.json").exists())
 
+    def test_picker_cancel_keeps_the_following_partial_escape(self):
+        for tail, rest in (("\x1b", ""), ("\x1b[27;", "1u")):
+            with self.subTest(tail=tail):
+                app = self.popup_app()
+                app.feed("r\x1b" + tail)
+                self.assertIsNone(app.picker)
+                self.assertFalse(app.closing)
+                self.assertEqual(app.buf, tail)
+                if rest:
+                    app.feed(rest)
+                else:
+                    app.lone_escape()
+                self.assertTrue(app.closing)
+
     def test_keys_after_q_in_the_same_read_are_dropped(self):
         app = self.popup_app()
         app.feed("qi")
@@ -1314,6 +1328,25 @@ class PtyTest(IsolatedTestCase):
                 out = run_in_pty({"VIEW_ARGS": "--popup"}, act)
                 self.assertIn("\x1b[?1000l", out)
                 self.assertRegex(out, r"RESULT 0 True True")
+
+    def test_unknown_process_identity_does_not_prevent_popup_use(self):
+        with tempfile.TemporaryDirectory() as state:
+
+            def act(pid, fd, read):
+                read(until="Esc/q close")
+                os.write(fd, b"\x1b")
+
+            out = run_in_pty(
+                {
+                    "VIEW_ARGS": "--popup",
+                    "COLUMNS": "80",
+                    "HERDR_SOCKET_PATH": "/test/no-server.sock",
+                    "HERDR_PLUGIN_STATE_DIR": state,
+                },
+                act,
+            )
+        self.assertIn("Esc/q close", out)
+        self.assertRegex(out, r"RESULT 0 True True")
 
     def test_a_missing_popup_pane_ends_the_loop(self):
         out = run_in_pty(

@@ -777,7 +777,7 @@ class App:
         if self.picker and "answer" in self.picker:
             self.status = "answer cancelled"
         self.closing = self.popup and self.picker is None
-        self.buf, self.picker = "", None
+        self.picker = None
         if not self.closing:
             self.refresh()
 
@@ -802,6 +802,7 @@ class App:
 
     def lone_escape(self):
         if self.buf == "\x1b":
+            self.buf = ""
             self.escape()
 
 

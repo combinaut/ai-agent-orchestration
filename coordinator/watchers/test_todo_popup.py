@@ -92,6 +92,35 @@ class PopupTest(IsolatedTestCase):
                     {"started": "Thu Oct 29 10:00:00 2026", "command": command},
                 )
 
+    def test_unknown_identity_registers_startup_without_authorizing_replacement(self):
+        with (
+            patch.object(self.popup, "pidfile", return_value=self.path),
+            patch.object(self.popup, "process_identity", return_value=None),
+        ):
+            self.path.unlink()
+            registration = self.popup.register()
+            record = self.popup.read_record(self.path)
+            self.assertIsNone(record["identity"])
+            self.assertFalse(self.popup.owns(record))
+            self.assertIsNotNone(registration)
+            self.popup.unregister(registration)
+        self.assertFalse(self.path.exists())
+
+    def test_narrow_columns_do_not_truncate_command_identity(self):
+        output = f"Thu Oct 29 10:00:00 2026 /usr/bin/python3 {self.popup.VIEW} --popup"
+
+        def ps(args, **kwargs):
+            width = len(output) if "-ww" in args else int(os.environ["COLUMNS"])
+            return subprocess.CompletedProcess(args, 0, stdout=output[:width])
+
+        with (
+            patch.dict(os.environ, {"COLUMNS": "80"}),
+            patch.object(self.popup.subprocess, "run", side_effect=ps),
+        ):
+            identity = self.popup.process_identity(12345)
+        self.assertIsNotNone(identity)
+        self.assertIn(str(self.popup.VIEW), identity["command"])
+
     def test_open_action_replaces_before_launch_and_waits_for_registration(self):
         events = []
         with (
@@ -104,7 +133,6 @@ class PopupTest(IsolatedTestCase):
             patch.object(
                 self.popup, "read_record", return_value={**self.record, "token": "new"}
             ),
-            patch.object(self.popup, "owns", return_value=True),
         ):
             token.return_value.hex = "new"
             run.side_effect = lambda *a, **k: (

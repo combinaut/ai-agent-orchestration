@@ -43,7 +43,7 @@ def pidfile():
 def process_identity(pid):
     try:
         result = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "lstart=", "-o", "command="],
+            ["ps", "-ww", "-p", str(pid), "-o", "lstart=", "-o", "command="],
             capture_output=True,
             text=True,
             timeout=1,
@@ -118,8 +118,6 @@ def register():
         return None
     path = pidfile()
     identity = process_identity(os.getpid())
-    if identity is None:
-        raise RuntimeError("cannot identify the to-do popup process")
     record = {
         "pid": os.getpid(),
         "identity": identity,
@@ -180,7 +178,7 @@ def open_popup():
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             record = read_record(path)
-            if record and record.get("token") == token and owns(record):
+            if record and record.get("token") == token:
                 return 0
             time.sleep(0.05)
         print("to-do popup did not register its process", file=sys.stderr)
