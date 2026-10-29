@@ -333,7 +333,7 @@ def answer(identifier, text, to_user=False):
         if to_user:
             target = questions_directory() / (identifier + ".md")
             choices = "\n".join(
-                f"{number}. " + choice.strip()
+                f"{number}\\. " + choice.strip() + "  "
                 for number, choice in enumerate(record["options"].split(","), 1)
                 if choice.strip()
             )

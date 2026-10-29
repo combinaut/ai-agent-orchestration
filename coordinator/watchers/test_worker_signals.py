@@ -1,6 +1,9 @@
 import argparse
+import importlib.util
+import io
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -158,8 +161,36 @@ class SignalTests(IsolatedTestCase):
         text = (s.questions_directory() / (q["id"] + ".md")).read_text()
         self.assertEqual(
             text,
-            f"# Worker question {q['id']}\n\nSafe question\n\tcontext\n\n1. Yes\n2. No\n",
+            f"# Worker question {q['id']}\n\nSafe question\n\tcontext\n\n1\\. Yes  \n2\\. No\n",
         )
+
+    def test_worker_question_keeps_sparse_display_ids_and_numeric_answers(self):
+        q = s.new_question(s.identity(), "Pick?", "A,,C", 60)
+        with patch.dict(
+            os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
+        ):
+            s.answer(q["id"], None, to_user=True)
+        question = s.questions_directory() / (q["id"] + ".md")
+        self.assertIn("1\\. A  \n3\\. C", question.read_text())
+        spec = importlib.util.spec_from_file_location(
+            "worker_question_pane", w.ROOT.parent / "question-pane.py"
+        )
+        panel_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(panel_module)
+        out = io.StringIO()
+        panel = panel_module.Panel(question, out)
+        with patch.object(panel_module.sys, "stderr", new_callable=io.StringIO):
+            panel.press("3")
+        self.assertEqual(question.with_suffix(".answer").read_text().strip(), "3")
+        executable = panel_module.shutil.which("mdcat") or "/opt/homebrew/bin/mdcat"
+        if os.access(executable, os.X_OK):
+            rendered = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", out.getvalue())
+            lines = [line.strip() for line in rendered.splitlines()]
+            self.assertIn("1. A", lines)
+            self.assertIn("3. C", lines)
+        raw = w.collect_answers(None)
+        w.acknowledge_answers(raw)
+        self.assertEqual(s.wait_answer(q, 0.01), "3")
 
     def test_heartbeat_rate_and_done_dedupe(self):
         ident = s.identity()

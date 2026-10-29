@@ -25,7 +25,7 @@ The question is rendered by the Rust Markdown viewer `mdcat`, found on `PATH` or
 | `d` | Dismiss: writes `answers: DISMISSED <slug>` to the feed, then closes the pane and removes the question. |
 | `r` | Remind: opens the same picker as the to-do view's Reminder (`1` 15m, `2` 1h, `3` 2h, `4` 4h, `5` tomorrow 9:00, `t` a typed `30m` or `3h`). Esc cancels it. |
 
-The panel writes `<slug>.answer`. `coord-user-answers-watch.sh` runs the answers watcher, which claims the file, normalises whitespace and publishes `answers: ANSWER <slug>: <text>` to the shared feed Monitor. The Coordinator relays `<slug>: <text>` to the registered asker verbatim. Worker `signal-*` questions additionally bridge into the worker signal answer file so the original waiting `orch-signal ask` receives the answer by its stored identity.
+The panel writes `<slug>.answer`. `coord-user-answers-watch.sh` runs the answers watcher, which claims the file, normalises whitespace and publishes `answers: ANSWER <slug>: <text>` to the shared feed Monitor. The Coordinator relays `<slug>: <text>` to the registered asker verbatim. Worker choices use literal escaped markers and hard breaks to preserve their source ids, including gaps, while keeping the legacy bare-number answer format. Worker `signal-*` questions additionally bridge into the worker signal answer file so the original waiting `orch-signal ask` receives the answer by its stored identity.
 
 ## File format
 
