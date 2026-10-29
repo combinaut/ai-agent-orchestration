@@ -1453,6 +1453,27 @@ class PtyTest(IsolatedTestCase):
         os.close(read_end)
         os.close(write_end)
 
+    def test_output_full_at_start_ends_the_view_without_a_traceback(self):
+        read_end, write_end = os.pipe()
+        os.set_blocking(write_end, False)
+        try:
+            while True:
+                os.write(write_end, b"x" * 65536)
+        except BlockingIOError:
+            pass
+        full = view.BoundedOut(write_end, timeout=0.2)
+        self.addCleanup(os.close, read_end)
+        self.addCleanup(os.close, write_end)
+        with (
+            patch.object(view, "BoundedOut", return_value=full),
+            patch.object(view, "App", side_effect=AssertionError("drew a frame")),
+            patch.object(view.termios, "tcgetattr", return_value=[]),
+            patch.object(view.termios, "tcsetattr") as restore,
+            patch.object(view.tty, "setcbreak"),
+        ):
+            view.main()
+        restore.assert_called_once()
+
     def test_a_setup_failure_after_the_mode_change_restores_it(self):
         out = run_in_pty({"VIEW_FAIL": "1"}, lambda pid, fd, read: read(until="RESULT"))
         self.assertRegex(out, r"RESULT oserror True True")

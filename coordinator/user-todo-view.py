@@ -851,10 +851,10 @@ def main():
         old = termios.tcgetattr(fd)
         tty.setcbreak(fd)
         os.set_blocking(out.fd, False)
-        out.write(ENTER)
-        app = App(hidden, demo, out, os.get_terminal_size, popup=popup)
-        decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
         try:
+            out.write(ENTER)
+            app = App(hidden, demo, out, os.get_terminal_size, popup=popup)
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
             while not app.closing and os.getppid() == parent:
                 app.tick()
                 ready, _, _ = select.select(
