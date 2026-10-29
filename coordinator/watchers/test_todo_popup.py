@@ -101,13 +101,11 @@ class PopupTest(IsolatedTestCase):
             patch.object(self.popup, "process_identity", return_value=None),
         ):
             self.path.unlink()
-            registration = self.popup.register()
+            self.popup.register()
             record = self.popup.read_record(self.path)
             self.assertIsNone(record["identity"])
             self.assertFalse(self.popup.owns(record))
-            self.assertIsNotNone(registration)
-            self.popup.unregister(registration)
-        self.assertFalse(self.path.exists())
+        self.assertTrue(self.path.exists())
 
     def test_narrow_columns_do_not_truncate_command_identity(self):
         output = f"Thu Oct 29 10:00:00 2026 /usr/bin/python3 {self.popup.VIEW} --popup"

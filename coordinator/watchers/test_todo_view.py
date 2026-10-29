@@ -1350,8 +1350,16 @@ class PtyTest(IsolatedTestCase):
                     "HERDR_SOCKET_PATH": "/test/no-server.sock",
                     "HERDR_PLUGIN_STATE_DIR": state,
                     "VIEW_CHECK_CLEANUP": "1",
+                    "ORCH_TODO_POPUP_TOKEN": "quick-close",
                 },
                 act,
+            )
+            receipts = list(Path(state).glob("todo-popup-*.json"))
+            self.assertEqual(
+                len(receipts), 1, "quick closure erased the startup receipt"
+            )
+            self.assertEqual(
+                json.loads(receipts[0].read_text())["token"], "quick-close"
             )
         self.assertIn("Esc/q close", out)
         self.assertRegex(out, r"RESULT 0 True True")

@@ -126,17 +126,6 @@ def register():
         os.replace(name, path)
     finally:
         Path(name).unlink(missing_ok=True)
-    return path, record
-
-
-def unregister(registration):
-    if registration:
-        path, record = registration
-        try:
-            if read_record(path) == record:
-                path.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 def pane_exists(pane):

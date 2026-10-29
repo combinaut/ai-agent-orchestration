@@ -855,10 +855,9 @@ def main():
         for number in (signal.SIGTERM, signal.SIGHUP)
     }
     old = None
-    registration = None
     try:
         if popup:
-            registration = todo_popup.register()
+            todo_popup.register()
         old = termios.tcgetattr(fd)
         tty.setcbreak(fd)
         os.set_blocking(out.fd, False)
@@ -887,23 +886,20 @@ def main():
         except OSError:
             pass
     finally:
-        try:
-            if old is not None:
-                for restore in (
-                    lambda: out.write(LEAVE),
-                    lambda: termios.tcsetattr(fd, termios.TCSANOW, old),
-                ):
-                    try:
-                        restore()
-                    except (OSError, ValueError):
-                        pass
-                os.set_blocking(out.fd, blocking)
-            for number, handler in previous.items():
-                signal.signal(number, handler)
-            if scratch:
-                shutil.rmtree(scratch, ignore_errors=True)
-        finally:
-            todo_popup.unregister(registration)
+        if old is not None:
+            for restore in (
+                lambda: out.write(LEAVE),
+                lambda: termios.tcsetattr(fd, termios.TCSANOW, old),
+            ):
+                try:
+                    restore()
+                except (OSError, ValueError):
+                    pass
+            os.set_blocking(out.fd, blocking)
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+        if scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
 
 
 if __name__ == "__main__":
