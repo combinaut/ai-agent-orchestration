@@ -16,6 +16,7 @@ from pathlib import Path
 import discovery
 from question_lock import answers_lock, questions_directory
 from question_remind import atomic_write
+from question_text import strip_controls
 
 POLL_SECONDS = 1
 HEARTBEAT_MIN_SECONDS = 30
@@ -338,7 +339,9 @@ def answer(identifier, text, to_user=False):
             )
             atomic_write(
                 target,
-                f"# Worker question {identifier}\n\n{record['question']}\n\n{choices}",
+                strip_controls(
+                    f"# Worker question {identifier}\n\n{record['question']}\n\n{choices}"
+                ),
             )
             # Use the existing reminder retry mechanism if opening the Q panel fails.
             from question_remind import write_remind

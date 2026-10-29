@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "watchers"))
 import feed_attach  # noqa: E402
 from question_lock import answers_lock  # noqa: E402
 from question_remind import atomic_write, remind_path, write_remind  # noqa: E402
+from question_text import read_question  # noqa: E402
 from reminder_picker import (
     PICK_KEYS,
     TYPE_HINT,
@@ -77,14 +78,15 @@ class Panel:
             clock,
         )
         self.launcher, self.feed = launcher, Path(feed)
-        self.markdown_warning = False
+        self.markdown_failed = False
+        self.markdown_cache = {}
         self.slug = self.question.stem
         self.status, self.picker, self.done, self.pending = "", None, False, None
 
     def options(self):
         """The option id -> label pairs under `## Options`, or None when the file has no such section."""
         try:
-            lines = self.question.read_text().splitlines()
+            lines = read_question(self.question).splitlines()
         except OSError:
             return None
         found, in_options = {}, False
@@ -100,19 +102,25 @@ class Panel:
         return found if in_options else None
 
     def markdown(self, text):
+        if self.markdown_failed:
+            return text
+        columns = max(1, self.columns() - 1)
+        key = (text, columns)
+        if key in self.markdown_cache:
+            return self.markdown_cache[key]
         executable = shutil.which("mdcat")
         if not executable and os.access("/opt/homebrew/bin/mdcat", os.X_OK):
             executable = "/opt/homebrew/bin/mdcat"
         if executable:
             try:
-                return subprocess.run(
+                rendered = subprocess.run(
                     [
                         executable,
                         "--ansi",
                         "--local",
                         "--no-pager",
                         "--columns",
-                        str(max(1, self.columns() - 1)),
+                        str(columns),
                     ],
                     input=text,
                     text=True,
@@ -120,19 +128,18 @@ class Panel:
                     check=True,
                     timeout=5,
                 ).stdout.rstrip()
+                self.markdown_cache[key] = rendered
+                return rendered
             except (OSError, subprocess.SubprocessError):
                 pass
-        if not self.markdown_warning:
-            print(
-                "question-pane: mdcat unavailable; showing plain text.", file=sys.stderr
-            )
-            self.markdown_warning = True
+        print("question-pane: mdcat unavailable; showing plain text.", file=sys.stderr)
+        self.markdown_failed = True
         return text
 
     def show(self, status=None):
         self.status = self.status if status is None else status
         text = (
-            self.question.read_text()
+            read_question(self.question)
             .rstrip()
             .replace("Answer in the Coordinator pane.", "")
         )

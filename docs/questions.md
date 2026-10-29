@@ -8,7 +8,7 @@ Every user question opens below the asking architect’s own pane without taking
 
 Create the question's Markdown file under `~/.claude/coordinator/questions/<slug>.md`, then run `ask-user-question <slug> <file>`. The pane is labelled `Q: <slug>`. The architect opens it directly and registers `QUESTION <slug> <file>` with the Coordinator for answer relay; the Coordinator records the slug’s asker rather than inferring it from the question pane’s location. Keep the matching wait in the architect’s status file so it also appears in the generated to-do list.
 
-The question is rendered by the Rust Markdown viewer `mdcat`, found on `PATH` or at `/opt/homebrew/bin/mdcat`. If it is unavailable or fails, the panel shows plain text with one stderr warning and keeps its answer controls interactive.
+The question is rendered by the Rust Markdown viewer `mdcat`, found on `PATH` or at `/opt/homebrew/bin/mdcat`. Successful renders are cached by question text and terminal width. If the viewer is unavailable or fails, the panel shows plain text with one stderr warning and uses plain text for the rest of that panel’s lifetime. The answer controls stay interactive. C0/C1 controls other than newline and tab are stripped from question text and option labels before display; worker escalations strip them before writing the question file.
 
 | Command | Effect |
 | --- | --- |
@@ -51,6 +51,6 @@ The option id is the digit `1`-`9`, consecutive from `1`; the label is the rest 
 
 ## Remind
 
-A pick writes `answers: REMIND <slug> <YYYY-MM-DD HH:MM>` to the feed and stores the time (epoch seconds) in `<slug>.remind` next to the question. The pane then runs `ask-user-question hide <slug>`. On its next cycle after that time, the answers watcher reopens the pane and removes the file. The opener records a live caller in `<slug>.asker-pane`; the watcher supplies that pane as `HERDR_PANE_ID` when reopening, with the same fallback if it has disappeared. A reminder without saved metadata clears the watcher’s caller pane and uses the legacy fallback. Close removes this metadata; hide keeps it. A failed open retries on the next cycle. If the feed cannot be written, nothing changes and the panel stays open.
+A pick writes `answers: REMIND <slug> <YYYY-MM-DD HH:MM>` to the feed and stores the time (epoch seconds) in `<slug>.remind` next to the question. The pane then runs `ask-user-question hide <slug>`. On its next cycle after that time, the answers watcher reopens the pane and removes the file. The opener records a live caller in `<slug>.asker-pane`; the watcher supplies that pane as `HERDR_PANE_ID` when reopening, with the same fallback if it has disappeared; the stale saved pane file is then removed. A reminder without saved metadata clears the watcher’s caller pane and uses the legacy fallback. Close removes this metadata; hide keeps it. A failed open retries on the next cycle. If the feed cannot be written, nothing changes and the panel stays open.
 
 See [watchers.md](watchers.md) for how the answers watcher claims and publishes answers.

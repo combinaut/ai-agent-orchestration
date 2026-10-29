@@ -92,7 +92,11 @@ caller = sys.argv[1]
 rows = json.load(sys.stdin).get("result", {}).get("panes", [])
 print(caller if any(isinstance(row, dict) and row.get("pane_id") == caller for row in rows) else "")
 ' "$HERDR_PANE_ID")
-      [ -z "$anchor" ] || printf '%s\n' "$anchor" >"$questions/$slug.asker-pane"
+    fi
+    if [ -n "$anchor" ]; then
+      printf '%s\n' "$anchor" >"$questions/$slug.asker-pane"
+    else
+      rm -f "$questions/$slug.asker-pane"
     fi
     [ -n "$anchor" ] || anchor=$(find_pane "Q: " prefix)
     [ -n "$anchor" ] || anchor=$(find_pane "To-do")

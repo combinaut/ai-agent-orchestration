@@ -141,6 +141,26 @@ class SignalTests(IsolatedTestCase):
         self.assertFalse((directory / (q["id"] + ".md")).exists())
         self.assertFalse(s.question_path(q["id"]).exists())
 
+    def test_user_escalation_strips_controls_from_question_and_choices(self):
+        controls = "".join(
+            chr(n) for n in (*range(9), *range(11, 32), *range(127, 160))
+        )
+        q = s.new_question(
+            s.identity(),
+            "Safe" + controls + " question\n\tcontext",
+            "Y" + controls + "es,No",
+            60,
+        )
+        with patch.dict(
+            os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
+        ):
+            s.answer(q["id"], None, to_user=True)
+        text = (s.questions_directory() / (q["id"] + ".md")).read_text()
+        self.assertEqual(
+            text,
+            f"# Worker question {q['id']}\n\nSafe question\n\tcontext\n\n1. Yes\n2. No\n",
+        )
+
     def test_heartbeat_rate_and_done_dedupe(self):
         ident = s.identity()
         with patch.object(s.time, "time", return_value=100):

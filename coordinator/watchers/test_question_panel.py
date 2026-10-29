@@ -123,6 +123,87 @@ class MarkdownTest(PanelCase):
         self.assertEqual(len(err.getvalue().splitlines()), 1)
         self.assertEqual(pane.answer_path(self.question).read_text().strip(), "1")
 
+    def test_mdcat_result_is_cached_per_width_and_updated_question(self):
+        width = [80]
+        self.panel.columns = lambda: width[0]
+        with (
+            patch.object(pane.shutil, "which", return_value="/bin/mdcat"),
+            patch.object(
+                pane.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout="Rendered\n"),
+            ) as render,
+        ):
+            self.panel.show()
+            self.panel.show("status")
+            self.press("r", pane.ESCAPE)
+            self.assertEqual(render.call_count, 1)
+            width[0] = 100
+            self.panel.show()
+            self.assertEqual(render.call_count, 2)
+            width[0] = 80
+            self.panel.show()
+            self.assertEqual(render.call_count, 2)
+            self.question.write_text("Updated question")
+            self.panel.show()
+            self.assertEqual(render.call_count, 3)
+        self.assertEqual(render.call_args.kwargs["input"], "Updated question")
+
+    def test_mdcat_failure_is_remembered_across_redraws_and_widths(self):
+        with (
+            patch.object(pane.shutil, "which", return_value="/bin/mdcat") as which,
+            patch.object(
+                pane.subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired("mdcat", 5),
+            ) as render,
+            patch.object(pane.sys, "stderr", new_callable=io.StringIO) as err,
+        ):
+            self.panel.show()
+            self.panel.columns = lambda: 100
+            self.panel.show("status")
+            self.press("r", pane.ESCAPE, "1")
+        self.assertEqual(render.call_count, 1)
+        self.assertEqual(which.call_count, 1)
+        self.assertEqual(len(err.getvalue().splitlines()), 1)
+        self.assertEqual(pane.answer_path(self.question).read_text().strip(), "1")
+
+    def test_controls_are_removed_before_both_render_paths_and_option_status(self):
+        controls = "".join(
+            chr(n) for n in (*range(9), *range(11, 32), *range(127, 160))
+        )
+        self.question.write_text(
+            "# Safe"
+            + controls
+            + " question\n\tcontext\n\n## Options\n1. Yes"
+            + controls
+            + " please"
+        )
+        clean = "# Safe question\n\tcontext\n\n## Options\n1. Yes please"
+        with (
+            patch.object(pane.shutil, "which", return_value="/bin/mdcat"),
+            patch.object(
+                pane.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout="Rendered\n"),
+            ) as render,
+        ):
+            self.panel.show()
+        self.assertEqual(render.call_args.kwargs["input"], clean)
+        with (
+            patch.object(pane.shutil, "which", return_value=None),
+            patch.object(pane.os, "access", return_value=False),
+            patch.object(pane.sys, "stderr", new_callable=io.StringIO),
+        ):
+            other = pane.Panel(self.question, io.StringIO())
+            other.show()
+            other.press("1")
+        self.assertIn(clean.replace("\n", "\r\n"), other.out.getvalue())
+        self.assertEqual(
+            pane.answer_path(self.question).read_text().strip(), '1 "Yes please"'
+        )
+        self.assertIn('Sent: 1 "Yes please"', other.out.getvalue())
+
     def test_homebrew_mdcat_is_used_when_missing_from_path(self):
         with (
             patch.object(pane.shutil, "which", return_value=None),

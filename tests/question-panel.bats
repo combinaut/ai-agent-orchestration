@@ -270,6 +270,26 @@ EOF
   [ ! -e "$questions/due.remind" ]
 }
 
+@test "a reminder with a vanished saved asker falls back and clears the saved pane" {
+  questions="$HOME/.claude/coordinator/questions"
+  printf due >"$questions/due.md"
+  for anchor in question todo; do
+    printf gone >"$questions/due.asker-pane"
+    printf '%s\n' 1 >"$questions/due.remind"
+    if [ "$anchor" = question ]; then
+      panes='{"result":{"panes":[{"pane_id":"watcher"},{"pane_id":"todo","label":"To-do"},{"pane_id":"question","label":"Q: other"}]}}'
+    else
+      panes='{"result":{"panes":[{"pane_id":"watcher"},{"pane_id":"todo","label":"To-do"}]}}'
+    fi
+    : >"$TMP/question-herdr.calls"
+    run env HERDR_PANE_ID=watcher ORCH_USER_QUESTIONS_DIR="$questions" HERDR_PANES="$panes" "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --state-dir "$TMP/state"
+    [ "$status" -eq 0 ]
+    grep -qx "pane split $anchor --direction down --no-focus" "$TMP/question-herdr.calls"
+    [ ! -e "$questions/due.asker-pane" ]
+    [ ! -e "$questions/due.remind" ]
+  done
+}
+
 @test "a legacy reminder ignores the watcher caller and uses the to-do fallback" {
   questions="$HOME/.claude/coordinator/questions"
   printf due >"$questions/due.md"
