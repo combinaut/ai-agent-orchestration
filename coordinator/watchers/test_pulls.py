@@ -1053,14 +1053,10 @@ class PullsTest(IsolatedTestCase):
         )
 
     def test_oldhead_approval_fires_once_per_approval_across_heads_and_restart(self):
-        row = pr(7, decision="REVIEW_REQUIRED")
-        row["latestOpinionatedReviews"]["nodes"] = []
+        row = pr(7)
         state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
 
-        row["reviewDecision"] = "APPROVED"
-        row["latestOpinionatedReviews"]["nodes"] = [
-            {"id": "approval-1", "state": "APPROVED", "commit": {"oid": "old"}}
-        ]
+        row["headRefOid"] = "head-2"
 
         state, events = w.reduce_pulls(
             state, w.collect_pulls(self.command([row]), state)
@@ -1069,16 +1065,16 @@ class PullsTest(IsolatedTestCase):
             events,
             [
                 f"APPROVED-OLDHEAD owner/product#7 owner=wArch {PR['title']} "
-                "[approval is not on the current head]"
+                "[approval is not on the current head]",
+                "APPROVED owner/product#7 cleared",
             ],
         )
 
-        for head in ("head-2", "head-3", "head-4"):
-            row["headRefOid"] = head
-            state, events = w.reduce_pulls(
-                state, w.collect_pulls(self.command([row]), state)
-            )
-            self.assertEqual(events, [])
+        row["headRefOid"] = "head-3"
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
 
         state = json.loads(json.dumps(state))
         state, events = w.reduce_pulls(
@@ -1086,16 +1082,8 @@ class PullsTest(IsolatedTestCase):
         )
         self.assertEqual(events, [])
 
-        row["latestOpinionatedReviews"]["nodes"].append(
-            {"id": "approval-2", "state": "APPROVED", "commit": {"oid": "old-2"}}
-        )
-        state, events = w.reduce_pulls(
-            state, w.collect_pulls(self.command([row]), state)
-        )
-        self.assertTrue(any(event.startswith("APPROVED-OLDHEAD ") for event in events))
-
         row["latestOpinionatedReviews"]["nodes"] = [
-            {"id": "approval-2", "state": "APPROVED", "commit": {"oid": "head-4"}}
+            {"id": "approval-2", "state": "APPROVED", "commit": {"oid": "head-3"}}
         ]
         state, events = w.reduce_pulls(
             state, w.collect_pulls(self.command([row]), state)
@@ -1105,6 +1093,19 @@ class PullsTest(IsolatedTestCase):
             [
                 f"APPROVED owner/product#7 owner=wArch {PR['title']}",
                 "APPROVED-OLDHEAD owner/product#7 cleared",
+            ],
+        )
+
+        row["headRefOid"] = "head-4"
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(
+            events,
+            [
+                f"APPROVED-OLDHEAD owner/product#7 owner=wArch {PR['title']} "
+                "[approval is not on the current head]",
+                "APPROVED owner/product#7 cleared",
             ],
         )
 

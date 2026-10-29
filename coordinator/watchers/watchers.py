@@ -1381,8 +1381,6 @@ def reduce_pulls(before, raw):
         )
         if before is None or legacy_reviews:
             seen.update(visible_reviews or [])
-        if before is None or legacy_approvals:
-            seen_approvals.update(visible_approvals or [])
         rerouted = pr["owner"] and pr["owner"] != previous.get("owner")
         for kind, line in sorted(pr["lines"].items()):
             identity = identities.get(kind)
@@ -1403,6 +1401,8 @@ def reduce_pulls(before, raw):
             if kind == "APPROVED-OLDHEAD" and identity is not None:
                 if legacy_approvals:
                     changed = False
+                    if visible_approvals is not None:
+                        seen_approvals.update(identity)
                 else:
                     changed = bool(set(identity) - seen_approvals)
                     seen_approvals.update(identity)
@@ -1421,7 +1421,6 @@ def reduce_pulls(before, raw):
         if legacy_approvals and visible_approvals is None:
             pr.pop("seen_approvals", None)
         else:
-            seen_approvals.update(visible_approvals or [])
             pr["seen_approvals"] = sorted(seen_approvals)
         if before is not None:
             events += [
