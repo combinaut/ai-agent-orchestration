@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live view of the user to-do list with Ignore and Reminder buttons under every item."""
+"""Live view of the user to-do list with Dismiss and Reminder buttons under every item."""
 
 import codecs
 import fcntl
@@ -61,12 +61,12 @@ TARGET = re.compile(r"->\s*(\S.*?)\s*$")
 AGE_PREFIX = re.compile(r"\[(?:now|\d+[mhd])\] ")
 MOUSE = re.compile(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])")
 BUTTONS = (
-    ("i", "ignore", "Ignore"),
+    ("d", "dismiss", "Dismiss"),
     ("r", "remind", "Reminder"),
 )
 CANCEL = ("r", "cancel", "Cancel reminder")
 GUTTER = 2
-FOOTER = "↑↓ or 1-9 select · i ignore · r reminder · s show reminders"
+FOOTER = "↑↓ or 1-9 select · d dismiss · r reminder · s show reminders"
 SHOW_HINT = "s show reminders"
 CLOSE_HINT = "Esc/q close"
 DEMO = [
@@ -118,7 +118,7 @@ def atomic_write(path, data):
 def feed_line(owner, text, now):
     clean = " ".join("".join(c for c in text if c.isprintable() or c == " ").split())
     stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now))
-    return f"{stamp} todo: TODO IGNORED {'_'.join(owner.split())}: {clean} (start)\n"
+    return f"{stamp} todo: TODO DISMISSED {'_'.join(owner.split())}: {clean} (start)\n"
 
 
 def key_action(action, rows, index):
@@ -148,18 +148,20 @@ def mono():
 
 
 class Hidden:
-    """Ignored items and reminders, keyed by owner and item text."""
+    """Dismissed items and reminders, keyed by owner and item text."""
 
     def __init__(self, path, feed, clock=None):
         self.path, self.feed, self.clock = Path(path), Path(feed), clock or wall
-        self.ignored, self.later = set(), {}
+        self.dismissed, self.later = set(), {}
         self.flagged = set()
         self.reload()
 
     def reload(self):
         try:
             data = json.loads(self.path.read_text())
-            self.ignored = set(data.get("ignored", []))
+            self.dismissed = set(data.get("dismissed", [])) | set(
+                data.get("ignored", [])
+            )
             self.later = {k: float(v) for k, v in data.get("later", {}).items()}
         except (OSError, ValueError, AttributeError, TypeError):
             pass
@@ -168,7 +170,8 @@ class Hidden:
         atomic_write(
             self.path,
             json.dumps(
-                {"ignored": sorted(self.ignored), "later": self.later}, sort_keys=True
+                {"dismissed": sorted(self.dismissed), "later": self.later},
+                sort_keys=True,
             ),
         )
 
@@ -178,10 +181,10 @@ class Hidden:
         fcntl.flock(stream, fcntl.LOCK_EX)
         return stream
 
-    def ignore(self, owner, text):
+    def dismiss(self, owner, text):
         with self.lock():
             self.reload()
-            self.ignored.add(key(owner, text))
+            self.dismissed.add(key(owner, text))
             self.later.pop(key(owner, text), None)
             self.save()
         try:
@@ -210,7 +213,7 @@ class Hidden:
         for owner, text in items:
             k = key(owner, text)
             note = ""
-            if k in self.ignored:
+            if k in self.dismissed:
                 continue
             if k in self.later:
                 if now < self.later[k]:
@@ -233,12 +236,12 @@ class Hidden:
         return shown
 
     def open_count(self, items):
-        return sum(key(*item) not in self.ignored for item in items)
+        return sum(key(*item) not in self.dismissed for item in items)
 
     def hidden_count(self, items):
         now = self.clock()
         return sum(
-            key(*item) not in self.ignored and self.later.get(key(*item), 0) > now
+            key(*item) not in self.dismissed and self.later.get(key(*item), 0) > now
             for item in items
         )
 
@@ -471,8 +474,8 @@ def act(hidden, rows, items, action, index, run_jump=jump, until=None):
     owner, text = rows[index][:2]
     if action == "focus":
         return run_jump(f"{text} -> {owner}")
-    if action == "ignore":
-        fed = hidden.ignore(owner, text)
+    if action == "dismiss":
+        fed = hidden.dismiss(owner, text)
         return "removed; it returns only if its text changes" + (
             "" if fed else " (feed not written)"
         )

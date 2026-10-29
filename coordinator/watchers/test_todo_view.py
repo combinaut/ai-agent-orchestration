@@ -68,13 +68,32 @@ class StateTest(ViewCase):
 
     def test_state_is_keyed_by_owner_and_text(self):
         hidden = self.hidden()
-        hidden.ignore("Architect::Finder", "Same text")
+        hidden.dismiss("Architect::Finder", "Same text")
         shown = [(owner, text) for owner, text, *_ in hidden.visible(self.items)]
         self.assertNotIn(("Architect::Finder", "Same text"), shown)
         self.assertIn(("Architect::Tooling", "Same text"), shown)
 
-    def test_ignore_survives_a_restart_and_clears_when_the_text_changes(self):
-        self.hidden().ignore("Architect::Finder", "Same text")
+    def test_an_old_ignored_key_still_hides_its_items(self):
+        (self.root / "state.json").write_text(
+            json.dumps({"ignored": [view.key(*self.items[0])], "later": {}})
+        )
+        shown = [(owner, text) for owner, text, *_ in self.hidden().visible(self.items)]
+        self.assertNotIn(self.items[0], shown)
+
+    def test_saving_writes_dismissed_and_drops_the_old_key(self):
+        (self.root / "state.json").write_text(
+            json.dumps({"ignored": [view.key(*self.items[0])], "later": {}})
+        )
+        self.hidden().dismiss(*self.items[1])
+        state = json.loads((self.root / "state.json").read_text())
+        self.assertNotIn("ignored", state)
+        self.assertEqual(
+            sorted(state["dismissed"]),
+            sorted([view.key(*self.items[0]), view.key(*self.items[1])]),
+        )
+
+    def test_dismiss_survives_a_restart_and_clears_when_the_text_changes(self):
+        self.hidden().dismiss("Architect::Finder", "Same text")
         restarted = self.hidden()
         self.assertEqual(len(restarted.visible(self.items)), 2)
         changed = view.parse("## Architect::Finder.md\n- [now] Same text, now urgent\n")
@@ -103,16 +122,16 @@ class StateTest(ViewCase):
             ("remind", "cancel"),
         )
 
-    def test_ignore_replaces_a_reminder_in_the_stored_state(self):
+    def test_dismiss_replaces_a_reminder_in_the_stored_state(self):
         hidden = self.hidden()
         hidden.remind(*self.items[0], self.clock.now + 60)
-        hidden.ignore(*self.items[0])
+        hidden.dismiss(*self.items[0])
         state = json.loads((self.root / "state.json").read_text())
-        self.assertEqual((len(state["ignored"]), state["later"]), (1, {}))
+        self.assertEqual((len(state["dismissed"]), state["later"]), (1, {}))
 
-    def test_ignored_items_never_show_under_the_reminder_toggle(self):
+    def test_dismissed_items_never_show_under_the_reminder_toggle(self):
         hidden = self.hidden()
-        hidden.ignore(*self.items[0])
+        hidden.dismiss(*self.items[0])
         self.assertNotIn(
             self.items[0], [row[:2] for row in hidden.visible(self.items, True)]
         )
@@ -140,9 +159,9 @@ class StateTest(ViewCase):
         )
         self.assertEqual((first[2], again[2], restarted[2]), (True, True, False))
 
-    def test_counts_cover_open_and_reminder_items_but_never_ignored_ones(self):
+    def test_counts_cover_open_and_reminder_items_but_never_dismissed_ones(self):
         hidden = self.hidden()
-        hidden.ignore(*self.items[0])
+        hidden.dismiss(*self.items[0])
         hidden.remind(*self.items[1], self.clock.now + 60)
         self.assertEqual(
             (hidden.open_count(self.items), hidden.hidden_count(self.items)), (2, 1)
@@ -161,7 +180,7 @@ class StateTest(ViewCase):
 
     def test_state_write_is_atomic_through_a_same_directory_temp_file(self):
         hidden = self.hidden()
-        hidden.ignore(*self.items[0])
+        hidden.dismiss(*self.items[0])
         before = (self.root / "state.json").read_text()
         moves = []
         real = os.replace
@@ -178,8 +197,8 @@ class StateTest(ViewCase):
             with self.assertRaises(OSError):
                 hidden.remind(*self.items[0], self.clock.now + 60)
         self.assertEqual(
-            json.loads((self.root / "state.json").read_text())["ignored"],
-            json.loads(before)["ignored"],
+            json.loads((self.root / "state.json").read_text())["dismissed"],
+            json.loads(before)["dismissed"],
         )
         self.assertEqual(
             sorted(
@@ -192,28 +211,29 @@ class StateTest(ViewCase):
 
 
 class FeedTest(ViewCase):
-    def test_ignore_writes_one_feed_line_the_action_filter_matches(self):
-        self.hidden().ignore(
+    def test_dismiss_writes_one_feed_line_the_action_filter_skips(self):
+        self.hidden().dismiss(
             "Architect::Finder", "Merge it -> https://example.com/pr/1"
         )
         lines = (self.root / "feed.log").read_text().splitlines()
         self.assertEqual(len(lines), 1)
         self.assertRegex(
             lines[0],
-            r"^\S+ todo: TODO IGNORED Architect::Finder: Merge it -> https://example.com/pr/1 \(start\)$",
+            r"^\S+ todo: TODO DISMISSED Architect::Finder: Merge it -> https://example.com/pr/1 \(start\)$",
         )
-        self.assertTrue(
+        self.assertFalse(
             feed_actions.is_action(lines[0], feed_actions.action_patterns())
         )
 
-    def test_only_ignore_lines_match_the_new_pattern(self):
+    def test_no_dismissed_line_is_an_action(self):
         patterns = feed_actions.action_patterns()
         quiet = [
-            "2026-10-21T10:00:00+0200 todo: TODO IGNORED (start)",
-            "2026-10-21T10:00:00+0200 todo: TODO IGNORED Architect::Finder: x (clear)",
-            "2026-10-21T10:00:00+0200 todo: TODO ignored Architect::Finder: x (start)",
-            "2026-10-21T10:00:00+0200 pulls: TODO IGNORED Architect::Finder: x (start)",
-            "2026-10-21T10:00:00+0200 todo: TODO IGNORED Two Words: x (start)",
+            "2026-10-21T10:00:00+0200 todo: TODO DISMISSED Architect::Finder: x (start)",
+            "2026-10-21T10:00:00+0200 todo: TODO DISMISSED (start)",
+            "2026-10-21T10:00:00+0200 todo: TODO DISMISSED Architect::Finder: x (clear)",
+            "2026-10-21T10:00:00+0200 todo: TODO dismissed Architect::Finder: x (start)",
+            "2026-10-21T10:00:00+0200 pulls: TODO DISMISSED Architect::Finder: x (start)",
+            "2026-10-21T10:00:00+0200 todo: TODO DISMISSED Two Words: x (start)",
             "2026-10-21T10:00:00+0200 todo: TODO 1 fresh: x (start)",
         ]
         self.assertEqual(
@@ -239,7 +259,7 @@ class FeedTest(ViewCase):
                 lambda fd, data: (events.append("write"), real(fd, data))[1],
             ),
         ):
-            self.hidden().ignore(*self.items[0])
+            self.hidden().dismiss(*self.items[0])
         self.assertEqual(events, ["lock", "write", "unlock"])
 
     def test_feed_text_is_one_line(self):
@@ -247,13 +267,13 @@ class FeedTest(ViewCase):
         self.assertEqual(line.count("\n"), 1)
         self.assertTrue(line.endswith("(start)\n"))
 
-    def test_an_unwritable_feed_keeps_the_ignore_and_says_so(self):
+    def test_an_unwritable_feed_keeps_the_dismiss_and_says_so(self):
         hidden = view.Hidden(
             self.root / "state.json", self.root / "missing" / "feed.log", self.clock
         )
         rows = [(*self.items[0], False, "")]
         self.assertIn(
-            "feed not written", view.act(hidden, rows, self.items, "ignore", 0)
+            "feed not written", view.act(hidden, rows, self.items, "dismiss", 0)
         )
         self.assertEqual(len(self.hidden().visible(self.items)), 2)
 
@@ -275,7 +295,7 @@ class ClickTest(ViewCase):
                 self.assertEqual(self.click(hits, line, last + 1), [])
                 label = shown[line - 1][first - 1 : last].strip().split("] ")[-1]
                 self.assertTrue(
-                    label in ("Ignore", "Reminder")
+                    label in ("Dismiss", "Reminder")
                     or label.startswith(("show", "hide")),
                     label,
                 )
@@ -285,15 +305,15 @@ class ClickTest(ViewCase):
         lines, hits = self.layout(30)
         by_action = {action: line for line, _f, _l, action, _i in hits}
         self.assertEqual(
-            len(set(by_action[a] for a in ("ignore", "remind"))) >= 1, True
+            len(set(by_action[a] for a in ("dismiss", "remind"))) >= 1, True
         )
-        self.assertIn("Ignore", self.plain(lines)[by_action["ignore"] - 1])
+        self.assertIn("Dismiss", self.plain(lines)[by_action["dismiss"] - 1])
 
     def test_two_actions_and_the_toggle_are_reachable(self):
         _lines, hits = self.layout(80)
         self.assertEqual(
             {action for _l, _f, _t, action, _i in hits if _i == 0},
-            {"ignore", "remind"},
+            {"dismiss", "remind"},
         )
         self.assertIn("show", [action for _l, _f, _t, action, _i in hits])
 
@@ -314,14 +334,14 @@ class ClickTest(ViewCase):
         events, pending = view.input_events(sequence[:5], hits)
         self.assertEqual((events, pending), ([], sequence[:5]))
         self.assertEqual(
-            view.input_events(pending + sequence[5:], hits)[0], [("ignore", 0)]
+            view.input_events(pending + sequence[5:], hits)[0], [("dismiss", 0)]
         )
 
     def test_keys_map_to_the_selected_item(self):
         _lines, hits = self.layout(80)
         self.assertEqual(
-            view.input_events("ir", hits)[0],
-            [("ignore", None), ("remind", None)],
+            view.input_events("dr", hits)[0],
+            [("dismiss", None), ("remind", None)],
         )
         self.assertEqual(
             view.input_events("\x1b[B\x1b[A", hits)[0], [("move", 1), ("move", -1)]
@@ -344,9 +364,9 @@ class ClickTest(ViewCase):
         other = next(h for h in hits if h[4] != index and h[3] == "remind")
         self.assertIn("Reminder", self.plain(lines)[other[0] - 1])
 
-    def test_ignore_key_hint_shows_on_the_selected_item_only(self):
+    def test_dismiss_key_hint_shows_on_the_selected_item_only(self):
         shown = self.plain(self.layout(80, 0)[0])
-        self.assertEqual(sum("[i] Ignore" in line for line in shown), 1)
+        self.assertEqual(sum("[d] Dismiss" in line for line in shown), 1)
 
     def test_picker_buttons_are_clickable_and_digits_pick_a_time(self):
         lines, hits = self.layout(80, 0, {"index": 0, "mode": "pick", "entry": ""})
@@ -372,7 +392,7 @@ class NoOpenTest(ViewCase):
     def test_the_footer_has_no_open_hint(self):
         self.assertNotIn("o open", " · ".join(view.footer_rows(200)))
 
-    def test_a_reminder_row_has_ignore_and_cancel_reminder_without_open(self):
+    def test_a_reminder_row_has_dismiss_and_cancel_reminder_without_open(self):
         hidden = self.hidden()
         hidden.remind(*self.items[0], self.clock.now + 60)
         rows = hidden.visible(self.items, True)
@@ -380,7 +400,7 @@ class NoOpenTest(ViewCase):
         _lines, hits = self.layout(rows, index, True)
         self.assertEqual(
             {hit[3] for hit in hits if hit[4] == index and hit[3] != "focus"},
-            {"ignore", "cancel"},
+            {"dismiss", "cancel"},
         )
 
 
@@ -482,11 +502,11 @@ class StateWriteTest(ViewCase):
         self.seed_expired()
         stale = self.hidden()
         other = self.hidden()
-        other.ignore(*self.items[1])
+        other.dismiss(*self.items[1])
         other.remind(*self.items[2], self.clock.now + 999)
         stale.visible(self.items)
         state = self.stored()
-        self.assertEqual(state["ignored"], [view.key(*self.items[1])])
+        self.assertEqual(state["dismissed"], [view.key(*self.items[1])])
         self.assertEqual(list(state["later"]), [view.key(*self.items[2])])
 
     def test_expiry_cleanup_keeps_a_reminder_another_viewer_extended(self):
@@ -498,17 +518,17 @@ class StateWriteTest(ViewCase):
 
     def test_each_write_starts_from_the_file_not_from_the_loaded_copy(self):
         for name, write in (
-            ("ignore", lambda h: h.ignore(*self.items[1])),
+            ("dismiss", lambda h: h.dismiss(*self.items[1])),
             ("remind", lambda h: h.remind(*self.items[1], self.clock.now + 60)),
             ("cancel", lambda h: h.cancel(*self.items[1])),
         ):
             with self.subTest(name):
                 (self.root / "state.json").unlink(missing_ok=True)
                 stale = self.hidden()
-                self.hidden().ignore(*self.items[2])
+                self.hidden().dismiss(*self.items[2])
                 write(stale)
                 self.assertEqual(
-                    self.stored()["ignored"].count(view.key(*self.items[2])), 1, name
+                    self.stored()["dismissed"].count(view.key(*self.items[2])), 1, name
                 )
 
     def test_writers_in_parallel_lose_nothing(self):
@@ -521,29 +541,29 @@ class StateWriteTest(ViewCase):
 
         with patch.object(view.Hidden, "save", slow_save):
             threads = [
-                threading.Thread(target=lambda n=n: self.hidden().ignore(*n))
+                threading.Thread(target=lambda n=n: self.hidden().dismiss(*n))
                 for n in names
             ]
             for thread in threads:
                 thread.start()
             for thread in threads:
                 thread.join()
-        self.assertEqual(len(self.stored()["ignored"]), len(names))
+        self.assertEqual(len(self.stored()["dismissed"]), len(names))
 
     def test_corrupt_state_reads_as_empty_and_the_next_write_repairs_it(self):
-        for bad in ("{not json", "[]", '{"ignored": 5, "later": "x"}', ""):
+        for bad in ("{not json", "[]", '{"dismissed": 5, "later": "x"}', ""):
             with self.subTest(bad):
                 (self.root / "state.json").write_text(bad)
                 hidden = self.hidden()
                 self.assertEqual(len(hidden.visible(self.items)), 3)
-                hidden.ignore(*self.items[0])
-                self.assertEqual(self.stored()["ignored"], [view.key(*self.items[0])])
+                hidden.dismiss(*self.items[0])
+                self.assertEqual(self.stored()["dismissed"], [view.key(*self.items[0])])
 
     def test_actions_outside_the_rows_change_nothing(self):
         hidden = self.hidden()
         rows = [(*self.items[0], False, "")]
         for index in (-1, 1, 99, None):
-            self.assertEqual(view.act(hidden, rows, self.items, "ignore", index), "")
+            self.assertEqual(view.act(hidden, rows, self.items, "dismiss", index), "")
         self.assertFalse((self.root / "state.json").exists())
 
 
@@ -747,7 +767,7 @@ class PaneTokenTest(AppCase):
                     "pane report-metadata w1:p7 --source orchestrate --token todo=3 --token tabbar=To-do 3"
                 ],
             )
-            app.feed("i")
+            app.feed("d")
         self.assertEqual(
             self.calls()[-1],
             "pane report-metadata w1:p7 --source orchestrate --token todo=2 --token tabbar=To-do 2",
@@ -935,17 +955,34 @@ class KeyboardTest(AppCase):
         self.assertEqual((app.buf, app.selected), ("", 0))
         self.assertIsNotNone(app.picker)
 
+    def test_d_dismisses_the_selected_item_and_feeds_todo_dismissed(self):
+        app = self.app()
+        app.feed("d")
+        self.assertEqual(
+            json.loads((self.root / "state.json").read_text())["dismissed"],
+            [view.key(*self.items[0])],
+        )
+        self.assertRegex(
+            (self.root / "feed.log").read_text(),
+            r"todo: TODO DISMISSED Architect::Finder: Merge it -> https://example.com/pr/1 \(start\)\n$",
+        )
+
+    def test_i_no_longer_dismisses(self):
+        app = self.app()
+        app.feed("i")
+        self.assertFalse((self.root / "state.json").exists())
+
     def test_keys_apply_in_the_order_typed(self):
         app = self.app()
-        app.feed("i\x1b[B")
+        app.feed("d\x1b[B")
         self.assertEqual(
-            json.loads((self.root / "state.json").read_text())["ignored"],
+            json.loads((self.root / "state.json").read_text())["dismissed"],
             [view.key(*self.items[0])],
         )
         self.assertEqual(app.selected, 1)
-        app.feed("i")
+        app.feed("d")
         self.assertEqual(
-            json.loads((self.root / "state.json").read_text())["ignored"],
+            json.loads((self.root / "state.json").read_text())["dismissed"],
             sorted([view.key(*self.items[0]), view.key(*self.items[2])]),
         )
 
@@ -968,13 +1005,13 @@ class KeyboardTest(AppCase):
 
         app = self.app(jump=jump)
         lines = self.screen.last_frame().split("\r\n")
-        row = next(n for n, line in enumerate(lines, 1) if "Ignore" in line)
-        column = lines[row - 1].index("Ignore") + 2
+        row = next(n for n, line in enumerate(lines, 1) if "Dismiss" in line)
+        column = lines[row - 1].index("Dismiss") + 2
         app.feed(f"\x1b[<0;{column};{row}M\r")
         self.assertEqual(app.status, "jumped")
         self.assertEqual(jumps, [f"{self.items[1][1]} -> {self.items[1][0]}"])
         self.assertEqual(
-            json.loads((self.root / "state.json").read_text())["ignored"],
+            json.loads((self.root / "state.json").read_text())["dismissed"],
             [view.key(*self.items[0])],
         )
 
@@ -1063,7 +1100,7 @@ class ViewportTest(AppCase):
         rows = self.screen.last_frame().split("\r\n")
         for line, first, last, action, index in app.hits:
             self.assertLessEqual(line, self.screen.lines - 1)
-            label = {"ignore": "Ignore", "remind": "Reminder"}.get(action)
+            label = {"dismiss": "Dismiss", "remind": "Reminder"}.get(action)
             if label:
                 self.assertIn(label, rows[line - 1][first - 1 : last])
 
@@ -1080,10 +1117,10 @@ class ViewportTest(AppCase):
         frame = self.screen.last_frame()
         self.assertIn("10. Architect", frame)
         self.hits_ok(app)
-        hit = next(h for h in app.hits if h[3] == "ignore" and h[4] == 9)
+        hit = next(h for h in app.hits if h[3] == "dismiss" and h[4] == 9)
         app.feed(f"\x1b[<0;{hit[1]};{hit[0]}M")
         self.assertEqual(
-            json.loads((self.root / "state.json").read_text())["ignored"],
+            json.loads((self.root / "state.json").read_text())["dismissed"],
             [view.key(*self.current[9])],
         )
 
@@ -1110,8 +1147,8 @@ class ViewportTest(AppCase):
             )
             plain = self.plain(lines)
             for line, first, last, action, index in hits:
-                if action in ("ignore", "remind"):
-                    label = {"ignore": "Ignore", "remind": "Reminder"}[action]
+                if action in ("dismiss", "remind"):
+                    label = {"dismiss": "Dismiss", "remind": "Reminder"}[action]
                     self.assertIn(
                         label, plain[line - 1][first - 1 : last], (width, action)
                     )
@@ -1127,7 +1164,7 @@ class ViewportTest(AppCase):
             ("Architect::Other", "short"),
         ]
         wanted = {
-            "ignore",
+            "dismiss",
             "remind",
             "pick1",
             "pick2",
@@ -1137,7 +1174,7 @@ class ViewportTest(AppCase):
             "type",
         }
         labels = {
-            "ignore": "Ignore",
+            "dismiss": "Dismiss",
             "remind": "Reminder",
             "pick1": "15m",
             "pick2": "1h",

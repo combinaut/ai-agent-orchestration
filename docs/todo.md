@@ -8,7 +8,7 @@ python3 ~/.claude/coordinator/user-todo.py --follow
 
 `user-todo.py` without `--follow` writes the file once. In the pane, press a number then Enter (or click) to jump to the item. `n` and `p` change page. A jump removes the item from the list. An empty list reads `Nothing waits on you.`
 
-For buttons instead, run `python3 ~/.claude/coordinator/user-todo-view.py` (`--demo` shows sample items). Clicking an item's architect heading or pressing Enter on its selected item focuses that architect's pane. Each item has Ignore and Reminder buttons (click, or `i` `r` on the selected item; `↑↓` or a number selects). Ignore removes the item for good: it returns only when the architect writes a new or changed item, and one `todo: TODO IGNORED <architect>: <text> (start)` line goes to the feed so the Coordinator can tell that architect. Reminder asks when (`1`-`5` for 15m, 1h, 2h, 4h, tomorrow 9:00; `t` types `30m` or `3h`) and hides the item until then; reminders are listed under `s` and come back marked `reminder:`; on a reminder item the button reads Cancel reminder. The top line reads `<n> open · <m> on reminder`. The `[s]` toggle and the `s show reminders` footer hint appear only while at least one reminder exists; the list closes when the last one goes. State is in `~/.claude/coordinator/user-todo-state.json` (not the generator's `user-todo.state.json`).
+For buttons instead, run `python3 ~/.claude/coordinator/user-todo-view.py` (`--demo` shows sample items). Clicking an item's architect heading or pressing Enter on its selected item focuses that architect's pane. Each item has Dismiss and Reminder buttons (click, or `d` `r` on the selected item; `↑↓` or a number selects). Dismiss hides the item for good: it returns only when the architect writes a new or changed item. One `todo: TODO DISMISSED <architect>: <text> (start)` line goes to the feed for the record; it is not an action line, and the action itself stays wanted. Reminder asks when (`1`-`5` for 15m, 1h, 2h, 4h, tomorrow 9:00; `t` types `30m` or `3h`) and hides the item until then; reminders are listed under `s` and come back marked `reminder:`; on a reminder item the button reads Cancel reminder. The top line reads `<n> open · <m> on reminder`. The `[s]` toggle and the `s show reminders` footer hint appear only while at least one reminder exists; the list closes when the last one goes. State is in `~/.claude/coordinator/user-todo-state.json` (not the generator's `user-todo.state.json`); it stores `dismissed`, and an old `ignored` key is still read.
 
 To open it as a Herdr popup on `prefix+t`, pass `--popup` so `Esc` or `q` closes it (the footer then shows `Esc/q close`; Herdr sets no popup marker). Without the flag nothing closes it, so the Coordinator's to-do pane stays up. `Esc` while the reminder choices show only cancels them, and `q` is typed as text in the `t` entry.
 
@@ -44,12 +44,12 @@ then press **a** (or click **Answer**). In answer mode, press its choice number,
 or **t** to type a free-text answer and **Enter** to send. **Esc** cancels the
 answer; in a popup it stays open. The simple `user-todo.py --follow` list also
 supports `a`: type the item number, press `a`, then choose or type. Outside answer
-mode, number/Enter jumps, n/p paging, mouse clicks, Ignore and Reminder keep their
+mode, number/Enter jumps, n/p paging, mouse clicks, Dismiss and Reminder keep their
 existing behavior. In text mode, letters such as q, n and p are answer text. If the item disappears or changes while you type, press Esc to leave the canceled answer; buffered text cannot act on another item.
 
 The queued answer removes the item using the same dismissal state as a successful
 jump. It returns only when the architect changes or re-adds the status item.
-Ignore still emits `TODO IGNORED`; answering emits `TODO ANSWER` instead. The
+Dismiss still emits `TODO DISMISSED`; answering emits `TODO ANSWER` instead. The
 message goes to the architect whose status file owns the line, through the
 existing to-do producer, native architect binding and notifier outbox. The target
 after `->` still controls normal jumps. An unavailable architect keeps the answer
