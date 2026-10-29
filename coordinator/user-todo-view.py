@@ -57,6 +57,7 @@ TODO = Path(configured_output() or COORDINATOR / "user-todo.md")
 HIDDEN = TODO.with_name("user-todo-state.json")
 FEED = feed_attach.FEED
 HIDE_AFTER = 30
+WRITE_TIMEOUT = 3
 TARGET = re.compile(r"->\s*(\S.*?)\s*$")
 AGE_PREFIX = re.compile(r"\[(?:now|\d+[mhd])\] ")
 MOUSE = re.compile(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])")
@@ -803,6 +804,27 @@ ENTER = "\033[?1000h\033[?1006h\033[?25l"
 LEAVE = "\033[?1000l\033[?1006l\033[?25h"
 
 
+class BoundedOut:
+    """Terminal output that raises TimeoutError when the terminal stops draining."""
+
+    def __init__(self, fd, timeout=WRITE_TIMEOUT):
+        self.fd, self.timeout = fd, timeout
+
+    def write(self, text):
+        data = text.encode()
+        deadline = time.monotonic() + self.timeout
+        while data:
+            try:
+                data = data[os.write(self.fd, data) :]
+            except BlockingIOError:
+                left = deadline - time.monotonic()
+                if left <= 0 or not select.select([], [self.fd], [], left)[1]:
+                    raise TimeoutError("terminal output is not draining")
+
+    def flush(self):
+        pass
+
+
 def stop(*_):
     sys.exit(143)
 
@@ -817,6 +839,9 @@ def main():
         else Hidden(HIDDEN, FEED)
     )
     fd = sys.stdin.fileno()
+    out = BoundedOut(sys.__stdout__.fileno())
+    blocking = os.get_blocking(out.fd)
+    parent = os.getppid()
     previous = {
         number: signal.signal(number, stop)
         for number in (signal.SIGTERM, signal.SIGHUP)
@@ -825,12 +850,12 @@ def main():
     try:
         old = termios.tcgetattr(fd)
         tty.setcbreak(fd)
-        sys.stdout.write(ENTER)
-        sys.stdout.flush()
-        app = App(hidden, demo, sys.stdout, os.get_terminal_size, popup=popup)
+        os.set_blocking(out.fd, False)
+        out.write(ENTER)
+        app = App(hidden, demo, out, os.get_terminal_size, popup=popup)
         decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
         try:
-            while not app.closing:
+            while not app.closing and os.getppid() == parent:
                 app.tick()
                 ready, _, _ = select.select(
                     [fd], [], [], 0.3 if app.buf == "\x1b" else 1
@@ -847,11 +872,11 @@ def main():
     finally:
         if old is not None:
             try:
-                sys.stdout.write(LEAVE)
-                sys.stdout.flush()
+                out.write(LEAVE)
                 termios.tcsetattr(fd, termios.TCSANOW, old)
             except (OSError, ValueError):
                 pass
+            os.set_blocking(out.fd, blocking)
         for number, handler in previous.items():
             signal.signal(number, handler)
         if scratch:

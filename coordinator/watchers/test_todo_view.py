@@ -6,6 +6,7 @@ import os
 import pty
 import re
 import select
+import shutil
 import signal
 import struct
 import subprocess
@@ -1342,10 +1343,10 @@ class PtyTest(IsolatedTestCase):
     def test_a_lost_terminal_ends_the_popup(self):
         path = str(w.ROOT.parent / "user-todo-view.py")
         script = (
-            "import importlib.util, os, sys, signal\n"
-            "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+            "import importlib.util, os, sys\n"
             f"spec = importlib.util.spec_from_file_location('v', {path!r})\n"
             "v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v)\n"
+            "v.stop = lambda *_: None\n"
             "sys.argv = ['x', '--demo', '--popup']\n"
             "v.main()\n"
         )
@@ -1372,6 +1373,66 @@ class PtyTest(IsolatedTestCase):
                 os.kill(pid, signal.SIGKILL)
                 os.waitpid(pid, 0)
         self.assertIsNotNone(status, "the popup outlived its terminal")
+
+    def test_an_orphaned_popup_ends(self):
+        path = str(w.ROOT.parent / "user-todo-view.py")
+        scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, scratch, ignore_errors=True)
+        pidfile = scratch / "pid"
+        script = (
+            "import importlib.util, os, sys, time\n"
+            f"spec = importlib.util.spec_from_file_location('v', {path!r})\n"
+            "v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v)\n"
+            "sys.argv = ['x', '--demo', '--popup']\n"
+            "if os.fork():\n"
+            "    time.sleep(2)\n"
+            "    os._exit(0)\n"
+            f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+            "v.main()\n"
+        )
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execvp(sys.executable, [sys.executable, "-I", "-c", script])
+        gone = False
+        try:
+            end = time.time() + 15
+            while time.time() < end and not gone:
+                ready, _, _ = select.select([fd], [], [], 0.2)
+                if ready:
+                    try:
+                        os.read(fd, 65536)
+                    except OSError:
+                        pass
+                if pidfile.exists() and pidfile.read_text():
+                    try:
+                        os.kill(int(pidfile.read_text()), 0)
+                    except ProcessLookupError:
+                        gone = True
+        finally:
+            if pidfile.exists():
+                try:
+                    os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                except (ProcessLookupError, ValueError):
+                    pass
+            os.waitpid(pid, 0)
+            os.close(fd)
+        self.assertTrue(gone, "the popup outlived its parent")
+
+    def test_output_that_never_drains_raises_instead_of_blocking(self):
+        read_end, write_end = os.pipe()
+        os.set_blocking(write_end, False)
+        try:
+            while True:
+                os.write(write_end, b"x" * 65536)
+        except BlockingIOError:
+            pass
+        out = view.BoundedOut(write_end, timeout=0.3)
+        started = time.monotonic()
+        with self.assertRaises(TimeoutError):
+            out.write("frame")
+        self.assertLess(time.monotonic() - started, 2)
+        os.close(read_end)
+        os.close(write_end)
 
     def test_a_setup_failure_after_the_mode_change_restores_it(self):
         out = run_in_pty({"VIEW_FAIL": "1"}, lambda pid, fd, read: read(until="RESULT"))
