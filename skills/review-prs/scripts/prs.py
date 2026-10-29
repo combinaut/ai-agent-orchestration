@@ -57,6 +57,19 @@ query($q: String!, $me: String, $endCursor: String) {
   }
 }"""
 
+DEPARTURE_QUERY = """
+query($url: URI!, $me: String) {
+  resource(url: $url) {
+    ... on PullRequest {
+      state headRefOid
+      reviewRequests(first: 20) { nodes { requestedReviewer {
+        __typename ... on User { login } ... on Team { slug } ... on Bot { login } } } }
+      myReviews: reviews(last: 1, author: $me, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) {
+        nodes { commit { oid } } }
+    }
+  }
+}"""
+
 
 def setting(name):
     """An ORCH_* global setting: the environment, else ~/.claude/orchestration.toml (or $ORCH_CONFIG)."""
@@ -473,16 +486,35 @@ def blocker(snap):
 
 
 def departure(url, login):
-    """Returns a confirmed departure state, or None while this reviewer is still requested."""
-    pr = json.loads(gh("pr", "view", url, "--json", "state,reviewRequests"))
+    """Returns a confirmed departure state, or None while the PR is still watched."""
+    raw = gh(
+        "api",
+        "graphql",
+        "-f",
+        f"query={DEPARTURE_QUERY}",
+        "-f",
+        f"url={url}",
+        "-f",
+        f"me={login}",
+    )
+    pr = json.loads(raw)["data"]["resource"]
+    if not pr:
+        raise RuntimeError("PR lookup returned no pull request")
+    pr["url"] = url
     state = pr.get("state")
     if state != "OPEN":
         return state
-    for request in pr.get("reviewRequests") or []:
+    for node in pr.get("reviewRequests") or []:
+        request = node.get("requestedReviewer") or node
         if (request.get("login") or "").lower() == login.lower():
             return None
         if request.get("slug") and not request.get("login"):
             return None
+    dispatched = read_dispatched()
+    if (my_review_sha(pr) and my_review_sha(pr) != pr.get("headRefOid")) or (
+        dispatched_done_on_other_head(pr, dispatched)
+    ):
+        return None
     return "cleared"
 
 
@@ -580,7 +612,7 @@ def changes(before, after, login=None):
         try:
             departure_login = departure_login or viewer_login()
             st = departure(url, departure_login)
-        except (RuntimeError, json.JSONDecodeError):
+        except (RuntimeError, ValueError):
             # Kept until a per-PR read confirms departure.
             keep_missed()
             continue

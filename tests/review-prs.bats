@@ -439,8 +439,8 @@ present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", 
 calls = []
 def fake_gh(*args):
     calls.append(args)
-    assert args == ("pr", "view", url, "--json", "state,reviewRequests"), args
-    return json.dumps({"state": "OPEN", "reviewRequests": [{"login": "reviewer"}]})
+    assert args[:2] == ("api", "graphql"), args
+    return json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "s", "reviewRequests": [{"requestedReviewer": {"login": "reviewer"}}], "myReviews": {"nodes": []}}}})
 prs.gh = fake_gh
 prs.viewer_login = lambda: "reviewer"
 lines, retained = prs.changes(present, {})
@@ -450,6 +450,75 @@ lines, retained = prs.changes(retained, present)
 assert lines == [], lines
 assert retained == {}, retained
 assert len(calls) == 1, calls
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a moved PR missing from one poll is kept" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="new", conflict=False)}
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "new", "reviewRequests": [], "myReviews": {"nodes": [{"commit": {"oid": "old"}}]}}}})
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [], lines
+assert retained == {url: dict(present[url], misses=1)}, retained
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a per-PR read clears an open PR only when it is not moved" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="head", conflict=False)}
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "head", "reviewRequests": [], "myReviews": {"nodes": [{"commit": {"oid": "head"}}]}}}})
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [f"cleared: {url} — t (no longer requesting you)"], lines
+assert retained == {}, retained
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "an empty poll after non-empty keeps every moved PR" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+urls = [f"https://github.com/acme/app/pull/{n}" for n in (7, 8)]
+present = {url: dict(title=url[-1], draft=False, author="a", ci="SUCCESS", sha="new", conflict=False) for url in urls}
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "new", "reviewRequests": [], "myReviews": {"nodes": [{"commit": {"oid": "old"}}]}}}})
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [], lines
+assert retained == {url: dict(present[url], misses=1) for url in urls}, retained
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "an unreadable dispatch ledger does not confirm a departure" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="head", conflict=False)}
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "head", "reviewRequests": [], "myReviews": {"nodes": [{"commit": {"oid": "head"}}]}}}})
+prs.read_dispatched = lambda: (_ for _ in ()).throw(ValueError("partial ledger"))
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [], lines
+assert retained == {url: dict(present[url], misses=1)}, retained
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
@@ -480,7 +549,7 @@ sys.path.insert(0, sys.argv[1])
 import prs
 url = "https://github.com/acme/app/pull/7"
 present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
-prs.gh = lambda *args: json.dumps({"state": "OPEN", "reviewRequests": [{"slug": "core"}]})
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "s", "reviewRequests": [{"requestedReviewer": {"slug": "core"}}], "myReviews": {"nodes": []}}}})
 lines, retained = prs.changes(present, {}, "reviewer")
 assert lines == [], lines
 assert retained[url]["misses"] == 1, retained
@@ -541,7 +610,7 @@ sys.path.insert(0, sys.argv[1])
 import prs
 url = "https://github.com/acme/app/pull/7"
 present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
-prs.gh = lambda *args: json.dumps({"state": "MERGED", "reviewRequests": []})
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "MERGED", "headRefOid": "s", "reviewRequests": [], "myReviews": {"nodes": []}}}})
 lines, state = prs.changes(present, {}, "reviewer")
 assert lines == [f"merged: {url} — t"], lines
 assert state == {}, state
