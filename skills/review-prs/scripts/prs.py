@@ -504,15 +504,16 @@ def departure(url, login):
     state = pr.get("state")
     if state != "OPEN":
         return state
-    for node in pr.get("reviewRequests") or []:
+    for node in (pr.get("reviewRequests") or {}).get("nodes") or []:
         request = node.get("requestedReviewer") or node
         if (request.get("login") or "").lower() == login.lower():
             return None
         if request.get("slug") and not request.get("login"):
             return None
     dispatched = read_dispatched()
-    if (my_review_sha(pr) and my_review_sha(pr) != pr.get("headRefOid")) or (
-        dispatched_done_on_other_head(pr, dispatched)
+    if not dispatched_current_head_done(pr, dispatched) and (
+        (my_review_sha(pr) and my_review_sha(pr) != pr.get("headRefOid"))
+        or dispatched_done_on_other_head(pr, dispatched)
     ):
         return None
     return "cleared"
@@ -612,7 +613,7 @@ def changes(before, after, login=None):
         try:
             departure_login = departure_login or viewer_login()
             st = departure(url, departure_login)
-        except (RuntimeError, ValueError):
+        except (OSError, RuntimeError, ValueError):
             # Kept until a per-PR read confirms departure.
             keep_missed()
             continue
