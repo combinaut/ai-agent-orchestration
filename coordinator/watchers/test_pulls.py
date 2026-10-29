@@ -22,7 +22,13 @@ def pr(number, decision="APPROVED", branch="feature", head="owner/product"):
         reviewDecision=decision,
     )
     row["latestOpinionatedReviews"] = {
-        "nodes": [{"state": "APPROVED", "commit": {"oid": row["headRefOid"]}}]
+        "nodes": [
+            {
+                "id": "approval-1",
+                "state": "APPROVED",
+                "commit": {"oid": row["headRefOid"]},
+            }
+        ]
     }
     return row
 
@@ -945,7 +951,11 @@ class PullsTest(IsolatedTestCase):
             if number == 32111:
                 row["reviewDecision"] = "APPROVED"
                 row["latestOpinionatedReviews"]["nodes"] = [
-                    {"state": "APPROVED", "commit": {"oid": "old"}}
+                    {
+                        "id": "approval-32111",
+                        "state": "APPROVED",
+                        "commit": {"oid": "old"},
+                    }
                 ]
             rows.append(row)
         repo = PR["repository"]["nameWithOwner"]
@@ -1018,7 +1028,7 @@ class PullsTest(IsolatedTestCase):
         state, events = w.reduce_pulls(
             state, w.collect_pulls(self.command([row]), state)
         )
-        for kind in ("COPILOT", "APPROVED-OLDHEAD", "THREADS"):
+        for kind in ("COPILOT", "THREADS"):
             self.assertTrue(
                 any(
                     event.startswith(kind + " owner/product#7 owner=")
@@ -1026,6 +1036,7 @@ class PullsTest(IsolatedTestCase):
                 ),
                 (kind, events),
             )
+        self.assertFalse(any(event.startswith("APPROVED-OLDHEAD ") for event in events))
         # A short review window temporarily shows no bot, then the same review again.
         row["reviews"]["nodes"] = []
         state, _ = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
@@ -1039,6 +1050,79 @@ class PullsTest(IsolatedTestCase):
         _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
         self.assertFalse(
             any(event.startswith("COPILOT ") and "owner=" in event for event in events)
+        )
+
+    def test_oldhead_approval_fires_once_per_approval_across_heads_and_restart(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        row["latestOpinionatedReviews"]["nodes"] = []
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+
+        row["reviewDecision"] = "APPROVED"
+        row["latestOpinionatedReviews"]["nodes"] = [
+            {"id": "approval-1", "state": "APPROVED", "commit": {"oid": "old"}}
+        ]
+
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(
+            events,
+            [
+                f"APPROVED-OLDHEAD owner/product#7 owner=wArch {PR['title']} "
+                "[approval is not on the current head]"
+            ],
+        )
+
+        for head in ("head-2", "head-3", "head-4"):
+            row["headRefOid"] = head
+            state, events = w.reduce_pulls(
+                state, w.collect_pulls(self.command([row]), state)
+            )
+            self.assertEqual(events, [])
+
+        state = json.loads(json.dumps(state))
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+
+        row["latestOpinionatedReviews"]["nodes"].append(
+            {"id": "approval-2", "state": "APPROVED", "commit": {"oid": "old-2"}}
+        )
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertTrue(any(event.startswith("APPROVED-OLDHEAD ") for event in events))
+
+        row["latestOpinionatedReviews"]["nodes"] = [
+            {"id": "approval-2", "state": "APPROVED", "commit": {"oid": "head-4"}}
+        ]
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(
+            events,
+            [
+                f"APPROVED owner/product#7 owner=wArch {PR['title']}",
+                "APPROVED-OLDHEAD owner/product#7 cleared",
+            ],
+        )
+
+    def test_oldhead_legacy_snapshot_seeds_approvals_silently(self):
+        row = pr(7)
+        row["latestOpinionatedReviews"]["nodes"][0]["commit"]["oid"] = "old"
+        state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
+        saved = state["prs"]["owner/product#7"]
+        saved["identities"]["APPROVED-OLDHEAD"] = ["head", ["old"]]
+        saved.pop("seen_approvals", None)
+
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+        self.assertEqual(saved.get("seen_approvals"), None)
+        self.assertEqual(
+            state["prs"]["owner/product#7"]["seen_approvals"], ["approval-1"]
         )
 
     def test_partial_pr_read_keeps_evidence_and_readable_sibling_changes(self):

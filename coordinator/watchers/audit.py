@@ -20,7 +20,7 @@ import orch_settings
 
 SELECTION = """number title state isDraft author{login} mergeable baseRefName headRefName headRefOid headRepository{nameWithOwner}
 repository{nameWithOwner defaultBranchRef{name}}
-latestOpinionatedReviews(first:10){nodes{state commit{oid}}}
+latestOpinionatedReviews(first:10){nodes{id state commit{oid}}}
 reviewDecision reviewRequests(first:3){totalCount}
 reviewThreads(first:$ni){pageInfo{hasNextPage} nodes{isResolved}}
 reviews(last:6){nodes{author{login __typename} state body comments{totalCount}}}

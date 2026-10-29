@@ -1182,6 +1182,11 @@ def collect_pulls(command, before, clock=time.monotonic):
                     ),
                 )
             ]
+            visible_approvals = [
+                review["id"]
+                for review in pr["latestOpinionatedReviews"]["nodes"]
+                if review["state"] == "APPROVED"
+            ]
             lines = {
                 line.split(" ", 1)[0]: line
                 for line in audit.pr_lines(display_pr, page_nodes, repo_settings)
@@ -1266,6 +1271,7 @@ def collect_pulls(command, before, clock=time.monotonic):
             lines, identities = old.get("lines", {}), old.get("identities", {})
             check_failures = old.get("check_failures")
             visible_bot_reviews = None
+            visible_approvals = None
             gate_checks = old.get("gate_checks")
             head, base = old.get("head"), old.get("base")
             unreadable.append(f"pr:{key}")
@@ -1276,7 +1282,9 @@ def collect_pulls(command, before, clock=time.monotonic):
             lines=lines,
             identities=identities,
             seen_reviews=old.get("seen_reviews", []),
+            seen_approvals=old.get("seen_approvals", []),
             visible_bot_reviews=visible_bot_reviews,
+            visible_approvals=visible_approvals,
             check_failures=check_failures,
             head=head,
             base=base,
@@ -1306,12 +1314,9 @@ def pull_identities(pr, lines):
         )
     if "APPROVED-OLDHEAD" in lines:
         identities["APPROVED-OLDHEAD"] = [
-            pr["headRefOid"],
-            sorted(
-                (review.get("commit") or {}).get("oid") or ""
-                for review in pr["latestOpinionatedReviews"]["nodes"]
-                if review["state"] == "APPROVED"
-            ),
+            review["id"]
+            for review in pr["latestOpinionatedReviews"]["nodes"]
+            if review["state"] == "APPROVED"
         ]
     bot = os.environ.get("ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer")
     reviews = [
@@ -1365,12 +1370,19 @@ def reduce_pulls(before, raw):
         old = previous.get("lines", {})
         identities = pr.get("identities", {})
         seen = set(previous.get("seen_reviews", []))
+        seen_approvals = set(previous.get("seen_approvals", []))
         visible_reviews = pr.pop("visible_bot_reviews", None)
+        visible_approvals = pr.pop("visible_approvals", None)
         legacy_reviews = (
             key in (before or {}).get("prs", {}) and "seen_reviews" not in previous
         )
+        legacy_approvals = (
+            key in (before or {}).get("prs", {}) and "seen_approvals" not in previous
+        )
         if before is None or legacy_reviews:
             seen.update(visible_reviews or [])
+        if before is None or legacy_approvals:
+            seen_approvals.update(visible_approvals or [])
         rerouted = pr["owner"] and pr["owner"] != previous.get("owner")
         for kind, line in sorted(pr["lines"].items()):
             identity = identities.get(kind)
@@ -1388,6 +1400,9 @@ def reduce_pulls(before, raw):
                 # Seed legacy active state silently on its first identity-aware read.
                 changed = identity not in seen and not legacy_reviews
                 seen.add(identity)
+            if kind == "APPROVED-OLDHEAD" and identity is not None:
+                changed = bool(set(identity) - seen_approvals) and not legacy_approvals
+                seen_approvals.update(identity)
             if before is not None and (changed or rerouted):
                 # End the previous identity before starting its replacement, including in the feed policy.
                 if kind in old and changed:
@@ -1400,6 +1415,11 @@ def reduce_pulls(before, raw):
             )  # Defer migration until the reviews are readable.
         else:
             pr["seen_reviews"] = sorted(seen)
+        if legacy_approvals and visible_approvals is None:
+            pr.pop("seen_approvals", None)
+        else:
+            seen_approvals.update(visible_approvals or [])
+            pr["seen_approvals"] = sorted(seen_approvals)
         if before is not None:
             events += [
                 f"{kind} {key} cleared" for kind in sorted(set(old) - set(pr["lines"]))
