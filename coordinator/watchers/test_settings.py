@@ -684,7 +684,7 @@ class PullsSettingsTest(SettingsTest):
         )
         pr.update(reviewDecision="APPROVED", baseRefName="feature/base")
         pr["latestOpinionatedReviews"]["nodes"] = [
-            dict(state="APPROVED", commit=dict(oid=pr["headRefOid"]))
+            dict(id="approval-1", state="APPROVED", commit=dict(oid=pr["headRefOid"]))
         ]
         calls = []
 
@@ -720,7 +720,7 @@ class PullsSettingsTest(SettingsTest):
         )
         pr.update(reviewDecision="APPROVED", baseRefName="feature/base")
         pr["latestOpinionatedReviews"]["nodes"] = [
-            dict(state="APPROVED", commit=dict(oid=pr["headRefOid"]))
+            dict(id="approval-1", state="APPROVED", commit=dict(oid=pr["headRefOid"]))
         ]
         repo_file = ['[audit]\nmerge_gate_checks = ["Full gate"]\n']
 

@@ -1125,6 +1125,38 @@ class PullsTest(IsolatedTestCase):
             state["prs"]["owner/product#7"]["seen_approvals"], ["approval-1"]
         )
 
+    def test_unreadable_legacy_oldhead_identity_defers_migration(self):
+        key = "owner/product#7"
+        line = f"APPROVED-OLDHEAD {key} {PR['title']} [approval is not on the current head]"
+        before = {
+            "prs": {
+                key: {
+                    "title": PR["title"],
+                    "owner": "wArch",
+                    "lines": {"APPROVED-OLDHEAD": line},
+                    "identities": {"APPROVED-OLDHEAD": ["head", ["old"]]},
+                }
+            },
+            "unreadable": [],
+        }
+        raw = {
+            "prs": {
+                key: {
+                    **before["prs"][key],
+                    "visible_bot_reviews": None,
+                    "visible_approvals": None,
+                }
+            },
+            "departed": {},
+            "failed": [],
+            "unreadable": [f"pr:{key}"],
+        }
+
+        state, events = w.reduce_pulls(before, raw)
+
+        self.assertEqual(events, [f"PULLS READFAIL pr:{key}"])
+        self.assertNotIn("seen_approvals", state["prs"][key])
+
     def test_partial_pr_read_keeps_evidence_and_readable_sibling_changes(self):
         row = pr(7)
         state, _ = w.reduce_pulls(

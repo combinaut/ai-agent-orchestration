@@ -1401,8 +1401,11 @@ def reduce_pulls(before, raw):
                 changed = identity not in seen and not legacy_reviews
                 seen.add(identity)
             if kind == "APPROVED-OLDHEAD" and identity is not None:
-                changed = bool(set(identity) - seen_approvals) and not legacy_approvals
-                seen_approvals.update(identity)
+                if legacy_approvals:
+                    changed = False
+                else:
+                    changed = bool(set(identity) - seen_approvals)
+                    seen_approvals.update(identity)
             if before is not None and (changed or rerouted):
                 # End the previous identity before starting its replacement, including in the feed policy.
                 if kind in old and changed:
