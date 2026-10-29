@@ -17,4 +17,4 @@ command = ["sh", "-c", "exec python3 \"$HOME/.claude/coordinator/user-todo-view.
 id = "open"
 title = "To-do: open the popup"
 description = "Open the to-do view in a popup."
-command = ["sh", "-c", "exec \"${HERDR_BIN_PATH:-herdr}\" plugin pane open --plugin combinaut.todo --entrypoint view"]
+command = ["sh", "-c", "exec python3 \"$HOME/.claude/coordinator/user-todo-view.py\" --open-popup"]

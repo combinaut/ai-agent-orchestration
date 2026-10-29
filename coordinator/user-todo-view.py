@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "watchers"))
 import feed_attach  # noqa: E402
 import todo_answers  # noqa: E402
+import todo_popup  # noqa: E402
 from reminder_picker import (  # noqa: E402
     PICK_KEYS,
     RESET,
@@ -772,14 +773,22 @@ class App:
                 and self.rows[self.selected][3] != ""
             )
 
+    def escape(self):
+        if self.picker and "answer" in self.picker:
+            self.status = "answer cancelled"
+        self.closing = self.popup and self.picker is None
+        self.buf, self.picker = "", None
+        if not self.closing:
+            self.refresh()
+
     def feed(self, data):
         self.last_input = self.clock()
         tokens, self.buf = split_input(self.buf + data)
         for token in tokens:
-            if token == "\x1b" and self.picker and "answer" in self.picker:
-                self.picker = None
-                self.status = "answer cancelled"
-                self.refresh()
+            if token in ("\x1b", "\x1b[27u", "\x1b[27;1u", "\x1b[27;1;27~"):
+                self.escape()
+                if self.closing:
+                    return
                 continue
             events = input_events(
                 token, self.hits, self.picker and self.picker["mode"]
@@ -793,11 +802,7 @@ class App:
 
     def lone_escape(self):
         if self.buf == "\x1b":
-            if self.picker and "answer" in self.picker:
-                self.status = "answer cancelled"
-            self.closing = self.popup and self.picker is None
-            self.buf, self.picker = "", None
-            self.refresh()
+            self.escape()
 
 
 ENTER = "\033[?1000h\033[?1006h\033[?25l"
@@ -830,6 +835,8 @@ def stop(*_):
 
 
 def main():
+    if "--open-popup" in sys.argv[1:]:
+        return todo_popup.open_popup()
     demo = "--demo" in sys.argv[1:]
     popup = "--popup" in sys.argv[1:]
     scratch = Path(tempfile.mkdtemp(prefix="user-todo-demo.")) if demo else None
@@ -847,7 +854,10 @@ def main():
         for number in (signal.SIGTERM, signal.SIGHUP)
     }
     old = None
+    registration = None
     try:
+        if popup:
+            registration = todo_popup.register()
         old = termios.tcgetattr(fd)
         tty.setcbreak(fd)
         os.set_blocking(out.fd, False)
@@ -855,7 +865,13 @@ def main():
             out.write(ENTER)
             app = App(hidden, demo, out, os.get_terminal_size, popup=popup)
             decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
+            next_pane_check = 0
+            pane = os.environ.get("HERDR_PANE_ID") if popup else None
             while not app.closing and os.getppid() == parent:
+                if pane and mono() >= next_pane_check:
+                    if not todo_popup.pane_exists(pane):
+                        break
+                    next_pane_check = mono() + 3
                 app.tick()
                 ready, _, _ = select.select(
                     [fd], [], [], 0.3 if app.buf == "\x1b" else 1
@@ -870,6 +886,7 @@ def main():
         except OSError:
             pass
     finally:
+        todo_popup.unregister(registration)
         if old is not None:
             for restore in (
                 lambda: out.write(LEAVE),
@@ -887,4 +904,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

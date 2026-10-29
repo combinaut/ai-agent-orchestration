@@ -890,6 +890,14 @@ class KeyboardTest(AppCase):
         app.lone_escape()
         self.assertTrue(app.closing)
 
+    def test_encoded_or_batched_escape_closes_popup_before_later_keys(self):
+        for keys in ("\x1bi", "\x1b[27u", "\x1b[27;1u", "\x1b[27;1;27~"):
+            with self.subTest(keys=keys):
+                app = self.popup_app()
+                app.feed(keys)
+                self.assertTrue(app.closing)
+                self.assertFalse((self.root / "state.json").exists())
+
     def test_keys_after_q_in_the_same_read_are_dropped(self):
         app = self.popup_app()
         app.feed("qi")
@@ -1227,6 +1235,8 @@ sys.argv = ["x", "--demo", *os.environ.get("VIEW_ARGS", "").split()]
 if os.environ.get("VIEW_FAIL"):
     def boom(*a): raise OSError("boom")
     v.tty.setcbreak = boom
+if os.environ.get("VIEW_PANE_GONE"):
+    v.todo_popup.pane_exists = lambda *_: False
 code = 0
 try:
     v.main()
@@ -1304,6 +1314,17 @@ class PtyTest(IsolatedTestCase):
                 out = run_in_pty({"VIEW_ARGS": "--popup"}, act)
                 self.assertIn("\x1b[?1000l", out)
                 self.assertRegex(out, r"RESULT 0 True True")
+
+    def test_a_missing_popup_pane_ends_the_loop(self):
+        out = run_in_pty(
+            {
+                "VIEW_ARGS": "--popup",
+                "HERDR_PANE_ID": "wtest:p99",
+                "VIEW_PANE_GONE": "1",
+            },
+            lambda pid, fd, read: read(until="RESULT"),
+        )
+        self.assertRegex(out, r"RESULT 0 True True")
 
     def test_q_and_escape_leave_a_view_that_is_not_a_popup_running(self):
         def act(pid, fd, read):
