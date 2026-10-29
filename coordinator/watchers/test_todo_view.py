@@ -1378,44 +1378,63 @@ class PtyTest(IsolatedTestCase):
         path = str(w.ROOT.parent / "user-todo-view.py")
         scratch = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, scratch, ignore_errors=True)
-        pidfile = scratch / "pid"
+        parent_file, child_file = scratch / "parent", scratch / "child"
         script = (
             "import importlib.util, os, sys, time\n"
             f"spec = importlib.util.spec_from_file_location('v', {path!r})\n"
             "v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v)\n"
             "sys.argv = ['x', '--demo', '--popup']\n"
-            "if os.fork():\n"
-            "    time.sleep(2)\n"
-            "    os._exit(0)\n"
-            f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
-            "v.main()\n"
+            "if os.fork() == 0:\n"
+            f"    open({str(parent_file)!r}, 'w').write(str(os.getpid()))\n"
+            "    if os.fork() == 0:\n"
+            f"        open({str(child_file)!r}, 'w').write(str(os.getpid()))\n"
+            "        v.main()\n"
+            "        os._exit(0)\n"
+            "    time.sleep(600)\n"
+            "time.sleep(600)\n"
         )
         pid, fd = pty.fork()
         if pid == 0:
             os.execvp(sys.executable, [sys.executable, "-I", "-c", script])
-        gone = False
-        try:
-            end = time.time() + 15
-            while time.time() < end and not gone:
-                ready, _, _ = select.select([fd], [], [], 0.2)
-                if ready:
+
+        def alive(file):
+            try:
+                os.kill(int(file.read_text()), 0)
+            except (OSError, ValueError):
+                return False
+            return True
+
+        def drain(seconds):
+            end = time.time() + seconds
+            while time.time() < end:
+                if select.select([fd], [], [], 0.1)[0]:
                     try:
                         os.read(fd, 65536)
                     except OSError:
-                        pass
-                if pidfile.exists() and pidfile.read_text():
-                    try:
-                        os.kill(int(pidfile.read_text()), 0)
-                    except ProcessLookupError:
-                        gone = True
+                        return
+
+        gone = started = False
+        try:
+            end = time.time() + 8
+            while time.time() < end and not child_file.exists():
+                drain(0.1)
+            drain(1)
+            started = alive(child_file)
+            os.kill(int(parent_file.read_text()), signal.SIGKILL)
+            end = time.time() + 8
+            while time.time() < end and not gone:
+                drain(0.2)
+                gone = not alive(child_file)
         finally:
-            if pidfile.exists():
+            for file in (child_file, parent_file):
                 try:
-                    os.kill(int(pidfile.read_text()), signal.SIGKILL)
-                except (ProcessLookupError, ValueError):
+                    os.kill(int(file.read_text()), signal.SIGKILL)
+                except (OSError, ValueError):
                     pass
+            os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
             os.close(fd)
+        self.assertTrue(started, "the popup never started")
         self.assertTrue(gone, "the popup outlived its parent")
 
     def test_output_that_never_drains_raises_instead_of_blocking(self):

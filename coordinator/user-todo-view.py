@@ -871,11 +871,14 @@ def main():
             pass
     finally:
         if old is not None:
-            try:
-                out.write(LEAVE)
-                termios.tcsetattr(fd, termios.TCSANOW, old)
-            except (OSError, ValueError):
-                pass
+            for restore in (
+                lambda: out.write(LEAVE),
+                lambda: termios.tcsetattr(fd, termios.TCSANOW, old),
+            ):
+                try:
+                    restore()
+                except (OSError, ValueError):
+                    pass
             os.set_blocking(out.fd, blocking)
         for number, handler in previous.items():
             signal.signal(number, handler)
