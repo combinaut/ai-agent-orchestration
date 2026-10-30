@@ -259,7 +259,7 @@ class GithubPollTests(IsolatedTestCase):
                 threading.Event().wait(0.01)
             self.assertTrue(pidfile.exists())
             child = int(pidfile.read_text())
-            owner.kill()
+            owner.terminate()
             owner.wait(timeout=2)
             self.now = json.loads((self.state / "github.json").read_text())["next"] + 3
             with self.assertRaisesRegex(OSError, "busy"):
@@ -277,7 +277,7 @@ class GithubPollTests(IsolatedTestCase):
             child = None
         finally:
             if owner.poll() is None:
-                owner.kill()
+                owner.terminate()
                 owner.wait(timeout=2)
             if child is not None:
                 try:
