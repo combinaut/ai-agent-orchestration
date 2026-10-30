@@ -1158,7 +1158,7 @@ def collect_pulls(command, before, clock=time.monotonic):
                 return values
             except audit.READ_ERRORS as error:
                 if audit.github_busy(error):
-                    busy[f"pr:{key}"] = str(error)
+                    busy[f"settings:{key}"] = str(error)
                 gate_checks = old.get("gate_checks")
                 settings_failed.append(f"settings:{key}")
                 raise

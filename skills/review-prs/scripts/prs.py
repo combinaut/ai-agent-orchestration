@@ -117,11 +117,8 @@ def gh(*args):
     try:
         result = github_poll.run(
             ["gh", *args],
-            lambda env, pass_fds: subprocess.run(
+            lambda env, pass_fds: github_poll.capture(
                 github_poll.supervised(["gh", *args], env),
-                start_new_session=True,
-                capture_output=True,
-                text=True,
                 timeout=GH_TIMEOUT_S,
                 env=env,
                 pass_fds=pass_fds,
@@ -501,7 +498,7 @@ def blocker(snap):
 
 
 def departure(url, login):
-    """Returns a confirmed departure state, or None while the PR is still watched."""
+    """Return a departure state, or None for the five-miss path."""
     try:
         raw = gh(
             "api",

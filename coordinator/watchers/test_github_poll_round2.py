@@ -207,7 +207,7 @@ class RoundTwoTests(IsolatedTestCase):
                     " assert kwargs['timeout'] == 45, kwargs",
                     " assert '--supervise' in args[0], args",
                     " raise subprocess.TimeoutExpired(args[0], 45)",
-                    "with patch.object(g.subprocess, 'run', side_effect=run):",
+                    "with patch.object(g, 'capture', side_effect=run):",
                     " raise SystemExit(g.main())",
                 ]
             )

@@ -1,0 +1,242 @@
+"""Review-cycle regressions for admission races, interruption, and source grace."""
+
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+from unittest.mock import patch
+
+from test_support import IsolatedTestCase
+
+import audit
+import test_github_poll_round2 as fixtures
+import watchers
+
+g = fixtures.g
+ROOT = fixtures.ROOT
+
+
+class ReviewTests(IsolatedTestCase):
+    setUp = fixtures.RoundTwoTests.setUp
+    advance = fixtures.RoundTwoTests.advance
+    run_call = fixtures.RoundTwoTests.run_call
+    real_clock = fixtures.RoundTwoTests.real_clock
+    fake_cli = fixtures.RoundTwoTests.fake_cli
+
+    def test_cooldown_published_before_lock_acquisition_is_respected(self):
+        self.state.mkdir()
+        path = self.state / "github.json"
+
+        def publication(_path):
+            path.write_text(json.dumps({"until": self.now + 60}))
+            return False
+
+        with patch.object(g, "active_cooldown", side_effect=publication):
+            with self.assertRaises(g.Cooldown):
+                self.run_call()
+        self.assertEqual(json.loads(path.read_text())["until"], 1060)
+
+    def test_ctrl_c_stops_the_private_cli_group_in_every_capture_adapter(self):
+        self.real_clock()
+        pidfile = Path(self.tmp.name) / "interrupt.pid"
+        env = dict(
+            self.fake_cli(
+                f"import os,time\nfrom pathlib import Path\nPath({str(pidfile)!r}).write_text(str(os.getpid()))\ntime.sleep(60)"
+            ),
+            PYTHONPATH=str(ROOT / "coordinator/watchers"),
+        )
+        commands = (
+            [sys.executable, str(Path(g.__file__)), "api", "fixture"],
+            [
+                sys.executable,
+                str(ROOT / "skills/review-prs/scripts/prs.py"),
+                "list",
+                "--repo",
+                "a/b",
+            ],
+            [sys.executable, "-c", "import focus_check as f; f.command('gh')"],
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                pidfile.unlink(missing_ok=True)
+                owner = subprocess.Popen(
+                    command,
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                child = None
+                try:
+                    for _ in range(500):
+                        if pidfile.exists():
+                            break
+                        time.sleep(0.01)
+                    self.assertTrue(pidfile.exists())
+                    child = int(pidfile.read_text())
+                    owner.send_signal(signal.SIGINT)
+                    owner.wait(timeout=2)
+                    time.sleep(0.2)
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(child, 0)
+                    child = None
+                finally:
+                    if owner.poll() is None:
+                        owner.terminate()
+                        owner.wait(timeout=2)
+                    if child:
+                        try:
+                            os.kill(child, signal.SIGTERM)
+                        except ProcessLookupError:
+                            pass
+
+    def test_legacy_busy_read_preserves_saved_evidence_through_audit_grace(self):
+        pr = json.loads((watchers.ROOT / "fixtures/audit-pr.json").read_text())
+        before = {
+            "sources": {"github": [], "herdr": []},
+            "legacy": {"saved": {"line": "LEGACY saved", "head": "old"}},
+            "unreadable": {},
+        }
+        with (
+            patch.object(
+                audit.discovery, "repos", return_value={"repos": ["a/b"], "clones": []}
+            ),
+            patch.object(audit, "fetch_prs", return_value=[pr]),
+            patch.object(
+                audit, "repo_settings", side_effect=g.Busy("holder pid=7 age=1s")
+            ),
+            patch.object(audit, "pr_lines", return_value=[]),
+            patch.object(audit, "workspace_lines", return_value=[]),
+            patch.object(audit, "slot_sources", return_value=({}, {})),
+        ):
+            raw = audit.collect(lambda *a: "", before=before)
+        after, events = audit.reduce(before, raw)
+        self.assertEqual(after["legacy"], before["legacy"])
+        self.assertEqual(events, [])
+        self.assertIn("github", raw["deferred"])
+
+    def test_stacked_settings_contention_uses_the_settings_source_identity(self):
+        from test_pulls import pr
+
+        row = pr(7)
+        row["baseRefName"] = "release"
+        key = row["repository"]["nameWithOwner"] + "#7"
+        with (
+            patch.object(watchers.discovery, "open_work", return_value={}),
+            patch.object(
+                watchers.discovery,
+                "repos",
+                return_value={
+                    "repos": [row["repository"]["nameWithOwner"]],
+                    "clones": [],
+                },
+            ),
+            patch.object(watchers.audit, "fetch_prs", return_value=[row]),
+            patch.object(watchers, "pull_owners", return_value={}),
+            patch.object(
+                watchers.audit,
+                "repo_settings",
+                side_effect=g.Busy("holder pid=7 age=1s"),
+            ),
+        ):
+            raw = watchers.collect_pulls(lambda *a: "", {"prs": {}})
+        self.assertIn("settings:" + key, raw["unreadable"])
+        self.assertIn("settings:" + key, raw["deferred"])
+        after, events = watchers.reduce_pulls({"prs": {}, "unreadable": []}, raw)
+        self.assertFalse(any("READFAIL" in line for line in events), events)
+
+    def test_entire_admission_and_final_state_write_obey_caller_deadline(self):
+        self.real_clock()
+        for phase in ("admission", "result"):
+            with self.subTest(phase=phase):
+                invoked = False
+                original_write = g.write_state
+
+                def slow(path, state):
+                    if (phase == "admission" and not invoked) or (
+                        phase == "result" and invoked
+                    ):
+                        time.sleep(1)
+                    original_write(path, state)
+
+                def invoke(env, fds):
+                    nonlocal invoked
+                    invoked = True
+                    return subprocess.CompletedProcess(["gh"], 0, "ok", "")
+
+                started = time.monotonic()
+                with patch.object(g, "write_state", side_effect=slow):
+                    with self.assertRaises(TimeoutError):
+                        g.run(["gh"], invoke, timeout=0.2)
+                self.assertLess(time.monotonic() - started, 0.6)
+
+    def test_parent_deadline_preserves_earlier_and_later_watcher_alarms(self):
+        self.real_clock()
+        for outer, expected_fired in ((0.05, True), (0.8, False)):
+            with self.subTest(outer=outer):
+                fired = []
+
+                def previous(signum, frame):
+                    fired.append(True)
+                    raise TimeoutError("outer deadline")
+
+                original_handler = signal.signal(signal.SIGALRM, previous)
+                original_timer = signal.setitimer(signal.ITIMER_REAL, outer)
+                try:
+                    with patch.object(
+                        g, "write_state", side_effect=lambda *a: time.sleep(0.5)
+                    ):
+                        with self.assertRaises(TimeoutError):
+                            g.run(["gh"], lambda env, fds: None, timeout=0.1)
+                    self.assertEqual(bool(fired), expected_fired)
+                    self.assertIs(signal.getsignal(signal.SIGALRM), previous)
+                    if not expected_fired:
+                        self.assertGreater(signal.getitimer(signal.ITIMER_REAL)[0], 0.4)
+                finally:
+                    signal.setitimer(signal.ITIMER_REAL, 0)
+                    signal.signal(signal.SIGALRM, original_handler)
+                    if original_timer[0]:
+                        signal.setitimer(signal.ITIMER_REAL, *original_timer)
+
+    def test_signals_during_spawn_clean_up_before_process_assignment(self):
+        self.real_clock()
+        env = self.fake_cli("import time; time.sleep(60)")
+        real_spawn = subprocess.Popen
+        for number, expected in (
+            (signal.SIGINT, KeyboardInterrupt),
+            (signal.SIGALRM, TimeoutError),
+        ):
+            with self.subTest(signal=number):
+                spawned = []
+
+                def interrupted(*args, **kwargs):
+                    process = real_spawn(*args, **kwargs)
+                    spawned.append(process)
+                    signal.raise_signal(number)
+                    return process
+
+                try:
+                    with (
+                        patch.dict(os.environ, PATH=env["PATH"]),
+                        patch.object(g.subprocess, "Popen", side_effect=interrupted),
+                    ):
+                        with self.assertRaises(expected):
+                            g.run(
+                                ["gh"],
+                                lambda env, fds: g.capture(
+                                    g.supervised(["gh"], env),
+                                    env=env,
+                                    pass_fds=fds,
+                                    timeout=5,
+                                ),
+                                timeout=5,
+                            )
+                    self.assertTrue(spawned)
+                    self.assertIsNotNone(spawned[0].poll())
+                finally:
+                    for process in spawned:
+                        if process.poll() is None:
+                            os.killpg(process.pid, signal.SIGKILL)
+                            process.wait(timeout=2)

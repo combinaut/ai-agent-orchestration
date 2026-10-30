@@ -25,14 +25,14 @@ def command(*argv):
     env = dict(os.environ, LC_ALL="C") if os.path.basename(argv[0]) == "git" else None
 
     def invoke(env, pass_fds=()):
-        return subprocess.run(
-            github_poll.supervised(argv, env) if argv[0] == "gh" else argv,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env=env,
-            pass_fds=pass_fds,
-        )
+        if argv[0] == "gh":
+            return github_poll.capture(
+                github_poll.supervised(argv, env),
+                env=env,
+                pass_fds=pass_fds,
+                timeout=30,
+            )
+        return subprocess.run(argv, capture_output=True, text=True, timeout=30, env=env)
 
     result = (
         github_poll.run(argv, invoke, timeout=30) if argv[0] == "gh" else invoke(env)

@@ -201,7 +201,7 @@ class GithubPollTests(IsolatedTestCase):
                 (prs.gh, 45),
                 (lambda *a: focus_check.command("gh", *a), 30),
             ):
-                with patch.object(subprocess, "run", return_value=result) as call:
+                with patch.object(g, "capture", return_value=result) as call:
                     self.assertEqual(read("api", "fixture"), "ok")
                     self.assertEqual(
                         call.call_args.args[0],

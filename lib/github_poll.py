@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
@@ -148,9 +149,62 @@ def active_cooldown(path):
         return False
 
 
-def run(argv, invoke, timeout=45):
-    """invoke(env, pass_fds) returns a captured text CompletedProcess; no retries."""
+class _Expired(BaseException):
+    """Deadline delivery bypasses recoverable read-error handlers."""
+
+
+@contextmanager
+def call_deadline(seconds):
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
     started = time.monotonic()
+    inherited = 0 < previous_timer[0] <= seconds
+    inherited_fired = False
+
+    def expired(signum, frame):
+        nonlocal inherited_fired
+        if inherited and callable(previous_handler):
+            inherited_fired = True
+            try:
+                previous_handler(signum, frame)
+            except TimeoutError:
+                raise _Expired from None
+        raise _Expired
+
+    signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(
+        signal.ITIMER_REAL, max(0.001, previous_timer[0] if inherited else seconds)
+    )
+    try:
+        yield
+    finally:
+        if inherited_fired:
+            if signal.getsignal(signal.SIGALRM) is expired:
+                signal.signal(signal.SIGALRM, previous_handler)
+        else:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_handler)
+            if previous_timer[0]:
+                signal.setitimer(
+                    signal.ITIMER_REAL,
+                    max(0.001, previous_timer[0] - (time.monotonic() - started)),
+                    previous_timer[1],
+                )
+
+
+def run(argv, invoke, timeout=45):
+    """Main-thread captured text invocation with one deadline and no retries."""
+    started = time.monotonic()
+    try:
+        with call_deadline(timeout):
+            return _run(argv, invoke, timeout, started)
+    except _Expired:
+        raise TimeoutError(
+            f"GitHub poll deadline exceeded; state {state_directory() / 'github.json'}"
+        ) from None
+
+
+def _run(argv, invoke, timeout, started):
     directory = state_directory()
     path = directory / "github.json"
     try:
@@ -188,6 +242,10 @@ def run(argv, invoke, timeout=45):
                 raise ValueError("invalid cooldown")
             if until > time.time() + MAX_DELAY + 5:
                 state["until"] = 0
+            elif until > time.time():
+                raise Cooldown(
+                    f"GitHub poll cooldown; state {path}; read not attempted"
+                )
             callers = state.setdefault("callers", {})
             label = Path(sys.argv[0]).name
             if label == "watchers.py" and len(sys.argv) > 1:
@@ -197,6 +255,8 @@ def run(argv, invoke, timeout=45):
             previous = float(state.get("last_monotonic", -SPACING))
             if not math.isfinite(previous):
                 raise ValueError("invalid start time")
+        except Cooldown:
+            raise
         except (
             ValueError,
             TypeError,
@@ -348,18 +408,58 @@ def supervise(deadline, argv):
         signal.signal(signal.SIGTERM, previous_term)
 
 
+def capture(argv, *, env, pass_fds, timeout):
+    process = None
+    pending = []
+
+    def defer(signum, _frame):
+        pending.append(signum)
+
+    handlers = {
+        number: signal.signal(number, defer)
+        for number in (signal.SIGINT, signal.SIGALRM)
+    }
+    try:
+        try:
+            process = subprocess.Popen(
+                argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+                env=env,
+                pass_fds=pass_fds,
+            )
+        finally:
+            for number, handler in handlers.items():
+                signal.signal(number, handler)
+            for number in pending:
+                signal.raise_signal(number)
+        stdout, stderr = process.communicate(timeout=timeout)
+        return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+    except BaseException:
+        if process is not None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=1)
+        raise
+    finally:
+        if process is not None:
+            process.stdout.close()
+            process.stderr.close()
+
+
 def main():
     try:
         argv = ["gh", *sys.argv[1:]]
         result = run(
             argv,
-            lambda env, pass_fds: subprocess.run(
+            lambda env, pass_fds: capture(
                 supervised(argv, env),
-                start_new_session=True,
                 env=env,
                 pass_fds=pass_fds,
-                capture_output=True,
-                text=True,
                 timeout=45,
             ),
         )
