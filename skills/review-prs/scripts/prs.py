@@ -126,6 +126,8 @@ def gh(*args):
                 pass_fds=pass_fds,
             ),
         )
+    except github_poll.NoRepository:
+        raise
     except OSError as error:
         raise RuntimeError(str(error)) from None
     except subprocess.TimeoutExpired:
@@ -161,7 +163,7 @@ def resolve_scope(args):
             repo = gh(
                 "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"
             ).strip()
-        except RuntimeError:
+        except github_poll.NoRepository:
             scope = setting("ORCH_WATCHERS_PR_SCOPE")
             return scope, scope or "all repos"
     return f"repo:{repo}", repo

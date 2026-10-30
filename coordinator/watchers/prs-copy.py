@@ -80,7 +80,7 @@ def resolve_scope(args):
             repo = gh(
                 "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"
             ).strip()
-        except RuntimeError:
+        except runtime.github_poll.NoRepository:
             return "", "all repos"
     return f"repo:{repo}", repo
 

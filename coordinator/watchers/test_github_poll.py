@@ -59,8 +59,8 @@ class GithubPollTests(IsolatedTestCase):
                     or subprocess.CompletedProcess(["gh"], 0, "ok", "")
                 ),
             )
-        self.assertEqual(starts, [1000 + 3 * i for i in range(40)])
-        self.assertLessEqual(sum(t < 1060 for t in starts), 20)
+        self.assertEqual(starts, [1003 + 3 * i for i in range(40)])
+        self.assertLessEqual(sum(t < starts[0] + 60 for t in starts), 20)
 
     def test_other_process_cannot_enter_during_call(self):
         code = "import github_poll as g; g.run(['gh'], lambda env, pass_fds: (_ for _ in ()).throw(AssertionError('entered')))"
@@ -83,13 +83,14 @@ class GithubPollTests(IsolatedTestCase):
 
     def test_retry_after_and_reset_set_shared_failed_reads_without_retry(self):
         for header, expected, status, code in (
-            ("Retry-After: 120", 1122, 429, 1),
+            ("Retry-After: 120", 1125, 429, 1),
             ("X-RateLimit-Reset: 1300", 1302, 403, 1),
-            ("Retry-After: 120\n< X-RateLimit-Reset: 1300", 1122, 429, 1),
+            ("Retry-After: 120\n< X-RateLimit-Reset: 1300", 1125, 429, 1),
             ("Retry-After: Thu, 01 Jan 1970 00:20:00 GMT", 1202, 429, 1),
             ("X-RateLimit-Reset: 1300", 1302, 200, 0),
         ):
             with self.subTest(header=header):
+                self.now = 1000
                 if self.state.exists():
                     (self.state / "github.json").unlink()
                 result = self.run_call(
@@ -101,7 +102,7 @@ class GithubPollTests(IsolatedTestCase):
                 self.assertEqual(saved["until"], expected)
                 with self.assertRaisesRegex(OSError, "cooldown"):
                     self.run_call()
-                self.assertEqual(self.now, 1000)
+                self.assertEqual(self.now, 1003)
 
     def test_fallback_grows_across_calls_and_success_resets(self):
         for delay in (62, 122, 242, 482, 962, 1922, 3602, 3602):
@@ -225,10 +226,10 @@ class GithubPollTests(IsolatedTestCase):
                 )
         self.assertGreaterEqual(starts[1] - starts[0], 3)
 
-    def test_abandoned_admission_waits_three_seconds_after_lock_recovery(self):
+    def test_legacy_spacing_state_has_bounded_admission_wait(self):
         self.state.mkdir()
         (self.state / "github.json").write_text(
-            json.dumps({"pending": True, "next": 0})
+            json.dumps({"pending": True, "next": 1e20})
         )
         self.run_call()
         self.assertEqual(self.now, 1003)
@@ -255,14 +256,14 @@ class GithubPollTests(IsolatedTestCase):
         )
         child = None
         try:
-            deadline = time.monotonic() + 2
+            deadline = time.monotonic() + 5
             while not pidfile.exists() and time.monotonic() < deadline:
                 threading.Event().wait(0.01)
             self.assertTrue(pidfile.exists())
             child = int(pidfile.read_text())
             owner.terminate()
             owner.wait(timeout=2)
-            self.now = json.loads((self.state / "github.json").read_text())["next"] + 3
+            self.now = 10000
             with self.assertRaisesRegex(OSError, "busy"):
                 self.run_call()
             os.kill(child, signal.SIGTERM)
@@ -356,3 +357,82 @@ class GithubPollTests(IsolatedTestCase):
                             prs.changes(before, {}, "reviewer")
                         else:
                             prs.changes(before, {})
+
+    def test_startup_admission_failure_cannot_expand_repository_scope(self):
+        root = Path(__file__).resolve().parents[2]
+        args = type("Args", (), {"all": False, "org": None, "repo": None})()
+        for relative in (
+            "skills/review-prs/scripts/prs.py",
+            "coordinator/watchers/prs-copy.py",
+        ):
+            with self.subTest(relative=relative):
+                spec = importlib.util.spec_from_file_location(
+                    "scope_prs", root / relative
+                )
+                prs = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(prs)
+                with (
+                    patch.object(
+                        prs, "gh", side_effect=RuntimeError("GitHub poll busy")
+                    ),
+                    patch.object(
+                        prs, "setting", return_value="org:configured", create=True
+                    ),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "busy"):
+                        prs.resolve_scope(args)
+                with (
+                    patch.object(
+                        prs,
+                        "gh",
+                        side_effect=g.NoRepository("fatal: not a git repository"),
+                    ),
+                    patch.object(
+                        prs, "setting", return_value="org:configured", create=True
+                    ),
+                ):
+                    scope, _label = prs.resolve_scope(args)
+                    self.assertEqual(
+                        scope, "org:configured" if relative.startswith("skills") else ""
+                    )
+
+    def test_wall_clock_changes_cannot_shorten_elapsed_spacing(self):
+        for jump in (3600, -3600):
+            with self.subTest(jump=jump):
+                if self.state.exists():
+                    (self.state / "github.json").unlink()
+                self.now = 10000
+                elapsed = 0
+                starts = []
+
+                def wait(seconds):
+                    nonlocal elapsed
+                    elapsed += seconds
+                    self.advance(seconds)
+
+                def invoke(env, pass_fds):
+                    starts.append(elapsed)
+                    return subprocess.CompletedProcess(["gh"], 0, "ok", "")
+
+                with patch.object(g.time, "sleep", side_effect=wait):
+                    g.run(["gh"], invoke)
+                    self.now += jump
+                    g.run(["gh"], invoke)
+                self.assertGreaterEqual(starts[1] - starts[0], 3)
+
+    def test_only_confirmed_local_repository_absence_can_use_scope_fallback(self):
+        with self.assertRaises(OSError):
+            g.run(
+                ["gh", "repo", "view"],
+                lambda env, pass_fds: subprocess.CompletedProcess(
+                    ["gh"], 1, "", "fatal: not a git repository"
+                ),
+            )
+
+        result = g.run(
+            ["gh", "api", "fixture"],
+            lambda env, pass_fds: subprocess.CompletedProcess(
+                ["gh"], 1, "", "fatal: not a git repository"
+            ),
+        )
+        self.assertEqual(result.returncode, 1)

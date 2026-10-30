@@ -16,6 +16,10 @@ from pathlib import Path
 SPACING = 3
 
 
+class NoRepository(OSError):
+    """The CLI confirmed that the current checkout has no GitHub repository."""
+
+
 def state_directory():
     return Path(
         os.environ.get("GITHUB_POLL_STATE_DIR")
@@ -93,10 +97,9 @@ def run(argv, invoke):
             state = json.loads(path.read_text()) if path.exists() else {}
             state.setdefault("until", 0)
             until = float(state.get("until", 0))
-            next_start = float(state.get("next", 0))
             failures = int(state.get("failures", 0))
-            if not all(map(math.isfinite, (until, next_start))) or failures < 0:
-                raise ValueError("invalid cadence")
+            if not math.isfinite(until) or failures < 0:
+                raise ValueError("invalid cooldown")
             callers = state.setdefault("callers", {})
             label = Path(sys.argv[0]).name
             if label == "watchers.py" and len(sys.argv) > 1:
@@ -105,47 +108,44 @@ def run(argv, invoke):
             counter["started"] += 1
         except (ValueError, TypeError, AttributeError, KeyError, OverflowError):
             raise OSError("GitHub poll state unreadable; read not attempted") from None
-        now = time.time()
-        if until > now:
+        if until > time.time():
             raise OSError(f"GitHub poll cooldown until {until:.0f}; read not attempted")
-        if state.get("pending"):
-            next_start = max(next_start, now + SPACING)
-        # Only an admitted caller waits for spacing; contenders never queue.
-        if next_start > now:
-            time.sleep(min(SPACING, next_start - now))
-            if next_start > time.time():
-                raise OSError("GitHub poll clock changed; read not attempted")
-        now = time.time()
-        state["pending"] = True
-        state["next"] = now + SPACING
-        counter["last_started"] = now
+        # The lock and elapsed wait bound starts independently of wall-clock changes.
+        time.sleep(SPACING)
+        state.pop("next", None)
+        state.pop("pending", None)
+        counter["last_started"] = time.time()
         write_state(path, state)
-        try:
-            result = invoke(dict(os.environ, GH_DEBUG="api"), (lock,))
-            headers, status, message = diagnostics(result.stderr)
-            limited = status == 429 or bool(
-                re.search(r"rate.?limit|abuse detection", message, re.I)
+        result = invoke(dict(os.environ, GH_DEBUG="api"), (lock,))
+        headers, status, message = diagnostics(result.stderr)
+        limited = status == 429 or bool(
+            re.search(r"rate.?limit|abuse detection", message, re.I)
+        )
+        if limited:
+            failures = min(failures + 1, 7)
+            delay = retry_delay(headers, time.time())
+            if delay is None:
+                delay = min(3600, 60 * 2 ** (failures - 1))
+            state["until"] = time.time() + delay + random.uniform(1, 5)
+            state["failures"] = failures
+            counter["limited"] += 1
+            if result.returncode == 0:
+                result.returncode = 1
+        elif result.returncode == 0:
+            state["until"], state["failures"] = 0, 0
+        write_state(path, state)
+        result.stderr = message or (
+            f"gh failed (exit {result.returncode})" if result.returncode else ""
+        )
+        if (
+            result.returncode
+            and list(argv[1:3]) == ["repo", "view"]
+            and re.search(
+                r"not a git repository|none of the git remotes", result.stderr, re.I
             )
-            if limited:
-                failures = min(failures + 1, 7)
-                delay = retry_delay(headers, time.time())
-                if delay is None:
-                    delay = min(3600, 60 * 2 ** (failures - 1))
-                state["until"] = time.time() + delay + random.uniform(1, 5)
-                state["failures"] = failures
-                counter["limited"] += 1
-                if result.returncode == 0:
-                    result.returncode = 1
-            elif result.returncode == 0:
-                state["until"], state["failures"] = 0, 0
-            result.stderr = message or (
-                f"gh failed (exit {result.returncode})" if result.returncode else ""
-            )
-            return result
-        finally:
-            state["next"] = time.time() + SPACING
-            state["pending"] = False
-            write_state(path, state)
+        ):
+            raise NoRepository(result.stderr)
+        return result
 
 
 def main():
