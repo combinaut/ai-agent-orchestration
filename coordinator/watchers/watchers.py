@@ -64,7 +64,7 @@ WATCH_TIMING = {
 YOUNG_PANE_SECONDS = 120
 HISTORY_BATCHES = 100
 CAPPED_HISTORY = ("audit", "pulls")
-READ_FAILURES = 3
+READ_FAILURES = audit.READ_FAILURES
 PULLS_DEPARTED_MAX = 10
 PULLS_DEPARTED_SECONDS = 60
 # Pulls needs stable identities; audit retains its existing presentation-only query.
@@ -1091,7 +1091,7 @@ def collect_pulls(command, before, clock=time.monotonic):
         for key in set(known) - searched
         if key.rsplit("#", 1)[0].lower() not in watched
     }
-    failed, attempted = [], set()
+    failed, attempted, busy = [], set(), {}
     pending = sorted(
         set(known) - searched,
         key=lambda key: (
@@ -1112,9 +1112,11 @@ def collect_pulls(command, before, clock=time.monotonic):
             # Open/unreadable ones retain the drop marker, never saved evidence.
             if departed.get(key) != "UNWATCHED" or state in ("MERGED", "CLOSED"):
                 departed[key] = state
-        except audit.READ_ERRORS:
+        except audit.READ_ERRORS as error:
             if departed.get(key) != "UNWATCHED":
                 failed.append(key)
+                if audit.github_busy(error):
+                    busy[f"pr:{key}"] = str(error)
     waiting = [
         key
         for key in pending
@@ -1125,8 +1127,10 @@ def collect_pulls(command, before, clock=time.monotonic):
     unreadable, roots = [], []
     try:
         owners = pull_owners(command, prs, roots, work)
-    except (*audit.READ_ERRORS, discovery.Unavailable):
+    except (*audit.READ_ERRORS, discovery.Unavailable) as error:
         owners, unreadable = {}, ["owners"]
+        if audit.github_busy(error):
+            busy["owners"] = str(error)
     if roots:
         unreadable = ["owners"]
     current, settings, settings_failed = {}, {"clones": found["clones"]}, []
@@ -1152,7 +1156,9 @@ def collect_pulls(command, before, clock=time.monotonic):
                     )
                 )
                 return values
-            except audit.READ_ERRORS:
+            except audit.READ_ERRORS as error:
+                if audit.github_busy(error):
+                    busy[f"pr:{key}"] = str(error)
                 gate_checks = old.get("gate_checks")
                 settings_failed.append(f"settings:{key}")
                 raise
@@ -1266,7 +1272,9 @@ def collect_pulls(command, before, clock=time.monotonic):
                     ]
             if incomplete or checks_truncated:
                 unreadable.append(f"pr:{key}")
-        except audit.READ_ERRORS:
+        except audit.READ_ERRORS as error:
+            if audit.github_busy(error):
+                busy[f"pr:{key}"] = str(error)
             # Partial per-PR data must not discard readable siblings or saved evidence.
             lines, identities = old.get("lines", {}), old.get("identities", {})
             check_failures = old.get("check_failures")
@@ -1294,6 +1302,8 @@ def collect_pulls(command, before, clock=time.monotonic):
         prs=current,
         departed=departed,
         failed=failed,
+        deferred=list(busy),
+        busy=busy,
         unreadable=unreadable
         + [f"pr:{key}" for key in sorted(failed + waiting)]
         + sorted(set(settings_failed)),
@@ -1359,11 +1369,35 @@ def pull_line(line, key, owner):
 
 def reduce_pulls(before, raw):
     current = {key: dict(pr) for key, pr in raw["prs"].items()}
+    previous_state = before or {}
+    deferred = raw.get("deferred", [])
+    counts = {
+        source: previous_state.get("deferred_passes", {}).get(source, 0) + 1
+        for source in deferred
+    }
+    previous_reported = previous_state.get(
+        "reported_unreadable", previous_state.get("unreadable", [])
+    )
+    reported = [
+        source
+        for source in raw["unreadable"]
+        if source not in deferred
+        or counts[source] >= READ_FAILURES
+        or source in previous_reported
+    ]
     events = (
         []
         if before is None
-        else readfail_changes("PULLS", before.get("unreadable", []), raw["unreadable"])
+        else readfail_changes(
+            "PULLS",
+            previous_reported,
+            reported,
+        )
     )
+    if events and raw.get("busy"):
+        events[0] += " " + "; ".join(
+            raw["busy"][source] for source in reported if source in raw["busy"]
+        )
     for key, pr in sorted(current.items()):
         previous = dict(((before or {}).get("prs", {})).get(key, {}))
         previous["identities"] = pull_saved_identities(previous)
@@ -1428,9 +1462,10 @@ def reduce_pulls(before, raw):
             ]
     if before is None:
         active = sum(len(pr["lines"]) for pr in current.values())
-        return dict(prs=current, unreadable=[]), [
-            f"PULLS BASELINE [{active} active lines]"
-        ]
+        seeded = dict(prs=current, unreadable=[])
+        if deferred:
+            seeded.update(deferred_passes=counts, reported_unreadable=[])
+        return seeded, [f"PULLS BASELINE [{active} active lines]"]
     after = dict(current)
     for key, old in sorted(before["prs"].items()):
         if key in current:
@@ -1451,7 +1486,10 @@ def reduce_pulls(before, raw):
             continue
         events += [f"{kind} {key} cleared" for kind in sorted(old["lines"])]
         events.append(pull_line(f"{state} {key} {old['title']}", key, old.get("owner")))
-    return dict(prs=after, unreadable=raw["unreadable"]), events
+    result = dict(prs=after, unreadable=raw["unreadable"])
+    if deferred or "deferred_passes" in previous_state:
+        result.update(deferred_passes=counts, reported_unreadable=reported)
+    return result, events
 
 
 _TODO_MODULE = None

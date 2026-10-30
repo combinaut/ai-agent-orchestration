@@ -16,6 +16,7 @@ import legacy_rules
 from watcher_platform import MissingMetric, herdr_bin, read_slots
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+import github_poll
 import orch_settings
 
 SELECTION = """number title state isDraft author{login} mergeable baseRefName headRefName headRefOid headRepository{nameWithOwner}
@@ -38,6 +39,7 @@ HUNK = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)")
 TOO_LARGE = re.compile(
     r"too_large|too large|exceeded the maximum number of files", re.I
 )
+READ_FAILURES = 3
 FILES_API_LIMIT = 3000
 FILE_READ_LIMIT = 1_000_000
 DIFF_LINES_LIMIT = 5000
@@ -729,11 +731,13 @@ def repository_lines(command, repo):
 
 def collect(command, slots=None, before=None):
     """Sources of one audit pass; without open work or a saved set the github and git sources stay unreadable."""
-    legacy, current, unreadable = {}, {}, {}
+    legacy, current, unreadable, deferred = {}, {}, {}, []
     try:
         found = discovery.repos(command)
     except discovery.Unavailable as error:
         found = None
+        if github_busy(error):
+            deferred.append("github")
         unreadable["github"] = f"READFAIL github: {error_detail(error)}"
         known = {
             **(before or {}).get("sources", {}),
@@ -761,16 +765,28 @@ def collect(command, slots=None, before=None):
         try:
             current[source] = sorted(set(read()))
         except READ_ERRORS as error:
+            if github_busy(error):
+                deferred.append(source)
             unreadable[source] = f"READFAIL {source}: {error_detail(error)}"
     slot_current, slot_errors = slot_sources(slots)
     current.update(slot_current)
     unreadable.update(slot_errors)
-    return dict(sources=current, unreadable=unreadable, legacy=legacy)
+    return dict(
+        sources=current, unreadable=unreadable, legacy=legacy, deferred=deferred
+    )
+
+
+def github_busy(error):
+    while error is not None:
+        if isinstance(error, github_poll.Busy):
+            return True
+        error = error.__cause__
+    return False
 
 
 def readfail_events(previous, current):
     events = [
-        line for source, line in sorted(current.items()) if previous.get(source) != line
+        line for source, line in sorted(current.items()) if source not in previous
     ]
     events += [
         f"{source} READFAIL cleared"
@@ -804,7 +820,22 @@ def reduce(before, raw):
             "slots" in unreadable and source.startswith("slot:")
         ):
             sources[source] = lines
-    events = readfail_events(previous.get("unreadable", {}), unreadable)
+    deferred = raw.get("deferred", [])
+    counts = {
+        source: previous.get("deferred_passes", {}).get(source, 0) + 1
+        for source in deferred
+    }
+    previous_reported = previous.get(
+        "reported_unreadable", previous.get("unreadable", {})
+    )
+    reported = {
+        source: line
+        for source, line in unreadable.items()
+        if source not in deferred
+        or counts[source] >= READ_FAILURES
+        or source in previous_reported
+    }
+    events = readfail_events(previous_reported, reported)
     for source, lines in sorted(raw["sources"].items()):
         if source not in old_sources:
             events.append(
@@ -839,6 +870,8 @@ def reduce(before, raw):
             [entry["line"] for entry in legacy.values() if entry["line"]],
         )
     after = dict(sources=sources, unreadable=unreadable)
+    if deferred or "deferred_passes" in previous:
+        after.update(deferred_passes=counts, reported_unreadable=reported)
     if legacy is not None:
         after["legacy"] = legacy
     return after, events

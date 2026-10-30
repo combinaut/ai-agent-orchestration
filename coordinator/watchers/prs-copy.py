@@ -335,17 +335,27 @@ def changes(before, after):
             )
             prefix = "ready" if became_ready else "changed"
             lines.append(f"{prefix}: {url} — {now['title']}: {', '.join(parts)}")
+    still_open = {}
     for url, was in before.items():
         if url in after:
             continue
-        st = gh("pr", "view", url, "--json", "state", "--jq", ".state").strip()
+        try:
+            st = gh("pr", "view", url, "--json", "state", "--jq", ".state").strip()
+        except RuntimeError as error:
+            if "Could not resolve to a" not in str(error):
+                raise
+            misses = was.get("misses", 0) + 1
+            if misses < 5:
+                still_open[url] = {**was, "misses": misses}
+                continue
+            st = "OPEN"
         if st not in ("OPEN", "CLOSED", "MERGED"):
             raise RuntimeError("PR lookup returned invalid state")
         if st == "OPEN":
             lines.append(f"cleared: {url} — {was['title']} (no longer requesting you)")
             continue
         lines.append(f"{st.lower()}: {url} — {was['title']}")
-    return lines, {}
+    return lines, still_open
 
 
 TITLE_MAX = 60

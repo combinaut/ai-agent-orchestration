@@ -28,6 +28,12 @@ class GithubPollTests(IsolatedTestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         self.now = 1000.0
+        self.elapsed = 1000.0
+        self.monotonic = patch.object(
+            g.time, "monotonic", side_effect=lambda: self.elapsed
+        )
+        self.monotonic.start()
+        self.addCleanup(self.monotonic.stop)
         self.clock = patch.object(g.time, "time", side_effect=lambda: self.now)
         self.clock.start()
         self.addCleanup(self.clock.stop)
@@ -40,6 +46,7 @@ class GithubPollTests(IsolatedTestCase):
 
     def advance(self, seconds):
         self.now += seconds
+        self.elapsed += seconds
 
     def run_call(self, stderr="", code=0):
         return g.run(
@@ -59,11 +66,11 @@ class GithubPollTests(IsolatedTestCase):
                     or subprocess.CompletedProcess(["gh"], 0, "ok", "")
                 ),
             )
-        self.assertEqual(starts, [1003 + 3 * i for i in range(40)])
+        self.assertEqual(starts, [1000 + 3 * i for i in range(40)])
         self.assertLessEqual(sum(t < starts[0] + 60 for t in starts), 20)
 
     def test_other_process_cannot_enter_during_call(self):
-        code = "import github_poll as g; g.run(['gh'], lambda env, pass_fds: (_ for _ in ()).throw(AssertionError('entered')))"
+        code = "import github_poll as g; g.run(['gh'], lambda env, pass_fds: (_ for _ in ()).throw(AssertionError('entered')), timeout=0.3)"
 
         def invoke(env, pass_fds):
             child_env = dict(os.environ, PYTHONPATH=str(Path(g.__file__).parent))
@@ -83,11 +90,11 @@ class GithubPollTests(IsolatedTestCase):
 
     def test_retry_after_and_reset_set_shared_failed_reads_without_retry(self):
         for header, expected, status, code in (
-            ("Retry-After: 120", 1125, 429, 1),
-            ("X-RateLimit-Reset: 1300", 1302, 403, 1),
-            ("Retry-After: 120\n< X-RateLimit-Reset: 1300", 1125, 429, 1),
+            ("Retry-After: 120", 1122, 429, 1),
+            ("X-RateLimit-Reset: 1300\n< X-RateLimit-Remaining: 0", 1302, 403, 1),
+            ("Retry-After: 120\n< X-RateLimit-Reset: 1300", 1122, 429, 1),
             ("Retry-After: Thu, 01 Jan 1970 00:20:00 GMT", 1202, 429, 1),
-            ("X-RateLimit-Reset: 1300", 1302, 200, 0),
+            ("X-RateLimit-Reset: 1300\n< X-RateLimit-Remaining: 0", 1302, 200, 0),
         ):
             with self.subTest(header=header):
                 self.now = 1000
@@ -102,7 +109,7 @@ class GithubPollTests(IsolatedTestCase):
                 self.assertEqual(saved["until"], expected)
                 with self.assertRaisesRegex(OSError, "cooldown"):
                     self.run_call()
-                self.assertEqual(self.now, 1003)
+                self.assertEqual(self.now, 1000)
 
     def test_fallback_grows_across_calls_and_success_resets(self):
         for delay in (62, 122, 242, 482, 962, 1922, 3602, 3602):
@@ -178,11 +185,13 @@ class GithubPollTests(IsolatedTestCase):
         result = subprocess.CompletedProcess(["gh"], 0, "ok", "")
         env = {"GH_DEBUG": "api"}
         with patch.object(
-            g, "run", side_effect=lambda argv, invoke: invoke(env, (77,))
+            g, "run", side_effect=lambda argv, invoke, **kw: invoke(env, (77,))
         ) as gate:
             with patch.object(watcher_runtime, "_run", return_value=result) as call:
                 watcher_runtime.run(["gh", "api", "fixture"], timeout=10)
-                call.assert_called_once_with(["gh", "api", "fixture"], 10, env, (77,))
+                call.assert_called_once_with(
+                    g.supervised(["gh", "api", "fixture"], env), 10, env, (77,)
+                )
             with patch.object(subprocess, "Popen") as spawn:
                 spawn.return_value.communicate.return_value = (b"ok", b"")
                 spawn.return_value.returncode = 0
@@ -194,6 +203,10 @@ class GithubPollTests(IsolatedTestCase):
             ):
                 with patch.object(subprocess, "run", return_value=result) as call:
                     self.assertEqual(read("api", "fixture"), "ok")
+                    self.assertEqual(
+                        call.call_args.args[0],
+                        g.supervised(["gh", "api", "fixture"], env),
+                    )
                     self.assertEqual(call.call_args.kwargs["timeout"], timeout)
                     self.assertEqual(call.call_args.kwargs["env"], env)
                     self.assertEqual(call.call_args.kwargs["pass_fds"], (77,))
@@ -232,12 +245,11 @@ class GithubPollTests(IsolatedTestCase):
             json.dumps({"pending": True, "next": 1e20})
         )
         self.run_call()
-        self.assertEqual(self.now, 1003)
+        self.assertEqual(self.now, 1000)
 
     def test_orphaned_cli_keeps_admission_locked_until_child_exits(self):
         import signal
         import threading
-        import time
 
         stub = Path(self.tmp.name) / "bin"
         stub.mkdir()
@@ -256,8 +268,9 @@ class GithubPollTests(IsolatedTestCase):
         )
         child = None
         try:
-            deadline = time.monotonic() + 5
-            while not pidfile.exists() and time.monotonic() < deadline:
+            for _ in range(500):
+                if pidfile.exists():
+                    break
                 threading.Event().wait(0.01)
             self.assertTrue(pidfile.exists())
             child = int(pidfile.read_text())
@@ -477,7 +490,7 @@ class GithubPollTests(IsolatedTestCase):
                 + "gh: rate limit exceeded",
                 1,
                 1,
-                1125,
+                1122,
             ),
             (
                 "omitted-unknown-length",
@@ -495,7 +508,7 @@ class GithubPollTests(IsolatedTestCase):
                 + "gh: rate limit exceeded",
                 1,
                 1,
-                1125,
+                1122,
             ),
             (
                 "pagination",
@@ -509,7 +522,7 @@ class GithubPollTests(IsolatedTestCase):
                 + "gh: rate limit exceeded",
                 1,
                 1,
-                1125,
+                1122,
             ),
         ):
             with self.subTest(name=name):

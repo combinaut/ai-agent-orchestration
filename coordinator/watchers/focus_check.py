@@ -26,10 +26,17 @@ def command(*argv):
 
     def invoke(env, pass_fds=()):
         return subprocess.run(
-            argv, capture_output=True, text=True, timeout=30, env=env, pass_fds=pass_fds
+            github_poll.supervised(argv, env) if argv[0] == "gh" else argv,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            pass_fds=pass_fds,
         )
 
-    result = github_poll.run(argv, invoke) if argv[0] == "gh" else invoke(env)
+    result = (
+        github_poll.run(argv, invoke, timeout=30) if argv[0] == "gh" else invoke(env)
+    )
     if result.returncode:
         raise subprocess.CalledProcessError(
             result.returncode, argv, output=result.stdout, stderr=result.stderr

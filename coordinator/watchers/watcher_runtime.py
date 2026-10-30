@@ -32,7 +32,11 @@ def kill_command(process):
 def run(argv, timeout=None):
     if os.path.basename(argv[0]) == "gh":
         return github_poll.run(
-            argv, lambda env, pass_fds: _run(argv, timeout, env, pass_fds)
+            argv,
+            lambda env, pass_fds: _run(
+                github_poll.supervised(argv, env), timeout, env, pass_fds
+            ),
+            timeout=COMMAND_TIMEOUT if timeout is None else timeout,
         )
     return _run(argv, timeout)
 
@@ -54,6 +58,11 @@ def _run(argv, timeout=None, env=None, pass_fds=()):
     # Defer Python delivery rather than block SIGALRM's OS mask, which a
     # spawned command would inherit. The C-level backstop remains armed.
     previous_handler = signal.signal(signal.SIGALRM, defer_alarm)
+
+    def terminated(signum, _frame):
+        raise SystemExit(128 + signum)
+
+    previous_term = signal.signal(signal.SIGTERM, terminated)
     try:
         try:
             # Git diagnostics are matched in English.
@@ -95,6 +104,7 @@ def _run(argv, timeout=None, env=None, pass_fds=()):
             process.stdout.close()
             process.stderr.close()
         _ACTIVE_PROCESS = None
+        signal.signal(signal.SIGTERM, previous_term)
 
 
 def arm_traceback_backstop():

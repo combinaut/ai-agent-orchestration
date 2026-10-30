@@ -118,13 +118,15 @@ def gh(*args):
         result = github_poll.run(
             ["gh", *args],
             lambda env, pass_fds: subprocess.run(
-                ["gh", *args],
+                github_poll.supervised(["gh", *args], env),
+                start_new_session=True,
                 capture_output=True,
                 text=True,
                 timeout=GH_TIMEOUT_S,
                 env=env,
                 pass_fds=pass_fds,
             ),
+            timeout=GH_TIMEOUT_S,
         )
     except github_poll.NoRepository:
         raise
@@ -500,19 +502,24 @@ def blocker(snap):
 
 def departure(url, login):
     """Returns a confirmed departure state, or None while the PR is still watched."""
-    raw = gh(
-        "api",
-        "graphql",
-        "-f",
-        f"query={DEPARTURE_QUERY}",
-        "-f",
-        f"url={url}",
-        "-f",
-        f"me={login}",
-    )
+    try:
+        raw = gh(
+            "api",
+            "graphql",
+            "-f",
+            f"query={DEPARTURE_QUERY}",
+            "-f",
+            f"url={url}",
+            "-f",
+            f"me={login}",
+        )
+    except RuntimeError as error:
+        if "Could not resolve to a" in str(error):
+            return None
+        raise
     pr = json.loads(raw)["data"]["resource"]
-    if not pr:
-        raise RuntimeError("PR lookup returned no pull request")
+    if pr is None:
+        return None
     pr["url"] = url
     state = pr.get("state")
     if state not in ("OPEN", "CLOSED", "MERGED"):
@@ -959,4 +966,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (OSError, RuntimeError, ValueError, KeyError) as error:
+        print((str(error).splitlines() or ["PR read failed"])[-1], file=sys.stderr)
+        sys.exit(1)
