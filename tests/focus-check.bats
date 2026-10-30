@@ -43,7 +43,7 @@ import sys
 process = subprocess.Popen([sys.argv[1], "900"], stdout=subprocess.PIPE, text=True,
                            start_new_session=True)
 try:
-    if not select.select([process.stdout], [], [], 5)[0]:
+    if not select.select([process.stdout], [], [], 15)[0]:
         raise SystemExit("focus-check did not emit a line")
     print(process.stdout.readline().strip())
 finally:

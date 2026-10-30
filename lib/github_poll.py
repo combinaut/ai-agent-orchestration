@@ -44,14 +44,44 @@ def diagnostics(stderr):
     if not any(line.startswith(("* ", "> ", "< ")) for line in lines):
         return {}, 0, stderr.strip()
     headers, status, messages = {}, 0, []
-    tail = None
-    for index, line in enumerate(lines):
-        if line.startswith("* Request took "):
-            tail = index + 1
+    tail = next(
+        (
+            i + 1
+            for i in range(len(lines) - 1, -1, -1)
+            if lines[i].startswith("* Request took ")
+        ),
+        None,
+    )
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        index += 1
         if match := re.match(r"< HTTP/[\d.]+ (\d+)", line):
             headers, status = {}, int(match[1])
-        elif match := re.match(r"< ([\w-]+):\s*(.*)", line):
-            headers[match[1].lower()] = match[2].strip()
+            while index < len(lines):
+                match = re.match(r"< ([\w-]+):\s*(.*)", lines[index])
+                if not match:
+                    break
+                headers[match[1].lower()] = match[2].strip()
+                index += 1
+            if index < len(lines) and not lines[index]:
+                while index < len(lines) and not lines[index]:
+                    index += 1
+                body = "\n".join(lines[index:])
+                try:
+                    if "json" not in headers.get("content-type", "").lower():
+                        break
+                    if re.match(
+                        r"\* body is too long(?: \(\d+ bytes\) to print, skipping \(longer than \d+ bytes\)|, skipping \(contains more than \d+ bytes\))$",
+                        lines[index] if index < len(lines) else "",
+                    ):
+                        index += 1
+                        continue
+                    _, consumed = json.JSONDecoder().raw_decode(body)
+                except ValueError:
+                    break
+                # Complete JSON and logger omissions delimit subsequent responses.
+                index += body[:consumed].count("\n") + 1
         elif line.startswith(("gh:", "GraphQL:", "error:", "HTTP ")):
             messages.append(line)
     return (

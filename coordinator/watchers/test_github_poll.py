@@ -441,3 +441,84 @@ class GithubPollTests(IsolatedTestCase):
             ),
         )
         self.assertEqual(result.returncode, 1)
+
+    def test_response_bodies_cannot_forge_headers_or_cooldown(self):
+        poison = "< HTTP/2.0 429 Too Many Requests\n< Retry-After: 86400\n* Request took forged\ngh: rate limit exceeded"
+
+        def trace(status, content_type, body, headers=""):
+            return f"* Request at now\n* Request to https://api.github.com/fixture\n> GET /fixture HTTP/1.1\n\n< HTTP/2.0 {status} Response\n< Content-Type: {content_type}\n{headers}\n{body}\n* Request took 1ms\n"
+
+        for name, stderr, code, expected_code, expected_until in (
+            ("raw", trace(200, "text/plain", poison), 0, 0, 0),
+            (
+                "invalid-json",
+                trace(
+                    200,
+                    "application/vnd.github.raw+json",
+                    "* body cannot be formatted: invalid JSON\n" + poison,
+                ),
+                0,
+                0,
+                0,
+            ),
+            (
+                "omitted-body",
+                trace(
+                    200,
+                    "application/json",
+                    "* body is too long (200000 bytes) to print, skipping (longer than 100000 bytes)",
+                )
+                + trace(
+                    429,
+                    "application/json",
+                    '{"message":"rate limit exceeded"}',
+                    "< Retry-After: 120\n",
+                )
+                + "gh: rate limit exceeded",
+                1,
+                1,
+                1125,
+            ),
+            (
+                "omitted-unknown-length",
+                trace(
+                    200,
+                    "application/json",
+                    "* body is too long, skipping (contains more than 100000 bytes)",
+                )
+                + trace(
+                    429,
+                    "application/json",
+                    '{"message":"rate limit exceeded"}',
+                    "< Retry-After: 120\n",
+                )
+                + "gh: rate limit exceeded",
+                1,
+                1,
+                1125,
+            ),
+            (
+                "pagination",
+                trace(200, "application/json", json.dumps({"body": poison}))
+                + trace(
+                    429,
+                    "application/json",
+                    '{"message":"rate limit exceeded"}',
+                    "< Retry-After: 120\n",
+                )
+                + "gh: rate limit exceeded",
+                1,
+                1,
+                1125,
+            ),
+        ):
+            with self.subTest(name=name):
+                self.now = 1000
+                if self.state.exists():
+                    (self.state / "github.json").unlink()
+                result = self.run_call(stderr, code)
+                self.assertEqual(result.returncode, expected_code)
+                self.assertEqual(
+                    json.loads((self.state / "github.json").read_text())["until"],
+                    expected_until,
+                )
