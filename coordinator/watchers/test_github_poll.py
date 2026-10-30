@@ -522,3 +522,18 @@ class GithubPollTests(IsolatedTestCase):
                     json.loads((self.state / "github.json").read_text())["until"],
                     expected_until,
                 )
+
+    def test_unrelated_rate_limit_terms_do_not_start_shared_cooldown(self):
+        for diagnostic in (
+            "GraphQL: Field 'rateLimit' doesn't exist on type 'Query'",
+            "gh: HTTP 403: Resource not accessible by integration (https://api.github.com/repos/acme/rate-limit)",
+            "GraphQL: Variable $rateLimit of type Int! was provided invalid value",
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                if self.state.exists():
+                    (self.state / "github.json").unlink()
+                result = self.run_call(diagnostic, 1)
+                self.assertEqual(result.returncode, 1)
+                state = json.loads((self.state / "github.json").read_text())
+                self.assertEqual(state["until"], 0)
+                self.assertEqual(state.get("failures", 0), 0)

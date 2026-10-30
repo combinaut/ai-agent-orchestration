@@ -149,7 +149,11 @@ def run(argv, invoke):
         result = invoke(dict(os.environ, GH_DEBUG="api"), (lock,))
         headers, status, message = diagnostics(result.stderr)
         limited = status == 429 or bool(
-            re.search(r"rate.?limit|abuse detection", message, re.I)
+            re.search(
+                r"secondary rate limit|rate.?limit(?: already)? exceeded|abuse detection",
+                message,
+                re.I,
+            )
         )
         if limited:
             failures = min(failures + 1, 7)
