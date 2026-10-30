@@ -513,6 +513,8 @@ def departure(url, login):
         raise RuntimeError("PR lookup returned no pull request")
     pr["url"] = url
     state = pr.get("state")
+    if state not in ("OPEN", "CLOSED", "MERGED"):
+        raise RuntimeError("PR lookup returned invalid state")
     if state != "OPEN":
         return state
     for node in (pr.get("reviewRequests") or {}).get("nodes") or []:
@@ -621,13 +623,8 @@ def changes(before, after, login=None):
             else:
                 still_open[url] = {**was, "misses": misses}
 
-        try:
-            departure_login = departure_login or viewer_login()
-            st = departure(url, departure_login)
-        except (OSError, RuntimeError, ValueError):
-            # Kept until a per-PR read confirms departure.
-            keep_missed()
-            continue
+        departure_login = departure_login or viewer_login()
+        st = departure(url, departure_login)
         if st is None:
             keep_missed()
             continue
@@ -715,7 +712,7 @@ def cmd_watch(args, scope, _label):
             if fails >= 3:
                 print("recovered: PR fetch works again", flush=True)
             fails = 0
-        except (OSError, RuntimeError, json.JSONDecodeError, KeyError) as error:
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
             fails += 1
             if fails == 3:
                 print(f"PR fetch failing 3x in a row: {error}", flush=True)

@@ -607,15 +607,18 @@ url = "https://github.com/acme/app/pull/7"
 present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="head", conflict=False)}
 prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "head", "reviewRequests": {"nodes": []}, "myReviews": {"nodes": [{"commit": {"oid": "head"}}]}}}})
 prs.read_dispatched = lambda: (_ for _ in ()).throw(OSError("partial ledger"))
-lines, retained = prs.changes(present, {}, "reviewer")
-assert lines == [], lines
-assert retained == {url: dict(present[url], misses=1)}, retained
+try:
+    prs.changes(present, {}, "reviewer")
+except OSError as error:
+    assert "partial ledger" in str(error), error
+else:
+    raise AssertionError("failed ledger read was treated as a departure")
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
 }
 
-@test "a failed departure check is kept with a miss" {
+@test "a failed departure check remains a failed read" {
   # shellcheck disable=SC2016 # Python source.
   run python3 -c '
 import sys
@@ -624,9 +627,12 @@ import prs
 url = "https://github.com/acme/app/pull/7"
 present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
 prs.gh = lambda *args: (_ for _ in ()).throw(RuntimeError("gone"))
-lines, retained = prs.changes(present, {}, "reviewer")
-assert lines == [], lines
-assert retained[url]["misses"] == 1, retained
+try:
+    prs.changes(present, {}, "reviewer")
+except RuntimeError as error:
+    assert "gone" in str(error), error
+else:
+    raise AssertionError("failed departure read succeeded")
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
@@ -649,7 +655,7 @@ assert retained[url]["misses"] == 1, retained
   [ "$status" -eq 0 ]
 }
 
-@test "an unconfirmed departure clears after five misses" {
+@test "five failed departure checks retain the saved entry" {
   # shellcheck disable=SC2016 # Python source.
   run python3 -c '
 import sys
@@ -658,13 +664,15 @@ import prs
 url = "https://github.com/acme/app/pull/7"
 state = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
 prs.gh = lambda *args: (_ for _ in ()).throw(RuntimeError("gone"))
-for miss in range(1, 5):
-    lines, state = prs.changes(state, {}, "reviewer")
-    assert lines == [], (miss, lines)
-    assert state[url]["misses"] == miss, state
-lines, state = prs.changes(state, {}, "reviewer")
-assert lines == [f"cleared: {url} — t (no longer requesting you)"], lines
-assert state == {}, state
+before = dict(state)
+for _ in range(5):
+    try:
+        prs.changes(state, {}, "reviewer")
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("failed departure read succeeded")
+    assert state == before, state
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
@@ -673,15 +681,15 @@ assert state == {}, state
 @test "departure checks cap at ten oldest missing PRs" {
   # shellcheck disable=SC2016 # Python source.
   run python3 -c '
-import sys
+import json, sys
 sys.path.insert(0, sys.argv[1])
 import prs
 present = {f"https://github.com/acme/app/pull/{n}": dict(title=str(n), draft=False, author="a", ci="SUCCESS", sha="s", conflict=False) for n in range(1, 12)}
 calls = []
-def fail(*args):
+def read(*args):
     calls.append(args)
-    raise RuntimeError("gone")
-prs.gh = fail
+    return json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "s", "reviewRequests": {"nodes": [{"requestedReviewer": {"login": "reviewer"}}]}, "myReviews": {"nodes": []}}}})
+prs.gh = read
 lines, retained = prs.changes(present, {}, "reviewer")
 assert lines == [], lines
 assert len(calls) == 10, calls

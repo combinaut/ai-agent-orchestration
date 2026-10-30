@@ -141,7 +141,7 @@ A manual review of a moved head is re-queued once when an older completed dispat
 - **Orchestrator never merges, closes, or assigns reviewers.** Codex posts reviews only.
 - **Do not dispatch Draft / CI-failing / CI-running / Conflicting** buckets — only Ready.
 - **At most 3 concurrent Codex reviews** unless the user raises the limit. When one finishes, report → close pane → fill from the queue.
-- **A PR missing from search is not proof it is gone** — watcher checks up to 10 absent PRs per poll with `gh pr view`, keeps direct or team requests, and clears an unconfirmed absence only after five misses.
+- **A PR missing from search is not proof it is gone** — watcher checks up to 10 absent PRs per poll through GraphQL and keeps direct or team requests. Failed departure reads fail the poll, retain its saved snapshot, and alert after three consecutive failed polls; they never advance the five-miss fallback.
 - **`merge state unknown` is not a pass** — `list` retries once.
 
 ## Common pitfalls

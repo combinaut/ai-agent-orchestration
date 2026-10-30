@@ -338,11 +338,10 @@ def changes(before, after):
     for url, was in before.items():
         if url in after:
             continue
-        try:
-            st = gh("pr", "view", url, "--json", "state", "--jq", ".state").strip()
-        except RuntimeError:
-            st = "UNKNOWN"
-        if st in ("OPEN", "UNKNOWN"):
+        st = gh("pr", "view", url, "--json", "state", "--jq", ".state").strip()
+        if st not in ("OPEN", "CLOSED", "MERGED"):
+            raise RuntimeError("PR lookup returned invalid state")
+        if st == "OPEN":
             lines.append(f"cleared: {url} — {was['title']} (no longer requesting you)")
             continue
         lines.append(f"{st.lower()}: {url} — {was['title']}")
@@ -424,7 +423,7 @@ def cmd_watch(args, scope, _label):
             OSError,
             RuntimeError,
             subprocess.SubprocessError,
-            json.JSONDecodeError,
+            ValueError,
             KeyError,
         ) as error:
             fails += 1

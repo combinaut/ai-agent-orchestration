@@ -1,6 +1,7 @@
 """Shared GitHub admission and cooldown contracts without network traffic."""
 
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -284,3 +285,74 @@ class GithubPollTests(IsolatedTestCase):
                     os.kill(child, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
+
+    def test_failed_departure_reads_never_clear_or_save_in_either_pr_watch(self):
+        root = Path(__file__).resolve().parents[2]
+        for relative, fetched in (
+            ("skills/review-prs/scripts/prs.py", ([], "reviewer")),
+            ("coordinator/watchers/prs-copy.py", []),
+        ):
+            for error_type in (RuntimeError, OSError, ValueError):
+                with self.subTest(relative=relative, error_type=error_type):
+                    spec = importlib.util.spec_from_file_location(
+                        "departure_prs", root / relative
+                    )
+                    prs = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(prs)
+                    before = {
+                        "https://github.com/acme/app/pull/7": {
+                            "title": "t",
+                            "misses": 4,
+                        }
+                    }
+                    args = type("Args", (), {"interval": 120})()
+                    with (
+                        patch.object(prs, "load_state", return_value=before),
+                        patch.object(prs, "fetch", return_value=fetched),
+                        patch.object(
+                            prs, "gh", side_effect=error_type("failed departure")
+                        ),
+                        patch.object(prs, "save_state") as save,
+                        patch.object(
+                            prs.time,
+                            "sleep",
+                            side_effect=[None, None, None, None, KeyboardInterrupt],
+                        ),
+                        patch.object(sys, "stdout", new_callable=io.StringIO) as output,
+                    ):
+                        if isinstance(fetched, tuple):
+                            with self.assertRaises(KeyboardInterrupt):
+                                prs.cmd_watch(args, "repo:fixture", "fixture")
+                        else:
+                            with patch.object(
+                                prs.runtime, "iterations", return_value=iter([None] * 5)
+                            ):
+                                prs.cmd_watch(args, "repo:fixture", "fixture")
+                    save.assert_not_called()
+                    self.assertIn("PR fetch failing 3x", output.getvalue())
+                    self.assertNotIn("cleared:", output.getvalue())
+
+    def test_missing_departure_state_is_a_failed_read(self):
+        root = Path(__file__).resolve().parents[2]
+        for relative, response in (
+            (
+                "skills/review-prs/scripts/prs.py",
+                json.dumps({"data": {"resource": {"headRefOid": "h"}}}),
+            ),
+            ("coordinator/watchers/prs-copy.py", ""),
+        ):
+            with self.subTest(relative=relative):
+                spec = importlib.util.spec_from_file_location(
+                    "invalid_departure", root / relative
+                )
+                prs = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(prs)
+                before = {
+                    "https://github.com/acme/app/pull/7": {"title": "t", "misses": 4}
+                }
+                with patch.object(prs, "gh", return_value=response):
+                    with self.assertRaises(RuntimeError):
+                        if relative.startswith("skills"):
+                            prs.changes(before, {}, "reviewer")
+                        else:
+                            prs.changes(before, {})
