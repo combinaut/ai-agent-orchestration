@@ -421,14 +421,19 @@ class GithubPollTests(IsolatedTestCase):
                 self.assertGreaterEqual(starts[1] - starts[0], 3)
 
     def test_only_confirmed_local_repository_absence_can_use_scope_fallback(self):
-        with self.assertRaises(OSError):
-            g.run(
-                ["gh", "repo", "view"],
-                lambda env, pass_fds: subprocess.CompletedProcess(
-                    ["gh"], 1, "", "fatal: not a git repository"
-                ),
-            )
-
+        for diagnostic in (
+            "fatal: not a git repository",
+            "error: no git remotes found",
+            "none of the git remotes point to a known GitHub host",
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                with self.assertRaises(g.NoRepository):
+                    g.run(
+                        ["gh", "repo", "view"],
+                        lambda env, pass_fds: subprocess.CompletedProcess(
+                            ["gh"], 1, "", diagnostic
+                        ),
+                    )
         result = g.run(
             ["gh", "api", "fixture"],
             lambda env, pass_fds: subprocess.CompletedProcess(

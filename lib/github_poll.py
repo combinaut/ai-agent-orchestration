@@ -141,7 +141,9 @@ def run(argv, invoke):
             result.returncode
             and list(argv[1:3]) == ["repo", "view"]
             and re.search(
-                r"not a git repository|none of the git remotes", result.stderr, re.I
+                r"not a git repository|none of the git remotes|no git remotes found",
+                result.stderr,
+                re.I,
             )
         ):
             raise NoRepository(result.stderr)
