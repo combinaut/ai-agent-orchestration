@@ -1394,10 +1394,13 @@ def reduce_pulls(before, raw):
             reported,
         )
     )
-    if events and raw.get("busy"):
-        events[0] += " " + "; ".join(
-            raw["busy"][source] for source in reported if source in raw["busy"]
-        )
+    details = "; ".join(
+        raw.get("busy", {})[source]
+        for source in reported
+        if source in raw.get("busy", {})
+    )
+    if events and details:
+        events[0] += " | " + details
     for key, pr in sorted(current.items()):
         previous = dict(((before or {}).get("prs", {})).get(key, {}))
         previous["identities"] = pull_saved_identities(previous)

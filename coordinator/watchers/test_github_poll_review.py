@@ -240,3 +240,92 @@ class ReviewTests(IsolatedTestCase):
                         if process.poll() is None:
                             os.killpg(process.pid, signal.SIGKILL)
                             process.wait(timeout=2)
+
+    def test_cooldown_and_failed_legacy_rechecks_never_clear_saved_hits(self):
+        pr = json.loads((watchers.ROOT / "fixtures/audit-pr.json").read_text())
+        key = pr["repository"]["nameWithOwner"] + "#" + str(pr["number"])
+        errors = (
+            g.Cooldown("cooldown"),
+            TimeoutError("timeout"),
+            subprocess.CalledProcessError(1, ["gh"], stderr="API rate limit exceeded"),
+            ValueError("malformed"),
+        )
+        for error, saved_key in (
+            (error, saved_key)
+            for error in errors
+            for saved_key in (
+                key,
+                pr["repository"]["nameWithOwner"] + "@" + pr["baseRefName"],
+            )
+        ):
+            with self.subTest(error=type(error).__name__, saved_key=saved_key):
+                before = {
+                    "sources": {"github": [], "herdr": []},
+                    "legacy": {saved_key: {"line": "LEGACY saved", "head": "old"}},
+                    "unreadable": {},
+                }
+                with (
+                    patch.object(
+                        audit.discovery,
+                        "repos",
+                        return_value={"repos": ["a/b"], "clones": []},
+                    ),
+                    patch.object(audit, "fetch_prs", return_value=[pr]),
+                    patch.object(audit, "repo_settings", side_effect=error),
+                    patch.object(audit, "pr_lines", return_value=[]),
+                    patch.object(audit, "workspace_lines", return_value=[]),
+                    patch.object(audit, "slot_sources", return_value=({}, {})),
+                ):
+                    raw = audit.collect(lambda *a: "", before=before)
+                after, events = audit.reduce(before, raw)
+                self.assertEqual(after["legacy"], before["legacy"])
+                self.assertIn("github", raw["unreadable"])
+                self.assertFalse(any("CLEARED" in line for line in events), events)
+        for error in (g.Busy("busy"), g.Cooldown("cooldown")):
+            with patch.object(audit, "repo_settings", side_effect=error):
+                with self.assertRaises(type(error)):
+                    audit.legacy_entries(lambda *a: "", [pr], {})
+
+    def test_readfail_diagnostics_preserve_one_source_and_holder_text(self):
+        state = {"prs": {}, "unreadable": []}
+        raw = {
+            "prs": {},
+            "departed": {},
+            "failed": [],
+            "unreadable": ["pr:a/b#1"],
+            "deferred": ["pr:a/b#1"],
+            "busy": {"pr:a/b#1": "GitHub poll busy; holder pid=7 age=5s"},
+        }
+        for _ in range(3):
+            state, events = watchers.reduce_pulls(state, raw)
+        facts = watchers.alert_policy.readfail_facts("pulls", events[0])
+        alerts = [fact for fact in facts if fact["kind"] == "alert"]
+        self.assertEqual([fact["key"] for fact in alerts], ["pulls:readfail:pr:a/b#1"])
+        self.assertIn("pid=7", alerts[0]["text"])
+        self.assertIn("age=5s", alerts[0]["text"])
+        self.assertEqual(facts[-1]["keep"], {"pulls:readfail:pr:a/b#1"})
+
+    def test_readfail_recovery_has_no_diagnostic_suffix_during_other_grace(self):
+        before = {
+            "prs": {},
+            "unreadable": ["owners"],
+            "reported_unreadable": ["owners"],
+        }
+        raw = {
+            "prs": {},
+            "departed": {},
+            "failed": [],
+            "unreadable": ["settings:a/b#1"],
+            "deferred": ["settings:a/b#1"],
+            "busy": {"settings:a/b#1": "holder pid=7 age=1s"},
+        }
+        after, events = watchers.reduce_pulls(before, raw)
+        self.assertEqual(events, ["PULLS READFAIL cleared"])
+        self.assertEqual(
+            watchers.alert_policy.readfail_facts("pulls", "PULLS READFAIL cleared "),
+            [watchers.alert_policy.clear("pulls:readfail:")],
+        )
+        self.assertEqual(
+            watchers.alert_policy.readfail_facts("pulls", events[0]),
+            [watchers.alert_policy.clear("pulls:readfail:")],
+        )

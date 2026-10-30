@@ -627,7 +627,7 @@ def legacy_entries(command, prs, cache, rules=None):
             elif old:
                 entries[key] = old
         except READ_ERRORS as error:
-            if github_busy(error):
+            if cache or github_busy(error) or isinstance(error, github_poll.Cooldown):
                 raise
             entries[key] = dict(
                 head=pr["headRefOid"],

@@ -610,6 +610,7 @@ class LegacyTests(IsolatedTestCase):
 
     def test_scan_failure_is_readfail_and_keeps_the_last_state(self):
         self.scan()
+        saved = self.saved()["before"]["legacy"]
         self.pr["headRefOid"] = "next"
 
         def failing(*args):
@@ -619,18 +620,13 @@ class LegacyTests(IsolatedTestCase):
 
         self.assertEqual(
             self.events(self.scan(failing)),
-            [
-                "READFAIL LEGACY owner/product#7 Fix menu: HTTP 502",
-                "CLEARED " + SUMMARY,
-            ],
+            ["READFAIL github: HTTP 502"],
         )
         self.assertIsNone(self.scan(failing))
-        self.assertEqual(
-            self.saved()["before"]["legacy"]["owner/product#7"]["head"], "next"
-        )
+        self.assertEqual(self.saved()["before"]["legacy"], saved)
         self.assertEqual(
             self.events(self.scan()),
-            [SUMMARY, "CLEARED READFAIL LEGACY owner/product#7 Fix menu: HTTP 502"],
+            ["github READFAIL cleared", SUMMARY],
         )
 
     def test_a_head_without_legacy_hits_clears_the_legacy_line(self):
