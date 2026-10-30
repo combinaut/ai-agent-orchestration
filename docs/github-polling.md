@@ -12,7 +12,7 @@ Keep the command's exit status. A nonzero exit means the read failed; retain sav
 
 ## Admission and retries
 
-All participating processes for the OS user share a nonblocking lock in `~/.cache/orch-github-poll`. Contention and cooldown fail immediately without invoking `gh`. An admitted caller holds the lock through command completion and waits at most three seconds for start spacing. There is no contender queue or fairness guarantee. A clock discontinuity that exceeds that wait fails the read.
+All participating processes for the OS user share a nonblocking lock in `~/.cache/orch-github-poll`. Contention and cooldown fail immediately without invoking `gh`. An admitted caller holds the lock through command completion and waits at most three seconds for spacing after the preceding call completes. An interrupted admission leaves a marker that requires three seconds of spacing after lock recovery. There is no contender queue or fairness guarantee. A clock discontinuity that exceeds that wait fails the read.
 
 Starts are separated by at least three seconds: at most 20 participating CLI starts in any half-open 60-second interval, with one CLI process active. This bounds participating CLI calls only, not HTTP requests or raw `gh`. Pagination and CLI internal requests can multiply HTTP traffic. Existing services need their normal upgrade/restart to participate; this change does not restart them.
 
@@ -24,7 +24,7 @@ With 10 architects and 30 workers sharing this helper, lock contention fails fir
 
 ## Measurement
 
-`github.json` in the state directory records `callers` counters (`started`, `limited`, `last_started`) by executable, with watcher mode included. Compare counters at two timestamps for observed rates. These count CLI starts, not HTTP requests. `GITHUB_POLL_STATE_DIR` selects a different state directory for isolated tests; production pollers must share the default. Debug HTTP output is captured for response headers, then discarded; only error diagnostics reach callers.
+`github.json` in the state directory records `callers` counters (`started`, `limited`, `last_started`) for admitted attempts by executable, with watcher mode included. Compare counters at two timestamps for observed admission rates. A spawn failure still counts as an admitted attempt; these are not HTTP request counters. `GITHUB_POLL_STATE_DIR` selects a different state directory for isolated tests; production pollers must share the default. Debug HTTP output is captured for response headers, then discarded; only error diagnostics reach callers.
 
 An investigation on 2026-10-30 sampled processes for 120.46 seconds (111 samples). It observed at least six CLI processes from an ad hoc PR monitor, two from standalone `prs.py`, and one from pulls: lower bounds of 2.989, 0.996, and 0.498 calls/minute. Short processes can be missed. The ad hoc monitor's saved state had 138 reviews, 12 comments, and 92 threads, requiring five GraphQL calls per successful pass followed by a 60-second sleep. The three observed `sleep 30` loops belonged to dev-server slot wrappers.
 

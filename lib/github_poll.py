@@ -108,37 +108,44 @@ def run(argv, invoke):
         now = time.time()
         if until > now:
             raise OSError(f"GitHub poll cooldown until {until:.0f}; read not attempted")
+        if state.get("pending"):
+            next_start = max(next_start, now + SPACING)
         # Only an admitted caller waits for spacing; contenders never queue.
         if next_start > now:
             time.sleep(min(SPACING, next_start - now))
             if next_start > time.time():
                 raise OSError("GitHub poll clock changed; read not attempted")
         now = time.time()
+        state["pending"] = True
         state["next"] = now + SPACING
         counter["last_started"] = now
         write_state(path, state)
-        result = invoke(dict(os.environ, GH_DEBUG="api"))
-        headers, status, message = diagnostics(result.stderr)
-        limited = status == 429 or bool(
-            re.search(r"rate.?limit|abuse detection", message, re.I)
-        )
-        if limited:
-            failures = min(failures + 1, 7)
-            delay = retry_delay(headers, time.time())
-            if delay is None:
-                delay = min(3600, 60 * 2 ** (failures - 1))
-            state["until"] = time.time() + delay + random.uniform(1, 5)
-            state["failures"] = failures
-            counter["limited"] += 1
-            if result.returncode == 0:
-                result.returncode = 1
-        elif result.returncode == 0:
-            state["until"], state["failures"] = 0, 0
-        write_state(path, state)
-        result.stderr = message or (
-            f"gh failed (exit {result.returncode})" if result.returncode else ""
-        )
-        return result
+        try:
+            result = invoke(dict(os.environ, GH_DEBUG="api"))
+            headers, status, message = diagnostics(result.stderr)
+            limited = status == 429 or bool(
+                re.search(r"rate.?limit|abuse detection", message, re.I)
+            )
+            if limited:
+                failures = min(failures + 1, 7)
+                delay = retry_delay(headers, time.time())
+                if delay is None:
+                    delay = min(3600, 60 * 2 ** (failures - 1))
+                state["until"] = time.time() + delay + random.uniform(1, 5)
+                state["failures"] = failures
+                counter["limited"] += 1
+                if result.returncode == 0:
+                    result.returncode = 1
+            elif result.returncode == 0:
+                state["until"], state["failures"] = 0, 0
+            result.stderr = message or (
+                f"gh failed (exit {result.returncode})" if result.returncode else ""
+            )
+            return result
+        finally:
+            state["next"] = time.time() + SPACING
+            state["pending"] = False
+            write_state(path, state)
 
 
 def main():

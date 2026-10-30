@@ -17,6 +17,9 @@ import github_poll as g
 
 class GithubPollTests(IsolatedTestCase):
     def setUp(self):
+        bytecode = patch.object(sys, "dont_write_bytecode", True)
+        bytecode.start()
+        self.addCleanup(bytecode.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / "state"
@@ -189,3 +192,34 @@ class GithubPollTests(IsolatedTestCase):
     def test_unprefixed_diagnostics_preserve_large_diff_fallback(self):
         for message in ("diff too_large", "EOF"):
             self.assertEqual(self.run_call(message, 1).stderr, message)
+
+    def test_persistence_latency_cannot_compress_actual_starts(self):
+        starts = []
+        original = g.write_state
+        writes = 0
+
+        def persist(path, state):
+            nonlocal writes
+            writes += 1
+            if writes == 1:
+                self.advance(1)
+            original(path, state)
+
+        with patch.object(g, "write_state", side_effect=persist):
+            for _ in range(2):
+                g.run(
+                    ["gh"],
+                    lambda env: (
+                        starts.append(self.now)
+                        or subprocess.CompletedProcess(["gh"], 0, "ok", "")
+                    ),
+                )
+        self.assertGreaterEqual(starts[1] - starts[0], 3)
+
+    def test_abandoned_admission_waits_three_seconds_after_lock_recovery(self):
+        self.state.mkdir()
+        (self.state / "github.json").write_text(
+            json.dumps({"pending": True, "next": 0})
+        )
+        self.run_call()
+        self.assertEqual(self.now, 1003)
