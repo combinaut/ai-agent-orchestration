@@ -31,11 +31,13 @@ def kill_command(process):
 
 def run(argv, timeout=None):
     if os.path.basename(argv[0]) == "gh":
-        return github_poll.run(argv, lambda env: _run(argv, timeout, env))
+        return github_poll.run(
+            argv, lambda env, pass_fds: _run(argv, timeout, env, pass_fds)
+        )
     return _run(argv, timeout)
 
 
-def _run(argv, timeout=None, env=None):
+def _run(argv, timeout=None, env=None, pass_fds=()):
     """A command owns its descendants; cleanup never waits for inherited pipe EOF."""
     global _ACTIVE_PROCESS
     for pending in _SOFT_DEADLINES:
@@ -66,6 +68,7 @@ def _run(argv, timeout=None, env=None):
                 stderr=subprocess.PIPE,
                 start_new_session=True,
                 env=env,
+                **({"pass_fds": pass_fds} if pass_fds else {}),
             )
             _ACTIVE_PROCESS = process
         finally:

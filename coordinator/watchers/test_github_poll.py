@@ -43,7 +43,9 @@ class GithubPollTests(IsolatedTestCase):
     def run_call(self, stderr="", code=0):
         return g.run(
             ["gh", "api", "fixture"],
-            lambda env: subprocess.CompletedProcess(["gh"], code, "payload", stderr),
+            lambda env, pass_fds: subprocess.CompletedProcess(
+                ["gh"], code, "payload", stderr
+            ),
         )
 
     def test_capacity_forty_callers_share_twenty_starts_per_minute(self):
@@ -51,7 +53,7 @@ class GithubPollTests(IsolatedTestCase):
         for _ in range(40):
             g.run(
                 ["gh"],
-                lambda env: (
+                lambda env, pass_fds: (
                     starts.append(self.now)
                     or subprocess.CompletedProcess(["gh"], 0, "ok", "")
                 ),
@@ -60,9 +62,9 @@ class GithubPollTests(IsolatedTestCase):
         self.assertLessEqual(sum(t < 1060 for t in starts), 20)
 
     def test_other_process_cannot_enter_during_call(self):
-        code = "import github_poll as g; g.run(['gh'], lambda env: (_ for _ in ()).throw(AssertionError('entered')))"
+        code = "import github_poll as g; g.run(['gh'], lambda env, pass_fds: (_ for _ in ()).throw(AssertionError('entered')))"
 
-        def invoke(env):
+        def invoke(env, pass_fds):
             child_env = dict(os.environ, PYTHONPATH=str(Path(g.__file__).parent))
             child = subprocess.run(
                 [sys.executable, "-c", code],
@@ -128,7 +130,7 @@ class GithubPollTests(IsolatedTestCase):
             self.run_call()
         (self.state / "github.json").unlink()
         with self.assertRaises(TimeoutError):
-            g.run(["gh"], lambda env: (_ for _ in ()).throw(TimeoutError()))
+            g.run(["gh"], lambda env, pass_fds: (_ for _ in ()).throw(TimeoutError()))
         self.assertEqual(self.run_call().returncode, 0)
 
     def test_prs_failure_keeps_snapshot(self):
@@ -174,11 +176,16 @@ class GithubPollTests(IsolatedTestCase):
         result = subprocess.CompletedProcess(["gh"], 0, "ok", "")
         env = {"GH_DEBUG": "api"}
         with patch.object(
-            g, "run", side_effect=lambda argv, invoke: invoke(env)
+            g, "run", side_effect=lambda argv, invoke: invoke(env, (77,))
         ) as gate:
             with patch.object(watcher_runtime, "_run", return_value=result) as call:
                 watcher_runtime.run(["gh", "api", "fixture"], timeout=10)
-                call.assert_called_once_with(["gh", "api", "fixture"], 10, env)
+                call.assert_called_once_with(["gh", "api", "fixture"], 10, env, (77,))
+            with patch.object(subprocess, "Popen") as spawn:
+                spawn.return_value.communicate.return_value = (b"ok", b"")
+                spawn.return_value.returncode = 0
+                watcher_runtime.run(["gh", "api", "fixture"], timeout=10)
+                self.assertEqual(spawn.call_args.kwargs["pass_fds"], (77,))
             for read, timeout in (
                 (prs.gh, 45),
                 (lambda *a: focus_check.command("gh", *a), 30),
@@ -187,7 +194,8 @@ class GithubPollTests(IsolatedTestCase):
                     self.assertEqual(read("api", "fixture"), "ok")
                     self.assertEqual(call.call_args.kwargs["timeout"], timeout)
                     self.assertEqual(call.call_args.kwargs["env"], env)
-            self.assertEqual(gate.call_count, 3)
+                    self.assertEqual(call.call_args.kwargs["pass_fds"], (77,))
+            self.assertEqual(gate.call_count, 4)
 
     def test_unprefixed_diagnostics_preserve_large_diff_fallback(self):
         for message in ("diff too_large", "EOF"):
@@ -209,7 +217,7 @@ class GithubPollTests(IsolatedTestCase):
             for _ in range(2):
                 g.run(
                     ["gh"],
-                    lambda env: (
+                    lambda env, pass_fds: (
                         starts.append(self.now)
                         or subprocess.CompletedProcess(["gh"], 0, "ok", "")
                     ),
@@ -223,3 +231,56 @@ class GithubPollTests(IsolatedTestCase):
         )
         self.run_call()
         self.assertEqual(self.now, 1003)
+
+    def test_orphaned_cli_keeps_admission_locked_until_child_exits(self):
+        import signal
+        import threading
+        import time
+
+        stub = Path(self.tmp.name) / "bin"
+        stub.mkdir()
+        pidfile = Path(self.tmp.name) / "child.pid"
+        cli = stub / "gh"
+        cli.write_text(
+            f"#!{sys.executable}\nimport os,time\nfrom pathlib import Path\nPath({str(pidfile)!r}).write_text(str(os.getpid()))\ntime.sleep(60)\n"
+        )
+        cli.chmod(0o755)
+        env = dict(os.environ, PATH=f"{stub}:{os.environ['PATH']}")
+        owner = subprocess.Popen(
+            [sys.executable, str(Path(g.__file__)), "api", "fixture"],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        child = None
+        try:
+            deadline = time.monotonic() + 2
+            while not pidfile.exists() and time.monotonic() < deadline:
+                threading.Event().wait(0.01)
+            self.assertTrue(pidfile.exists())
+            child = int(pidfile.read_text())
+            owner.kill()
+            owner.wait(timeout=2)
+            self.now = json.loads((self.state / "github.json").read_text())["next"] + 3
+            with self.assertRaisesRegex(OSError, "busy"):
+                self.run_call()
+            os.kill(child, signal.SIGTERM)
+            for _ in range(100):
+                try:
+                    result = self.run_call()
+                    break
+                except OSError:
+                    threading.Event().wait(0.01)
+            else:
+                self.fail("child exit did not release admission")
+            self.assertEqual(result.returncode, 0)
+            child = None
+        finally:
+            if owner.poll() is None:
+                owner.kill()
+                owner.wait(timeout=2)
+            if child is not None:
+                try:
+                    os.kill(child, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass

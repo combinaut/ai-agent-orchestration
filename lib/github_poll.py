@@ -79,7 +79,7 @@ def retry_delay(headers, now):
 
 
 def run(argv, invoke):
-    """invoke(env) returns a captured, text-mode CompletedProcess; no retries."""
+    """invoke(env, pass_fds) returns a captured, text-mode CompletedProcess; no retries."""
     directory = state_directory()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock = os.open(directory / "github.lock", os.O_CREAT | os.O_RDWR, 0o600)
@@ -121,7 +121,7 @@ def run(argv, invoke):
         counter["last_started"] = now
         write_state(path, state)
         try:
-            result = invoke(dict(os.environ, GH_DEBUG="api"))
+            result = invoke(dict(os.environ, GH_DEBUG="api"), (lock,))
             headers, status, message = diagnostics(result.stderr)
             limited = status == 429 or bool(
                 re.search(r"rate.?limit|abuse detection", message, re.I)
@@ -153,8 +153,13 @@ def main():
         argv = ["gh", *sys.argv[1:]]
         result = run(
             argv,
-            lambda env: subprocess.run(
-                argv, env=env, capture_output=True, text=True, timeout=45
+            lambda env, pass_fds: subprocess.run(
+                argv,
+                env=env,
+                pass_fds=pass_fds,
+                capture_output=True,
+                text=True,
+                timeout=45,
             ),
         )
         sys.stdout.write(result.stdout)

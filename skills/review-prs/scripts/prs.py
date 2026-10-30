@@ -117,12 +117,13 @@ def gh(*args):
     try:
         result = github_poll.run(
             ["gh", *args],
-            lambda env: subprocess.run(
+            lambda env, pass_fds: subprocess.run(
                 ["gh", *args],
                 capture_output=True,
                 text=True,
                 timeout=GH_TIMEOUT_S,
                 env=env,
+                pass_fds=pass_fds,
             ),
         )
     except OSError as error:

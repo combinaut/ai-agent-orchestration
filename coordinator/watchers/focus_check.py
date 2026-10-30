@@ -24,8 +24,10 @@ PAUSED = re.compile(r"^Paused:\s*\S")
 def command(*argv):
     env = dict(os.environ, LC_ALL="C") if os.path.basename(argv[0]) == "git" else None
 
-    def invoke(env):
-        return subprocess.run(argv, capture_output=True, text=True, timeout=30, env=env)
+    def invoke(env, pass_fds=()):
+        return subprocess.run(
+            argv, capture_output=True, text=True, timeout=30, env=env, pass_fds=pass_fds
+        )
 
     result = github_poll.run(argv, invoke) if argv[0] == "gh" else invoke(env)
     if result.returncode:
