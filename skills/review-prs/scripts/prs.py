@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+import github_poll  # noqa: E402
 import orch_settings  # noqa: E402
 
 BOT_TITLES = ("Automatic Update of README", "Changes by create-pull-request")
@@ -114,9 +115,18 @@ def worker_model():
 
 def gh(*args):
     try:
-        result = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT_S
+        result = github_poll.run(
+            ["gh", *args],
+            lambda env: subprocess.run(
+                ["gh", *args],
+                capture_output=True,
+                text=True,
+                timeout=GH_TIMEOUT_S,
+                env=env,
+            ),
         )
+    except OSError as error:
+        raise RuntimeError(str(error)) from None
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"gh timed out after {GH_TIMEOUT_S}s") from None
     if result.returncode != 0:
@@ -704,7 +714,7 @@ def cmd_watch(args, scope, _label):
             if fails >= 3:
                 print("recovered: PR fetch works again", flush=True)
             fails = 0
-        except (RuntimeError, json.JSONDecodeError, KeyError) as error:
+        except (OSError, RuntimeError, json.JSONDecodeError, KeyError) as error:
             fails += 1
             if fails == 3:
                 print(f"PR fetch failing 3x in a row: {error}", flush=True)

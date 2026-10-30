@@ -13,6 +13,7 @@ from pathlib import Path
 import discovery
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+import github_poll
 import orch_settings
 
 PR_REPOS_MAX = 20
@@ -22,7 +23,11 @@ PAUSED = re.compile(r"^Paused:\s*\S")
 
 def command(*argv):
     env = dict(os.environ, LC_ALL="C") if os.path.basename(argv[0]) == "git" else None
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=30, env=env)
+
+    def invoke(env):
+        return subprocess.run(argv, capture_output=True, text=True, timeout=30, env=env)
+
+    result = github_poll.run(argv, invoke) if argv[0] == "gh" else invoke(env)
     if result.returncode:
         raise subprocess.CalledProcessError(
             result.returncode, argv, output=result.stdout, stderr=result.stderr

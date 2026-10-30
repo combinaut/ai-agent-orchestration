@@ -108,3 +108,5 @@ These text indicators are incomplete, so every waiting line retains the caveat
 `(may be waiting on its own job)`, including the escalation.
 
 Explicit completion, heartbeat and question commands: [worker signals](workers.md#explicit-worker-signals).
+
+GitHub reads share the [polling admission helper](github-polling.md). Lock contention and rate-limit cooldown remain failed reads.

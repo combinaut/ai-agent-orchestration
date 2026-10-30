@@ -27,6 +27,7 @@ os.environ.update(
         "HERDR_BIN_PATH": str(TEST_TOOLS_DIR / "herdr"),
         "ORCH_USER_QUESTIONS_DIR": str(TEST_TOOLS_DIR / "questions"),
         "TEST_TOOL_LOG": str(TEST_TOOL_LOG),
+        "GITHUB_POLL_STATE_DIR": str(TEST_TOOLS_DIR / "github-poll"),
     }
 )
 atexit.register(shutil.rmtree, TEST_TOOLS_DIR, ignore_errors=True)

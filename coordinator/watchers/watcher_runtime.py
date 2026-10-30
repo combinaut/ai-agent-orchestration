@@ -7,6 +7,10 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+import github_poll  # noqa: E402
 
 COMMAND_TIMEOUT = 45
 ITERATION_TIMEOUT = 600
@@ -26,6 +30,12 @@ def kill_command(process):
 
 
 def run(argv, timeout=None):
+    if os.path.basename(argv[0]) == "gh":
+        return github_poll.run(argv, lambda env: _run(argv, timeout, env))
+    return _run(argv, timeout)
+
+
+def _run(argv, timeout=None, env=None):
     """A command owns its descendants; cleanup never waits for inherited pipe EOF."""
     global _ACTIVE_PROCESS
     for pending in _SOFT_DEADLINES:
@@ -48,7 +58,7 @@ def run(argv, timeout=None):
             env = (
                 dict(os.environ, LC_ALL="C")
                 if os.path.basename(argv[0]) == "git"
-                else None
+                else env
             )
             process = subprocess.Popen(
                 argv,

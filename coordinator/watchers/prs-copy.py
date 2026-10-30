@@ -421,6 +421,7 @@ def cmd_watch(args, scope, _label):
                 print("recovered: PR fetch works again", flush=True)
             fails = 0
         except (
+            OSError,
             RuntimeError,
             subprocess.SubprocessError,
             json.JSONDecodeError,
