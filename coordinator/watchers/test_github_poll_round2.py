@@ -139,6 +139,31 @@ class RoundTwoTests(IsolatedTestCase):
                 )
                 self.assertNotIn(gone, before)
 
+    def test_service_departures_cap_reads_and_keep_unchecked_entries(self):
+        prs = load_prs(service=True)
+        before = {
+            f"https://github.com/a/b/pull/{number}": {
+                "title": f"OLD-{number}",
+                "misses": number % 3,
+            }
+            for number in reversed(range(1, 15))
+        }
+        entry = dict(
+            title="NEW-PR", author="a", draft=False, conflict=False, ci="SUCCESS"
+        )
+        present = "https://github.com/a/b/pull/99"
+        after = {present: entry, "https://github.com/a/b/pull/100": entry}
+        expected = sorted(before, key=lambda url: (-before[url]["misses"], url))[:10]
+        with patch.object(
+            prs, "gh", side_effect=RuntimeError("gh deadline exceeded")
+        ) as read:
+            lines, kept = prs.changes({**before, present: entry}, after)
+        self.assertEqual(read.call_count, 10)
+        self.assertEqual([call.args[2] for call in read.call_args_list], expected)
+        self.assertEqual(kept, before)
+        self.assertTrue(any("new:" in line and "NEW-PR" in line for line in lines))
+        self.assertEqual(sum(line.startswith("READFAIL") for line in lines), 10)
+
     def test_busy_grace_keeps_audit_and_pull_evidence_without_first_event(self):
         before = {"sources": {"github": ["saved"]}, "unreadable": {}}
         raw = {

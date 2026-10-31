@@ -27,6 +27,7 @@ STATE_DIR = Path.home() / ".cache" / "review-prs"
 DISPATCH_FILE = STATE_DIR / "dispatched.json"
 DEFAULT_MODEL = os.environ.get("ORCH_WATCHERS_WORKER_MODEL", "")
 PROJECTS = Path.home() / "Projects"
+DEPARTURE_CHECKS_MAX = 10
 
 QUERY = """
 query($q: String!, $endCursor: String) {
@@ -335,10 +336,12 @@ def changes(before, after):
             )
             prefix = "ready" if became_ready else "changed"
             lines.append(f"{prefix}: {url} — {now['title']}: {', '.join(parts)}")
-    still_open = {}
-    for url, was in before.items():
-        if url in after:
-            continue
+    missing = sorted(
+        ((url, was) for url, was in before.items() if url not in after),
+        key=lambda entry: (-entry[1].get("misses", 0), entry[0]),
+    )
+    still_open = dict(missing[DEPARTURE_CHECKS_MAX:])
+    for url, was in missing[:DEPARTURE_CHECKS_MAX]:
         try:
             st = gh("pr", "view", url, "--json", "state", "--jq", ".state").strip()
             if st not in ("OPEN", "CLOSED", "MERGED"):
