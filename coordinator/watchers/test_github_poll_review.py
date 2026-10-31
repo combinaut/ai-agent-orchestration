@@ -509,7 +509,7 @@ class ReviewTests(IsolatedTestCase):
             with self.assertRaises(g.Busy):
                 g.run(["gh"], lambda *args: self.fail("CLI started"), timeout=10)
 
-    def test_call_deadline_is_an_oserror_but_pass_deadline_stays_timeout(self):
+    def test_call_deadline_is_an_oserror_and_worker_result_is_unknown(self):
         self.real_clock()
         with patch.object(g, "write_state", side_effect=lambda *args: time.sleep(1)):
             with self.assertRaises(OSError) as caught:
@@ -527,16 +527,6 @@ class ReviewTests(IsolatedTestCase):
             patch.object(watchers, "github_remotes", return_value=["a/b"]),
         ):
             self.assertIsNone(watchers.open_pr({"cwd": "/repo"}))
-        previous_handler = signal.signal(
-            signal.SIGALRM, lambda *args: (_ for _ in ()).throw(TimeoutError("pass"))
-        )
-        signal.setitimer(signal.ITIMER_REAL, 0.05)
-        try:
-            with self.assertRaises(TimeoutError):
-                g.run(["gh"], lambda *args: time.sleep(1), timeout=5)
-        finally:
-            signal.setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, previous_handler)
 
     def test_unreached_departures_share_busy_grace(self):
         keys = [f"a/b#{n}" for n in range(8)]

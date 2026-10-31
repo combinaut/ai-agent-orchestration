@@ -595,6 +595,7 @@ def legacy_entries(command, prs, cache, rules=None):
             continue
         key = f"{repo}#{pr['number']}"
         old = cache.get(key)
+        configured = False
         try:
             settings = repo_settings(command, repo, pr["baseRefName"], rules)
             if settings["ORCH_LEGACY_SCAN"] != "1":
@@ -607,6 +608,7 @@ def legacy_entries(command, prs, cache, rules=None):
                     line=no_rules_line(repo, pr["baseRefName"]),
                 )
                 continue
+            configured = True
             fingerprint = parsed.fingerprint
             if (
                 old
@@ -624,13 +626,20 @@ def legacy_entries(command, prs, cache, rules=None):
                     rules=fingerprint,
                     line=legacy_line(f"{key} {pr['title']}", hits, parsed.kinds),
                 )
-            elif old:
-                entries[key] = old
+            else:
+                if old:
+                    entries[key] = old
+                failure = f"failed:{key}"
+                if failure in cache:
+                    entries[failure] = cache[failure]
         except READ_ERRORS as error:
             if github_busy(error) or isinstance(error, github_poll.Cooldown):
                 raise
             if old:
                 entries[key] = old
+            base_key = f"{repo}@{pr['baseRefName']}"
+            if not configured and base_key in cache:
+                entries[base_key] = cache[base_key]
             entries[f"failed:{key}"] = dict(
                 head=pr["headRefOid"],
                 base=pr["baseRefName"],

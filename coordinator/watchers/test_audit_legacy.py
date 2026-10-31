@@ -725,6 +725,53 @@ class LegacyTests(IsolatedTestCase):
             ("next", "head"),
         )
 
+    def test_deferred_scans_keep_readfail_with_or_without_saved_hits(self):
+        other = {**self.pr, "number": 8}
+        key = "owner/product#7"
+        failed_key = "failed:" + key
+
+        def raw(entries):
+            return dict(sources={"github": []}, unreadable={}, legacy=entries)
+
+        for saved in (False, True):
+            with self.subTest(saved=saved):
+                cache = audit.legacy_entries(self.fake, [self.pr], {}) if saved else {}
+                self.pr["headRefOid"] += "next"
+                with patch.object(
+                    audit, "legacy_scan", side_effect=OSError("HTTP 502")
+                ):
+                    failed = audit.legacy_entries(self.fake, [self.pr], cache)
+                before, _ = audit.reduce(None, raw(failed))
+                with patch.dict(os.environ, ORCH_LEGACY_SCANS_MAX="1"):
+                    deferred = audit.legacy_entries(self.fake, [other, self.pr], failed)
+                after, events = audit.reduce(before, raw(deferred))
+                self.assertEqual(deferred.get(failed_key), failed[failed_key])
+                self.assertFalse(
+                    any("CLEARED READFAIL" in line for line in events), events
+                )
+                if saved:
+                    self.assertEqual(deferred[key], cache[key])
+                recovered = audit.legacy_entries(self.fake, [self.pr], deferred)
+                _, events = audit.reduce(after, raw(recovered))
+                self.assertNotIn(failed_key, recovered)
+                self.assertTrue(
+                    any("CLEARED READFAIL" in line for line in events), events
+                )
+
+    def test_norules_survives_configuration_failure_but_not_diff_failure(self):
+        key = "owner/product@main"
+        with patch.object(audit, "repo_rules", return_value=None):
+            cache = audit.legacy_entries(self.fake, [self.pr], {})
+        self.assertIn(key, cache)
+        for function in ("repo_settings", "repo_rules", "legacy_scan"):
+            with self.subTest(function=function):
+                with patch.object(audit, function, side_effect=OSError("HTTP 502")):
+                    entries = audit.legacy_entries(self.fake, [self.pr], cache)
+                self.assertEqual(key in entries, function != "legacy_scan")
+                if key in entries:
+                    self.assertEqual(entries[key], cache[key])
+                self.assertTrue(any(entry.get("failed") for entry in entries.values()))
+
     def test_empty_first_read_still_baselines_once(self):
         self.repo_files = {"owner/other": SCAN}
         self.assertIn(
