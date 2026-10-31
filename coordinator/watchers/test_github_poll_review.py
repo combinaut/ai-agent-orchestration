@@ -479,3 +479,20 @@ class ReviewTests(IsolatedTestCase):
                 self.run_call()
                 self.assertGreaterEqual(self.elapsed - completed, 3)
                 self.assertFalse(json.loads(path.read_text()).get("pending_start"))
+
+    def test_wait_deadline_crossing_remains_a_busy_read(self):
+        sleeps = []
+
+        def wait(seconds):
+            if seconds < 0:
+                raise ValueError("sleep length must be non-negative")
+            sleeps.append(seconds)
+
+        with (
+            patch.object(g.fcntl, "flock", side_effect=BlockingIOError),
+            patch.object(g.time, "monotonic", side_effect=[1000.74, 1000.76, 1000.76]),
+            patch.object(g.time, "sleep", side_effect=wait),
+        ):
+            with self.assertRaises(g.Busy):
+                g._run(["gh"], lambda *args: self.fail("invoked"), 1, 1000)
+        self.assertEqual(sleeps, [0])

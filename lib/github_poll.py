@@ -227,7 +227,7 @@ def _run(argv, invoke, timeout, started):
                     raise Busy(
                         f"GitHub poll busy; {holder_message(directory)}; read not attempted"
                     ) from None
-                time.sleep(min(0.05, end - time.monotonic()))
+                time.sleep(max(0, min(0.05, end - time.monotonic())))
         holder = directory / "holder.json"
         try:
             write_state(holder, {"pid": os.getpid(), "since": time.time()})
