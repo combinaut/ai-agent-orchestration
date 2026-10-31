@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.1](https://github.com/combinaut/ai-agent-orchestration/compare/v1.2.0...v1.2.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **github:** share polling cadence and rate-limit cooldowns ([#146](https://github.com/combinaut/ai-agent-orchestration/issues/146)) ([715c4da](https://github.com/combinaut/ai-agent-orchestration/commit/715c4da6ba711d188fbb769e7d944088c28a9ead))
+* **guard-bash:** check every echo/printf reading in pane text ([#140](https://github.com/combinaut/ai-agent-orchestration/issues/140)) ([dd502b2](https://github.com/combinaut/ai-agent-orchestration/commit/dd502b260c7f99f1f2c9b22abf16ef01aa3d96e5))
+* **guard-bash:** treat command -v as a lookup, not a start ([#145](https://github.com/combinaut/ai-agent-orchestration/issues/145)) ([029dea0](https://github.com/combinaut/ai-agent-orchestration/commit/029dea0a28ed626bd4313d0c01a88c68fb02d2cb))
+* **prs:** cap service watcher departure reads ([#148](https://github.com/combinaut/ai-agent-orchestration/issues/148)) ([bb3cdfe](https://github.com/combinaut/ai-agent-orchestration/commit/bb3cdfee83f9f7dc0c579cc703d46cb72a2a92a3))
+
 ## [1.2.0](https://github.com/combinaut/ai-agent-orchestration/compare/v1.1.0...v1.2.0) (2026-10-29)
 
 
