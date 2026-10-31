@@ -329,3 +329,129 @@ class ReviewTests(IsolatedTestCase):
             watchers.alert_policy.readfail_facts("pulls", events[0]),
             [watchers.alert_policy.clear("pulls:readfail:")],
         )
+
+    def test_runtime_stop_during_spawn_terminates_its_owned_command(self):
+        import watcher_runtime as runtime
+
+        self.real_clock()
+        real_spawn = subprocess.Popen
+        for number, expected in (
+            (signal.SIGTERM, SystemExit),
+            (signal.SIGINT, KeyboardInterrupt),
+        ):
+            with self.subTest(signal=number):
+                spawned = []
+
+                def interrupted(*args, **kwargs):
+                    process = real_spawn(*args, **kwargs)
+                    spawned.append(process)
+                    signal.raise_signal(number)
+                    return process
+
+                try:
+                    with patch.object(
+                        runtime.subprocess, "Popen", side_effect=interrupted
+                    ):
+                        with self.assertRaises(expected):
+                            runtime.run(
+                                [sys.executable, "-c", "import time;time.sleep(60)"],
+                                timeout=2,
+                            )
+                    self.assertIsNotNone(spawned[0].poll())
+                finally:
+                    for process in spawned:
+                        if process.poll() is None:
+                            os.killpg(process.pid, signal.SIGKILL)
+                            process.wait(timeout=2)
+
+    def test_malformed_counters_cannot_bypass_rate_limit_persistence(self):
+        for field, bad in (
+            ("limited", "bad"),
+            ("limited", None),
+            ("limited", float("inf")),
+            ("limited", -1),
+            ("started", -1),
+        ):
+            with self.subTest(field=field, value=bad):
+                self.state.mkdir(exist_ok=True)
+                counter = {"started": 0, "limited": 0}
+                counter[field] = bad
+                path = self.state / "github.json"
+                path.write_text(
+                    json.dumps({"callers": {Path(sys.argv[0]).name: counter}})
+                )
+                calls = []
+
+                def invoke(env, fds):
+                    calls.append(True)
+                    return subprocess.CompletedProcess(
+                        ["gh"],
+                        1,
+                        "",
+                        "< HTTP/2.0 429 Too Many Requests\n< Retry-After: 120\ngh: rate limit exceeded",
+                    )
+
+                with self.assertRaises(g.Cooldown):
+                    g.run(["gh"], invoke)
+                self.assertEqual(calls, [])
+                self.assertTrue(list(self.state.glob("github.json.corrupt*")))
+                self.advance(66)
+                self.assertEqual(g.run(["gh"], invoke).returncode, 1)
+                self.assertEqual(calls, [True])
+                self.assertEqual(json.loads(path.read_text())["until"], self.now + 122)
+                with self.assertRaises(g.Cooldown):
+                    g.run(["gh"], invoke)
+                self.assertEqual(calls, [True])
+
+    def test_supervisor_spawn_signals_reap_the_owned_child(self):
+        self.real_clock()
+        real_spawn = subprocess.Popen
+
+        def terminated(signum, frame):
+            raise SystemExit(128 + signum)
+
+        def expired(signum, frame):
+            raise subprocess.TimeoutExpired(["gh"], 0)
+
+        previous_alarm = signal.signal(signal.SIGALRM, expired)
+        previous_term = signal.signal(signal.SIGTERM, terminated)
+        try:
+            for number, expected in (
+                (signal.SIGTERM, SystemExit),
+                (signal.SIGINT, KeyboardInterrupt),
+                (signal.SIGALRM, None),
+            ):
+                with self.subTest(signal=number):
+                    spawned = []
+
+                    def interrupted(*args, **kwargs):
+                        process = real_spawn(*args, **kwargs)
+                        spawned.append(process)
+                        signal.raise_signal(number)
+                        return process
+
+                    try:
+                        with patch.object(
+                            g.subprocess, "Popen", side_effect=interrupted
+                        ):
+                            command = [
+                                sys.executable,
+                                "-c",
+                                "import time;time.sleep(60)",
+                            ]
+                            if expected is None:
+                                self.assertEqual(
+                                    g.supervise(time.monotonic() + 2, command), 124
+                                )
+                            else:
+                                with self.assertRaises(expected):
+                                    g.supervise(time.monotonic() + 2, command)
+                        self.assertIsNotNone(spawned[0].poll())
+                    finally:
+                        for process in spawned:
+                            if process.poll() is None:
+                                os.kill(process.pid, signal.SIGKILL)
+                                process.wait(timeout=2)
+        finally:
+            signal.signal(signal.SIGTERM, previous_term)
+            signal.signal(signal.SIGALRM, previous_alarm)

@@ -49,20 +49,20 @@ def _run(argv, timeout=None, env=None, pass_fds=()):
             raise TimeoutError(f"pass deadline exceeded: {pending['label']}")
     timeout = COMMAND_TIMEOUT if timeout is None else timeout
     process = None
-    pending_alarm = False
+    pending_signals = set()
 
-    def defer_alarm(_signal, _frame):
-        nonlocal pending_alarm
-        pending_alarm = True
+    def defer_signal(signum, _frame):
+        pending_signals.add(signum)
 
     # Defer Python delivery rather than block SIGALRM's OS mask, which a
     # spawned command would inherit. The C-level backstop remains armed.
-    previous_handler = signal.signal(signal.SIGALRM, defer_alarm)
+    previous_handler = signal.signal(signal.SIGALRM, defer_signal)
 
     def terminated(signum, _frame):
         raise SystemExit(128 + signum)
 
-    previous_term = signal.signal(signal.SIGTERM, terminated)
+    previous_int = signal.signal(signal.SIGINT, defer_signal)
+    previous_term = signal.signal(signal.SIGTERM, defer_signal)
     try:
         try:
             # Git diagnostics are matched in English.
@@ -82,9 +82,12 @@ def _run(argv, timeout=None, env=None, pass_fds=()):
             _ACTIVE_PROCESS = process
         finally:
             signal.signal(signal.SIGALRM, previous_handler)
-            if pending_alarm:
-                # Both soft exceptions and hard exits now see the owned group.
-                signal.raise_signal(signal.SIGALRM)
+            signal.signal(signal.SIGINT, previous_int)
+            signal.signal(signal.SIGTERM, terminated)
+            # Both soft exceptions and hard exits now see the owned group.
+            for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGALRM):
+                if signum in pending_signals:
+                    signal.raise_signal(signum)
         stdout, stderr = process.communicate(timeout=timeout)
         if process.returncode:
             kill_command(process)
@@ -105,6 +108,7 @@ def _run(argv, timeout=None, env=None, pass_fds=()):
             process.stderr.close()
         _ACTIVE_PROCESS = None
         signal.signal(signal.SIGTERM, previous_term)
+        signal.signal(signal.SIGINT, previous_int)
 
 
 def arm_traceback_backstop():

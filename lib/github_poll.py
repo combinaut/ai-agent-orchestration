@@ -251,6 +251,11 @@ def _run(argv, invoke, timeout, started):
             if label == "watchers.py" and len(sys.argv) > 1:
                 label += ":" + sys.argv[1]
             counter = callers.setdefault(label, {"started": 0, "limited": 0})
+            if any(
+                type(counter.get(field)) is not int or counter[field] < 0
+                for field in ("started", "limited")
+            ):
+                raise ValueError("invalid caller counter")
             counter["started"] += 1
             previous = float(state.get("last_monotonic", -SPACING))
             if not math.isfinite(previous):
@@ -361,7 +366,12 @@ def supervised(argv, env):
 
 
 def supervise(deadline, argv):
-    process = subprocess.Popen(argv)
+    process = None
+    pending = set()
+
+    def defer(signum, _frame):
+        pending.add(signum)
+
     holder = os.environ.get("GITHUB_POLL_HOLDER")
 
     def expired(_signal, _frame):
@@ -370,10 +380,20 @@ def supervise(deadline, argv):
     def stopped(_signal, _frame):
         raise SystemExit(1)
 
-    previous_alarm = signal.signal(signal.SIGALRM, expired)
-    previous_term = signal.signal(signal.SIGTERM, stopped)
+    previous_alarm = signal.signal(signal.SIGALRM, defer)
+    previous_term = signal.signal(signal.SIGTERM, defer)
+    previous_int = signal.signal(signal.SIGINT, defer)
     signal.setitimer(signal.ITIMER_REAL, max(0.001, deadline - time.monotonic() - 0.1))
     try:
+        try:
+            process = subprocess.Popen(argv)
+        finally:
+            signal.signal(signal.SIGALRM, expired)
+            signal.signal(signal.SIGTERM, stopped)
+            signal.signal(signal.SIGINT, previous_int)
+            for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGALRM):
+                if signum in pending:
+                    signal.raise_signal(signum)
         if holder:
             since, monotonic = time.time(), time.monotonic()
             write_state(
@@ -398,7 +418,7 @@ def supervise(deadline, argv):
         return 1
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
-        if process.poll() is None:
+        if process is not None and process.poll() is None:
             process.kill()
             try:
                 process.wait(timeout=1)
@@ -406,6 +426,7 @@ def supervise(deadline, argv):
                 pass
         signal.signal(signal.SIGALRM, previous_alarm)
         signal.signal(signal.SIGTERM, previous_term)
+        signal.signal(signal.SIGINT, previous_int)
 
 
 def capture(argv, *, env, pass_fds, timeout):
