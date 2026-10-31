@@ -1752,7 +1752,37 @@ def unwrap_wrapper_options(words, wrapper):
     return words
 
 
-def unwrap(words):
+def command_lookup(args):
+    """True when the options of `command` are only -p, -v and -V with -v or -V among them: it prints where names are and runs nothing."""
+    lookup = False
+    for word in args:
+        if re.fullmatch(r"-[pvV]+", word):
+            lookup = lookup or bool(re.search("[vV]", word))
+        else:
+            return lookup and (word == "--" or not word.startswith("-"))
+    return lookup
+
+
+LOOKUP_REDIRECTION = re.compile(
+    r"&>>?[ \t]*/dev/null(?=[ \t]*(?:$|\n|;|&&|\|\|))|>>?[ \t]*/dev/null(?=[\s;&|]|$)|>&[12](?=[\s;&|]|$)"
+)
+LOOKUP_SEGMENT = re.compile(
+    r"(?:(?:if|elif|then|else|!)(?:[ \t]+|$))*"
+    r"(?:fi|(?:command(?:[ \t]+-p+)*[ \t]+-p*[vV][pvV]*|echo|true|false|exit)"
+    r"(?:[ \t]+[A-Za-z0-9_.+/:,%@-]+)*)?"
+)
+
+
+def quiet_lookup(command):
+    """The raw command is only plain lookups, `echo`, `true`, `false`, `exit` and `if`, with redirects only to /dev/null or a standard descriptor (`&>` only at command end): nothing in it can read the output, redefine `command` or hide a second command."""
+    rest = LOOKUP_REDIRECTION.sub(" ", command)
+    return all(
+        LOOKUP_SEGMENT.fullmatch(part.strip(" \t"))
+        for part in re.split(r"\n|;|&&|\|\|", rest)
+    )
+
+
+def unwrap(words, lookup_ok=False):
     wrapped = []
     while words and words[0] in (
         "then",
@@ -1771,6 +1801,8 @@ def unwrap(words):
         words = words[1:]
     while words and os.path.basename(words[0]) in WRAPPER_OPTIONS:
         wrapper = os.path.basename(words.pop(0))
+        if lookup_ok and not wrapped and command_lookup(words):
+            return [], [wrapper]
         wrapped.append(wrapper)
         words = unwrap_wrapper_options(words, wrapper)
         if wrapper == "timeout" and words:
@@ -2084,10 +2116,11 @@ def evaluate(command, cwd, disabled=()):
             )
             if reason:
                 return reason
+        lookup_ok = quiet_lookup(command)
         for words, where, pipeline in commands(normalized_command, cwd):
             # Familiar wrappers may have incomplete option parsing. Inspect every later
             # guarded executable too, so a leftover option value cannot hide a command.
-            words, wrapped = unwrap(words)
+            words, wrapped = unwrap(words, lookup_ok)
             if not words:
                 continue
             candidates = [words]

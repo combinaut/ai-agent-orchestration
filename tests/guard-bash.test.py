@@ -749,7 +749,7 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     )
     for name, command in [
         ("env combined short options", "env -i0 git push origin HEAD:main"),
-        ("command combined short options", "command -pv git push origin HEAD:main"),
+        ("command combined short options", "command -pp git push origin HEAD:main"),
         ("exec combined short options", "exec -cl git push origin HEAD:main"),
         ("time combined short options", "time -avq git push origin HEAD:main"),
         (
@@ -776,6 +776,8 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     for wrapper, options in guard.WRAPPER_OPTIONS.items():
         for option, arity in options.items():
             if wrapper == "env" and option in ("-S", "--split-string"):
+                continue
+            if wrapper == "command" and option in ("-v", "-V"):
                 continue
             prefix = [wrapper, option]
             if arity == 1:
@@ -1826,6 +1828,19 @@ pkill -f vite
         assert result.returncode == (2 if deny else 0), (result, elapsed)
         assert elapsed < 1, f"64 KB zero format took {elapsed:.3f}s"
         print(f"64 KB zero format {command[:12]!r}: {elapsed:.3f}s")
+    start = time.perf_counter()
+    result = hook(" " * 128000 + "git push origin main", scripts, timeout=1)
+    elapsed = time.perf_counter() - start
+    assert result.returncode == 2, (result, elapsed)
+    assert elapsed < 1, f"128000 blanks took {elapsed:.3f}s"
+    print(f"128000 blanks before a push: {elapsed:.3f}s")
+    for name, word in (("v", "v" * 128000), ("vp", "vp" * 64000)):
+        start = time.perf_counter()
+        result = hook(f"command -{word}$; git push origin main", scripts, timeout=1)
+        elapsed = time.perf_counter() - start
+        assert result.returncode == 2, (result, elapsed)
+        assert elapsed < 1, f"128000 option letters {name} took {elapsed:.3f}s"
+        print(f"128000 option letters {name} before a push: {elapsed:.3f}s")
     started = time.perf_counter()
     log_path = Path.home() / ".claude/hooks/guard-bash.log"
     assert not guard.evaluate(f"bash {scripts}/fan.sh", repo)
@@ -2690,6 +2705,199 @@ pkill -f vite
         )
     for command in ("cursor .", "cursor --version", "cursor agent --help"):
         case(f"allowed cursor command {command}", command)
+    for command in (
+        "command -v pi",
+        "command -v cursor-agent",
+        "command -V pi",
+        "command -V cursor-agent",
+        "command -pv pi",
+        "command -vp pi",
+        "command -p -v pi",
+        "command -pp -v pi",
+        "command -ppv pi",
+        "command -p -p -v pi",
+        "command -v pi;\techo ok",
+        "command -v -- pi",
+        "command -v pi cursor-agent",
+        "command -v pi cursor-agent herdr",
+        "command -v pkill",
+        "command -pv git push origin HEAD:main",
+        "command -v a_B.9+c/d:e,f%g@h-i pi",
+        "command -v pi >/dev/null",
+        "command -v pi > /dev/null",
+        "command -v pi >>/dev/null",
+        "command -v pi 2>/dev/null",
+        "command -v pi &>/dev/null",
+        "command -v pi &>>/dev/null",
+        "command -v pi >&2",
+        "command -v pi 2>&1",
+        "command -v pi >>/dev/null 2>&1",
+        "command -v pi >/dev/null 2>&1 && echo ok",
+        "command -v pi >/dev/null&&echo ok",
+        "command -v pi >/dev/null||echo missing",
+        "command -v pi || echo missing",
+        "command -v pi || exit 1",
+        "command -v pi || false",
+        "command -v pi && true",
+        "command -v pi && echo ok || echo missing",
+        "command -v pi; command -v pi",
+        "command -v pi;",
+        "if command -v cursor-agent >/dev/null 2>&1; then echo y; fi",
+        "if ! command -v pi >/dev/null 2>&1; then echo missing; fi",
+        "if command -v pi; then echo y; else echo n; fi",
+        "if command -v pi\nthen echo y\nelse echo n\nfi",
+        "if command -v pi\nthen\n  echo y\nelse\n  echo n\nfi",
+        "if command -v pi; then echo y; elif command -v x; then echo z; else echo n; fi",
+    ):
+        case(f"command lookup {command}", command)
+    for command in (
+        "command pi",
+        "command -p pi",
+        "command -- pi",
+        "command -p -- pi",
+        "command -x pi",
+        "command -v -x pi",
+        "command -vx pi",
+        "command cursor-agent -p hi",
+        "command pkill -f vite",
+        "command kill -9 -1",
+        "command git push origin main",
+        "env command pi",
+        "command -v pi; pi",
+        "command -v pi && pi",
+        "command -v pi || pi",
+        "command -v x &>/dev/null pi",
+        "command -v x &>/dev/null git push origin main",
+        "command -v pi; command pi",
+        "command -v cursor-agent && cursor-agent -p hi",
+        "command -v herdr && herdr agent start x --kind pi --pane p",
+        "command -v herdr && herdr agent start x --kind cursor --pane p",
+        "command -v kill -9 -1; kill -9 -1",
+        "command -v git && git push origin main",
+        "$(command -v pi) --model x",
+        '"$(command -v cursor-agent)" -p hi',
+        "`command -v pi` --model x",
+        "x=$(command -v pi); $x",
+        'eval "$(command -v pi)"',
+        "bash -c 'command -v pi && pi'",
+        "bash -c 'command -v pi'",
+        'bash -c "$(command -v pi)"',
+        "command -v pi | bash",
+        "command -v pi | sh",
+        "command -v pi 2>&1 | cat",
+        "command -v pi > /dev/null | bash",
+        "command -v pi |& bash",
+        "{ command -v pi; } | bash",
+        "( command -v pi ) | bash",
+        "command -v pi > f; bash f",
+        "command -v pi >> f; bash f",
+        "command -v pi >&f; bash f",
+        "command -v pi >&2x; bash 2x",
+        "command -v pi >&3",
+        "env command -v pi",
+        "timeout 5 command -v pi",
+        "./command -v cursor-agent -p hi",
+        "env -P command -v pi",
+        "nohup command -v pi",
+        "if { command -v git } then git push origin main; fi",
+        "{ command -v x } always { git push origin main }",
+        "if { command -v pi } then pi; fi",
+        "bash =(command -v pi)",
+        'x=(command -v pi); "${x[3]}"',
+        "command -v pi; ${(Q)_}",
+        'n=_; command -v pi; "${!n}"',
+        "command -v x ${ pi; }",
+        'function -T command { shift; "$@"; }; command -v pi',
+        "functions[command]='shift; \"$@\"'; command -v pi",
+        "comm''and() { shift; \"$@\"; }; command -v pi",
+        "eval 'comm''and() { shift; \"$@\"; }'; command -v pi",
+        "command -v pi; eval '\"$''_\"'",
+        "aliases[command]=env\ncommand -v pi",
+        "source f; command -v pi",
+        ". ./f; command -v pi",
+        "x=`command -v pi`; $x",
+        'command -v cursor-agent; "$_" -p hi',
+        'command -v pi; "$_"',
+        'command -v pi; "${_}" hello',
+        'command -v pi; bash -c "$_"',
+        'command -v pi; eval "$_"',
+        'command() { shift; "$@"; }; command -v cursor-agent -p hi',
+        'command() { shift; "$@"; }; command -v pi',
+        'function command { shift; "$@"; }; command -v pi',
+        "eval 'command() { shift; \"$@\"; }'; command -v pi",
+        "alias command=env\ncommand -v pi",
+        "shopt -s expand_aliases\nalias command='env -S'\ncommand -v pi",
+        "{ command -v pi; } > f; bash f",
+        "exec >f; command -v pi; bash f",
+        "command -v pi >/dev/null/x",
+        "command -v pi >'/dev/null'",
+        "bash <(command -v pi)",
+        "command -v x \\\ngit push origin main",
+        "command -v x \\\npi",
+        "command -v x \\\ngit commit -m 'Co-Authored-By: Claude'",
+        "command -v x >/dev/null \\\ngit push origin main",
+        "command -v y $'\\'';x=\\' git push origin main",
+        "command -v y $'\\'';x=\\' pi",
+        "command -v y $'\\''\nx=\\' git push origin main",
+        'command -v pi >&1"x"; bash 1x',
+        "command -v pi >&2'x'; bash 2x",
+        "command -v pi >&1,x; bash 1,x",
+        "command -v pi >&1\\x; bash 1x",
+        "command -v pi >/dev/nullx",
+        "command -v pi >&1x",
+        "command -v pi >&2x",
+        "'.' ./f; command -v pi",
+        "\\. ./f; command -v pi",
+        "sou''rce f; command -v pi",
+        "e''val 'comm''and(''){ shift; \"$@\"; }'; command -v pi",
+        "trap '\"$''_\"' EXIT; command -v pi",
+        "disable command; command -v pi",
+        "enable -n command; command -v pi",
+        "FPATH=.; autoload command; command -v pi",
+        "x=sou; ${x}rce ./f; command -v pi",
+        'declare -n r=_; command -v pi; "$r"',
+        "if git push origin main; then command -v pi; fi",
+        "command -v pi & pi",
+        "command -v pi &! pi",
+        "command -v pi &| pi",
+        "command -v pi }",
+        "{ command -v x >/dev/null } always { git push origin main }",
+        'command -v pi || echo "missing"',
+        "{ command -v pi; }",
+        "x=1 command -v pi",
+        "command -v pi; exec cat",
+        "command -v pi <<< x",
+        "command -v pi # x",
+        "command -v pi *",
+        "command source ./f; command -v pi",
+        "command -p source ./f; command -v pi",
+        "command -p -p make; command -v pi",
+        "command . ./f; command -v pi",
+        "command builtin source ./f; command -v pi",
+        "command eval source ./f; command -v pi",
+        "command -v pi; command make",
+        "command env -v git push origin main",
+        "command time -v git push origin main",
+        "command nice -v pi",
+        "command command -v pi",
+        "command -v -x env -v git push origin main",
+        "command -v -x time -v git push origin main",
+        "command -V -x nice -v pi",
+        "command -pv -f nohup -v pi",
+        "command -v pi $PATH",
+    ):
+        case(f"command run or captured lookup {command}", command, True)
+    for command in (
+        "command -v pi",
+        "command -v pi; pi",
+        "$(command -v pi)",
+        "command -v -x env -v git push origin main",
+    ):
+        case(
+            f"cursor pane command lookup {command}",
+            f"herdr pane run w1:p2 '{command}'",
+            True,
+        )
     case(
         "generated agent argument is not a command",
         'herdr pane run p "$(printf echo) $(printf agent)"',
