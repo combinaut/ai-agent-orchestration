@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+import github_poll  # noqa: E402
 import orch_settings  # noqa: E402
 
 BOT_TITLES = ("Automatic Update of README", "Changes by create-pull-request")
@@ -114,9 +115,20 @@ def worker_model():
 
 def gh(*args):
     try:
-        result = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT_S
+        result = github_poll.run(
+            ["gh", *args],
+            lambda env, pass_fds: github_poll.capture(
+                github_poll.supervised(["gh", *args], env),
+                timeout=GH_TIMEOUT_S,
+                env=env,
+                pass_fds=pass_fds,
+            ),
+            timeout=GH_TIMEOUT_S,
         )
+    except github_poll.NoRepository:
+        raise
+    except OSError as error:
+        raise RuntimeError(str(error)) from None
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"gh timed out after {GH_TIMEOUT_S}s") from None
     if result.returncode != 0:
@@ -150,7 +162,7 @@ def resolve_scope(args):
             repo = gh(
                 "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"
             ).strip()
-        except RuntimeError:
+        except github_poll.NoRepository:
             scope = setting("ORCH_WATCHERS_PR_SCOPE")
             return scope, scope or "all repos"
     return f"repo:{repo}", repo
@@ -486,22 +498,29 @@ def blocker(snap):
 
 
 def departure(url, login):
-    """Returns a confirmed departure state, or None while the PR is still watched."""
-    raw = gh(
-        "api",
-        "graphql",
-        "-f",
-        f"query={DEPARTURE_QUERY}",
-        "-f",
-        f"url={url}",
-        "-f",
-        f"me={login}",
-    )
+    """Return a departure state, or None for the five-miss path."""
+    try:
+        raw = gh(
+            "api",
+            "graphql",
+            "-f",
+            f"query={DEPARTURE_QUERY}",
+            "-f",
+            f"url={url}",
+            "-f",
+            f"me={login}",
+        )
+    except RuntimeError as error:
+        if "Could not resolve to a" in str(error):
+            return None
+        raise
     pr = json.loads(raw)["data"]["resource"]
-    if not pr:
-        raise RuntimeError("PR lookup returned no pull request")
+    if pr is None:
+        return None
     pr["url"] = url
     state = pr.get("state")
+    if state not in ("OPEN", "CLOSED", "MERGED"):
+        raise RuntimeError("PR lookup returned invalid state")
     if state != "OPEN":
         return state
     for node in (pr.get("reviewRequests") or {}).get("nodes") or []:
@@ -613,9 +632,9 @@ def changes(before, after, login=None):
         try:
             departure_login = departure_login or viewer_login()
             st = departure(url, departure_login)
-        except (OSError, RuntimeError, ValueError):
-            # Kept until a per-PR read confirms departure.
-            keep_missed()
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
+            still_open[url] = was
+            lines.append(f"READFAIL departure {url} — {was['title']}: {error}")
             continue
         if st is None:
             keep_missed()
@@ -704,7 +723,7 @@ def cmd_watch(args, scope, _label):
             if fails >= 3:
                 print("recovered: PR fetch works again", flush=True)
             fails = 0
-        except (RuntimeError, json.JSONDecodeError, KeyError) as error:
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
             fails += 1
             if fails == 3:
                 print(f"PR fetch failing 3x in a row: {error}", flush=True)
@@ -949,4 +968,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (OSError, RuntimeError, ValueError, KeyError) as error:
+        print((str(error).splitlines() or ["PR read failed"])[-1], file=sys.stderr)
+        sys.exit(1)

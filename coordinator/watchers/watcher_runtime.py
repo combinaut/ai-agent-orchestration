@@ -7,6 +7,10 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+import github_poll  # noqa: E402
 
 COMMAND_TIMEOUT = 45
 ITERATION_TIMEOUT = 600
@@ -26,6 +30,18 @@ def kill_command(process):
 
 
 def run(argv, timeout=None):
+    if os.path.basename(argv[0]) == "gh":
+        return github_poll.run(
+            argv,
+            lambda env, pass_fds: _run(
+                github_poll.supervised(argv, env), timeout, env, pass_fds
+            ),
+            timeout=COMMAND_TIMEOUT if timeout is None else timeout,
+        )
+    return _run(argv, timeout)
+
+
+def _run(argv, timeout=None, env=None, pass_fds=()):
     """A command owns its descendants; cleanup never waits for inherited pipe EOF."""
     global _ACTIVE_PROCESS
     for pending in _SOFT_DEADLINES:
@@ -33,22 +49,27 @@ def run(argv, timeout=None):
             raise TimeoutError(f"pass deadline exceeded: {pending['label']}")
     timeout = COMMAND_TIMEOUT if timeout is None else timeout
     process = None
-    pending_alarm = False
+    pending_signals = set()
 
-    def defer_alarm(_signal, _frame):
-        nonlocal pending_alarm
-        pending_alarm = True
+    def defer_signal(signum, _frame):
+        pending_signals.add(signum)
 
     # Defer Python delivery rather than block SIGALRM's OS mask, which a
     # spawned command would inherit. The C-level backstop remains armed.
-    previous_handler = signal.signal(signal.SIGALRM, defer_alarm)
+    previous_handler = signal.signal(signal.SIGALRM, defer_signal)
+
+    def terminated(signum, _frame):
+        raise SystemExit(128 + signum)
+
+    previous_int = signal.signal(signal.SIGINT, defer_signal)
+    previous_term = signal.signal(signal.SIGTERM, defer_signal)
     try:
         try:
             # Git diagnostics are matched in English.
             env = (
                 dict(os.environ, LC_ALL="C")
                 if os.path.basename(argv[0]) == "git"
-                else None
+                else env
             )
             process = subprocess.Popen(
                 argv,
@@ -56,13 +77,17 @@ def run(argv, timeout=None):
                 stderr=subprocess.PIPE,
                 start_new_session=True,
                 env=env,
+                **({"pass_fds": pass_fds} if pass_fds else {}),
             )
             _ACTIVE_PROCESS = process
         finally:
             signal.signal(signal.SIGALRM, previous_handler)
-            if pending_alarm:
-                # Both soft exceptions and hard exits now see the owned group.
-                signal.raise_signal(signal.SIGALRM)
+            signal.signal(signal.SIGINT, previous_int)
+            signal.signal(signal.SIGTERM, terminated)
+            # Both soft exceptions and hard exits now see the owned group.
+            for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGALRM):
+                if signum in pending_signals:
+                    signal.raise_signal(signum)
         stdout, stderr = process.communicate(timeout=timeout)
         if process.returncode:
             kill_command(process)
@@ -82,6 +107,8 @@ def run(argv, timeout=None):
             process.stdout.close()
             process.stderr.close()
         _ACTIVE_PROCESS = None
+        signal.signal(signal.SIGTERM, previous_term)
+        signal.signal(signal.SIGINT, previous_int)
 
 
 def arm_traceback_backstop():

@@ -608,29 +608,41 @@ class LegacyTests(IsolatedTestCase):
         self.scan()
         self.assertEqual(self.scans(), [])
 
-    def test_scan_failure_is_readfail_and_keeps_the_last_state(self):
+    def test_scan_failure_keeps_saved_hits_and_allows_new_prs(self):
         self.scan()
+        saved = self.saved()["before"]["legacy"]["owner/product#7"]
         self.pr["headRefOid"] = "next"
+        poison, add_new = True, False
 
-        def failing(*args):
-            if args[:3] == ("gh", "pr", "diff"):
+        def command(*args):
+            if poison and args[:4] == ("gh", "pr", "diff", "7"):
                 raise subprocess.CalledProcessError(1, args, stderr="HTTP 502")
-            return self.fake(*args)
+            result = self.fake(*args)
+            if add_new and args[:3] == ("gh", "api", "graphql"):
+                raw = json.loads(result)
+                raw["data"]["search"]["nodes"].append(
+                    {**self.pr, "number": 8, "title": "NEW-PR"}
+                )
+                return json.dumps(raw)
+            return result
 
         self.assertEqual(
-            self.events(self.scan(failing)),
-            [
-                "READFAIL LEGACY owner/product#7 Fix menu: HTTP 502",
-                "CLEARED " + SUMMARY,
-            ],
+            self.events(self.scan(command)), [f"READFAIL LEGACY {LABEL}: HTTP 502"]
         )
-        self.assertIsNone(self.scan(failing))
-        self.assertEqual(
-            self.saved()["before"]["legacy"]["owner/product#7"]["head"], "next"
+        self.assertIsNone(self.scan(command))
+        add_new = True
+        self.assertTrue(
+            any("NEW-PR" in line for line in self.events(self.scan(command)))
         )
+        self.assertIn("owner/product#8", self.saved()["before"]["legacy"])
+        for _ in range(3):
+            self.assertIsNone(self.scan(command))
+            self.assertEqual(self.saved()["before"]["legacy"]["owner/product#7"], saved)
+            self.assertNotIn("github", self.saved()["before"]["unreadable"])
+        poison = False
         self.assertEqual(
-            self.events(self.scan()),
-            [SUMMARY, "CLEARED READFAIL LEGACY owner/product#7 Fix menu: HTTP 502"],
+            self.events(self.scan(command)),
+            [SUMMARY, f"CLEARED READFAIL LEGACY {LABEL}: HTTP 502"],
         )
 
     def test_a_head_without_legacy_hits_clears_the_legacy_line(self):
@@ -713,6 +725,53 @@ class LegacyTests(IsolatedTestCase):
             ("next", "head"),
         )
 
+    def test_deferred_scans_keep_readfail_with_or_without_saved_hits(self):
+        other = {**self.pr, "number": 8}
+        key = "owner/product#7"
+        failed_key = "failed:" + key
+
+        def raw(entries):
+            return dict(sources={"github": []}, unreadable={}, legacy=entries)
+
+        for saved in (False, True):
+            with self.subTest(saved=saved):
+                cache = audit.legacy_entries(self.fake, [self.pr], {}) if saved else {}
+                self.pr["headRefOid"] += "next"
+                with patch.object(
+                    audit, "legacy_scan", side_effect=OSError("HTTP 502")
+                ):
+                    failed = audit.legacy_entries(self.fake, [self.pr], cache)
+                before, _ = audit.reduce(None, raw(failed))
+                with patch.dict(os.environ, ORCH_LEGACY_SCANS_MAX="1"):
+                    deferred = audit.legacy_entries(self.fake, [other, self.pr], failed)
+                after, events = audit.reduce(before, raw(deferred))
+                self.assertEqual(deferred.get(failed_key), failed[failed_key])
+                self.assertFalse(
+                    any("CLEARED READFAIL" in line for line in events), events
+                )
+                if saved:
+                    self.assertEqual(deferred[key], cache[key])
+                recovered = audit.legacy_entries(self.fake, [self.pr], deferred)
+                _, events = audit.reduce(after, raw(recovered))
+                self.assertNotIn(failed_key, recovered)
+                self.assertTrue(
+                    any("CLEARED READFAIL" in line for line in events), events
+                )
+
+    def test_norules_survives_configuration_failure_but_not_diff_failure(self):
+        key = "owner/product@main"
+        with patch.object(audit, "repo_rules", return_value=None):
+            cache = audit.legacy_entries(self.fake, [self.pr], {})
+        self.assertIn(key, cache)
+        for function in ("repo_settings", "repo_rules", "legacy_scan"):
+            with self.subTest(function=function):
+                with patch.object(audit, function, side_effect=OSError("HTTP 502")):
+                    entries = audit.legacy_entries(self.fake, [self.pr], cache)
+                self.assertEqual(key in entries, function != "legacy_scan")
+                if key in entries:
+                    self.assertEqual(entries[key], cache[key])
+                self.assertTrue(any(entry.get("failed") for entry in entries.values()))
+
     def test_empty_first_read_still_baselines_once(self):
         self.repo_files = {"owner/other": SCAN}
         self.assertIn(
@@ -727,7 +786,7 @@ class LegacyTests(IsolatedTestCase):
 
     def fail_reason(self, command=None):
         return audit.collect(command or self.fake, self.base / "slots")["legacy"][
-            "owner/product#7"
+            "failed:owner/product#7"
         ]["line"]
 
     def test_bad_rules_and_scan_errors_are_per_pr_and_retry(self):
@@ -767,7 +826,7 @@ class LegacyTests(IsolatedTestCase):
             self.assertTrue(raw["sources"]["github"])
             self.assertIn("JQUERY 1", raw["legacy"]["owner/product#7"]["line"])
             self.assertTrue(
-                raw["legacy"]["owner/other#8"]["line"].startswith(
+                raw["legacy"]["failed:owner/other#8"]["line"].startswith(
                     "READFAIL LEGACY owner/other#8"
                 )
             )

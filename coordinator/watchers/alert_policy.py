@@ -158,14 +158,16 @@ def health_line(mode, line):
 def readfail_facts(mode, line):
     """Only the producer's own forms: `<LABEL> READFAIL …` and `<mode> read failed …`, never text inside a PR line."""
     label = READFAIL_LABELS.get(mode, mode.upper())
-    if line == f"{label} READFAIL cleared":
+    source_line, separator, diagnostics = line.partition(" | ")
+    source_line = source_line.rstrip()
+    if source_line == f"{label} READFAIL cleared":
         return [clear(f"{mode}:readfail:")]
     if line == f"{mode} READ RECOVERED":
         return [clear(f"{mode}:health:read", exact=True)]
     if line.startswith(f"{mode} read failed "):
         return [fact(f"{mode}:health:read", line, clearable=True)]
     if line.startswith(f"{label} READFAIL "):
-        prefix, sources = line.split(" READFAIL ", 1)
+        prefix, sources = source_line.split(" READFAIL ", 1)
         out = []
         for source in sources.split():
             if source.endswith(YOUNG_MARK):
@@ -174,7 +176,8 @@ def readfail_facts(mode, line):
                 out.append(
                     fact(
                         f"{mode}:readfail:{source}",
-                        f"{prefix} READFAIL {source}",
+                        f"{prefix} READFAIL {source}"
+                        + (" | " + diagnostics if separator else ""),
                         clearable=True,
                     )
                 )

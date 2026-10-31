@@ -80,7 +80,7 @@ def resolve_scope(args):
             repo = gh(
                 "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"
             ).strip()
-        except RuntimeError:
+        except runtime.github_poll.NoRepository:
             return "", "all repos"
     return f"repo:{repo}", repo
 
@@ -335,18 +335,29 @@ def changes(before, after):
             )
             prefix = "ready" if became_ready else "changed"
             lines.append(f"{prefix}: {url} — {now['title']}: {', '.join(parts)}")
+    still_open = {}
     for url, was in before.items():
         if url in after:
             continue
         try:
             st = gh("pr", "view", url, "--json", "state", "--jq", ".state").strip()
-        except RuntimeError:
-            st = "UNKNOWN"
-        if st in ("OPEN", "UNKNOWN"):
+            if st not in ("OPEN", "CLOSED", "MERGED"):
+                raise RuntimeError("PR lookup returned invalid state")
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
+            if "Could not resolve to a" not in str(error):
+                still_open[url] = was
+                lines.append(f"READFAIL departure {url} — {was['title']}: {error}")
+                continue
+            misses = was.get("misses", 0) + 1
+            if misses < 5:
+                still_open[url] = {**was, "misses": misses}
+                continue
+            st = "OPEN"
+        if st == "OPEN":
             lines.append(f"cleared: {url} — {was['title']} (no longer requesting you)")
             continue
         lines.append(f"{st.lower()}: {url} — {was['title']}")
-    return lines, {}
+    return lines, still_open
 
 
 TITLE_MAX = 60
@@ -421,9 +432,10 @@ def cmd_watch(args, scope, _label):
                 print("recovered: PR fetch works again", flush=True)
             fails = 0
         except (
+            OSError,
             RuntimeError,
             subprocess.SubprocessError,
-            json.JSONDecodeError,
+            ValueError,
             KeyError,
         ) as error:
             fails += 1
