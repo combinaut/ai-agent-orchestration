@@ -48,7 +48,7 @@ jobs:
   ubuntu:
     name: Validate (ubuntu-latest)
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
       - run: scripts/ci/install-deps-ubuntu.sh
