@@ -260,6 +260,8 @@ def _run(argv, invoke, timeout, started):
             previous = float(state.get("last_monotonic", -SPACING))
             if not math.isfinite(previous):
                 raise ValueError("invalid start time")
+            if state.get("pending_start"):
+                previous = time.monotonic()
         except Cooldown:
             raise
         except (
@@ -289,6 +291,7 @@ def _run(argv, invoke, timeout, started):
         time.sleep(spacing)
         state.pop("next", None)
         state.pop("pending", None)
+        state["pending_start"] = True
         state["last_monotonic"] = time.monotonic()
         state["last_started"] = counter["last_started"] = time.time()
         try:
@@ -300,7 +303,6 @@ def _run(argv, invoke, timeout, started):
             raise Busy(
                 f"GitHub poll busy; {holder_message(directory)}; admission deadline exhausted"
             )
-        actual_start = time.monotonic()
         result = invoke(
             dict(
                 os.environ,
@@ -313,8 +315,15 @@ def _run(argv, invoke, timeout, started):
             (lock,),
         )
         recorded = json.loads(holder.read_text())
-        state["last_monotonic"] = recorded.get("monotonic", actual_start)
-        state["last_started"] = recorded.get("since", time.time())
+        if "monotonic" in recorded:
+            state["last_monotonic"] = recorded["monotonic"]
+            state["last_started"] = recorded["since"]
+        else:
+            state["last_monotonic"], state["last_started"] = (
+                time.monotonic(),
+                time.time(),
+            )
+        state["pending_start"] = False
         headers, status, message = diagnostics(result.stderr)
         limited = status == 429 or bool(
             re.search(
@@ -407,7 +416,9 @@ def supervise(deadline, argv):
             )
             path = Path(os.environ["GITHUB_POLL_STATE"])
             state = json.loads(path.read_text())
-            state.update(last_monotonic=monotonic, last_started=since)
+            state.update(
+                pending_start=False, last_monotonic=monotonic, last_started=since
+            )
             write_state(path, state)
         return process.wait()
     except subprocess.TimeoutExpired:

@@ -455,3 +455,27 @@ class ReviewTests(IsolatedTestCase):
         finally:
             signal.signal(signal.SIGTERM, previous_term)
             signal.signal(signal.SIGALRM, previous_alarm)
+
+    def test_unpublished_spawn_uses_completion_or_pending_recovery(self):
+        for abandoned in (False, True):
+            with self.subTest(abandoned=abandoned):
+                path = self.state / "github.json"
+                path.unlink(missing_ok=True)
+
+                def invoke(env, fds):
+                    self.advance(2.5)
+                    if abandoned:
+                        raise OSError("supervisor exited before timestamp publication")
+                    return subprocess.CompletedProcess(["gh"], 124, "", "deadline")
+
+                if abandoned:
+                    with self.assertRaises(OSError):
+                        g.run(["gh"], invoke)
+                    self.assertTrue(json.loads(path.read_text()).get("pending_start"))
+                else:
+                    g.run(["gh"], invoke)
+                    self.assertFalse(json.loads(path.read_text()).get("pending_start"))
+                completed = self.elapsed
+                self.run_call()
+                self.assertGreaterEqual(self.elapsed - completed, 3)
+                self.assertFalse(json.loads(path.read_text()).get("pending_start"))

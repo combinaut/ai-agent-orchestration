@@ -70,7 +70,7 @@ class GithubPollTests(IsolatedTestCase):
         self.assertLessEqual(sum(t < starts[0] + 60 for t in starts), 20)
 
     def test_other_process_cannot_enter_during_call(self):
-        code = "import github_poll as g; g.run(['gh'], lambda env, pass_fds: (_ for _ in ()).throw(AssertionError('entered')), timeout=0.3)"
+        code = "import github_poll as g; g.SPACING = 0; g.run(['gh'], lambda env, pass_fds: (_ for _ in ()).throw(AssertionError('entered')), timeout=0.3)"
 
         def invoke(env, pass_fds):
             child_env = dict(os.environ, PYTHONPATH=str(Path(g.__file__).parent))

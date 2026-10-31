@@ -357,6 +357,11 @@ class RoundTwoTests(IsolatedTestCase):
             with (self.state / "github.lock").open() as stream:
                 fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
             holder = json.loads((self.state / "holder.json").read_text())
+            self.assertFalse(
+                json.loads((self.state / "github.json").read_text()).get(
+                    "pending_start"
+                )
+            )
             self.assertEqual(holder["gh_pid"], child)
             self.assertEqual(
                 json.loads((self.state / "github.json").read_text())["last_monotonic"],
