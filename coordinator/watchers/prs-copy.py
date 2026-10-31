@@ -341,16 +341,18 @@ def changes(before, after):
             continue
         try:
             st = gh("pr", "view", url, "--json", "state", "--jq", ".state").strip()
-        except RuntimeError as error:
+            if st not in ("OPEN", "CLOSED", "MERGED"):
+                raise RuntimeError("PR lookup returned invalid state")
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
             if "Could not resolve to a" not in str(error):
-                raise
+                still_open[url] = was
+                lines.append(f"READFAIL departure {url} — {was['title']}: {error}")
+                continue
             misses = was.get("misses", 0) + 1
             if misses < 5:
                 still_open[url] = {**was, "misses": misses}
                 continue
             st = "OPEN"
-        if st not in ("OPEN", "CLOSED", "MERGED"):
-            raise RuntimeError("PR lookup returned invalid state")
         if st == "OPEN":
             lines.append(f"cleared: {url} — {was['title']} (no longer requesting you)")
             continue

@@ -141,12 +141,12 @@ def active_cooldown(path):
     try:
         until = float(json.loads(path.read_text()).get("until", 0))
         return time.time() < until <= time.time() + MAX_DELAY + 5
-    except FileNotFoundError:
+    except (OSError, ValueError, TypeError, AttributeError, OverflowError):
         return False
-    except (ValueError, TypeError, AttributeError, OverflowError):
-        return False
-    except OSError:
-        return False
+
+
+class Deadline(OSError):
+    """The individual CLI call exhausted its budget."""
 
 
 class _Expired(BaseException):
@@ -167,17 +167,16 @@ def call_deadline(seconds):
             inherited_fired = True
             try:
                 previous_handler(signum, frame)
-            except TimeoutError:
-                raise _Expired from None
+            except TimeoutError as error:
+                raise _Expired from error
         raise _Expired
 
     signal.signal(signal.SIGALRM, expired)
     signal.setitimer(
         signal.ITIMER_REAL, max(0.001, previous_timer[0] if inherited else seconds)
     )
-    try:
-        yield
-    finally:
+
+    def restore():
         if inherited_fired:
             if signal.getsignal(signal.SIGALRM) is expired:
                 signal.signal(signal.SIGALRM, previous_handler)
@@ -191,6 +190,15 @@ def call_deadline(seconds):
                     previous_timer[1],
                 )
 
+    try:
+        yield
+    finally:
+        try:
+            restore()
+        except _Expired:
+            restore()
+            raise
+
 
 def run(argv, invoke, timeout=45):
     """Main-thread captured text invocation with one deadline and no retries."""
@@ -198,8 +206,10 @@ def run(argv, invoke, timeout=45):
     try:
         with call_deadline(timeout):
             return _run(argv, invoke, timeout, started)
-    except _Expired:
-        raise TimeoutError(
+    except _Expired as error:
+        if isinstance(error.__cause__, TimeoutError):
+            raise error.__cause__
+        raise Deadline(
             f"GitHub poll deadline exceeded; state {state_directory() / 'github.json'}"
         ) from None
 
@@ -289,8 +299,6 @@ def _run(argv, invoke, timeout, started):
                 f"GitHub poll busy; {holder_message(directory)}; admission deadline exhausted"
             )
         time.sleep(spacing)
-        state.pop("next", None)
-        state.pop("pending", None)
         state["pending_start"] = True
         state["last_monotonic"] = time.monotonic()
         state["last_started"] = counter["last_started"] = time.time()
@@ -299,7 +307,7 @@ def _run(argv, invoke, timeout, started):
         except OSError as error:
             raise OSError(f"GitHub poll state {path}: {error}") from error
         remaining = timeout - (time.monotonic() - started)
-        if remaining <= 0.1:
+        if remaining < 2:
             raise Busy(
                 f"GitHub poll busy; {holder_message(directory)}; admission deadline exhausted"
             )
@@ -307,7 +315,6 @@ def _run(argv, invoke, timeout, started):
             dict(
                 os.environ,
                 GH_DEBUG="api",
-                GITHUB_POLL_SECONDS=str(remaining),
                 GITHUB_POLL_DEADLINE=str(started + timeout),
                 GITHUB_POLL_HOLDER=str(holder),
                 GITHUB_POLL_STATE=str(path),
@@ -337,7 +344,7 @@ def _run(argv, invoke, timeout, started):
             delay = retry_delay(headers, time.time())
             if delay is None:
                 delay = min(MAX_DELAY, 60 * 2 ** (failures - 1))
-            state["until"] = time.time() + min(delay, MAX_DELAY) + random.uniform(1, 5)
+            state["until"] = time.time() + delay + random.uniform(1, 5)
             state["failures"] = failures
             counter["limited"] += 1
             if result.returncode == 0:

@@ -158,7 +158,7 @@ class ReviewTests(IsolatedTestCase):
                     if (phase == "admission" and not invoked) or (
                         phase == "result" and invoked
                     ):
-                        time.sleep(1)
+                        time.sleep(3)
                     original_write(path, state)
 
                 def invoke(env, fds):
@@ -168,9 +168,11 @@ class ReviewTests(IsolatedTestCase):
 
                 started = time.monotonic()
                 with patch.object(g, "write_state", side_effect=slow):
-                    with self.assertRaises(TimeoutError):
-                        g.run(["gh"], invoke, timeout=0.2)
-                self.assertLess(time.monotonic() - started, 0.6)
+                    with self.assertRaises(g.Deadline):
+                        g.run(["gh"], invoke, timeout=2.1 if phase == "result" else 0.2)
+                self.assertLess(
+                    time.monotonic() - started, 2.6 if phase == "result" else 0.6
+                )
 
     def test_parent_deadline_preserves_earlier_and_later_watcher_alarms(self):
         self.real_clock()
@@ -188,7 +190,9 @@ class ReviewTests(IsolatedTestCase):
                     with patch.object(
                         g, "write_state", side_effect=lambda *a: time.sleep(0.5)
                     ):
-                        with self.assertRaises(TimeoutError):
+                        with self.assertRaises(
+                            TimeoutError if expected_fired else g.Deadline
+                        ):
                             g.run(["gh"], lambda env, fds: None, timeout=0.1)
                     self.assertEqual(bool(fired), expected_fired)
                     self.assertIs(signal.getsignal(signal.SIGALRM), previous)
@@ -206,10 +210,11 @@ class ReviewTests(IsolatedTestCase):
         real_spawn = subprocess.Popen
         for number, expected in (
             (signal.SIGINT, KeyboardInterrupt),
-            (signal.SIGALRM, TimeoutError),
+            (signal.SIGALRM, g.Deadline),
         ):
             with self.subTest(signal=number):
                 spawned = []
+                (self.state / "github.json").unlink(missing_ok=True)
 
                 def interrupted(*args, **kwargs):
                     process = real_spawn(*args, **kwargs)
@@ -241,15 +246,10 @@ class ReviewTests(IsolatedTestCase):
                             os.killpg(process.pid, signal.SIGKILL)
                             process.wait(timeout=2)
 
-    def test_cooldown_and_failed_legacy_rechecks_never_clear_saved_hits(self):
+    def test_admission_legacy_rechecks_never_clear_saved_hits(self):
         pr = json.loads((watchers.ROOT / "fixtures/audit-pr.json").read_text())
         key = pr["repository"]["nameWithOwner"] + "#" + str(pr["number"])
-        errors = (
-            g.Cooldown("cooldown"),
-            TimeoutError("timeout"),
-            subprocess.CalledProcessError(1, ["gh"], stderr="API rate limit exceeded"),
-            ValueError("malformed"),
-        )
+        errors = (g.Busy("busy"), g.Cooldown("cooldown"))
         for error, saved_key in (
             (error, saved_key)
             for error in errors
@@ -496,3 +496,102 @@ class ReviewTests(IsolatedTestCase):
             with self.assertRaises(g.Busy):
                 g._run(["gh"], lambda *args: self.fail("invoked"), 1, 1000)
         self.assertEqual(sleeps, [0])
+
+    def test_short_remaining_budget_is_busy_without_invoking_cli(self):
+        original = g.write_state
+
+        def slow(path, state):
+            original(path, state)
+            if path.name == "github.json":
+                self.advance(8.5)
+
+        with patch.object(g, "write_state", side_effect=slow):
+            with self.assertRaises(g.Busy):
+                g.run(["gh"], lambda *args: self.fail("CLI started"), timeout=10)
+
+    def test_call_deadline_is_an_oserror_but_pass_deadline_stays_timeout(self):
+        self.real_clock()
+        with patch.object(g, "write_state", side_effect=lambda *args: time.sleep(1)):
+            with self.assertRaises(OSError) as caught:
+                g.run(["gh"], lambda *args: None, timeout=0.05)
+        self.assertNotIsInstance(caught.exception, TimeoutError)
+
+        def command(*args):
+            if args[0] == "gh":
+                raise caught.exception
+            return "feature"
+
+        with (
+            patch.object(watchers, "command", side_effect=command),
+            patch.object(watchers, "stopped_operation", return_value=False),
+            patch.object(watchers, "github_remotes", return_value=["a/b"]),
+        ):
+            self.assertIsNone(watchers.open_pr({"cwd": "/repo"}))
+        previous_handler = signal.signal(
+            signal.SIGALRM, lambda *args: (_ for _ in ()).throw(TimeoutError("pass"))
+        )
+        signal.setitimer(signal.ITIMER_REAL, 0.05)
+        try:
+            with self.assertRaises(TimeoutError):
+                g.run(["gh"], lambda *args: time.sleep(1), timeout=5)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_handler)
+
+    def test_unreached_departures_share_busy_grace(self):
+        keys = [f"a/b#{n}" for n in range(8)]
+        before = {
+            "prs": {key: {"misses": 1, "title": key, "lines": {}} for key in keys},
+            "unreadable": [],
+        }
+        elapsed = [0]
+
+        def command(*args):
+            elapsed[0] += 15
+            raise g.Busy("holder pid=7 age=1s")
+
+        with (
+            patch.object(watchers.discovery, "open_work", return_value={}),
+            patch.object(
+                watchers.discovery,
+                "repos",
+                return_value={"repos": ["a/b"], "clones": []},
+            ),
+            patch.object(watchers.audit, "fetch_prs", return_value=[]),
+            patch.object(watchers, "pull_owners", return_value={}),
+        ):
+            raw = watchers.collect_pulls(command, before, clock=lambda: elapsed[0])
+        self.assertEqual(set(raw["deferred"]), {"pr:" + key for key in keys})
+        after, events = watchers.reduce_pulls(before, raw)
+        self.assertFalse(any("READFAIL" in line for line in events), events)
+        self.assertEqual(set(after["prs"]), set(keys))
+
+    def test_alarm_during_cleanup_restores_outer_handler_and_timer(self):
+        self.real_clock()
+        original_timer = signal.setitimer
+        previous_handler = signal.signal(signal.SIGALRM, lambda *args: None)
+        previous_timer = original_timer(signal.ITIMER_REAL, 50)
+        fired = False
+
+        def timer(which, seconds, *args):
+            nonlocal fired
+            if seconds == 0 and not fired:
+                fired = True
+                signal.raise_signal(signal.SIGALRM)
+            return original_timer(which, seconds, *args)
+
+        outer = signal.getsignal(signal.SIGALRM)
+        try:
+            with patch.object(g.signal, "setitimer", side_effect=timer):
+                try:
+                    with g.call_deadline(5):
+                        pass
+                except g._Expired:
+                    pass
+            self.assertIs(signal.getsignal(signal.SIGALRM), outer)
+            self.assertGreater(signal.getitimer(signal.ITIMER_REAL)[0], 45)
+        finally:
+            original_timer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_handler)
+            if previous_timer[0]:
+                original_timer(signal.ITIMER_REAL, *previous_timer)

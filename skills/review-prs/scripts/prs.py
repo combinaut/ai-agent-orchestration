@@ -629,8 +629,13 @@ def changes(before, after, login=None):
             else:
                 still_open[url] = {**was, "misses": misses}
 
-        departure_login = departure_login or viewer_login()
-        st = departure(url, departure_login)
+        try:
+            departure_login = departure_login or viewer_login()
+            st = departure(url, departure_login)
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
+            still_open[url] = was
+            lines.append(f"READFAIL departure {url} — {was['title']}: {error}")
+            continue
         if st is None:
             keep_missed()
             continue

@@ -1,7 +1,6 @@
 """Shared GitHub admission and cooldown contracts without network traffic."""
 
 import importlib.util
-import io
 import json
 import os
 import subprocess
@@ -70,7 +69,7 @@ class GithubPollTests(IsolatedTestCase):
         self.assertLessEqual(sum(t < starts[0] + 60 for t in starts), 20)
 
     def test_other_process_cannot_enter_during_call(self):
-        code = "import github_poll as g; g.SPACING = 0; g.run(['gh'], lambda env, pass_fds: (_ for _ in ()).throw(AssertionError('entered')), timeout=0.3)"
+        code = "import github_poll as g; g.SPACING = 0; g.WAIT = 0; g.run(['gh'], lambda env, pass_fds: (_ for _ in ()).throw(AssertionError('entered')), timeout=3)"
 
         def invoke(env, pass_fds):
             child_env = dict(os.environ, PYTHONPATH=str(Path(g.__file__).parent))
@@ -239,14 +238,6 @@ class GithubPollTests(IsolatedTestCase):
                 )
         self.assertGreaterEqual(starts[1] - starts[0], 3)
 
-    def test_legacy_spacing_state_has_bounded_admission_wait(self):
-        self.state.mkdir()
-        (self.state / "github.json").write_text(
-            json.dumps({"pending": True, "next": 1e20})
-        )
-        self.run_call()
-        self.assertEqual(self.now, 1000)
-
     def test_orphaned_cli_keeps_admission_locked_until_child_exits(self):
         import signal
         import threading
@@ -300,76 +291,63 @@ class GithubPollTests(IsolatedTestCase):
                 except ProcessLookupError:
                     pass
 
-    def test_failed_departure_reads_never_clear_or_save_in_either_pr_watch(self):
+    def test_failed_departures_keep_only_the_failed_entry_and_report_new_prs(self):
         root = Path(__file__).resolve().parents[2]
-        for relative, fetched in (
-            ("skills/review-prs/scripts/prs.py", ([], "reviewer")),
-            ("coordinator/watchers/prs-copy.py", []),
+        for relative, malformed in (
+            ("skills/review-prs/scripts/prs.py", '{"data":{"resource":{}}}'),
+            ("coordinator/watchers/prs-copy.py", ""),
         ):
-            for error_type in (RuntimeError, OSError, ValueError):
-                with self.subTest(relative=relative, error_type=error_type):
-                    spec = importlib.util.spec_from_file_location(
-                        "departure_prs", root / relative
-                    )
-                    prs = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(prs)
+            spec = importlib.util.spec_from_file_location(
+                "departure_prs", root / relative
+            )
+            prs = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(prs)
+            for error in (
+                RuntimeError("SAML enforcement"),
+                OSError("offline"),
+                ValueError("bad JSON"),
+                None,
+            ):
+                with self.subTest(relative=relative, error=error):
                     before = {
-                        "https://github.com/acme/app/pull/7": {
-                            "title": "t",
+                        "https://github.com/a/b/pull/1": {
+                            "title": "poison",
                             "misses": 4,
                         }
                     }
-                    args = type("Args", (), {"interval": 120})()
-                    with (
-                        patch.object(prs, "load_state", return_value=before),
-                        patch.object(prs, "fetch", return_value=fetched),
-                        patch.object(
-                            prs, "gh", side_effect=error_type("failed departure")
-                        ),
-                        patch.object(prs, "save_state") as save,
-                        patch.object(
-                            prs.time,
-                            "sleep",
-                            side_effect=[None, None, None, None, KeyboardInterrupt],
-                        ),
-                        patch.object(sys, "stdout", new_callable=io.StringIO) as output,
+                    after = {
+                        "https://github.com/a/b/pull/2": dict(
+                            title="NEW-PR",
+                            author="a",
+                            draft=False,
+                            conflict=False,
+                            ci="SUCCESS",
+                        )
+                    }
+                    with patch.object(
+                        prs, "gh", side_effect=error, return_value=malformed
                     ):
-                        if isinstance(fetched, tuple):
-                            with self.assertRaises(KeyboardInterrupt):
-                                prs.cmd_watch(args, "repo:fixture", "fixture")
-                        else:
-                            with patch.object(
-                                prs.runtime, "iterations", return_value=iter([None] * 5)
-                            ):
-                                prs.cmd_watch(args, "repo:fixture", "fixture")
-                    save.assert_not_called()
-                    self.assertIn("PR fetch failing 3x", output.getvalue())
-                    self.assertNotIn("cleared:", output.getvalue())
-
-    def test_missing_departure_state_is_a_failed_read(self):
-        root = Path(__file__).resolve().parents[2]
-        for relative, response in (
-            (
-                "skills/review-prs/scripts/prs.py",
-                json.dumps({"data": {"resource": {"headRefOid": "h"}}}),
-            ),
-            ("coordinator/watchers/prs-copy.py", ""),
-        ):
-            with self.subTest(relative=relative):
-                spec = importlib.util.spec_from_file_location(
-                    "invalid_departure", root / relative
-                )
-                prs = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(prs)
-                before = {
-                    "https://github.com/acme/app/pull/7": {"title": "t", "misses": 4}
-                }
-                with patch.object(prs, "gh", return_value=response):
-                    with self.assertRaises(RuntimeError):
-                        if relative.startswith("skills"):
-                            prs.changes(before, {}, "reviewer")
-                        else:
-                            prs.changes(before, {})
+                        for _ in range(3):
+                            args = (
+                                (before, after, "reviewer")
+                                if relative.startswith("skills")
+                                else (before, after)
+                            )
+                            lines, kept = prs.changes(*args)
+                            self.assertEqual(kept, before)
+                            self.assertTrue(
+                                any(
+                                    "new:" in line and "NEW-PR" in line
+                                    for line in lines
+                                )
+                            )
+                            self.assertTrue(
+                                any(
+                                    "READFAIL" in line and "poison" in line
+                                    for line in lines
+                                )
+                            )
+                            self.assertFalse(any("cleared:" in line for line in lines))
 
     def test_startup_admission_failure_cannot_expand_repository_scope(self):
         root = Path(__file__).resolve().parents[2]

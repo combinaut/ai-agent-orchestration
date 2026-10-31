@@ -607,32 +607,9 @@ url = "https://github.com/acme/app/pull/7"
 present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="head", conflict=False)}
 prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "head", "reviewRequests": {"nodes": []}, "myReviews": {"nodes": [{"commit": {"oid": "head"}}]}}}})
 prs.read_dispatched = lambda: (_ for _ in ()).throw(OSError("partial ledger"))
-try:
-    prs.changes(present, {}, "reviewer")
-except OSError as error:
-    assert "partial ledger" in str(error), error
-else:
-    raise AssertionError("failed ledger read was treated as a departure")
-' "$ROOT/$SKILL_DIR/scripts"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
-@test "a failed departure check remains a failed read" {
-  # shellcheck disable=SC2016 # Python source.
-  run python3 -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-import prs
-url = "https://github.com/acme/app/pull/7"
-present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
-prs.gh = lambda *args: (_ for _ in ()).throw(RuntimeError("gone"))
-try:
-    prs.changes(present, {}, "reviewer")
-except RuntimeError as error:
-    assert "gone" in str(error), error
-else:
-    raise AssertionError("failed departure read succeeded")
+lines, retained = prs.changes(present, {}, "reviewer")
+assert retained == present, retained
+assert len(lines) == 1 and "READFAIL" in lines[0] and "partial ledger" in lines[0], lines
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
@@ -650,29 +627,6 @@ prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headR
 lines, retained = prs.changes(present, {}, "reviewer")
 assert lines == [], lines
 assert retained[url]["misses"] == 1, retained
-' "$ROOT/$SKILL_DIR/scripts"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
-@test "five failed departure checks retain the saved entry" {
-  # shellcheck disable=SC2016 # Python source.
-  run python3 -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-import prs
-url = "https://github.com/acme/app/pull/7"
-state = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
-prs.gh = lambda *args: (_ for _ in ()).throw(RuntimeError("gone"))
-before = dict(state)
-for _ in range(5):
-    try:
-        prs.changes(state, {}, "reviewer")
-    except RuntimeError:
-        pass
-    else:
-        raise AssertionError("failed departure read succeeded")
-    assert state == before, state
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]

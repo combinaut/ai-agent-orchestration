@@ -318,7 +318,7 @@ class RoundTwoTests(IsolatedTestCase):
             result = g.run(
                 ["gh"],
                 lambda env, fds: subprocess.CompletedProcess(["gh"], 0, "ok", ""),
-                timeout=2,
+                timeout=3,
             )
             self.assertEqual(result.returncode, 0)
             self.assertGreater(time.monotonic() - start, 0.2)
@@ -334,7 +334,7 @@ class RoundTwoTests(IsolatedTestCase):
         env = self.fake_cli(
             f"import os,time,signal\nfrom pathlib import Path\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nPath({str(pidfile)!r}).write_text(str(os.getpid()))\ntime.sleep(60)"
         )
-        code = "import github_poll as g, subprocess; g.run(['gh'], lambda env,fds: subprocess.run(g.supervised(['gh'],env), env=env,pass_fds=fds,capture_output=True,text=True),timeout=1)"
+        code = "import github_poll as g, subprocess; g.run(['gh'], lambda env,fds: subprocess.run(g.supervised(['gh'],env), env=env,pass_fds=fds,capture_output=True,text=True),timeout=2.2)"
         owner = subprocess.Popen(
             [sys.executable, "-c", code],
             env=dict(env, PYTHONPATH=str(ROOT / "lib")),
@@ -351,7 +351,7 @@ class RoundTwoTests(IsolatedTestCase):
             child = int(pidfile.read_text())
             owner.terminate()
             owner.wait(timeout=2)
-            time.sleep(1.2)
+            time.sleep(2.4)
             import fcntl
 
             with (self.state / "github.lock").open() as stream:
@@ -500,7 +500,7 @@ class RoundTwoTests(IsolatedTestCase):
                 ),
                 capture_output=True,
                 text=True,
-                timeout=2,
+                timeout=3,
             )
             self.assertEqual(result.returncode, 124, result.stderr)
         finally:

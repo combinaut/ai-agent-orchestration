@@ -1124,6 +1124,13 @@ def collect_pulls(command, before, clock=time.monotonic):
         and departed.get(key) != "UNWATCHED"
         and known[key].get("misses", 0)
     ]
+    if any(source.startswith("pr:") for source in busy):
+        busy.update(
+            {
+                f"pr:{key}": "departure window exhausted during contention"
+                for key in waiting
+            }
+        )
     unreadable, roots = [], []
     try:
         owners = pull_owners(command, prs, roots, work)
