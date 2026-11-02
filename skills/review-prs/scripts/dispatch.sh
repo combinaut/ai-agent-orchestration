@@ -151,7 +151,7 @@ block_hook_screen() {
   if [ -n "$opened" ]; then close_opened || true; else echo "LEFT OPEN $pane"; fi
 }
 start_screen=$(herdr agent read "$agent" --source recent-unwrapped --lines 30 2>/dev/null || true)
-if grep -Fqi 'hooks need review before they can run' <<<"$start_screen"; then
+if grep -Eqi 'hooks? needs? review before (it|they) can run' <<<"$start_screen"; then
   block_hook_screen "$start_screen"
   exit 1
 fi
@@ -161,7 +161,7 @@ if grep -qi "update" <<<"$start_screen"; then
   herdr agent send-keys "$agent" enter
   sleep 5
   start_screen=$(herdr agent read "$agent" --source recent-unwrapped --lines 30 2>/dev/null || true)
-  if grep -Fqi 'hooks need review before they can run' <<<"$start_screen"; then
+  if grep -Eqi 'hooks? needs? review before (it|they) can run' <<<"$start_screen"; then
     block_hook_screen "$start_screen"
     exit 1
   fi

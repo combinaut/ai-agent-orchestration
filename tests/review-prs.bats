@@ -152,10 +152,10 @@ fork_head_missing_from_pull_ref() {
   [ "$status" -eq 1 ]
 }
 
-@test "dispatch blocks a hook-review screen before it prompts" {
+@test "dispatch blocks a singular hook-review screen before it prompts" {
   stub_review_tools
   : >"$TMP/none.toml"
-  AGENT_START_SCREEN=$'3 hooks need review before they can run\nPreToolUse\nSessionStart\nUserPromptSubmit' dispatch
+  AGENT_START_SCREEN=$'1 hook needs review before it can run\nPreToolUse\nSessionStart\nUserPromptSubmit' dispatch
   [ "$status" -ne 0 ]
   contains "$output" 'HOOKS UNTRUSTED PreToolUse SessionStart UserPromptSubmit'
   contains "$output" '"state": "blocked"'
@@ -190,7 +190,7 @@ fork_head_missing_from_pull_ref() {
 @test "dispatch blocks a hook screen shown after dismissing an update banner" {
   stub_review_tools
   : >"$TMP/none.toml"
-  AGENT_START_SCREEN='Update available' AGENT_START_SCREEN_AFTER_UPDATE='3 hooks need review before they can run' dispatch
+  AGENT_START_SCREEN='Update available' AGENT_START_SCREEN_AFTER_UPDATE='1 hook needs review before it can run' dispatch
   [ "$status" -ne 0 ]
   contains "$output" 'UPDATE BANNER'
   contains "$output" 'HOOKS UNTRUSTED'
