@@ -193,6 +193,7 @@ No code starts until the Coordinator answers `LEGACY OK`. Other projects skip th
 - Every repo runs `review.finalize_commands` (default: `/finalize-change-footprint` and `/finalize-code-comments`; a repo file overrides it, `[]` opts out). Tell the worker to run each command over the complete PR diff before calling the PR done or ready, send you each findings table and wait, then apply only the approved findings. When commands run and `review.finalize_comment` is not `false`, after the approved findings are applied and pushed the worker posts ONE PR comment with one table per configured command (every finding, approved or rejected, what changed, the commit SHA) ending with the tool's attribution trailer.
 - Respect the repo's own rules on attribution, commit signing and language choice.
 - **Never change shared config to get past a block** — the repo's `.git/config`, global gitconfig, `CLAUDE.md`, settings, credentials. A blocked worker stops and reports `BLOCKED: …`.
+- **GitHub wiki repositories are the exception to the main/master push rule:** workers may push their `master` branch directly; code repositories still use a PR.
 - A PR title, body and commit message name only links and references its reviewers can open. A reviewer cannot open a private repo such as another org's repo or its issues; the body states the problem and why the change fixes it, self-contained.
 
 ## A worker owns its PR's review cycle
