@@ -2073,6 +2073,10 @@ def evaluate_words(words, where, command, disabled, pipeline):
                     )
                 else:
                     opts += [option, value]
+            elif option.startswith("-C") and len(option) > 2:
+                where = os.path.abspath(
+                    os.path.join(where, os.path.expanduser(option[2:]))
+                )
             elif option.startswith(("--git-dir=", "--work-tree=")):
                 opts.append(option)
             elif option in ("--no-pager", "--bare", "--literal-pathspecs"):

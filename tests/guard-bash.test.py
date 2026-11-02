@@ -548,6 +548,12 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     webapp.mkdir()
     git(webapp, "init", "-b", "main")
     git(webapp, "remote", "add", "origin", "git@github.com:acme/webapp.git")
+    wiki = root / "sparkle.wiki"
+    wiki.mkdir()
+    git(wiki, "init", "-b", "master")
+    git(
+        wiki, "remote", "add", "origin", "https://github.com/combinaut/sparkle.wiki.git"
+    )
     other = root / "other"
     other.mkdir()
     git(other, "init", "-b", "main")
@@ -737,6 +743,37 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     case("default push remote protected push", "git push", True, push_default)
     case("cd push", f"cd {wt} && git push", True, root)
     case("git -C push", f"git -C {wt} push", True, root)
+    for name, command in [
+        ("wiki cd push", f"cd {wiki} && git push origin master"),
+        ("wiki git -C push", f"git -C {wiki} push origin master"),
+        ("wiki compact git -C push", f"git -C{wiki} push origin master"),
+        (
+            "wiki git-dir push",
+            f"git --git-dir={wiki / '.git'} push origin HEAD:master",
+        ),
+        (
+            "wiki HTTPS URL push",
+            "git push https://github.com/combinaut/sparkle.wiki.git master",
+        ),
+        (
+            "wiki SSH URL push",
+            "git push git@github.com:combinaut/sparkle.wiki.git HEAD:master",
+        ),
+        ("wiki default push", "git push --force-with-lease"),
+    ]:
+        case(name, command, False, wiki if name == "wiki default push" else root)
+    for name, command in [
+        ("code compact git -C push", f"git -C{webapp} push origin master"),
+        (
+            "code HTTPS URL push",
+            "git push https://github.com/combinaut/webapp.git master",
+        ),
+        (
+            "code SSH URL push",
+            "git push git@github.com:combinaut/webapp.git HEAD:master",
+        ),
+    ]:
+        case(name, command, True, root)
     case("env push", "env MODE=test git push origin HEAD:main", True)
     case("pipeline push", "echo ok | git push origin HEAD:main", True)
     case("env option push", "env -i git push origin HEAD:main", True)
