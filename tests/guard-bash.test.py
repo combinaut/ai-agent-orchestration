@@ -556,6 +556,20 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     )
     (webapp / "subdir").mkdir()
     (wiki / "link").symlink_to("../subdir")
+    compact_tilde_code = root / "~" / "wiki"
+    compact_tilde_code.mkdir(parents=True)
+    git(compact_tilde_code, "init", "-b", "main")
+    git(compact_tilde_code, "remote", "add", "origin", "git@github.com:acme/tilde.git")
+    home_wiki = test_home / "wiki"
+    home_wiki.mkdir()
+    git(home_wiki, "init", "-b", "master")
+    git(
+        home_wiki,
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/combinaut/home.wiki.git",
+    )
     other = root / "other"
     other.mkdir()
     git(other, "init", "-b", "main")
@@ -774,6 +788,7 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "code compact git -C symlink parent push",
             f"git -C{wiki}/link/.. push origin master",
         ),
+        ("code compact git -C literal tilde push", "git -C~/wiki push origin master"),
         (
             "code HTTPS URL push",
             "git push https://github.com/combinaut/webapp.git master",
