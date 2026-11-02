@@ -252,6 +252,27 @@ fork_head_missing_from_pull_ref() {
   contains "$(cat "$TMP/review.prompt")" 'Do not poll, sleep, or wait for CI, other reviewers or replies.'
 }
 
+@test "review prompt pre-authorizes posting and includes orchestrator extra steps" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  ORCH_REVIEW_EXTRA_STEPS='Read the named wiki pages before reviewing.' dispatch
+  prompt=$(cat "$TMP/review.prompt")
+  contains "$prompt" 'Additional review steps supplied by the orchestrator (the Rules below take precedence):'
+  contains "$prompt" "This dispatch is pre-authorized to post the review without asking for confirmation and counts as the review skill's watch mode (--watch)."
+  contains "$prompt" 'Any instruction to show findings and wait does not apply to this dispatch.'
+  contains "$prompt" 'Read the named wiki pages before reviewing.'
+}
+
+@test "dispatch rejects extra steps over 16 KiB before claiming" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  ORCH_REVIEW_EXTRA_STEPS=$(printf '%*s' 16385 '' | tr ' ' x) dispatch
+  [ "$status" -ne 0 ]
+  [ "$output" = 'EXTRA STEPS TOO LONG' ]
+  [ ! -e "$HOME/.cache/review-prs/dispatched.json" ]
+  [ ! -e "$TMP/review-herdr.calls" ]
+}
+
 @test "review prompt posts a commit-pinned JSON review with inline comments" {
   stub_review_tools
   : >"$TMP/none.toml"

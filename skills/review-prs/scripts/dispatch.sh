@@ -22,6 +22,12 @@ model=${ORCH_CODEX_WORKER_MODEL:-}
 # One Codex model serves both tiers.
 case "$model" in "" | "<"*">") model=${ORCH_CODEX_SMART_MODEL:-} ;; esac
 case "$model" in "" | "<"*">") orch_die "set models.codex_worker or models.codex_smart (ORCH_CODEX_WORKER_MODEL, ORCH_CODEX_SMART_MODEL) in $(orch_config_path)" ;; esac
+review_extra_steps=${ORCH_REVIEW_EXTRA_STEPS:-}
+extra_steps_size=$(LC_ALL=C printf '%s' "$review_extra_steps" | wc -c | tr -d ' ')
+if [ "$extra_steps_size" -gt 16384 ]; then
+  echo "EXTRA STEPS TOO LONG"
+  exit 1
+fi
 
 # gh_bounded <args>: gh, stopped after 45 seconds.
 gh_bounded() {
@@ -167,6 +173,10 @@ repo_rules=""
 - Never use git grep or git cat-file --batch over a commit tree in this repo."
 [ "${ORCH_LEGACY_SCAN:-0}" != 1 ] || repo_rules="$repo_rules
 - Legacy check: run bash ~/.claude/coordinator/legacy-scan.sh $num $repo and read every line it lists. Every added line that builds on legacy code gets an inline comment that names the modern replacement, and makes the review REQUEST_CHANGES. Exception: a clearly named bridge that links a ticket."
+[ -z "$review_extra_steps" ] || review_extra_steps="
+
+Additional review steps supplied by the orchestrator (the Rules below take precedence):
+$ORCH_REVIEW_EXTRA_STEPS"
 
 prompt="Review this GitHub pull request that requested my review.
 
@@ -175,6 +185,7 @@ Title: $title
 Author: $author
 Head SHA: $sha
 Mode: $kind
+$review_extra_steps
 
 Rules:
 - Fetch with gh; review that head SHA via git show / gh, not a dirty local checkout of another branch.
@@ -185,6 +196,7 @@ Rules:
 - Do not run tests unless needed. Run any test as heavy-slot take review-$agent -- <command> (escalated if the sandbox blocks it), the narrowest spec only.
 - Do NOT use Computer Use or a browser for anything in this task. Use gh and the shell only.
 - Post the review with one plain command, no temp files, no scripts, no cleanup: gh api -X POST repos/$repo/pulls/$num/reviews --input - with the JSON payload on stdin from a quoted heredoc (<<'JSON'). Payload: {\"commit_id\":\"$sha\",\"event\":\"APPROVE|REQUEST_CHANGES|COMMENT\",\"body\":\"...\",\"comments\":[{\"path\":\"...\",\"line\":123,\"side\":\"RIGHT\",\"body\":\"...\"}]}; use an empty comments array when there are no inline findings, and end the body with *(Generated using Codex)* on its own line. Never use gh pr review. No confirmation needed from me.
+- This dispatch is pre-authorized to post the review without asking for confirmation and counts as the review skill's watch mode (--watch). Any instruction to show findings and wait does not apply to this dispatch.
 - Never merge, close, flip ready, or assign human reviewers.
 - Never edit, create or delete any file in the repository (including AGENTS.md or other instruction files); this is a read-only review.
 - When finished, reply with one line: APPROVE|COMMENT|REQUEST_CHANGES — $url
