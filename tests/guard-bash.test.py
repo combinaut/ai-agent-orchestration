@@ -548,12 +548,14 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     webapp.mkdir()
     git(webapp, "init", "-b", "main")
     git(webapp, "remote", "add", "origin", "git@github.com:acme/webapp.git")
-    wiki = root / "sparkle.wiki"
+    wiki = webapp / "sparkle.wiki"
     wiki.mkdir()
     git(wiki, "init", "-b", "master")
     git(
         wiki, "remote", "add", "origin", "https://github.com/combinaut/sparkle.wiki.git"
     )
+    (webapp / "subdir").mkdir()
+    (wiki / "link").symlink_to("../subdir")
     other = root / "other"
     other.mkdir()
     git(other, "init", "-b", "main")
@@ -764,6 +766,14 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         case(name, command, False, wiki if name == "wiki default push" else root)
     for name, command in [
         ("code compact git -C push", f"git -C{webapp} push origin master"),
+        (
+            "code git -C symlink parent push",
+            f"git -C {wiki}/link/.. push origin master",
+        ),
+        (
+            "code compact git -C symlink parent push",
+            f"git -C{wiki}/link/.. push origin master",
+        ),
         (
             "code HTTPS URL push",
             "git push https://github.com/combinaut/webapp.git master",
