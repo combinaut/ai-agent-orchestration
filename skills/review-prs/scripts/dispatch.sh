@@ -167,6 +167,11 @@ repo_rules=""
 - Never use git grep or git cat-file --batch over a commit tree in this repo."
 [ "${ORCH_LEGACY_SCAN:-0}" != 1 ] || repo_rules="$repo_rules
 - Legacy check: run bash ~/.claude/coordinator/legacy-scan.sh $num $repo and read every line it lists. Every added line that builds on legacy code gets an inline comment that names the modern replacement, and makes the review REQUEST_CHANGES. Exception: a clearly named bridge that links a ticket."
+review_extra_steps=""
+[ -z "${ORCH_REVIEW_EXTRA_STEPS:-}" ] || review_extra_steps="
+
+Additional review steps supplied by the orchestrator:
+$ORCH_REVIEW_EXTRA_STEPS"
 
 prompt="Review this GitHub pull request that requested my review.
 
@@ -175,6 +180,7 @@ Title: $title
 Author: $author
 Head SHA: $sha
 Mode: $kind
+$review_extra_steps
 
 Rules:
 - Fetch with gh; review that head SHA via git show / gh, not a dirty local checkout of another branch.
@@ -185,6 +191,7 @@ Rules:
 - Do not run tests unless needed. Run any test as heavy-slot take review-$agent -- <command> (escalated if the sandbox blocks it), the narrowest spec only.
 - Do NOT use Computer Use or a browser for anything in this task. Use gh and the shell only.
 - Post the review with one plain command, no temp files, no scripts, no cleanup: gh api -X POST repos/$repo/pulls/$num/reviews --input - with the JSON payload on stdin from a quoted heredoc (<<'JSON'). Payload: {\"commit_id\":\"$sha\",\"event\":\"APPROVE|REQUEST_CHANGES|COMMENT\",\"body\":\"...\",\"comments\":[{\"path\":\"...\",\"line\":123,\"side\":\"RIGHT\",\"body\":\"...\"}]}; use an empty comments array when there are no inline findings, and end the body with *(Generated using Codex)* on its own line. Never use gh pr review. No confirmation needed from me.
+- This dispatch is pre-authorized to post the review without asking for confirmation. Any instruction to show findings and wait does not apply to this dispatch.
 - Never merge, close, flip ready, or assign human reviewers.
 - Never edit, create or delete any file in the repository (including AGENTS.md or other instruction files); this is a read-only review.
 - When finished, reply with one line: APPROVE|COMMENT|REQUEST_CHANGES — $url

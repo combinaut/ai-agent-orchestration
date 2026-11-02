@@ -252,6 +252,16 @@ fork_head_missing_from_pull_ref() {
   contains "$(cat "$TMP/review.prompt")" 'Do not poll, sleep, or wait for CI, other reviewers or replies.'
 }
 
+@test "review prompt pre-authorizes posting and includes orchestrator extra steps" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  ORCH_REVIEW_EXTRA_STEPS='Read the named wiki pages before reviewing.' dispatch
+  prompt=$(cat "$TMP/review.prompt")
+  contains "$prompt" 'This dispatch is pre-authorized to post the review without asking for confirmation.'
+  contains "$prompt" 'Any instruction to show findings and wait does not apply to this dispatch.'
+  contains "$prompt" 'Read the named wiki pages before reviewing.'
+}
+
 @test "review prompt posts a commit-pinned JSON review with inline comments" {
   stub_review_tools
   : >"$TMP/none.toml"
