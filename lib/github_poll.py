@@ -200,12 +200,12 @@ def call_deadline(seconds):
             raise
 
 
-def run(argv, invoke, timeout=45):
+def run(argv, invoke, timeout=45, retry_base=60, retry_jitter=(1, 5)):
     """Main-thread captured text invocation with one deadline and no retries."""
     started = time.monotonic()
     try:
         with call_deadline(timeout):
-            return _run(argv, invoke, timeout, started)
+            return _run(argv, invoke, timeout, started, retry_base, retry_jitter)
     except _Expired as error:
         if isinstance(error.__cause__, TimeoutError):
             raise error.__cause__
@@ -214,7 +214,7 @@ def run(argv, invoke, timeout=45):
         ) from None
 
 
-def _run(argv, invoke, timeout, started):
+def _run(argv, invoke, timeout, started, retry_base=60, retry_jitter=(1, 5)):
     directory = state_directory()
     path = directory / "github.json"
     try:
@@ -343,8 +343,8 @@ def _run(argv, invoke, timeout, started):
             failures = min(failures + 1, 7)
             delay = retry_delay(headers, time.time())
             if delay is None:
-                delay = min(MAX_DELAY, 60 * 2 ** (failures - 1))
-            state["until"] = time.time() + delay + random.uniform(1, 5)
+                delay = min(MAX_DELAY, retry_base * 2 ** (failures - 1))
+            state["until"] = time.time() + delay + random.uniform(*retry_jitter)
             state["failures"] = failures
             counter["limited"] += 1
             if result.returncode == 0:
@@ -447,7 +447,7 @@ def supervise(deadline, argv):
         signal.signal(signal.SIGINT, previous_int)
 
 
-def capture(argv, *, env, pass_fds, timeout):
+def capture(argv, *, env, pass_fds, timeout, input=None):
     process = None
     pending = []
 
@@ -465,6 +465,7 @@ def capture(argv, *, env, pass_fds, timeout):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                stdin=subprocess.PIPE if input is not None else None,
                 start_new_session=True,
                 env=env,
                 pass_fds=pass_fds,
@@ -474,7 +475,7 @@ def capture(argv, *, env, pass_fds, timeout):
                 signal.signal(number, handler)
             for number in pending:
                 signal.raise_signal(number)
-        stdout, stderr = process.communicate(timeout=timeout)
+        stdout, stderr = process.communicate(input=input, timeout=timeout)
         return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
     except BaseException:
         if process is not None:
