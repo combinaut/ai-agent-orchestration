@@ -104,6 +104,17 @@ class GithubWriteTests(IsolatedTestCase):
         self.assertIn("not replayed", actual.stderr)
         run.assert_called_once()
 
+    def test_busy_reader_admission_is_retried_before_any_write(self):
+        success = subprocess.CompletedProcess(["gh"], 0, "ok", "")
+        with patch.object(
+            github_poll,
+            "run",
+            side_effect=[github_poll.Busy("read not attempted"), success],
+        ) as run:
+            actual = github_write.run(["gh", "api", "-X", "POST", "fixture"], timeout=5)
+        self.assertEqual(actual.stdout, "ok")
+        self.assertEqual(run.call_count, 2)
+
     def test_stdin_forms_are_buffered_before_a_retry(self):
         for argv in (
             ["api", "--input", "-"],

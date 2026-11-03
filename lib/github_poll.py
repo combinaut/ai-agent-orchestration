@@ -126,9 +126,9 @@ def retry_delay(headers, now):
     return None
 
 
-def holder_message(directory):
+def holder_message(directory, name="holder.json"):
     try:
-        holder = json.loads((directory / "holder.json").read_text())
+        holder = json.loads((directory / name).read_text())
         age = max(0, time.time() - holder["since"])
         return f"holder pid={holder['pid']} age={age:.1f}s" + (
             " stuck" if age > 60 else ""

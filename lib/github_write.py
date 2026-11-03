@@ -18,6 +18,7 @@ import github_poll
 
 MAX_ATTEMPTS = 4
 DEFAULT_TIMEOUT = 300
+MAX_TIMEOUT = 600
 
 
 def positive_float(value, name):
@@ -28,6 +29,13 @@ def positive_float(value, name):
     if not math.isfinite(parsed) or parsed < 0:
         raise argparse.ArgumentTypeError(f"{name} must be non-negative")
     return parsed
+
+
+def timeout_value(value):
+    timeout = positive_float(value, "timeout")
+    if timeout > MAX_TIMEOUT:
+        raise argparse.ArgumentTypeError(f"timeout must be at most {MAX_TIMEOUT}s")
+    return timeout
 
 
 def configuration():
@@ -113,6 +121,7 @@ def run(argv, *, timeout=DEFAULT_TIMEOUT, stdin=None):
     directory = github_poll.state_directory()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock_path = directory / "github-write.lock"
+    holder_path = directory / "github-write-holder.json"
     started = time.monotonic()
     deadline = started + timeout
     with open(lock_path, "a+") as lock:
@@ -122,46 +131,61 @@ def run(argv, *, timeout=DEFAULT_TIMEOUT, stdin=None):
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
-                    raise TimeoutError("GitHub write timeout waiting for another retry")
+                    raise TimeoutError(
+                        "GitHub write timeout waiting for another retry; "
+                        + github_poll.holder_message(
+                            directory, "github-write-holder.json"
+                        )
+                    )
                 time.sleep(min(0.05, deadline - time.monotonic()))
-        for attempt in range(1, MAX_ATTEMPTS + 1):
-            sleep_until_ready(directory / "github.json", deadline)
-            remaining = deadline - time.monotonic()
-            if remaining < 2:
-                raise TimeoutError("GitHub write timeout exhausted before an attempt")
-            try:
-                result = github_poll.run(
-                    argv,
-                    lambda env, pass_fds: github_poll.capture(
-                        github_poll.supervised(argv, env),
-                        env=env,
-                        pass_fds=pass_fds,
+        github_poll.write_state(holder_path, {"pid": os.getpid(), "since": time.time()})
+        try:
+            attempt = 0
+            while attempt < MAX_ATTEMPTS:
+                sleep_until_ready(directory / "github.json", deadline)
+                remaining = deadline - time.monotonic()
+                if remaining < 2:
+                    raise TimeoutError(
+                        "GitHub write timeout exhausted before an attempt"
+                    )
+                try:
+                    result = github_poll.run(
+                        argv,
+                        lambda env, pass_fds: github_poll.capture(
+                            github_poll.supervised(argv, env),
+                            env=env,
+                            pass_fds=pass_fds,
+                            timeout=remaining,
+                            input=stdin,
+                        ),
                         timeout=remaining,
-                        input=stdin,
-                    ),
-                    timeout=remaining,
-                    retry_base=base,
-                    retry_jitter=(0, jitter),
-                )
-            except github_poll.Cooldown:
-                # A reader may have published a cooldown after our preflight.
-                if attempt == MAX_ATTEMPTS:
-                    raise RuntimeError(
-                        "GitHub write retry attempts exhausted"
-                    ) from None
-                continue
-            if result.returncode == 0:
+                        retry_base=base,
+                        retry_jitter=(0, jitter),
+                    )
+                except (github_poll.Busy, github_poll.Cooldown):
+                    # Admission failed before gh started, so no write outcome exists.
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(
+                            "GitHub write deadline exceeded; write not attempted"
+                        ) from None
+                    continue
+                attempt += 1
+                if result.returncode == 0:
+                    return result
+                # Only this invocation can prove a limit response. A reader may
+                # publish a shared cooldown after our write completes, but that
+                # cannot make an uncertain write safe to replay.
+                if getattr(result, "github_limited", False):
+                    if not replay_safe(argv) or (
+                        reads_stdin(argv[1:]) and stdin is None
+                    ):
+                        return limit_not_replayed(result, directory / "github.json")
+                    if attempt == MAX_ATTEMPTS:
+                        raise RuntimeError("GitHub write retry attempts exhausted")
+                    continue
                 return result
-            # Only this invocation can prove a limit response. A reader may
-            # publish a shared cooldown after our write completes, but that
-            # cannot make an uncertain write safe to replay.
-            if getattr(result, "github_limited", False):
-                if not replay_safe(argv) or (reads_stdin(argv[1:]) and stdin is None):
-                    return limit_not_replayed(result, directory / "github.json")
-                if attempt == MAX_ATTEMPTS:
-                    raise RuntimeError("GitHub write retry attempts exhausted")
-                continue
-            return result
+        finally:
+            holder_path.unlink(missing_ok=True)
     raise AssertionError("unreachable")
 
 
@@ -169,7 +193,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument(
         "--timeout",
-        type=lambda value: positive_float(value, "timeout"),
+        type=timeout_value,
         default=DEFAULT_TIMEOUT,
     )
     parser.add_argument("gh", nargs=argparse.REMAINDER, help="arguments passed to gh")
