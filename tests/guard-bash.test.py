@@ -2278,6 +2278,21 @@ pkill -f vite
         "wrapped clean PR",
         f"python3 {ROOT}/lib/github_write.py pr create --title Fix --body Details",
     )
+    case(
+        "ruff mentions wrapper source",
+        f"python3 -m ruff check {ROOT}/lib/github_write.py --fix",
+    )
+    case(
+        "pytest mentions wrapper source",
+        f"python3 -m pytest {ROOT}/lib/github_write.py",
+    )
+    case("cat wrapper source", f"cat {ROOT}/lib/github_write.py")
+    case("rg wrapper source", f"rg timeout {ROOT}/lib/github_write.py")
+    case(
+        "direct wrapped PR attribution",
+        f'{ROOT}/lib/github_write.py --timeout 240 pr create --body "Generated with Codex"',
+        True,
+    )
     for option in ("--tim 240", "--timeout=240", "--foo"):
         case(
             f"wrapped attributed PR with {option}",

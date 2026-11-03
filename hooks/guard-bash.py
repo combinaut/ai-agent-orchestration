@@ -1824,13 +1824,33 @@ def unwrap_gh(args):
 
 def github_write_gh_args(words):
     """The gh arguments wrapped by a Python github_write.py invocation, if any."""
-    if not words or not re.fullmatch(
-        r"python(?:\d+(?:\.\d+)*)?", os.path.basename(words[0])
-    ):
+    if not words:
         return None
-    for index, word in enumerate(words[1:], 1):
-        if os.path.basename(word) == "github_write.py":
-            return words[index + 1 :]
+    if os.path.basename(words[0]) == "github_write.py":
+        return words[1:]
+    if not re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", os.path.basename(words[0])):
+        return None
+    args = words[1:]
+    index = 0
+    while index < len(args):
+        option = args[index]
+        if option == "--":
+            index += 1
+            break
+        if option in ("-m", "-c") or option.startswith(("-m", "-c")):
+            return None
+        if option in ("-W", "-X", "--check-hash-based-pycs"):
+            index += 2
+            continue
+        if option.startswith(("-W", "-X")):
+            index += 1
+            continue
+        if option.startswith("-"):
+            index += 1
+            continue
+        if os.path.basename(option) == "github_write.py":
+            return args[index + 1 :]
+        return None
     return None
 
 
