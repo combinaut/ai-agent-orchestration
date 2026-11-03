@@ -20,6 +20,7 @@ from pathlib import Path
 
 PUSH_REASON = "Never push to main/master; open a PR (see .ai/git-workflow.md)."
 ATTR_REASON = "No AI attribution in commits, PR titles or PR bodies (global + .ai/git-workflow.md); remove the trailer and retry."
+GITHUB_WRITE_OPTION_REASON = "github_write.py accepts only --timeout before gh arguments; remove the unknown wrapper option and retry."
 FILE_TOO_LARGE_REASON = "Message/body file is too large to check safely; use a smaller file or remove the file input."
 FILE_NONREGULAR_REASON = (
     "Message/body file is not a regular file; use a regular file input."
@@ -1821,6 +1822,81 @@ def unwrap_gh(args):
     return args
 
 
+GITHUB_WRITE_INVALID = object()
+PYTHON_FLAGS = set("bBdEhiIOqsSuvV")
+PYTHON_VALUE_FLAGS = {"W", "X"}
+
+
+def github_write_gh_args(words):
+    """The gh arguments wrapped by a real github_write.py script invocation."""
+    if not words:
+        return None
+    if os.path.basename(words[0]) == "github_write.py":
+        return words[1:]
+    if not re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", os.path.basename(words[0])):
+        return None
+    args = words[1:]
+    index = 0
+    while index < len(args):
+        option = args[index]
+        if option == "--":
+            index += 1
+            if index < len(args) and os.path.basename(args[index]) == "github_write.py":
+                return args[index + 1 :]
+            return None
+        if option in ("-m", "-c") or option.startswith(("-m", "-c")):
+            return None
+        if option == "--check-hash-based-pycs":
+            index += 2
+            continue
+        if option.startswith("--"):
+            if any(
+                os.path.basename(arg) == "github_write.py" for arg in args[index + 1 :]
+            ):
+                return GITHUB_WRITE_INVALID
+            return None
+        if option.startswith("-"):
+            letters = option[1:]
+            unknown = False
+            while letters:
+                flag, letters = letters[0], letters[1:]
+                if flag in ("m", "c"):
+                    return None
+                if flag in PYTHON_VALUE_FLAGS:
+                    if not letters:
+                        index += 1
+                    break
+                if flag not in PYTHON_FLAGS:
+                    unknown = True
+                    break
+            if unknown:
+                if any(
+                    os.path.basename(arg) == "github_write.py"
+                    for arg in args[index + 1 :]
+                ):
+                    return GITHUB_WRITE_INVALID
+                return None
+            index += 1
+            continue
+        if os.path.basename(option) == "github_write.py":
+            return args[index + 1 :]
+        return None
+    return None
+
+
+def unwrap_github_write(args):
+    args = args[:]
+    while args and args[0].startswith("-"):
+        option = args.pop(0)
+        if option == "--timeout" and args:
+            args.pop(0)
+        elif option.startswith("--timeout="):
+            continue
+        else:
+            return None
+    return args
+
+
 GH_API_VALUE_OPTIONS = {
     "-X",
     "--method",
@@ -1856,6 +1932,12 @@ def api_endpoint(args):
 
 def comment_segment(words):
     words, _ = unwrap(words[:])
+    if (wrapped := github_write_gh_args(words)) is GITHUB_WRITE_INVALID:
+        return False
+    if wrapped:
+        if (wrapped := unwrap_github_write(wrapped)) is None:
+            return False
+        words = ["gh", *wrapped]
     if not words or os.path.basename(words[0]) != "gh":
         return False
     args = unwrap_gh(words[1:])
@@ -2085,6 +2167,13 @@ def evaluate_words(words, where, command, disabled, pipeline):
         guards = (guard_push, guard_attribution, guard_memory, guard_big_repo_reads)
     elif executable == "gh":
         args = unwrap_gh(args)
+        guards = (guard_attribution,)
+    elif (wrapped_args := github_write_gh_args(words)) is GITHUB_WRITE_INVALID:
+        return GITHUB_WRITE_OPTION_REASON
+    elif wrapped_args:
+        if (wrapped_args := unwrap_github_write(wrapped_args)) is None:
+            return GITHUB_WRITE_OPTION_REASON
+        args = unwrap_gh(wrapped_args)
         guards = (guard_attribution,)
     elif executable in ("herdr", "pi", "cursor", "cursor-agent", "agent"):
         return (

@@ -2264,6 +2264,73 @@ pkill -f vite
     case("plain commit", 'git commit -m "Fix main menu"')
     case("plain file", f"git commit -F {clean}")
     case("plain PR", 'gh pr create --title "Fix" --body "Details"')
+    case(
+        "wrapped PR title attribution",
+        f'python3 -I {ROOT}/lib/github_write.py pr create --title "Generated with Codex" --body Details',
+        True,
+    )
+    case(
+        "env wrapped PR body attribution",
+        f'env MODE=test python3 {ROOT}/lib/github_write.py pr edit 1 --body "Generated with Claude Code"',
+        True,
+    )
+    case(
+        "wrapped clean PR",
+        f"python3 {ROOT}/lib/github_write.py pr create --title Fix --body Details",
+    )
+    case(
+        "ruff mentions wrapper source",
+        f"python3 -m ruff check {ROOT}/lib/github_write.py --fix",
+    )
+    case(
+        "pytest mentions wrapper source",
+        f"python3 -m pytest {ROOT}/lib/github_write.py",
+    )
+    case("cat wrapper source", f"cat {ROOT}/lib/github_write.py")
+    case("rg wrapper source", f"rg timeout {ROOT}/lib/github_write.py")
+    case(
+        "direct wrapped PR attribution",
+        f'{ROOT}/lib/github_write.py --timeout 240 pr create --body "Generated with Codex"',
+        True,
+    )
+    for option in ("--tim 240", "--timeout=240", "--foo"):
+        case(
+            f"wrapped attributed PR with {option}",
+            f'python3 {ROOT}/lib/github_write.py {option} pr edit 1 --body "Generated with Codex"',
+            True,
+        )
+    wrapper = f'{ROOT}/lib/github_write.py --timeout 240 pr edit 1 --body "Generated with Codex"'
+    for prefix in (
+        "python3 --",
+        "python3 -I",
+        "python3 -u",
+        "python3 -E",
+        "python3 -Iu",
+        "python3 -Bsu",
+        "python3 -IX dev",
+        "python3 -X dev",
+        "python3 -Xdev",
+        "python3 -W error",
+        "python3 -Werror",
+        "python3 --check-hash-based-pycs always",
+        "/usr/bin/python3 -I",
+        "/usr/bin/env python3 -I",
+        "/usr/bin/env -S python3 -I",
+    ):
+        case(
+            f"wrapped attributed PR with interpreter form {prefix}",
+            f"{prefix} {wrapper}",
+            True,
+        )
+    for prefix in (
+        "python3 -m ruff check",
+        "python3 -c 'print(1)'",
+        "python3 -m pytest",
+    ):
+        case(
+            f"module or command form {prefix}",
+            f"{prefix} {ROOT}/lib/github_write.py",
+        )
     case("plain heredoc", "git commit -F - <<'EOF'\nA plain commit\nEOF")
     case(
         "plain substitution heredoc",

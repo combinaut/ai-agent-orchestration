@@ -1,6 +1,6 @@
 # GitHub polling
 
-The watcher command runner, standalone `prs.py`, and focus check share `lib/github_poll.py`. Audit, pulls, workers, and the optional service PR watcher use the command runner. One-shot review dispatch and raw `gh` commands do not participate.
+The watcher command runner, standalone `prs.py`, and focus check share `lib/github_poll.py`. Audit, pulls, workers, and the optional service PR watcher use the command runner. `lib/github_write.py` is the shared entry point for GitHub writes and Actions dispatches; raw `gh` reads still do not participate.
 
 For an additional monitor or shell wait loop, invoke:
 
@@ -9,6 +9,15 @@ python3 <orch-root>/lib/github_poll.py api repos/owner/repo/pulls/123
 ```
 
 Keep the command's exit status. A nonzero exit means the read failed; retain saved evidence, and report repeated failures. Prefer existing pulls/PR watcher events over another monitor. Shell pipelines need `set -o pipefail` so a failed read cannot become a successful empty result.
+
+For a write or Actions call, use the sibling command and set its timeout below the caller's own timeout:
+
+```sh
+python3 <orch-root>/lib/github_write.py --timeout 240 api -X POST repos/owner/repo/issues --input -
+python3 <orch-root>/lib/github_write.py --timeout 240 workflow run validate.yml --repo owner/repo
+```
+
+It takes a machine-shared write lock (one retrying write globally), uses the same cooldown state as readers, and holds that lock while waiting. At most four started attempts occur in one call; the total wait and execution stay within `--timeout` (300 seconds by default, capped at 600). On a confirmed secondary-limit, abuse-detection 403, or 429 it honours `Retry-After`, then a primary-limit reset with zero remaining, else backs off from 60 seconds exponentially, with 0–5 seconds of jitter. A busy read admission means no write was attempted, so the wrapper waits and retries it until the write deadline. A peer blocked on `github-write.lock` reports its holder PID and age from `github-write-holder.json`. A successful write resets the shared exponent. A permission 403 or any non-limit error fails immediately. Timeouts and transport failures are never replayed because the server may already have applied the write. Test-only `GITHUB_WRITE_BACKOFF_BASE` and `GITHUB_WRITE_JITTER_MAX` shorten the fallback delay.
 
 ## Admission and retries
 
