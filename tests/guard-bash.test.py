@@ -2299,6 +2299,38 @@ pkill -f vite
             f'python3 {ROOT}/lib/github_write.py {option} pr edit 1 --body "Generated with Codex"',
             True,
         )
+    wrapper = f'{ROOT}/lib/github_write.py --timeout 240 pr edit 1 --body "Generated with Codex"'
+    for prefix in (
+        "python3 --",
+        "python3 -I",
+        "python3 -u",
+        "python3 -E",
+        "python3 -Iu",
+        "python3 -Bsu",
+        "python3 -IX dev",
+        "python3 -X dev",
+        "python3 -Xdev",
+        "python3 -W error",
+        "python3 -Werror",
+        "python3 --check-hash-based-pycs always",
+        "/usr/bin/python3 -I",
+        "/usr/bin/env python3 -I",
+        "/usr/bin/env -S python3 -I",
+    ):
+        case(
+            f"wrapped attributed PR with interpreter form {prefix}",
+            f"{prefix} {wrapper}",
+            True,
+        )
+    for prefix in (
+        "python3 -m ruff check",
+        "python3 -c 'print(1)'",
+        "python3 -m pytest",
+    ):
+        case(
+            f"module or command form {prefix}",
+            f"{prefix} {ROOT}/lib/github_write.py",
+        )
     case("plain heredoc", "git commit -F - <<'EOF'\nA plain commit\nEOF")
     case(
         "plain substitution heredoc",

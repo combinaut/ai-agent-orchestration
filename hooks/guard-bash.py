@@ -1822,8 +1822,13 @@ def unwrap_gh(args):
     return args
 
 
+GITHUB_WRITE_INVALID = object()
+PYTHON_FLAGS = set("bBdEhiIOqsSuvV")
+PYTHON_VALUE_FLAGS = {"W", "X"}
+
+
 def github_write_gh_args(words):
-    """The gh arguments wrapped by a Python github_write.py invocation, if any."""
+    """The gh arguments wrapped by a real github_write.py script invocation."""
     if not words:
         return None
     if os.path.basename(words[0]) == "github_write.py":
@@ -1836,16 +1841,41 @@ def github_write_gh_args(words):
         option = args[index]
         if option == "--":
             index += 1
-            break
+            if index < len(args) and os.path.basename(args[index]) == "github_write.py":
+                return args[index + 1 :]
+            return None
         if option in ("-m", "-c") or option.startswith(("-m", "-c")):
             return None
-        if option in ("-W", "-X", "--check-hash-based-pycs"):
+        if option == "--check-hash-based-pycs":
             index += 2
             continue
-        if option.startswith(("-W", "-X")):
-            index += 1
-            continue
+        if option.startswith("--"):
+            if any(
+                os.path.basename(arg) == "github_write.py" for arg in args[index + 1 :]
+            ):
+                return GITHUB_WRITE_INVALID
+            return None
         if option.startswith("-"):
+            letters = option[1:]
+            unknown = False
+            while letters:
+                flag, letters = letters[0], letters[1:]
+                if flag in ("m", "c"):
+                    return None
+                if flag in PYTHON_VALUE_FLAGS:
+                    if not letters:
+                        index += 1
+                    break
+                if flag not in PYTHON_FLAGS:
+                    unknown = True
+                    break
+            if unknown:
+                if any(
+                    os.path.basename(arg) == "github_write.py"
+                    for arg in args[index + 1 :]
+                ):
+                    return GITHUB_WRITE_INVALID
+                return None
             index += 1
             continue
         if os.path.basename(option) == "github_write.py":
@@ -1902,7 +1932,9 @@ def api_endpoint(args):
 
 def comment_segment(words):
     words, _ = unwrap(words[:])
-    if wrapped := github_write_gh_args(words):
+    if (wrapped := github_write_gh_args(words)) is GITHUB_WRITE_INVALID:
+        return False
+    if wrapped:
         if (wrapped := unwrap_github_write(wrapped)) is None:
             return False
         words = ["gh", *wrapped]
@@ -2136,7 +2168,9 @@ def evaluate_words(words, where, command, disabled, pipeline):
     elif executable == "gh":
         args = unwrap_gh(args)
         guards = (guard_attribution,)
-    elif wrapped_args := github_write_gh_args(words):
+    elif (wrapped_args := github_write_gh_args(words)) is GITHUB_WRITE_INVALID:
+        return GITHUB_WRITE_OPTION_REASON
+    elif wrapped_args:
         if (wrapped_args := unwrap_github_write(wrapped_args)) is None:
             return GITHUB_WRITE_OPTION_REASON
         args = unwrap_gh(wrapped_args)
