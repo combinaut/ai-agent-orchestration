@@ -2264,6 +2264,20 @@ pkill -f vite
     case("plain commit", 'git commit -m "Fix main menu"')
     case("plain file", f"git commit -F {clean}")
     case("plain PR", 'gh pr create --title "Fix" --body "Details"')
+    case(
+        "wrapped PR title attribution",
+        f'python3 -I {ROOT}/lib/github_write.py pr create --title "Generated with Codex" --body Details',
+        True,
+    )
+    case(
+        "env wrapped PR body attribution",
+        f'env MODE=test python3 {ROOT}/lib/github_write.py pr edit 1 --body "Generated with Claude Code"',
+        True,
+    )
+    case(
+        "wrapped clean PR",
+        f"python3 {ROOT}/lib/github_write.py pr create --title Fix --body Details",
+    )
     case("plain heredoc", "git commit -F - <<'EOF'\nA plain commit\nEOF")
     case(
         "plain substitution heredoc",

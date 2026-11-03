@@ -61,6 +61,50 @@ def sleep_until_ready(path, deadline):
     time.sleep(delay)
 
 
+def replay_safe(argv):
+    args = argv[1:] if argv[:1] == ["gh"] else argv
+    if args[:1] == ["api"]:
+        return not any(
+            arg == "--paginate" or arg.startswith("--paginate=") for arg in args
+        )
+    return args[:2] == ["workflow", "run"]
+
+
+def reads_stdin(argv):
+    for index, arg in enumerate(argv):
+        next_arg = argv[index + 1] if index + 1 < len(argv) else ""
+        if arg in ("--input", "--body-file") and next_arg == "-":
+            return True
+        if arg in ("--input=-", "--body-file=-"):
+            return True
+        if arg in ("-F", "--field", "-f", "--raw-field") and (
+            next_arg == "@-" or next_arg.endswith("=@-")
+        ):
+            return True
+        if arg.startswith(("-F", "-f")) and (
+            arg[2:] == "@-" or arg[2:].endswith("=@-")
+        ):
+            return True
+        if arg.startswith(("--field=", "--raw-field=")) and arg.endswith("=@-"):
+            return True
+    return argv[:2] == ["workflow", "run"] and "--json" in argv
+
+
+def limit_not_replayed(result, path):
+    wait = cooldown_remaining(path)
+    detail = result.stderr.strip()
+    result.stderr = "\n".join(
+        part
+        for part in (
+            detail,
+            "GitHub secondary/rate limit confirmed; command not replayed because it may have side effects beyond one request."
+            + (f" Shared cooldown: {wait:.1f}s." if wait else ""),
+        )
+        if part
+    )
+    return result
+
+
 def run(argv, *, timeout=DEFAULT_TIMEOUT, stdin=None):
     """Run one idempotency-unsafe CLI command, retrying only proven limits."""
     if timeout <= 0:
@@ -112,19 +156,13 @@ def run(argv, *, timeout=DEFAULT_TIMEOUT, stdin=None):
             # publish a shared cooldown after our write completes, but that
             # cannot make an uncertain write safe to replay.
             if getattr(result, "github_limited", False):
+                if not replay_safe(argv) or (reads_stdin(argv[1:]) and stdin is None):
+                    return limit_not_replayed(result, directory / "github.json")
                 if attempt == MAX_ATTEMPTS:
                     raise RuntimeError("GitHub write retry attempts exhausted")
                 continue
             return result
     raise AssertionError("unreachable")
-
-
-def uses_stdin(argv):
-    return any(
-        arg == "--input=-"
-        or (arg == "--input" and index + 1 < len(argv) and argv[index + 1] == "-")
-        for index, arg in enumerate(argv)
-    )
 
 
 def main():
@@ -140,7 +178,9 @@ def main():
         parser.error(
             "pass gh arguments, for example: api -X POST repos/owner/repo/issues"
         )
-    stdin = sys.stdin.read() if uses_stdin(args.gh) and not sys.stdin.isatty() else None
+    stdin = (
+        sys.stdin.read() if reads_stdin(args.gh) and not sys.stdin.isatty() else None
+    )
     try:
         result = run(["gh", *args.gh], timeout=args.timeout, stdin=stdin)
     except (OSError, TimeoutError, RuntimeError, subprocess.TimeoutExpired) as error:

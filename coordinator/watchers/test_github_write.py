@@ -95,6 +95,27 @@ class GithubWriteTests(IsolatedTestCase):
         result = github_write.run(["gh", "workflow", "run", "fixture"], timeout=5)
         self.assertEqual(result.stdout, "ok")
 
+    def test_limited_non_single_request_command_is_not_replayed(self):
+        result = subprocess.CompletedProcess(["gh"], 1, "", "secondary rate limit")
+        result.github_limited = True
+        with patch.object(github_poll, "run", return_value=result) as run:
+            actual = github_write.run(["gh", "pr", "create", "--title", "x"], timeout=5)
+        self.assertIs(actual, result)
+        self.assertIn("not replayed", actual.stderr)
+        run.assert_called_once()
+
+    def test_stdin_forms_are_buffered_before_a_retry(self):
+        for argv in (
+            ["api", "--input", "-"],
+            ["pr", "create", "--body-file=-"],
+            ["api", "-F", "body=@-"],
+            ["api", "-f", "@-"],
+            ["api", "--raw-field", "body=@-"],
+            ["workflow", "run", "validate.yml", "--json"],
+        ):
+            with self.subTest(argv=argv):
+                self.assertTrue(github_write.reads_stdin(argv))
+
     def test_second_process_waits_for_the_shared_cooldown(self):
         self.fake_gh("printf ok\n")
         self.state.mkdir()

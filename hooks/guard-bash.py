@@ -1821,6 +1821,27 @@ def unwrap_gh(args):
     return args
 
 
+def github_write_gh_args(words):
+    """The gh arguments wrapped by a Python github_write.py invocation, if any."""
+    if not words or not re.fullmatch(
+        r"python(?:\d+(?:\.\d+)*)?", os.path.basename(words[0])
+    ):
+        return None
+    for index, word in enumerate(words[1:], 1):
+        if os.path.basename(word) == "github_write.py":
+            return words[index + 1 :]
+    return None
+
+
+def unwrap_github_write(args):
+    args = args[:]
+    while args and args[0].startswith("--timeout"):
+        option = args.pop(0)
+        if option == "--timeout" and args:
+            args.pop(0)
+    return args
+
+
 GH_API_VALUE_OPTIONS = {
     "-X",
     "--method",
@@ -1856,6 +1877,8 @@ def api_endpoint(args):
 
 def comment_segment(words):
     words, _ = unwrap(words[:])
+    if wrapped := github_write_gh_args(words):
+        words = ["gh", *unwrap_github_write(wrapped)]
     if not words or os.path.basename(words[0]) != "gh":
         return False
     args = unwrap_gh(words[1:])
@@ -2085,6 +2108,9 @@ def evaluate_words(words, where, command, disabled, pipeline):
         guards = (guard_push, guard_attribution, guard_memory, guard_big_repo_reads)
     elif executable == "gh":
         args = unwrap_gh(args)
+        guards = (guard_attribution,)
+    elif wrapped_args := github_write_gh_args(words):
+        args = unwrap_gh(unwrap_github_write(wrapped_args))
         guards = (guard_attribution,)
     elif executable in ("herdr", "pi", "cursor", "cursor-agent", "agent"):
         return (
