@@ -23,10 +23,10 @@ print(existing.get("tab_id", ""))
 print(caller_row.get("tab_id", ""))
 ' "$label")
 newline=$'\n'
-existing=${pane_rows%%$newline*}
-pane_rows=${pane_rows#*$newline}
-existing_tab=${pane_rows%%$newline*}
-caller_tab=${pane_rows#*$newline}
+existing=${pane_rows%%"$newline"*}
+pane_rows=${pane_rows#*"$newline"}
+existing_tab=${pane_rows%%"$newline"*}
+caller_tab=${pane_rows#*"$newline"}
 if [ -n "$existing" ]; then
   if [ -n "$existing_tab" ] && [ "$existing_tab" = "$caller_tab" ]; then
     echo "to-do pane already open: $existing"
