@@ -43,6 +43,8 @@ def cooldown_remaining(path):
         import json
 
         until = float(json.loads(path.read_text()).get("until", 0))
+        if not math.isfinite(until) or until > time.time() + github_poll.MAX_DELAY + 5:
+            return 0
         return max(0, until - time.time())
     except (OSError, ValueError, TypeError, AttributeError, OverflowError):
         return 0
@@ -106,14 +108,23 @@ def run(argv, *, timeout=DEFAULT_TIMEOUT, stdin=None):
                 continue
             if result.returncode == 0:
                 return result
-            # github_poll changes a confirmed limit to a nonzero result and
-            # publishes its shared cooldown.  All other failures are final.
-            if github_poll.active_cooldown(directory / "github.json"):
+            # Only this invocation can prove a limit response. A reader may
+            # publish a shared cooldown after our write completes, but that
+            # cannot make an uncertain write safe to replay.
+            if getattr(result, "github_limited", False):
                 if attempt == MAX_ATTEMPTS:
                     raise RuntimeError("GitHub write retry attempts exhausted")
                 continue
             return result
     raise AssertionError("unreachable")
+
+
+def uses_stdin(argv):
+    return any(
+        arg == "--input=-"
+        or (arg == "--input" and index + 1 < len(argv) and argv[index + 1] == "-")
+        for index, arg in enumerate(argv)
+    )
 
 
 def main():
@@ -129,7 +140,7 @@ def main():
         parser.error(
             "pass gh arguments, for example: api -X POST repos/owner/repo/issues"
         )
-    stdin = sys.stdin.read() if not sys.stdin.isatty() else None
+    stdin = sys.stdin.read() if uses_stdin(args.gh) and not sys.stdin.isatty() else None
     try:
         result = run(["gh", *args.gh], timeout=args.timeout, stdin=stdin)
     except (OSError, TimeoutError, RuntimeError, subprocess.TimeoutExpired) as error:

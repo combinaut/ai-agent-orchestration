@@ -351,6 +351,7 @@ def _run(argv, invoke, timeout, started, retry_base=60, retry_jitter=(1, 5)):
                 result.returncode = 1
         elif result.returncode == 0:
             state["until"], state["failures"] = 0, 0
+        result.github_limited = limited
         try:
             write_state(path, state)
         except OSError as error:

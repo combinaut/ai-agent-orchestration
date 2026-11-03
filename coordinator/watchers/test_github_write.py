@@ -75,6 +75,26 @@ class GithubWriteTests(IsolatedTestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.calls(), 1)
 
+    def test_unrelated_shared_cooldown_does_not_replay_an_uncertain_write(self):
+        result = subprocess.CompletedProcess(["gh"], 1, "", "connection lost")
+        with (
+            patch.object(github_poll, "run", return_value=result) as run,
+            patch.object(github_poll, "active_cooldown", return_value=True),
+        ):
+            actual = github_write.run(["gh", "api", "-X", "POST", "fixture"], timeout=5)
+        self.assertIs(actual, result)
+        run.assert_called_once()
+
+    def test_oversized_saved_cooldown_reaches_state_recovery(self):
+        self.fake_gh("printf ok\n")
+        self.state.mkdir()
+        github_poll.write_state(
+            self.state / "github.json",
+            {"until": time.time() + github_poll.MAX_DELAY + 6},
+        )
+        result = github_write.run(["gh", "workflow", "run", "fixture"], timeout=5)
+        self.assertEqual(result.stdout, "ok")
+
     def test_second_process_waits_for_the_shared_cooldown(self):
         self.fake_gh("printf ok\n")
         self.state.mkdir()
