@@ -20,6 +20,7 @@ from pathlib import Path
 
 PUSH_REASON = "Never push to main/master; open a PR (see .ai/git-workflow.md)."
 ATTR_REASON = "No AI attribution in commits, PR titles or PR bodies (global + .ai/git-workflow.md); remove the trailer and retry."
+GITHUB_WRITE_OPTION_REASON = "github_write.py accepts only --timeout before gh arguments; remove the unknown wrapper option and retry."
 FILE_TOO_LARGE_REASON = "Message/body file is too large to check safely; use a smaller file or remove the file input."
 FILE_NONREGULAR_REASON = (
     "Message/body file is not a regular file; use a regular file input."
@@ -1835,10 +1836,14 @@ def github_write_gh_args(words):
 
 def unwrap_github_write(args):
     args = args[:]
-    while args and args[0].startswith("--timeout"):
+    while args and args[0].startswith("-"):
         option = args.pop(0)
         if option == "--timeout" and args:
             args.pop(0)
+        elif option.startswith("--timeout="):
+            continue
+        else:
+            return None
     return args
 
 
@@ -1878,7 +1883,9 @@ def api_endpoint(args):
 def comment_segment(words):
     words, _ = unwrap(words[:])
     if wrapped := github_write_gh_args(words):
-        words = ["gh", *unwrap_github_write(wrapped)]
+        if (wrapped := unwrap_github_write(wrapped)) is None:
+            return False
+        words = ["gh", *wrapped]
     if not words or os.path.basename(words[0]) != "gh":
         return False
     args = unwrap_gh(words[1:])
@@ -2110,7 +2117,9 @@ def evaluate_words(words, where, command, disabled, pipeline):
         args = unwrap_gh(args)
         guards = (guard_attribution,)
     elif wrapped_args := github_write_gh_args(words):
-        args = unwrap_gh(unwrap_github_write(wrapped_args))
+        if (wrapped_args := unwrap_github_write(wrapped_args)) is None:
+            return GITHUB_WRITE_OPTION_REASON
+        args = unwrap_gh(wrapped_args)
         guards = (guard_attribution,)
     elif executable in ("herdr", "pi", "cursor", "cursor-agent", "agent"):
         return (

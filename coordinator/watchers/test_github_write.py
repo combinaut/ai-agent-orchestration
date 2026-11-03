@@ -116,6 +116,16 @@ class GithubWriteTests(IsolatedTestCase):
             with self.subTest(argv=argv):
                 self.assertTrue(github_write.reads_stdin(argv))
 
+    def test_parser_rejects_abbreviated_timeout(self):
+        result = subprocess.run(
+            [sys.executable, str(Path(github_write.__file__)), "--tim", "240"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized arguments: --tim", result.stderr)
+
     def test_second_process_waits_for_the_shared_cooldown(self):
         self.fake_gh("printf ok\n")
         self.state.mkdir()

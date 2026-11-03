@@ -166,7 +166,7 @@ def run(argv, *, timeout=DEFAULT_TIMEOUT, stdin=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument(
         "--timeout",
         type=lambda value: positive_float(value, "timeout"),

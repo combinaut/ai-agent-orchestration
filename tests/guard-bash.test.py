@@ -2278,6 +2278,12 @@ pkill -f vite
         "wrapped clean PR",
         f"python3 {ROOT}/lib/github_write.py pr create --title Fix --body Details",
     )
+    for option in ("--tim 240", "--timeout=240", "--foo"):
+        case(
+            f"wrapped attributed PR with {option}",
+            f'python3 {ROOT}/lib/github_write.py {option} pr edit 1 --body "Generated with Codex"',
+            True,
+        )
     case("plain heredoc", "git commit -F - <<'EOF'\nA plain commit\nEOF")
     case(
         "plain substitution heredoc",
