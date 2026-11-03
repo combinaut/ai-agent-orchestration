@@ -22,7 +22,7 @@ width = "80%"
 height = "80%"
 ```
 
-The Coordinator opens this view itself at start, in a pane labelled `To-do` beside its own (`~/.claude/coordinator/todo-pane.sh`). A pane with that label is kept, so a recycled Coordinator opens no second one. It runs without `--popup`, so nothing closes it.
+The Coordinator opens this view itself at start, in a pane labelled `To-do` beside its own (`~/.claude/coordinator/todo-pane.sh`). A recycled Coordinator moves a pane with that label into its tab and opens no second one. It runs without `--popup`, so nothing closes it.
 
 ![The to-do view in the popup, with demo items](todo-view.png)
 
