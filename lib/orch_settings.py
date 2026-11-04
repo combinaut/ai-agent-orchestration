@@ -1170,7 +1170,7 @@ def merged(layers, environ):
     return result
 
 
-def load_repo(start, environ=None):
+def load_repo(start, environ=None, exported=None):
     """Repo settings for the checkout containing start: committed file, the main checkout's personal file, its own."""
     environ = os.environ if environ is None else environ
     root = repo_root(start)
@@ -1191,12 +1191,14 @@ def load_repo(start, environ=None):
     result = merged(layers, environ)
     setting = BY_KEY[FINALIZE_SETTING]
     sources = [(global_layer(environ), config_path(environ)), *zip(layers, labels)]
-    source = setting.env if setting.env in environ else None
+    exported = environ if exported is None else exported
+    source = setting.env if setting.env in exported else None
     for layer, label in reversed(sources):
         if source is None and any(k.key == FINALIZE_SETTING for k in layer):
             source = label
     if source is not None:
-        warn_old_finalize(result[setting.env].split(setting.sep), source)
+        value = exported.get(setting.env, result[setting.env])
+        warn_old_finalize(value.split(setting.sep), source)
     return result
 
 
@@ -2069,7 +2071,7 @@ def main(argv):
             sys.stdout.write(print_lines(printed(values)))
         elif command == "repo" and len(argv) == 3:
             selected = {k: v for k, v in os.environ.items() if k == "ORCH_CONFIG"}
-            sys.stdout.write(shell_lines(load_repo(argv[2], selected)))
+            sys.stdout.write(shell_lines(load_repo(argv[2], selected, os.environ)))
         elif command == "migrate" and len(argv) == 5:
             print("\n".join(migrate(*argv[2:])))
         elif command == "upgrade" and len(argv) >= 3:
