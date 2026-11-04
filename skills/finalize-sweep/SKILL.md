@@ -75,4 +75,5 @@ A `real-bug` finding must be traced to a concrete failure, otherwise it is `FALS
 1. Merge duplicates across slices.
 2. Re-check every bug claim yourself against the code. A validator can be confidently wrong.
 3. Present the kept findings as a table, one row each with file and line, category, verdict and recommendation, and wait for approval before changing anything. Below it, give the raw finding count, the kept count and the count per verdict.
-4. Apply only the approved changes, then run the linters and tests for the touched surfaces. Do **not** commit or push unless asked.
+4. Write the sweep record as JSON, next to the findings table, at a path you give in your report. Put the same JSON in a fenced `json` block in the findings PR comment. Fields: `head` (full 40-character SHA swept), `base`, `slices`, `sweep_agents` and `validators` (counts started), `validator_ids` (the agent or task id of each validator), `findings` (raw count), `verdicts` (count per verdict; the counts add up to `findings`). `orch-sweep-record check --record <path> --head <sha>` verifies it.
+5. Apply only the approved changes, then run the linters and tests for the touched surfaces. Do **not** commit or push unless asked.
