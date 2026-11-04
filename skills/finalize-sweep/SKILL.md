@@ -85,5 +85,5 @@ A `real-bug` finding must be traced to a concrete failure, otherwise it is `FALS
 
 1. Merge duplicates across slices.
 2. Re-check every bug claim yourself against the code. A validator can be confidently wrong.
-3. Present the kept findings as a table, one row each with file and line, category, verdict and recommendation, and wait for approval before changing anything. Below it, give the raw finding count, the kept count and the count per verdict.
+3. Present the kept findings as a table, one row each with file and line (or the missing evidence), category, verdict and recommendation, and wait for approval before changing anything. Below it, give the raw finding count, the kept count and the count per verdict.
 4. Apply only the approved changes, then run the linters and tests for the touched surfaces. An approved `pr-text` finding changes the PR title or body, unless the approval says the code is wrong. After applying, record the five values from step 3 again, run step 4 over the changed code, and compare them when it finishes. Send each new `pr-text` finding through steps 5 and 6. Do **not** commit or push unless asked.
