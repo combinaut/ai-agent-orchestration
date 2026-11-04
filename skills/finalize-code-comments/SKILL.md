@@ -9,7 +9,7 @@ argument-hint: "[<base-ref>] [<path>…]"
 
 AI-assisted development produces comments as a side effect of iterating: the model explains what it just changed, justifies a decision to the reviewer, or narrates the difference from a previous version of the code. Those comments made sense *during* the session, but they are noise the moment the work is final — the next reader sees only the final code and has no "previous version" to compare against.
 
-This skill sweeps every comment **added or modified on the current branch** and removes or rewrites two kinds of clutter: iteration artifacts, and comments that simply shouldn't exist because the code already says it.
+This skill sweeps every comment **added or modified on the current branch**, plus any older comment next to changed code that the change made false, and removes or rewrites two kinds of clutter: iteration artifacts, and comments that simply shouldn't exist because the code already says it.
 
 ## Input
 
@@ -46,7 +46,7 @@ For each comment, ask — in this order:
 - **Structured doc comments** that tools consume: JSDoc, YARD/RDoc, docstrings, `@deprecated` markers.
 - **Directive comments**: linter disables, `@ts-check`, `@ts-expect-error`, magic comments (`# frozen_string_literal`), shebangs, and any justification attached to them.
 - **TODOs that reference a ticket.** A bare TODO with no ticket is a judgment call — flag it in the summary rather than deleting silently.
-- **Comments that predate the branch.** Only comments added or modified in the branch diff are in scope. Never "improve" pre-existing comments — that's scope creep.
+- **Comments that predate the branch.** Only comments added or modified in the branch diff are in scope. Never "improve" pre-existing comments — that's scope creep. One exception: a pre-existing comment next to changed code that the diff makes false is in scope, and fixing it is not scope creep.
 - **The repo's own comment rules.** If the repo documents a comment style (a style guide, `CLAUDE.md`, `AGENTS.md`), rewrite surviving comments to it.
 
 ## Rewrite vs. delete
@@ -61,8 +61,8 @@ For each comment, ask — in this order:
 ## Process
 
 1. Determine the diff scope with a single command that covers committed, staged, **and** unstaged changes: `git diff $(git merge-base HEAD <base>) -- <paths>` (base as in Input; ref and paths from `$ARGUMENTS`). The scope is the complete PR diff, not the last commit. Also run `git ls-files --others --exclude-standard -- <paths>` to pick up untracked files, which `git diff` misses.
-2. For each changed file, read the diff and identify every added or modified **syntactic comment** — text the language's parser treats as a comment (including HTML `<!-- -->`, `//`, `#`, and block comments whose body changed). A comment marker inside a non-comment context is out of scope: `#` in a string literal, URL, or scalar value; `//` in a URL or regex; heredoc content. When in doubt, read the surrounding file context — never edit anything that isn't unambiguously a comment.
-3. Apply the tests above to each and present the findings as a table; wait for approval before changing anything:
+2. For each changed file, read the diff and identify every added or modified **syntactic comment** — text the language's parser treats as a comment (including HTML `<!-- -->`, `//`, `#`, and block comments whose body changed). A comment marker inside a non-comment context is out of scope: `#` in a string literal, URL, or scalar value; `//` in a URL or regex; heredoc content. When in doubt, read the surrounding file context — never edit anything that isn't unambiguously a comment. Also read the unchanged comments next to changed code, and add each one whose claim the diff made false.
+3. Apply the tests above to each. A kept comment that states a claim about the code (a constraint, a "why", a quirk) needs the same evidence as a removal: verified at `file:line`, a test or a run. Directives, structured doc comments and ticket TODOs need none. Present the findings as a table and wait for approval before changing anything:
 
    ```
    FINDING                                  FILE            CATEGORY     RECOMMENDATION
