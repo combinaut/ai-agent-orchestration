@@ -34,13 +34,13 @@ DENIED = (errno.EPERM, errno.EACCES, errno.EROFS)
 EXIT_UNWRITABLE = 73
 
 
+def directory():
+    return Path.home() / ".claude/coordinator/worker-signals"
+
+
 def denied_directory(error):
     path = Path(error.filename) if error.filename else directory()
     return path if path.is_dir() else path.parent
-
-
-def directory():
-    return Path.home() / ".claude/coordinator/worker-signals"
 
 
 def read(path):
