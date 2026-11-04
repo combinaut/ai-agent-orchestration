@@ -36,7 +36,7 @@ At 400 changed lines or fewer, use one slice and go to step 3. Otherwise write a
 
 Check the plan with a script, not by reading it: every changed path appears exactly once, only single-file slices exceed the limit, and binary files sit only in their own slice.
 
-Above 24 slices, stop before starting any agent. Report the slice count and suggest splitting the PR.
+Above 25 slices, pause before starting any agent. Report the slice count and ask whoever started the sweep, the developer or the orchestration layer, whether to continue or split the PR into smaller PRs. Continue only on their decision.
 
 ## 3. Sweep
 
