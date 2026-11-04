@@ -78,6 +78,17 @@ denied_signals() {
   chmod 555 "$HOME/.claude/coordinator/worker-signals"
 }
 
+denied_missing_questions() {
+  export ORCH_USER_QUESTIONS_DIR="$TMP/denied/questions"
+  mkdir -p "$TMP/denied"
+  chmod 555 "$TMP/denied"
+}
+
+denied_missing_signals() {
+  mkdir -p "$HOME/.claude/coordinator"
+  chmod 555 "$HOME/.claude/coordinator"
+}
+
 assert_escalate() {
   [ "$status" -eq 73 ]
   local dir=${1//\/\//\/}
@@ -132,4 +143,36 @@ assert_escalate() {
   run "$ROOT/orch-signal" heartbeat --new-job
   [ "$status" -eq 1 ]
   [[ "$output" == 'orch-signal: '* ]]
+}
+
+@test "worker signals done exits 73 naming the signals directory when it is unwritable" {
+  denied_signals
+  run "$ROOT/orch-signal" "done" --outcome succeeded --report /tmp/report --summary passed
+  assert_escalate "$HOME/.claude/coordinator/worker-signals"
+}
+
+@test "worker signals list names the questions directory when it is missing under a denied parent" {
+  denied_missing_questions
+  run "$ROOT/orch-signal" list
+  assert_escalate "$TMP/denied/questions"
+}
+
+@test "worker signals ask names the questions directory when it is missing under a denied parent" {
+  denied_missing_questions
+  run "$ROOT/orch-signal" ask --question 'Which version?' --timeout 5
+  assert_escalate "$TMP/denied/questions"
+}
+
+@test "worker signals heartbeat names the signals directory when it is missing under a denied parent" {
+  export ORCH_USER_QUESTIONS_DIR="$TMP/questions"
+  denied_missing_signals
+  run "$ROOT/orch-signal" heartbeat --new-job
+  assert_escalate "$HOME/.claude/coordinator/worker-signals"
+}
+
+@test "worker signals done names the signals directory when it is missing under a denied parent" {
+  export ORCH_USER_QUESTIONS_DIR="$TMP/questions"
+  denied_missing_signals
+  run "$ROOT/orch-signal" "done" --outcome succeeded --report /tmp/report --summary passed
+  assert_escalate "$HOME/.claude/coordinator/worker-signals"
 }

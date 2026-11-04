@@ -1,5 +1,6 @@
 """Serialize question cancellation with answer publication."""
 
+import errno
 import fcntl
 import os
 import signal
@@ -17,6 +18,27 @@ def questions_directory():
     )
 
 
+DENIED = (errno.EPERM, errno.EACCES, errno.EROFS)
+
+
+class Unwritable(OSError):
+    """A write or lock the sandbox or file modes deny; `directory` is the one the caller meant to use."""
+
+    def __init__(self, error, directory):
+        super().__init__(error.errno, error.strerror, str(directory))
+        self.directory = Path(directory)
+
+
+@contextmanager
+def guarded(directory):
+    try:
+        yield
+    except OSError as error:
+        if error.errno in DENIED and not isinstance(error, Unwritable):
+            raise Unwritable(error, directory) from error
+        raise
+
+
 HELD = "ORCH_ANSWERS_LOCK_HELD"
 CLOSE_TIMEOUT = 30
 ACTION_TIMEOUT = 60
@@ -30,8 +52,10 @@ def answers_lock(directory=None, timeout=None):
         yield
         return
     directory = Path(directory) if directory else questions_directory()
-    directory.mkdir(parents=True, exist_ok=True)
-    with (directory / ".answers.lock").open("a") as lock:
+    with guarded(directory):
+        directory.mkdir(parents=True, exist_ok=True)
+        lock = (directory / ".answers.lock").open("a")
+    with lock:
         if timeout is None:
             fcntl.flock(lock, fcntl.LOCK_EX)
         else:

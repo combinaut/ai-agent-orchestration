@@ -1,7 +1,6 @@
 """Explicit, harness-independent worker signals. Runtime files live outside the checkout."""
 
 import argparse
-import errno
 import hashlib
 import json
 import math
@@ -15,7 +14,7 @@ import uuid
 from pathlib import Path
 
 import discovery
-from question_lock import answers_lock, questions_directory
+from question_lock import Unwritable, answers_lock, guarded, questions_directory
 from question_remind import atomic_write
 from question_text import strip_controls
 
@@ -30,17 +29,11 @@ DONE_EVENTS_MAX = 200
 DONE_EVENTS_KEEP_SECONDS = 3600
 ID = re.compile(r"signal-[a-f0-9]{32}\Z")
 IDENTITY_KEYS = ("pane", "workspace", "owner")
-DENIED = (errno.EPERM, errno.EACCES, errno.EROFS)
 EXIT_UNWRITABLE = 73
 
 
 def directory():
     return Path.home() / ".claude/coordinator/worker-signals"
-
-
-def denied_directory(error):
-    path = Path(error.filename) if error.filename else directory()
-    return path if path.is_dir() else path.parent
 
 
 def read(path):
@@ -51,7 +44,8 @@ def read(path):
 
 
 def write(path, value):
-    atomic_write(path, json.dumps(value))
+    with guarded(directory()):
+        atomic_write(path, json.dumps(value))
 
 
 def pane_path(pane):
@@ -345,12 +339,13 @@ def answer(identifier, text, to_user=False):
                 for number, choice in enumerate(record["options"].split(","), 1)
                 if choice.strip()
             )
-            atomic_write(
-                target,
-                strip_controls(
-                    f"# Worker question {identifier}\n\n{record['question']}\n\n{choices}"
-                ),
-            )
+            with guarded(questions_directory()):
+                atomic_write(
+                    target,
+                    strip_controls(
+                        f"# Worker question {identifier}\n\n{record['question']}\n\n{choices}"
+                    ),
+                )
             # Use the existing reminder retry mechanism if opening the Q panel fails.
             from question_remind import write_remind
 
@@ -360,7 +355,8 @@ def answer(identifier, text, to_user=False):
         else:
             if not text or not text.strip():
                 raise ValueError("answer text is required")
-            atomic_write(answer_path(identifier), text)
+            with guarded(directory()):
+                atomic_write(answer_path(identifier), text)
 
 
 def bridge_user_answer(identifier, text):
@@ -591,16 +587,13 @@ def main():
             fields.pop("action")
             record_signal(identity(recover=True), args.action, **fields)
         return 0
-    except OSError as error:
-        if error.errno not in DENIED:
-            print(f"orch-signal: {error}", file=sys.stderr)
-            return 1
+    except Unwritable as error:
         print(
-            f"orch-signal: cannot write {denied_directory(error)} (sandbox?); run this command escalated",
+            f"orch-signal: cannot write {error.directory} (sandbox?); run this command escalated",
             file=sys.stderr,
         )
         return EXIT_UNWRITABLE
-    except (ValueError, discovery.Unavailable) as error:
+    except (OSError, ValueError, discovery.Unavailable) as error:
         print(f"orch-signal: {error}", file=sys.stderr)
         return 1
 
