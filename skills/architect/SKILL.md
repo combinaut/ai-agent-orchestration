@@ -187,7 +187,7 @@ No code starts until the Coordinator answers `LEGACY OK`. Other projects skip th
 - Workers do not call the `advisor` tool; architects and the Coordinator keep it. Each call re-reads the whole transcript uncached on the advisor model.
 - `/goal` is not part of the default worker brief. It is not shown to help yet; keep it for a long job whose worker is known to stop early, and write the condition for all the work you will send to that pane.
 - The goal is checked only when a turn ends. A prompt sent to a busy pane joins the running turn, so a goal set for one task is checked after all of them; once met it clears.
-- Prove the test **fails first**. Mutate one guard at a time and report which test caught it. A test that stays green under its own mutation pins nothing. Also check that every test has a kill no other test has: a test with no unique kill is a redundancy finding. Find a mutation only it catches, or merge it into the test that covers it (keeping its distinct inputs and assertions) or drop it. In a pure refactor, report the finding as a follow-up instead of editing the spec. A spec moved or ported in a refactor commit gets its mutation run again on the new code; a kill from the old code does not carry over.
+- Prove the test **fails first**. Mutate one guard at a time and report which test caught it. A test that stays green under its own mutation pins nothing. Also check that every test has a kill no other test has: a test with no unique kill is a redundancy finding. Find a mutation only it catches, or merge it into the test that covers it, keeping its distinct inputs and assertions. Drop it only when it is a duplicate by the footprint skill's rule: same setup and inputs, assertions a subset of the other's. In a pure refactor, report the finding as a follow-up instead of editing the spec. A spec moved or ported in a refactor commit gets its mutation run again on the new code; a kill from the old code does not carry over.
 - Run the linter **and** the formatter. Passing lint is not passing CI.
 - A pure refactor edits **no spec**, and the test count matches before and after.
 - **"Done" means the checks were actually run** — not that the file looks right. For anything deployable, the acceptance test is a real request against a real dependency.
@@ -236,8 +236,9 @@ Before you report a task complete, every line must hold:
 2. **Mutation table has a kill per guard and a unique kill per test.** A mutation that *survived* is a
    finding — the behaviour is not covered where it now lives. Never accept it as a footnote. A test
    that no mutation turns red on its own is a redundancy finding until a mutation only it catches is
-   shown; otherwise it is merged or dropped (a follow-up in a pure refactor). A moved or ported spec
-   counts only with kills measured on the new code.
+   shown; otherwise it is merged, keeping its distinct inputs and assertions, or dropped as a duplicate
+   (a follow-up in a pure refactor). A moved or ported spec counts only with kills measured on the
+   new code.
 3. **A pure refactor edited no spec**, and the test count matches before and after.
 4. **Linter and formatter both ran**, with their real output. Lint passing is not CI passing.
 5. **CI is green on the actual head commit**, not on an earlier one.
