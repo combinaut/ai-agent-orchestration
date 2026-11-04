@@ -9,7 +9,7 @@ argument-hint: "[<base-ref>] [<path>…]"
 
 AI-assisted development produces comments as a side effect of iterating: the model explains what it just changed, justifies a decision to the reviewer, or narrates the difference from a previous version of the code. Those comments made sense *during* the session, but they are noise the moment the work is final — the next reader sees only the final code and has no "previous version" to compare against.
 
-This skill sweeps every comment **added or modified on the current branch** and removes or rewrites two kinds of clutter: iteration artifacts, and comments that simply shouldn't exist because the code already says it.
+This skill sweeps every comment **added or modified on the current branch**, plus any older comment next to changed code that the change made false, and removes or rewrites two kinds of clutter: iteration artifacts, and comments that simply shouldn't exist because the code already says it.
 
 ## Input
 
@@ -61,8 +61,8 @@ For each comment, ask — in this order:
 ## Process
 
 1. Determine the diff scope with a single command that covers committed, staged, **and** unstaged changes: `git diff $(git merge-base HEAD <base>) -- <paths>` (base as in Input; ref and paths from `$ARGUMENTS`). The scope is the complete PR diff, not the last commit. Also run `git ls-files --others --exclude-standard -- <paths>` to pick up untracked files, which `git diff` misses.
-2. For each changed file, read the diff and identify every added or modified **syntactic comment** — text the language's parser treats as a comment (including HTML `<!-- -->`, `//`, `#`, and block comments whose body changed). A comment marker inside a non-comment context is out of scope: `#` in a string literal, URL, or scalar value; `//` in a URL or regex; heredoc content. When in doubt, read the surrounding file context — never edit anything that isn't unambiguously a comment.
-3. Apply the tests above to each, check the unchanged comments next to changed code for claims the diff made false, and present the findings as a table; wait for approval before changing anything. A Keep row is a claim too: it needs the same evidence as a removal (verified at `file:line`, a test or a run), not assertion:
+2. For each changed file, read the diff and identify every added or modified **syntactic comment** — text the language's parser treats as a comment (including HTML `<!-- -->`, `//`, `#`, and block comments whose body changed). A comment marker inside a non-comment context is out of scope: `#` in a string literal, URL, or scalar value; `//` in a URL or regex; heredoc content. When in doubt, read the surrounding file context — never edit anything that isn't unambiguously a comment. Also read the unchanged comments next to changed code, and add each one whose claim the diff made false.
+3. Apply the tests above to each. A comment kept by judgment, not by the never-touch list, needs the same evidence as a removal: verified at `file:line`, a test or a run. Present the findings as a table and wait for approval before changing anything:
 
    ```
    FINDING                                  FILE            CATEGORY     RECOMMENDATION
