@@ -267,14 +267,14 @@ class RepoFileTest(SettingsTest):
         )
         self.assertEqual(s.load_repo(self.base, {})["ORCH_BIG_REPO"], "0")
 
-    def test_finalize_commands_default_to_both_skills_and_a_repo_file_overrides(self):
-        both = "/finalize-change-footprint|/finalize-code-comments"
+    def test_finalize_commands_default_to_the_sweep_and_a_repo_file_overrides(self):
+        default = "/finalize-sweep"
         root = self.repo()
         self.assertEqual(
             s.load_repo(root, {"ORCH_CONFIG": str(self.write("empty.toml", ""))})[
                 "ORCH_REVIEW_FINALIZE_COMMANDS"
             ],
-            both,
+            default,
         )
         (root / s.REPO_FILE).write_text(
             '[review]\nfinalize_commands = ["/finalize-code-comments --fix"]\n'
@@ -1160,7 +1160,7 @@ class ProvidersTest(SettingsTest):
         defaults = self.resolve()
         self.assertEqual(
             defaults["ORCH_REVIEW_FINALIZE_COMMANDS"],
-            "/finalize-change-footprint|/finalize-code-comments",
+            "/finalize-sweep",
         )
         self.assertEqual(defaults["ORCH_REVIEW_FINALIZE_COMMENT"], "1")
         text = "[review]\nfinalize_commands = []\nfinalize_comment = false\n"

@@ -1629,9 +1629,9 @@ TOML
   [ "$output" = "$HOME/.claude/ai-agent-orchestration" ]
 }
 
-@test "install links both finalize skills for Claude and the shared agents folder" {
+@test "install links the finalize skills for Claude and the shared agents folder" {
   fresh_install
-  for name in finalize-change-footprint finalize-code-comments; do
+  for name in finalize-sweep finalize-change-footprint finalize-code-comments; do
     skill="$(cd "$CLONE" && pwd -P)/skills/$name"
     [ -f "$skill/SKILL.md" ]
     [ "$(readlink "$HOME/.claude/skills/$name")" = "$skill" ]
@@ -1651,6 +1651,6 @@ TOML
 }
 
 @test "the finalize skills carry no repo-specific names" {
-  run grep -rniE 'sparkle|combinaut|sleistner|stagehand|rubocop|mise run|\.ai/' "$ROOT/skills/finalize-change-footprint" "$ROOT/skills/finalize-code-comments"
+  run grep -rniE 'sparkle|combinaut|sleistner|stagehand|rubocop|mise run|\.ai/' "$ROOT/skills/finalize-sweep" "$ROOT/skills/finalize-change-footprint" "$ROOT/skills/finalize-code-comments"
   [ "$status" -eq 1 ]
 }

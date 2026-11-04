@@ -359,7 +359,7 @@ ENV
   [ "$status" -eq 0 ]
   [ "$output" = "ORCH_BIG_REPO=1
 ORCH_MERGE_GATE_CHECKS=Gate A|Gate B
-ORCH_REVIEW_FINALIZE_COMMANDS=/finalize-change-footprint|/finalize-code-comments
+ORCH_REVIEW_FINALIZE_COMMANDS=/finalize-sweep
 ORCH_REVIEW_FINALIZE_COMMENT=1
 ORCH_LEGACY_SCAN=1
 ORCH_LEGACY_RULES=[{\"kind\":\"LEGACY\",\"pattern\":\"old-widget\",\"paths\":[\"**\"]}]
