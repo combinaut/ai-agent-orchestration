@@ -20,7 +20,10 @@ SH
   chmod +x "$HERDR_BIN_PATH"
 }
 
-teardown() { rm -rf "$TMP"; }
+teardown() {
+  chmod -R u+w "$TMP" 2>/dev/null || true
+  rm -rf "$TMP"
+}
 
 @test "worker signals wrapper resolves symlinks, ignores identical done and preserves changed done" {
   printf '[workers]\nask_timeout_s = 1\n[herdr]\nbin = "%s"\n' "$HERDR_BIN_PATH" >"$ORCH_CONFIG"
@@ -87,6 +90,24 @@ denied_missing_questions() {
 denied_missing_signals() {
   mkdir -p "$HOME/.claude/coordinator"
   chmod 555 "$HOME/.claude/coordinator"
+}
+
+pending_question() {
+  export ORCH_USER_QUESTIONS_DIR="$TMP/questions"
+  "$ROOT/orch-signal" ask --question 'Which version?' --options v1,v2 --timeout 20 >/dev/null 2>&1 &
+  asker=$!
+  for _ in {1..50}; do
+    files=("$HOME/.claude/coordinator/worker-signals/"signal-*.json)
+    [ ! -f "${files[0]}" ] || break
+    sleep 0.1
+  done
+  id=${files[0]##*/}
+  id=${id%.json}
+}
+
+stop_asker() {
+  kill "$asker" 2>/dev/null || true
+  wait "$asker" 2>/dev/null || true
 }
 
 assert_escalate() {
@@ -175,4 +196,20 @@ assert_escalate() {
   denied_missing_signals
   run "$ROOT/orch-signal" "done" --outcome succeeded --report /tmp/report --summary passed
   assert_escalate "$HOME/.claude/coordinator/worker-signals"
+}
+
+@test "worker signals answer exits 73 naming the signals directory when the answer file is unwritable" {
+  pending_question
+  chmod 555 "$HOME/.claude/coordinator/worker-signals"
+  run env HERDR_PANE_ID=architect-pane HERDR_WORKSPACE_ID=architect "$ROOT/orch-signal" answer "$id" v2
+  stop_asker
+  assert_escalate "$HOME/.claude/coordinator/worker-signals"
+}
+
+@test "worker signals answer --to-user exits 73 naming the questions directory when the panel file is unwritable" {
+  pending_question
+  chmod 555 "$TMP/questions"
+  run env HERDR_PANE_ID=architect-pane HERDR_WORKSPACE_ID=architect "$ROOT/orch-signal" answer "$id" --to-user
+  stop_asker
+  assert_escalate "$TMP/questions"
 }
