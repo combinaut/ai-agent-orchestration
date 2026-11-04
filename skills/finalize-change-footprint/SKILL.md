@@ -63,7 +63,7 @@ For each added or changed piece, ask:
    Fallback on the text column                 widget.css                 defensive    Keep
    ```
 
-   A Keep row is a claim and needs the same evidence as a removal: verified at `file:line`, a test or a run. "Required" without a test is not evidence.
+   A Keep row is a claim and needs the same evidence as a removal: verified at `file:line`, a test or a run. "Required" without one of these is not evidence.
 
 5. Apply only the approved changes, then run the linters and tests for the touched surfaces. When removing a duplicate test, break the behaviour it pinned, confirm the covering test fails, then restore it.
 6. Report what was removed, moved, or kept, and why. Do **not** commit or push unless asked.
