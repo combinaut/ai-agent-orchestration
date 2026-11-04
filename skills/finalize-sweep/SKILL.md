@@ -46,7 +46,7 @@ Brief every agent with these rules. They override any step of the skill that edi
 
 - **No context.** Work only from the skill, the file list and the code. Do not read any PR, issue, plan, commit message, blame or earlier finding. No plan or ticket excuses what the code does today. This skips the footprint skill's `git log` step, so a leftover that only the commit history reveals can be missed.
 - **Report only.** Create, change or delete no file in the repository, even temporarily, and run no tests. The only write is one report file outside the repository.
-- **Evidence.** Verify every finding against the code at `file:line`, naming the callers or the covering test. Drop anything unverified. Report a behaviour bug you notice as `real-bug`, with the concrete failure.
+- **Evidence.** Verify every finding against the code at `file:line`, naming the callers or the covering test. Drop anything unverified. A Keep needs the same evidence. Report a behaviour bug you notice as `real-bug`, with the concrete failure.
 
 Before starting them, record `git rev-parse HEAD`, `git status --porcelain`, a hash of `git diff HEAD`, a hash of `git diff --cached HEAD`, and a hash over each untracked file's path, mode and content. Compare all five when the agents finish, so existing uncommitted work stays out of the check. A difference means an agent broke the report-only rule: stop and report it.
 

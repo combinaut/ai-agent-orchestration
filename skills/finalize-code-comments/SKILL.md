@@ -46,7 +46,7 @@ For each comment, ask — in this order:
 - **Structured doc comments** that tools consume: JSDoc, YARD/RDoc, docstrings, `@deprecated` markers.
 - **Directive comments**: linter disables, `@ts-check`, `@ts-expect-error`, magic comments (`# frozen_string_literal`), shebangs, and any justification attached to them.
 - **TODOs that reference a ticket.** A bare TODO with no ticket is a judgment call — flag it in the summary rather than deleting silently.
-- **Comments that predate the branch.** Only comments added or modified in the branch diff are in scope. Never "improve" pre-existing comments — that's scope creep.
+- **Comments that predate the branch.** Only comments added or modified in the branch diff are in scope. Never "improve" pre-existing comments — that's scope creep. One exception: a pre-existing comment next to changed code that the diff makes false is in scope, and fixing it is not scope creep.
 - **The repo's own comment rules.** If the repo documents a comment style (a style guide, `CLAUDE.md`, `AGENTS.md`), rewrite surviving comments to it.
 
 ## Rewrite vs. delete
@@ -62,7 +62,7 @@ For each comment, ask — in this order:
 
 1. Determine the diff scope with a single command that covers committed, staged, **and** unstaged changes: `git diff $(git merge-base HEAD <base>) -- <paths>` (base as in Input; ref and paths from `$ARGUMENTS`). The scope is the complete PR diff, not the last commit. Also run `git ls-files --others --exclude-standard -- <paths>` to pick up untracked files, which `git diff` misses.
 2. For each changed file, read the diff and identify every added or modified **syntactic comment** — text the language's parser treats as a comment (including HTML `<!-- -->`, `//`, `#`, and block comments whose body changed). A comment marker inside a non-comment context is out of scope: `#` in a string literal, URL, or scalar value; `//` in a URL or regex; heredoc content. When in doubt, read the surrounding file context — never edit anything that isn't unambiguously a comment.
-3. Apply the tests above to each and present the findings as a table; wait for approval before changing anything:
+3. Apply the tests above to each, check the unchanged comments next to changed code for claims the diff made false, and present the findings as a table; wait for approval before changing anything. A Keep row is a claim too: it needs the same evidence as a removal (verified at `file:line`, a test or a run), not assertion:
 
    ```
    FINDING                                  FILE            CATEGORY     RECOMMENDATION
