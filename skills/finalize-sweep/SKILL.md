@@ -36,6 +36,8 @@ At 400 changed lines or fewer, use one slice and go to step 3. Otherwise write a
 
 Check the plan with a script, not by reading it: every changed path appears exactly once, only single-file slices exceed the limit, and binary files sit only in their own slice.
 
+Above 24 slices, stop before starting any agent. Report the slice count and suggest splitting the PR.
+
 ## 3. Sweep
 
 Start one agent for `/finalize-code-comments` and one for `/finalize-change-footprint` per slice, passing the merge base from step 1 as the base ref, followed by the slice's paths, so no agent has to look up the PR. Respect the runtime's limit on concurrent agents and start the rest as others finish. A runtime that cannot start agents runs the same slices one after another, reading only one slice at a time.
