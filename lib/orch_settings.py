@@ -668,7 +668,7 @@ SETTINGS = [
         "review.finalize_commands",
         "ORCH_REVIEW_FINALIZE_COMMANDS",
         "list",
-        ["/finalize-change-footprint", "/finalize-code-comments"],
+        ["/finalize-sweep"],
         "Slash commands workers run before calling a PR done or ready; empty skips this step. The global file sets it for every repo; a repo file overrides it",
         sep="|",
         shared=True,
