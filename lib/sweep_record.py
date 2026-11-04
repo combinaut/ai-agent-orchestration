@@ -35,8 +35,11 @@ def problem(path, head):
         for n in verdicts.values()
     ):
         return f"{path}: verdicts must map each verdict to a count"
-    if not isinstance(record["validator_ids"], list):
-        return f"{path}: validator_ids must be a list"
+    ids = record["validator_ids"]
+    if not isinstance(ids, list) or not all(isinstance(i, str) and i for i in ids):
+        return f"{path}: validator_ids must be a list of non-empty strings"
+    if len(ids) != record["validators"]:
+        return f"{path}: {len(ids)} validator_ids for {record['validators']} validators"
     if record["findings"] > 0 and record["validators"] < 1:
         return f"{path}: {record['findings']} findings and no validator started"
     if sum(verdicts.values()) != record["findings"]:

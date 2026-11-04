@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2154 # run --separate-stderr sets stderr.
 
 bats_require_minimum_version 1.5.0
 
@@ -15,9 +16,11 @@ teardown() {
 
 # record <findings> <validators> <verdicts-json> [head]: writes the record file.
 record() {
+  local ids="" i
+  for ((i = 1; i <= $2; i++)); do ids="${ids:+$ids, }\"agent-$i\""; done
   cat >"$REC" <<JSON
 {"head": "${4:-$HEAD_SHA}", "base": "abc123", "slices": 3, "sweep_agents": 6,
- "validators": $2, "validator_ids": ["agent-1"], "findings": $1, "verdicts": $3}
+ "validators": $2, "validator_ids": [$ids], "findings": $1, "verdicts": $3}
 JSON
 }
 
@@ -88,4 +91,20 @@ check() {
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: validators must be a non-negative integer" ]
+}
+
+@test "validator ids that do not match the validator count fail" {
+  record 5 3 '{"FALSE": 5}'
+  sed -i.bak 's/"agent-2", "agent-3"//; s/, \]/]/' "$REC"
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: 1 validator_ids for 3 validators" ]
+}
+
+@test "a blank validator id fails" {
+  record 5 1 '{"FALSE": 5}'
+  sed -i.bak 's/"agent-1"/""/' "$REC"
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator_ids must be a list of non-empty strings" ]
 }

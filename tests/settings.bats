@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# shellcheck disable=SC2030,SC2031 # Bats runs each test in a subshell.
+# shellcheck disable=SC2030,SC2031,SC2154 # Bats runs each test in a subshell; run --separate-stderr sets stderr.
 
 bats_require_minimum_version 1.5.0
 
