@@ -339,6 +339,9 @@ def answer(identifier, text, to_user=False):
                 for number, choice in enumerate(record["options"].split(","), 1)
                 if choice.strip()
             )
+            # Use the existing reminder retry mechanism if opening the Q panel fails.
+            from question_remind import write_remind
+
             with guarded(questions_directory()):
                 atomic_write(
                     target,
@@ -346,10 +349,7 @@ def answer(identifier, text, to_user=False):
                         f"# Worker question {identifier}\n\n{record['question']}\n\n{choices}"
                     ),
                 )
-            # Use the existing reminder retry mechanism if opening the Q panel fails.
-            from question_remind import write_remind
-
-            write_remind(target, time.time())
+                write_remind(target, time.time())
             if open_user_question(identifier, target) in (0, 73):
                 target.with_suffix(".remind").unlink(missing_ok=True)
         else:

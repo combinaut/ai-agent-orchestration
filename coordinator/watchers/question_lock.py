@@ -56,19 +56,20 @@ def answers_lock(directory=None, timeout=None):
         directory.mkdir(parents=True, exist_ok=True)
         lock = (directory / ".answers.lock").open("a")
     with lock:
-        if timeout is None:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-        else:
-            deadline = time.monotonic() + timeout
-            while True:
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise TimeoutError("question lock wait timed out") from None
-                    time.sleep(min(0.05, remaining))
+        with guarded(directory):
+            if timeout is None:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            else:
+                deadline = time.monotonic() + timeout
+                while True:
+                    try:
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise TimeoutError("question lock wait timed out") from None
+                        time.sleep(min(0.05, remaining))
         yield
 
 

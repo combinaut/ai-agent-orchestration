@@ -110,6 +110,35 @@ stop_asker() {
   wait "$asker" 2>/dev/null || true
 }
 
+deny_with_stub() {
+  mkdir -p "$TMP/stub"
+  cat >"$TMP/stub/sitecustomize.py" <<'PY'
+import errno
+import os
+
+mode = os.environ.get("ORCH_TEST_DENY")
+if mode == "reminder":
+    import question_remind
+
+    original = question_remind.atomic_write
+
+    def deny_reminder(path, text):
+        if str(path).endswith(".remind"):
+            raise PermissionError(errno.EPERM, "Operation not permitted", str(path))
+        return original(path, text)
+
+    question_remind.atomic_write = deny_reminder
+elif mode == "flock":
+    import fcntl
+
+    def deny_flock(fd, operation):
+        raise PermissionError(errno.EPERM, "Operation not permitted")
+
+    fcntl.flock = deny_flock
+PY
+  export PYTHONPATH="$TMP/stub:$ROOT/coordinator/watchers"
+}
+
 assert_escalate() {
   [ "$status" -eq 73 ]
   local dir=${1//\/\//\/}
@@ -212,4 +241,24 @@ assert_escalate() {
   run env HERDR_PANE_ID=architect-pane HERDR_WORKSPACE_ID=architect "$ROOT/orch-signal" answer "$id" --to-user
   stop_asker
   assert_escalate "$TMP/questions"
+}
+
+@test "worker signals answer --to-user exits 73 naming the questions directory when the reminder file is unwritable" {
+  pending_question
+  deny_with_stub
+  run env ORCH_TEST_DENY=reminder HERDR_PANE_ID=architect-pane HERDR_WORKSPACE_ID=architect "$ROOT/orch-signal" answer "$id" --to-user
+  stop_asker
+  assert_escalate "$TMP/questions"
+}
+
+@test "worker signals list exits 73 naming the questions directory when a blocking flock is denied" {
+  deny_with_stub
+  run env ORCH_TEST_DENY=flock "$ROOT/orch-signal" list
+  assert_escalate "${ORCH_USER_QUESTIONS_DIR:-$HOME/.claude/coordinator/questions}"
+}
+
+@test "worker signals ask exits 73 naming the questions directory when a non-blocking flock is denied" {
+  deny_with_stub
+  run env ORCH_TEST_DENY=flock "$ROOT/orch-signal" ask --question 'Which version?' --timeout 5
+  assert_escalate "${ORCH_USER_QUESTIONS_DIR:-$HOME/.claude/coordinator/questions}"
 }
