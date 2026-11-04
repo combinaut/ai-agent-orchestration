@@ -669,7 +669,7 @@ SETTINGS = [
         "ORCH_REVIEW_FINALIZE_COMMANDS",
         "list",
         ["/finalize-sweep"],
-        "Slash commands workers run before calling a PR done or ready; empty skips this step. The global file sets it for every repo; a repo file overrides it",
+        "Slash commands workers run before calling a PR done or ready, and again after every merge or rebase of the base; empty skips this step. The global file sets it for every repo; a repo file overrides it",
         sep="|",
         shared=True,
     ),

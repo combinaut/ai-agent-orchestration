@@ -117,7 +117,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `pr_tabs.repos` | `ORCH_PR_TABS_REPOS` | empty | Repo names in pr_tabs.org the popup can send a bare PR number to, besides default_repo; the popup shows a picker when there are two or more |
 | `pr_tabs.open_all` | `ORCH_PR_TABS_OPEN_ALL` | empty | GitHub search behind the Open all button; empty turns it off |
 | `pr_tabs.terminal_app` | `ORCH_PR_TABS_TERMINAL_APP` | empty | macOS app the popup's go to pane button brings to the front after focusing the Herdr pane; empty leaves the windows as they are |
-| `review.finalize_commands` | `ORCH_REVIEW_FINALIZE_COMMANDS` | `["/finalize-sweep"]` | Slash commands workers run before calling a PR done or ready; empty skips this step. The global file sets it for every repo; a repo file overrides it |
+| `review.finalize_commands` | `ORCH_REVIEW_FINALIZE_COMMANDS` | `["/finalize-sweep"]` | Slash commands workers run before calling a PR done or ready, and again after every merge or rebase of the base; empty skips this step. The global file sets it for every repo; a repo file overrides it |
 | `review.finalize_comment` | `ORCH_REVIEW_FINALIZE_COMMENT` | `true` | After the approved findings are applied and pushed, the worker posts one PR comment with every finding. The global file sets it for every repo; a repo file overrides it |
 
 ## Repo settings
@@ -126,7 +126,7 @@ A family left out is never started: the installer does not ask for its models, a
 |---|---|---|---|
 | `guard.big_repo` | `ORCH_BIG_REPO` | `false` | Broad Git reads (git grep, cat-file over all objects) are blocked in this repo |
 | `audit.merge_gate_checks` | `ORCH_MERGE_GATE_CHECKS` | empty | Check names that only run on a full CI run; an approved PR on a non-default base reports "full CI ran" or "full CI not run" |
-| `review.finalize_commands` | `ORCH_REVIEW_FINALIZE_COMMANDS` | `["/finalize-sweep"]` | Slash commands workers run before calling a PR done or ready; empty skips this step. The global file sets it for every repo; a repo file overrides it |
+| `review.finalize_commands` | `ORCH_REVIEW_FINALIZE_COMMANDS` | `["/finalize-sweep"]` | Slash commands workers run before calling a PR done or ready, and again after every merge or rebase of the base; empty skips this step. The global file sets it for every repo; a repo file overrides it |
 | `review.finalize_comment` | `ORCH_REVIEW_FINALIZE_COMMENT` | `true` | After the approved findings are applied and pushed, the worker posts one PR comment with every finding. The global file sets it for every repo; a repo file overrides it |
 | `legacy.scan` | `ORCH_LEGACY_SCAN` | `false` | Open PRs of this repo are scanned for added lines that legacy.rules count (LEGACY line) |
 | `legacy.rules` | `ORCH_LEGACY_RULES` | empty | Legacy rules ([[legacy.rules]]: kind, paths, optional pattern and exclude); the first rule that counts a line names its kind. No rules: nothing is scanned or mapped |
