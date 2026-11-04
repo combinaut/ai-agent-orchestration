@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 
 import discovery
-from question_lock import Unwritable, answers_lock, guarded, questions_directory
+from question_lock import DENIED, Unwritable, answers_lock, guarded, questions_directory
 from question_remind import atomic_write
 from question_text import strip_controls
 
@@ -60,6 +60,22 @@ def question_path(identifier):
 
 def answer_path(identifier):
     return question_path(identifier).with_suffix(".answer")
+
+
+def escalation_directory(error):
+    """The directory to name for a denied write: the known root the path lies under, else its nearest existing directory."""
+    if isinstance(error, Unwritable):
+        return error.directory
+    if not error.filename:
+        return directory()
+    path = Path(os.path.abspath(error.filename))
+    for root in (questions_directory(), directory()):
+        if path == root or root in path.parents:
+            return root
+    return next(
+        (candidate for candidate in (path, *path.parents) if candidate.is_dir()),
+        Path(path.anchor),
+    )
 
 
 def worktree_of(path):
@@ -210,21 +226,32 @@ def remove_question(record, close_panel=True, close_timeout=CLEANUP_SECONDS):
         if not close_panel:
             record["cleanup"] = True
             write(question_path(identifier), record)
-            answer_path(identifier).unlink(missing_ok=True)
-            panel.with_suffix(".remind").unlink(missing_ok=True)
+            with guarded(directory()):
+                answer_path(identifier).unlink(missing_ok=True)
+            with guarded(questions_directory()):
+                panel.with_suffix(".remind").unlink(missing_ok=True)
             return False
         try:
             if open_user_question("close", identifier, timeout=close_timeout) != 0:
                 return False
         except (OSError, subprocess.SubprocessError):
             return False
-    question_path(identifier).unlink(missing_ok=True)
-    answer_path(identifier).unlink(missing_ok=True)
-    directory = questions_directory()
-    for suffix in ("md", "remind", "asker-pane", "answer", "answer.seen", "opening"):
-        (directory / f"{identifier}.{suffix}").unlink(missing_ok=True)
-    for path in directory.glob(f"{identifier}.*.answer.*"):
-        path.unlink(missing_ok=True)
+    with guarded(directory()):
+        question_path(identifier).unlink(missing_ok=True)
+        answer_path(identifier).unlink(missing_ok=True)
+    questions = questions_directory()
+    with guarded(questions):
+        for suffix in (
+            "md",
+            "remind",
+            "asker-pane",
+            "answer",
+            "answer.seen",
+            "opening",
+        ):
+            (questions / f"{identifier}.{suffix}").unlink(missing_ok=True)
+        for path in questions.glob(f"{identifier}.*.answer.*"):
+            path.unlink(missing_ok=True)
     return True
 
 
@@ -351,7 +378,8 @@ def answer(identifier, text, to_user=False):
                 )
                 write_remind(target, time.time())
             if open_user_question(identifier, target) in (0, 73):
-                target.with_suffix(".remind").unlink(missing_ok=True)
+                with guarded(questions_directory()):
+                    target.with_suffix(".remind").unlink(missing_ok=True)
         else:
             if not text or not text.strip():
                 raise ValueError("answer text is required")
@@ -587,13 +615,16 @@ def main():
             fields.pop("action")
             record_signal(identity(recover=True), args.action, **fields)
         return 0
-    except Unwritable as error:
+    except OSError as error:
+        if error.errno not in DENIED:
+            print(f"orch-signal: {error}", file=sys.stderr)
+            return 1
         print(
-            f"orch-signal: cannot write {error.directory} (sandbox?); run this command escalated",
+            f"orch-signal: cannot write {escalation_directory(error)} (sandbox?); run this command escalated",
             file=sys.stderr,
         )
         return EXIT_UNWRITABLE
-    except (OSError, ValueError, discovery.Unavailable) as error:
+    except (ValueError, discovery.Unavailable) as error:
         print(f"orch-signal: {error}", file=sys.stderr)
         return 1
 

@@ -115,8 +115,16 @@ deny_with_stub() {
   cat >"$TMP/stub/sitecustomize.py" <<'PY'
 import errno
 import os
+import pathlib
 
 mode = os.environ.get("ORCH_TEST_DENY")
+code = getattr(errno, os.environ.get("ORCH_TEST_ERRNO", "EPERM"))
+
+
+def denied(path=None):
+    return PermissionError(code, os.strerror(code), str(path) if path else None)
+
+
 if mode == "reminder":
     import question_remind
 
@@ -124,7 +132,7 @@ if mode == "reminder":
 
     def deny_reminder(path, text):
         if str(path).endswith(".remind"):
-            raise PermissionError(errno.EPERM, "Operation not permitted", str(path))
+            raise denied(path)
         return original(path, text)
 
     question_remind.atomic_write = deny_reminder
@@ -132,9 +140,29 @@ elif mode == "flock":
     import fcntl
 
     def deny_flock(fd, operation):
-        raise PermissionError(errno.EPERM, "Operation not permitted")
+        raise denied()
 
     fcntl.flock = deny_flock
+elif mode in ("unlink-remind", "unlink-signal"):
+    import watchers
+
+    watchers.open_question = lambda *args, **kwargs: 0
+    unlink = pathlib.Path.unlink
+    suffix = ".remind" if mode == "unlink-remind" else ".json"
+
+    def deny_unlink(self, missing_ok=False):
+        if self.name.endswith(suffix):
+            raise denied(self)
+        return unlink(self, missing_ok=missing_ok)
+
+    pathlib.Path.unlink = deny_unlink
+elif mode == "raw":
+    import discovery
+
+    def deny_open_work(command):
+        raise denied(os.environ["ORCH_TEST_DENY_PATH"])
+
+    discovery.open_work = deny_open_work
 PY
   export PYTHONPATH="$TMP/stub:$ROOT/coordinator/watchers"
 }
@@ -261,4 +289,59 @@ assert_escalate() {
   deny_with_stub
   run env ORCH_TEST_DENY=flock "$ROOT/orch-signal" ask --question 'Which version?' --timeout 5
   assert_escalate "${ORCH_USER_QUESTIONS_DIR:-$HOME/.claude/coordinator/questions}"
+}
+
+@test "worker signals answer --to-user exits 73 naming the questions directory when the reminder cleanup is denied" {
+  pending_question
+  deny_with_stub
+  run env ORCH_TEST_DENY=unlink-remind HERDR_PANE_ID=architect-pane HERDR_WORKSPACE_ID=architect "$ROOT/orch-signal" answer "$id" --to-user
+  stop_asker
+  assert_escalate "$TMP/questions"
+}
+
+@test "worker signals ask exits 73 naming the signals directory when the answered record cleanup is denied" {
+  export ORCH_USER_QUESTIONS_DIR="$TMP/questions"
+  deny_with_stub
+  ORCH_TEST_DENY=unlink-signal "$ROOT/orch-signal" ask --question 'Which version?' --timeout 20 >"$TMP/result" 2>&1 &
+  asker=$!
+  for _ in {1..50}; do
+    files=("$HOME/.claude/coordinator/worker-signals/"signal-*.json)
+    [ ! -f "${files[0]}" ] || break
+    sleep 0.1
+  done
+  id=${files[0]##*/}
+  id=${id%.json}
+  run env HERDR_PANE_ID=architect-pane HERDR_WORKSPACE_ID=architect "$ROOT/orch-signal" answer "$id" v2
+  [ "$status" -eq 0 ]
+  wait "$asker" && code=0 || code=$?
+  [ "$code" -eq 73 ]
+  status=73 output=$(cat "$TMP/result")
+  assert_escalate "$HOME/.claude/coordinator/worker-signals"
+}
+
+@test "worker signals denied flock exits 73 for EPERM, EACCES and EROFS" {
+  deny_with_stub
+  for name in EPERM EACCES EROFS; do
+    run env ORCH_TEST_DENY=flock ORCH_TEST_ERRNO=$name "$ROOT/orch-signal" list
+    assert_escalate "$HOME/.claude/coordinator/questions"
+  done
+}
+
+@test "worker signals fallback names the questions directory for a denied path below it" {
+  export ORCH_USER_QUESTIONS_DIR="$TMP/q"
+  deny_with_stub
+  run env ORCH_TEST_DENY=raw ORCH_TEST_DENY_PATH="$TMP/q/sub/missing" "$ROOT/orch-signal" list
+  assert_escalate "$TMP/q"
+}
+
+@test "worker signals fallback names the signals directory for a denied path below it" {
+  deny_with_stub
+  run env ORCH_TEST_DENY=raw ORCH_TEST_DENY_PATH="$HOME/.claude/coordinator/worker-signals/x.json" "$ROOT/orch-signal" list
+  assert_escalate "$HOME/.claude/coordinator/worker-signals"
+}
+
+@test "worker signals fallback names the nearest existing parent for a denied path outside both roots" {
+  deny_with_stub
+  run env ORCH_TEST_DENY=raw ORCH_TEST_DENY_PATH="$TMP/outside/a/b" "$ROOT/orch-signal" list
+  assert_escalate "$TMP"
 }
