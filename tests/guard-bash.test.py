@@ -552,7 +552,11 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     wiki.mkdir()
     git(wiki, "init", "-b", "master")
     git(
-        wiki, "remote", "add", "origin", "https://github.com/example-org/webapp.wiki.git"
+        wiki,
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/example-org/webapp.wiki.git",
     )
     (webapp / "subdir").mkdir()
     (wiki / "link").symlink_to("../subdir")
