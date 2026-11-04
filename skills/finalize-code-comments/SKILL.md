@@ -62,7 +62,7 @@ For each comment, ask — in this order:
 
 1. Determine the diff scope with a single command that covers committed, staged, **and** unstaged changes: `git diff $(git merge-base HEAD <base>) -- <paths>` (base as in Input; ref and paths from `$ARGUMENTS`). The scope is the complete PR diff, not the last commit. Also run `git ls-files --others --exclude-standard -- <paths>` to pick up untracked files, which `git diff` misses.
 2. For each changed file, read the diff and identify every added or modified **syntactic comment** — text the language's parser treats as a comment (including HTML `<!-- -->`, `//`, `#`, and block comments whose body changed). A comment marker inside a non-comment context is out of scope: `#` in a string literal, URL, or scalar value; `//` in a URL or regex; heredoc content. When in doubt, read the surrounding file context — never edit anything that isn't unambiguously a comment. Also read the unchanged comments next to changed code, and add each one whose claim the diff made false.
-3. Apply the tests above to each. A comment kept by judgment, not by the never-touch list, needs the same evidence as a removal: verified at `file:line`, a test or a run. Present the findings as a table and wait for approval before changing anything:
+3. Apply the tests above to each. A kept comment that states a claim about the code (a constraint, a "why", a quirk) needs the same evidence as a removal: verified at `file:line`, a test or a run. Directives, structured doc comments and ticket TODOs need none. Present the findings as a table and wait for approval before changing anything:
 
    ```
    FINDING                                  FILE            CATEGORY     RECOMMENDATION
