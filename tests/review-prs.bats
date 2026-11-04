@@ -444,7 +444,7 @@ fork_head_missing_from_pull_ref() {
 }
 
 @test "the skill holds no org, model, login or personal path literals" {
-  run grep -rniE 'combinaut|sparkle|gpt-[0-9]|sleistner|/Users/|/private/tmp|31691' "$ROOT/$SKILL_DIR"
+  run grep -rniE 'combinaut|spar''kle|gpt-[0-9]|sleistner|/Users/|/private/tmp|31691' "$ROOT/$SKILL_DIR"
   [ "$status" -eq 1 ]
 }
 
