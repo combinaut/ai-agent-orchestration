@@ -13,7 +13,7 @@ printf '%s\n' "$*" >>"$TMP/todo-herdr.calls"
 case "$1 $2" in
   'pane list') printf '{"result":{"panes":[%s]}}\n' "$(cat "$TMP/panes.json")" ;;
   'pane split') printf '%s\n' '{"result":{"pane":{"pane_id":"todo-new"}}}' ;;
-  'pane rename') printf '{"pane_id":"%s","label":"%s"}' "$3" "$4" >"$TMP/panes.json" ;;
+  'pane rename') printf '{"pane_id":"coord-pane","tab_id":"coord-tab"},{"pane_id":"%s","label":"%s","tab_id":"coord-tab"}' "$3" "$4" >"$TMP/panes.json" ;;
 esac
 EOF2
   chmod +x "$BIN/herdr-todo"
@@ -40,11 +40,13 @@ splits() { calls | grep -c '^pane split ' || true; }
   not_contains "$(calls)" 'pane focus'
 }
 
-@test "reuses a pane already labelled To-do and opens nothing" {
-  printf '{"pane_id":"existing","label":"To-do"}' >"$TMP/panes.json"
+@test "reuses a pane already labelled To-do in the Coordinator tab" {
+  printf '{"pane_id":"coord-pane","tab_id":"coord-tab"},{"pane_id":"existing","label":"To-do","tab_id":"coord-tab"}' >"$TMP/panes.json"
   run "$PANE"
   [ "$status" -eq 0 ]
   [ "$(splits)" -eq 0 ]
+  not_contains "$(calls)" 'pane move'
+  not_contains "$(calls)" 'pane focus'
   not_contains "$(calls)" 'pane run'
 }
 
@@ -56,11 +58,58 @@ splits() { calls | grep -c '^pane split ' || true; }
   [ "$(splits)" -eq 1 ]
 }
 
-@test "a Coordinator successor in another pane keeps the existing pane" {
-  printf '{"pane_id":"old-todo","label":"To-do","terminal_title_stripped":"python3 user-todo-view.py"}' >"$TMP/panes.json"
+@test "a Coordinator successor moves the existing pane into its tab without changing focus" {
+  printf '{"pane_id":"old-todo","label":"To-do","tab_id":"old-tab"},{"pane_id":"successor-pane","tab_id":"successor-tab"}' >"$TMP/panes.json"
   run env HERDR_PANE_ID=successor-pane "$PANE"
   [ "$status" -eq 0 ]
   [ "$(splits)" -eq 0 ]
+  contains "$(calls)" 'pane move old-todo --tab successor-tab --target-pane successor-pane --split right --no-focus'
+  not_contains "$(calls)" 'pane focus'
+}
+
+@test "a failed move reports an error and does not open a replacement pane" {
+  printf '{"pane_id":"old-todo","label":"To-do","tab_id":"old-tab"},{"pane_id":"successor-pane","tab_id":"successor-tab"}' >"$TMP/panes.json"
+  run env HERDR_FAIL=move HERDR_PANE_ID=successor-pane "$PANE"
+  [ "$status" -ne 0 ]
+  contains "$output" 'failed to move to-do pane: old-todo'
+  [ "$(splits)" -eq 0 ]
+  not_contains "$(calls)" 'pane focus'
+}
+
+@test "an existing pane with a caller absent from pane list reports an error" {
+  printf '{"pane_id":"old-todo","label":"To-do","tab_id":"old-tab"}' >"$TMP/panes.json"
+  run env HERDR_PANE_ID=successor-pane "$PANE"
+  [ "$status" -ne 0 ]
+  contains "$output" 'cannot move to-do pane'
+  [ "$(splits)" -eq 0 ]
+  not_contains "$(calls)" 'pane move'
+}
+
+@test "an existing pane without HERDR_PANE_ID reports an error" {
+  printf '{"pane_id":"old-todo","label":"To-do","tab_id":"old-tab"}' >"$TMP/panes.json"
+  run env -u HERDR_PANE_ID "$PANE"
+  [ "$status" -ne 0 ]
+  contains "$output" 'cannot move to-do pane'
+  [ "$(splits)" -eq 0 ]
+  not_contains "$(calls)" 'pane move'
+}
+
+@test "an existing pane without tab ids reports an error" {
+  printf '{"pane_id":"old-todo","label":"To-do"},{"pane_id":"successor-pane"}' >"$TMP/panes.json"
+  run env HERDR_PANE_ID=successor-pane "$PANE"
+  [ "$status" -ne 0 ]
+  contains "$output" 'cannot move to-do pane'
+  [ "$(splits)" -eq 0 ]
+  not_contains "$(calls)" 'pane move'
+}
+
+@test "an existing pane in the caller tab is kept before a pane in another tab" {
+  printf '{"pane_id":"successor-pane","tab_id":"successor-tab"},{"pane_id":"current-todo","label":"To-do","tab_id":"successor-tab"},{"pane_id":"old-todo","label":"To-do","tab_id":"old-tab"}' >"$TMP/panes.json"
+  run env HERDR_PANE_ID=successor-pane "$PANE"
+  [ "$status" -eq 0 ]
+  contains "$output" 'to-do pane already open: current-todo'
+  [ "$(splits)" -eq 0 ]
+  not_contains "$(calls)" 'pane move'
 }
 
 @test "only the exact label counts: To-do list and Q: To-do open a new pane" {
