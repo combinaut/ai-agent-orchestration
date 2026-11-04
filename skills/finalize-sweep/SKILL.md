@@ -20,7 +20,7 @@ It runs `/finalize-code-comments` and `/finalize-change-footprint` per slice. Mo
 - Record the commit the sweep runs at. Before reporting, check whether the head has moved, and say so if it has.
 - Cover the complete PR diff, never only what changed since an earlier sweep. Include staged, unstaged and untracked changes.
 - Resolve the merge base once, with `git merge-base HEAD <base>` and the base from Input. Use that commit for everything below.
-- List the changed paths with `git diff --name-status -z <merge-base>`, which covers committed, staged and unstaged changes, deleted files included. A renamed file is listed under its new name only. Add each file from `git ls-files --others --exclude-standard`.
+- List the changed paths with `git diff --name-status -z <merge-base>`, which covers committed, staged and unstaged changes, deleted files included. A renamed file counts once, under its new name, and keeps its old name for step 3. Add each file from `git ls-files --others --exclude-standard`.
 - Count additions plus deletions per path with `git diff --numstat -z <merge-base>`, and all lines for an untracked file. A binary file has no line count.
 
 ## 2. Slice
@@ -40,7 +40,7 @@ Above 25 slices, pause before starting any agent. Report the slice count and ask
 
 ## 3. Sweep
 
-Start one agent for `/finalize-code-comments` and one for `/finalize-change-footprint` per slice, passing the merge base from step 1 as the base ref, followed by the slice's paths, so no agent has to look up the PR. Respect the runtime's limit on concurrent agents and start the rest as others finish. A runtime that cannot start agents runs the same slices one after another, reading only one slice at a time.
+Start one agent for `/finalize-code-comments` and one for `/finalize-change-footprint` per slice, passing the merge base from step 1 as the base ref, followed by the slice's paths, so no agent has to look up the PR. For a renamed file, pass both its old and new names, because a path-limited diff with only the new name shows the whole file as added. Respect the runtime's limit on concurrent agents and start the rest as others finish. A runtime that cannot start agents runs the same slices one after another, reading only one slice at a time.
 
 Brief every agent with these rules. They override any step of the skill that edits files or asks for approval.
 
@@ -48,7 +48,7 @@ Brief every agent with these rules. They override any step of the skill that edi
 - **Report only.** Create, change or delete no file in the repository, even temporarily, and run no tests. The only write is one report file outside the repository.
 - **Evidence.** Verify every finding against the code at `file:line`, naming the callers or the covering test. Drop anything unverified. Report a behaviour bug you notice as `real-bug`, with the concrete failure.
 
-Before starting them, record `git rev-parse HEAD`, `git status --porcelain`, a hash of `git diff HEAD`, and a hash over each untracked file's path, mode and content. Compare all four when the agents finish, so existing uncommitted work stays out of the check. A difference means an agent broke the report-only rule: stop and report it.
+Before starting them, record `git rev-parse HEAD`, `git status --porcelain`, a hash of `git diff HEAD`, a hash of `git diff --cached HEAD`, and a hash over each untracked file's path, mode and content. Compare all five when the agents finish, so existing uncommitted work stays out of the check. A difference means an agent broke the report-only rule: stop and report it.
 
 ## 4. Validate
 
@@ -64,7 +64,7 @@ For each finding, a validator checks: is it true of the code, was it raised befo
 | `RESPECT_DROP` | Dropped earlier, and the reason holds | Drop |
 | `ALREADY_FIXED` | Fixed at this commit | Drop |
 | `ALLOWED_PLANNED` | True, but a named later step needs it | Drop |
-| `PREEXISTING` | Moved or unchanged from the base | Drop |
+| `PREEXISTING` | The problem already existed at the merge base, so this PR didn't cause it. Unchanged code can still be this PR's doing, such as a helper whose last caller it removed | Drop |
 | `FALSE` | Not true of the code | Drop |
 | `NOT_WORTH_IT` | True, but too minor or debatable | Drop |
 
