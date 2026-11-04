@@ -66,3 +66,70 @@ teardown() { rm -rf "$TMP"; }
   [ "$(cat "$TMP/result")" = v2 ]
   [ ! -s "$TMP/error" ]
 }
+
+denied_questions() {
+  export ORCH_USER_QUESTIONS_DIR="$TMP/questions"
+  mkdir -p "$ORCH_USER_QUESTIONS_DIR"
+  chmod 555 "$ORCH_USER_QUESTIONS_DIR"
+}
+
+denied_signals() {
+  mkdir -p "$HOME/.claude/coordinator/worker-signals"
+  chmod 555 "$HOME/.claude/coordinator/worker-signals"
+}
+
+assert_escalate() {
+  [ "$status" -eq 73 ]
+  local dir=${1//\/\//\/}
+  [ "$output" = "orch-signal: cannot write $dir (sandbox?); run this command escalated" ] || { echo "$output"; false; }
+}
+
+@test "worker signals ask exits 73 naming the questions directory when its lock is unwritable" {
+  denied_questions
+  run "$ROOT/orch-signal" ask --question 'Which version?' --timeout 5
+  assert_escalate "$TMP/questions"
+}
+
+@test "worker signals list exits 73 naming the questions directory when its lock is unwritable" {
+  denied_questions
+  run "$ROOT/orch-signal" list
+  assert_escalate "$TMP/questions"
+}
+
+@test "worker signals heartbeat exits 73 naming the questions directory when its lock is unwritable" {
+  denied_questions
+  run "$ROOT/orch-signal" heartbeat --new-job
+  assert_escalate "$TMP/questions"
+}
+
+@test "worker signals done exits 73 naming the questions directory when its lock is unwritable" {
+  denied_questions
+  run "$ROOT/orch-signal" "done" --outcome succeeded --report /tmp/report --summary passed
+  assert_escalate "$TMP/questions"
+}
+
+@test "worker signals answer exits 73 naming the questions directory when its lock is unwritable" {
+  denied_questions
+  run env HERDR_PANE_ID=architect-pane HERDR_WORKSPACE_ID=architect "$ROOT/orch-signal" answer signal-00000000000000000000000000000000 v2
+  assert_escalate "$TMP/questions"
+}
+
+@test "worker signals heartbeat exits 73 naming the signals directory when it is unwritable" {
+  denied_signals
+  run "$ROOT/orch-signal" heartbeat --new-job
+  assert_escalate "$HOME/.claude/coordinator/worker-signals"
+}
+
+@test "worker signals ask exits 73 naming the signals directory when it is unwritable" {
+  denied_signals
+  run "$ROOT/orch-signal" ask --question 'Which version?' --timeout 5
+  assert_escalate "$HOME/.claude/coordinator/worker-signals"
+}
+
+@test "worker signals other write errors keep exit 1" {
+  mkdir -p "$HOME/.claude/coordinator"
+  : >"$HOME/.claude/coordinator/worker-signals"
+  run "$ROOT/orch-signal" heartbeat --new-job
+  [ "$status" -eq 1 ]
+  [[ "$output" == 'orch-signal: '* ]]
+}

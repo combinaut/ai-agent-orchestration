@@ -1,6 +1,7 @@
 """Explicit, harness-independent worker signals. Runtime files live outside the checkout."""
 
 import argparse
+import errno
 import hashlib
 import json
 import math
@@ -29,6 +30,13 @@ DONE_EVENTS_MAX = 200
 DONE_EVENTS_KEEP_SECONDS = 3600
 ID = re.compile(r"signal-[a-f0-9]{32}\Z")
 IDENTITY_KEYS = ("pane", "workspace", "owner")
+DENIED = (errno.EPERM, errno.EACCES, errno.EROFS)
+EXIT_UNWRITABLE = 73
+
+
+def denied_directory(error):
+    path = Path(error.filename) if error.filename else directory()
+    return path if path.is_dir() else path.parent
 
 
 def directory():
@@ -583,7 +591,16 @@ def main():
             fields.pop("action")
             record_signal(identity(recover=True), args.action, **fields)
         return 0
-    except (OSError, ValueError, discovery.Unavailable) as error:
+    except OSError as error:
+        if error.errno not in DENIED:
+            print(f"orch-signal: {error}", file=sys.stderr)
+            return 1
+        print(
+            f"orch-signal: cannot write {denied_directory(error)} (sandbox?); run this command escalated",
+            file=sys.stderr,
+        )
+        return EXIT_UNWRITABLE
+    except (ValueError, discovery.Unavailable) as error:
         print(f"orch-signal: {error}", file=sys.stderr)
         return 1
 
