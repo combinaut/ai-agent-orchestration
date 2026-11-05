@@ -25,7 +25,7 @@ VERDICTS = (
 
 
 def problem(path, head, base=None):
-    """(why, record): why the record at path does not prove a sweep of head, else None."""
+    """(why, record): why the record at path is malformed or its SHAs are not full SHAs, else None."""
     try:
         with open(path, encoding="utf-8") as handle:
             record = json.load(handle)
@@ -99,7 +99,7 @@ def git(*args):
 
 
 def since(path, swept, base, head):
-    """Why the swept commit does not lead to head, else the commits after it."""
+    """(why, commits): why the record's commits do not fit head, else the log of the commits after the swept one."""
     for sha in (swept, base, head):
         if git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}") is None:
             return f"{path}: git cannot resolve {sha}", ""

@@ -18,10 +18,10 @@ It runs `/finalize-code-comments` and `/finalize-change-footprint` per slice. Mo
 ## 1. Scope
 
 - The sweep needs a committed head and a clean tree: `git status --porcelain` must be empty before slicing. When the tree is dirty, stop and tell the caller to commit first. Record the head commit as `head`. Before reporting, check whether the head has moved, and say so if it has.
-- Cover the complete PR diff, never only what changed since an earlier sweep. Include staged, unstaged and untracked changes.
+- Cover the complete PR diff, never only what changed since an earlier sweep. The scope is the committed diff `<merge-base>..HEAD`.
 - Resolve the merge base once, with `git merge-base HEAD <base>` and the base from Input. Use that commit for everything below.
-- List the changed paths with `git diff --name-status -z <merge-base>`, which covers committed, staged and unstaged changes, deleted files included. A renamed file counts once, under its new name, and keeps its old name for step 3. Add each file from `git ls-files --others --exclude-standard`.
-- Count additions plus deletions per path with `git diff --numstat -z <merge-base>`, and all lines for an untracked file. A binary file has no line count.
+- List the changed paths with `git diff --name-status -z <merge-base> HEAD`, deleted files included. A renamed file counts once, under its new name, and keeps its old name for step 3.
+- Count additions plus deletions per path with `git diff --numstat -z <merge-base> HEAD`. A binary file has no line count.
 
 ## 2. Slice
 
