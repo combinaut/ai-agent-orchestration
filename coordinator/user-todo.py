@@ -186,7 +186,6 @@ def merge(directory, output, state_path, now=None, links=None):
                 and urls
                 and all(links.get(url, {}).get("state") in RESOLVED for url in urls)
             ):
-                dismissed.add(item["id"])
                 auto_closed.append(
                     dict(item, url=urls[0], resolution=links[urls[0]]["state"])
                 )
@@ -210,13 +209,20 @@ def merge(directory, output, state_path, now=None, links=None):
         atomic_write(state_path, json.dumps(state, sort_keys=True))
         visible = [item for item in current if item["id"] not in dismissed]
         render(output, visible)
+        closing = {item["id"] for item in auto_closed}
         return {
             "auto_closed": auto_closed,
-            "now": visible,
+            "now": [item for item in visible if item["id"] not in closing],
             "unreadable": unreadable,
             "read": sorted(read),
             "scanned": str(directory) not in unreadable,
         }
+
+
+def commit_auto_closed(items, state_path, output):
+    """Dismisses the auto-closed items once their feed events are handed off."""
+    for item in items:
+        dismiss_item(item, state_path, output)
 
 
 AGE_PREFIX = re.compile(r"\[(now|\d+[mhd])\] (.*)")

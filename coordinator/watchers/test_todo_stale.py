@@ -55,6 +55,7 @@ class TodoStaleTest(IsolatedTestCase):
         with patch.object(w, "github_link_state", lookup):
             raw = w.collect_todo(self.before)
         self.before, events = w.reduce_todo(self.before, raw)
+        w.commit_todo_closures(raw)
         shown = sorted(item["text"] for item in raw["now"])
         return shown, [e for e in events if e.startswith("TODO AUTO-CLOSED")]
 
@@ -143,8 +144,11 @@ class TodoStaleTest(IsolatedTestCase):
         self.assertEqual(self.calls, urls[:1])
         self.assertEqual(timeouts, [todo.LINK_BUDGET_SECONDS - 6])
         self.assertEqual(list(links), urls[:1])
-        todo.merge(
+        raw = todo.merge(
             self.status, self.root / "todo.md", self.root / "state.json", links=links
+        )
+        todo.commit_auto_closed(
+            raw["auto_closed"], self.root / "state.json", self.root / "todo.md"
         )
         shown = (self.root / "todo.md").read_text()
         self.assertNotIn(urls[0], shown)
@@ -187,6 +191,50 @@ class TodoStaleTest(IsolatedTestCase):
         with patch.object(w, "github_link_state", lambda url, timeout=None: "merged"):
             out = json.loads(w.cycle(base, "todo", w.collect_todo))
         self.assertTrue(any(e.startswith("TODO AUTO-CLOSED ") for e in out["events"]))
+
+    def run_cycle(self, base):
+        with patch.object(w, "github_link_state", lambda url, timeout=None: "merged"):
+            line = w.cycle(base, "todo", w.collect_todo)
+        return json.loads(line)["events"] if line else []
+
+    def shown_in_output(self):
+        return (self.root / "todo.md").read_text()
+
+    def test_item_stays_and_its_event_is_sent_after_a_render_failure(self):
+        self.write(f"Merge {PR} -> Coordinator")
+        base = self.root / "watch"
+        todo = w.todo_module()
+        with patch.object(todo, "render", side_effect=OSError("disk full")):
+            first = self.run_cycle(base)
+        self.assertFalse(any("AUTO-CLOSED" in e for e in first))
+        second = self.run_cycle(base)
+        self.assertEqual(sum("AUTO-CLOSED" in e for e in second), 1)
+        self.assertNotIn(PR, self.shown_in_output())
+
+    def test_item_stays_and_its_event_is_sent_after_a_collect_failure(self):
+        self.write(f"Merge {PR} -> Coordinator")
+        base = self.root / "watch"
+        self.run_cycle(base)
+        (self.root / "state.json").unlink()
+        (self.root / "todo.md").unlink()
+        with patch.object(w.todo_answers, "collect", side_effect=OSError("timeout")):
+            first = self.run_cycle(base)
+        self.assertFalse(any("AUTO-CLOSED" in e for e in first))
+        self.assertIn(PR, self.shown_in_output())
+        second = self.run_cycle(base)
+        self.assertEqual(sum("AUTO-CLOSED" in e for e in second), 1)
+        self.assertNotIn(PR, self.shown_in_output())
+
+    def test_item_stays_and_its_event_is_sent_after_a_publish_failure(self):
+        self.write(f"Merge {PR} -> Coordinator")
+        base = self.root / "watch"
+        with patch.object(w, "publish_events", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.run_cycle(base)
+        self.assertIn(PR, self.shown_in_output())
+        second = self.run_cycle(base)
+        self.assertEqual(sum("AUTO-CLOSED" in e for e in second), 1)
+        self.assertNotIn(PR, self.shown_in_output())
 
     def test_github_link_state_passes_the_timeout_to_gh(self):
         seen = []
