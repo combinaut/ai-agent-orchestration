@@ -1516,6 +1516,21 @@ def todo_module():
     return _TODO_MODULE
 
 
+def github_link_state(url):
+    """merged, closed or open for a GitHub PR or issue URL."""
+    owner, repo, kind, number = url.split("/")[3:7]
+    row = json.loads(
+        command(
+            "gh",
+            "api",
+            f"repos/{owner}/{repo}/{'pulls' if kind == 'pull' else 'issues'}/{number}",
+        )
+    )
+    if row.get("merged") or row.get("merged_at"):
+        return "merged"
+    return "closed" if row["state"] == "closed" else "open"
+
+
 def collect_todo(before):
     module = todo_module()
     directory = Path(
@@ -1529,7 +1544,12 @@ def collect_todo(before):
     state = Path(
         os.environ.get("ORCH_USER_TODO_STATE") or coordinator / "user-todo.state.json"
     )
-    raw = module.merge(directory, output, state)
+    try:
+        with short_commands():
+            links = module.resolve_links(directory, state, github_link_state)
+    except Exception:
+        links = {}
+    raw = module.merge(directory, output, state, links=links)
     records, failed = todo_answers.collect(command)
     if todo_answers.directory().exists():
         raw["todo_answers"] = records
@@ -1609,6 +1629,10 @@ def reduce_todo(before, raw):
     after, events = reduce_todo_status(before, raw)
     events += [
         "TODO READFAIL " + notice for notice in raw.get("todo_answer_notices", [])
+    ]
+    events += [
+        f"TODO AUTO-CLOSED {'_'.join(item['source'].removesuffix('.md').split())}: {item['text']} ({item['url']} {item['resolution']})"
+        for item in raw.get("auto_closed", [])
     ]
     records = raw.get("todo_answers", [])
     previous = set((before or {}).get("todo_answer_ids", []))

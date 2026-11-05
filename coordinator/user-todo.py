@@ -26,6 +26,10 @@ import todo_answers  # noqa: E402
 
 NOW = "## Waits on the user"
 PLACEHOLDERS = {"none", "none yet", "nothing", "nothing yet", "n/a", "-"}
+LINK = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/(?:pull|issues)/\d+")
+LINK_TTL = 300
+LINK_LOOKUPS_MAX = 5
+RESOLVED = ("merged", "closed")
 
 
 def normalized(text):
@@ -95,8 +99,49 @@ def atomic_write(path, data):
             os.unlink(name)
 
 
-def merge(directory, output, state_path, now=None):
+def item_links(text):
+    return list(dict.fromkeys(LINK.findall(text)))
+
+
+def resolve_links(directory, state_path, lookup, now=None):
+    """Link states for the open items; resolved states are kept, others are looked up again after LINK_TTL."""
     now = time.time() if now is None else now
+    try:
+        state = json.loads(Path(state_path).read_text())
+        dismissed = set(state.get("dismissed", []))
+        cached = state.get("links", {})
+    except (OSError, ValueError, AttributeError):
+        dismissed, cached = set(), {}
+    urls = [
+        url
+        for item in status_items(directory)[0]
+        if item["id"] not in dismissed
+        for url in item_links(item["text"])
+    ]
+    links, budget = {}, LINK_LOOKUPS_MAX
+    for url in dict.fromkeys(urls):
+        entry = cached.get(url)
+        if (
+            isinstance(entry, dict)
+            and entry.get("state") in RESOLVED + ("open", "unknown")
+            and (entry["state"] in RESOLVED or now - entry.get("at", 0) < LINK_TTL)
+        ):
+            links[url] = entry
+        elif budget > 0:
+            budget -= 1
+            try:
+                found = lookup(url)
+            except Exception:
+                found = "unknown"
+            links[url] = {"state": found, "at": now}
+        elif isinstance(entry, dict):
+            links[url] = entry
+    return links
+
+
+def merge(directory, output, state_path, now=None, links=None):
+    now = time.time() if now is None else now
+    links = links or {}
     directory = Path(directory)
     state_path = Path(state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,6 +171,24 @@ def merge(directory, output, state_path, now=None):
         present = {item["id"] for item in current}
         dismissed.update(todo_answers.pending_item_ids(seen) & present)
         dismissed &= present
+        auto_closed = []
+        for item in current:
+            urls = item_links(item["text"])
+            if (
+                item["id"] not in dismissed
+                and urls
+                and all(links.get(url, {}).get("state") in RESOLVED for url in urls)
+            ):
+                dismissed.add(item["id"])
+                auto_closed.append(
+                    dict(item, url=urls[0], resolution=links[urls[0]]["state"])
+                )
+        state["links"] = {
+            url: entry
+            for item in current
+            for url in item_links(item["text"])
+            if (entry := links.get(url))
+        }
         state["first_seen"] = {
             key: value for key, value in seen.items() if key in present
         }
@@ -140,6 +203,7 @@ def merge(directory, output, state_path, now=None):
         visible = [item for item in current if item["id"] not in dismissed]
         render(output, visible)
         return {
+            "auto_closed": auto_closed,
             "now": visible,
             "unreadable": unreadable,
             "read": sorted(read),
