@@ -287,6 +287,34 @@ fork_head_missing_from_pull_ref() {
   contains "$prompt" 'APPROVE|COMMENT|REQUEST_CHANGES'
 }
 
+@test "review prompt runs the finalize sweep, posts one comment and gates APPROVE on it" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  dispatch
+  prompt=$(cat "$TMP/review.prompt")
+  contains "$prompt" 'every review includes the finalize sweep over the whole PR diff'
+  contains "$prompt" 'Read ~/.claude/skills/finalize-sweep/SKILL.md'
+  contains "$prompt" 'then its validator step'
+  contains "$prompt" 'github_write.py --timeout 240 api -X POST repos/acme/app/issues/7/comments --input -'
+  contains "$prompt" 'as ONE PR comment, before the review'
+  contains "$prompt" 'the head SHA and "no findings"'
+  contains "$prompt" 'APPROVE only while no fix finding is open'
+  contains "$prompt" 'Nits never block.'
+  contains "$prompt" 'Class every finding: fix'
+  contains "$prompt" 'nit (pure style or taste'
+  contains "$prompt" 'A finding rejected once on this PR is never raised again.'
+  contains "$prompt" 'covers only the lines changed since the last swept head'
+  contains "$prompt" 'covers the whole PR diff again, on the new head, before a new APPROVE'
+  contains "$prompt" 'a human reviewer finds nothing left to clean up'
+}
+
+@test "the review texts carry the sweep rules" {
+  grep -qF 'An open fix finding blocks APPROVE; nits never do.' "$ROOT/$SKILL_DIR/SKILL.md"
+  grep -qF 'An open fix finding fails the review; nits never do.' "$ROOT/skills/architect/references/reviewer.md"
+  grep -qF 'a finding rejected once on this PR is never raised again' "$ROOT/skills/architect/references/reviewer.md"
+  grep -qF 're-sweep only the lines changed since the last swept head' "$ROOT/skills/architect/references/reviewer.md"
+}
+
 @test "the skill closes panes only through close-pane.sh" {
   run grep -rn 'herdr pane close' "$ROOT/$SKILL_DIR"
   [ "$status" -eq 1 ]
