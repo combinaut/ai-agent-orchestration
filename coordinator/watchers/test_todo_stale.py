@@ -150,6 +150,33 @@ class TodoStaleTest(IsolatedTestCase):
         self.assertNotIn(urls[0], shown)
         self.assertIn(urls[1], shown)
 
+    def test_expired_early_links_do_not_starve_never_checked_ones(self):
+        urls = [f"https://github.com/acme/app/pull/{n}" for n in range(1, 9)]
+        self.write(*(f"Merge {url} -> Coordinator" for url in urls))
+        self.cycle({url: "open" for url in urls})
+        self.age_links()
+        self.calls.clear()
+        self.cycle({url: "open" for url in urls})
+        self.assertEqual(self.calls[:3], urls[5:])
+
+    def test_cached_resolution_survives_a_merge_without_links(self):
+        self.write(f"Merge {PR} -> Coordinator")
+        self.assertEqual(self.cycle({PR: "merged"})[0], [])
+        self.write(f"Merge {PR} again -> Coordinator")
+        todo = w.todo_module()
+        todo.merge(self.status, self.root / "todo.md", self.root / "state.json")
+        state = json.loads((self.root / "state.json").read_text())
+        self.assertEqual(state["links"][PR]["state"], "merged")
+
+    def test_cached_resolution_applies_to_a_changed_item_when_the_lookup_fails(self):
+        self.write(f"Merge {PR} -> Coordinator")
+        self.cycle({PR: "merged"})
+        self.cycle({})
+        self.write(f"Merge {PR} again -> Coordinator")
+        shown, events = self.cycle({PR: OSError("gh down")})
+        self.assertEqual(shown, [])
+        self.assertEqual(len(events), 1)
+
     def test_github_link_state_passes_the_timeout_to_gh(self):
         seen = []
 

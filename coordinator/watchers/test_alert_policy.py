@@ -79,6 +79,18 @@ class PolicyTest(IsolatedTestCase):
     def run_at(self, now, *alerts):
         return policy.apply(self.state, list(alerts), now, CFG)
 
+    def test_todo_auto_closed_lines_are_terminal_and_distinct_per_item(self):
+        first = "TODO AUTO-CLOSED Architect_Tooling: Merge https://github.com/acme/app/pull/7 (https://github.com/acme/app/pull/7 merged)"
+        second = first.replace("pull/7", "pull/8")
+        out = self.run_at(
+            0,
+            {"mode": "todo", "events": [first]},
+            {"mode": "todo", "events": [second]},
+        )
+        self.assertEqual(out, [f"todo: {first} (start)", f"todo: {second} (start)"])
+        self.assertNotIn("unparsed", self.state)
+        self.assertEqual(len(self.state["keys"]), 2)
+
     def test_first_alert_writes_one_start_line(self):
         self.assertEqual(
             self.run_at(0, files(160000)), ["host: HOST FILES 160000 (start)"]

@@ -121,7 +121,12 @@ def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic)
     ]
     links, budget = {}, LINK_LOOKUPS_MAX
     deadline = clock() + LINK_BUDGET_SECONDS
-    for url in dict.fromkeys(urls):
+
+    def checked_at(url):
+        entry = cached.get(url)
+        return entry.get("at", -1) if isinstance(entry, dict) else -1
+
+    for url in sorted(dict.fromkeys(urls), key=checked_at):
         entry = cached.get(url)
         if (
             isinstance(entry, dict)
@@ -185,11 +190,12 @@ def merge(directory, output, state_path, now=None, links=None):
                 auto_closed.append(
                     dict(item, url=urls[0], resolution=links[urls[0]]["state"])
                 )
+        known = state.get("links", {})
         state["links"] = {
             url: entry
             for item in current
             for url in item_links(item["text"])
-            if (entry := links.get(url))
+            if (entry := links.get(url) or known.get(url))
         }
         state["first_seen"] = {
             key: value for key, value in seen.items() if key in present
