@@ -59,47 +59,91 @@ class TodoStaleTest(IsolatedTestCase):
         shown = sorted(item["text"] for item in raw["now"])
         return shown, [e for e in events if e.startswith("TODO AUTO-CLOSED")]
 
-    def test_all_links_resolved_hides_the_item_with_one_feed_line(self):
-        self.write(f"Merge {PR} and close {ISSUE} -> Coordinator")
+    def test_resolved_target_hides_the_item_with_one_feed_line(self):
+        self.write(f"Merge it -> {PR}", f"Close it -> {ISSUE}")
         shown, events = self.cycle({PR: "merged", ISSUE: "closed"})
         self.assertEqual(shown, [])
         self.assertEqual(
             events,
             [
-                f"TODO AUTO-CLOSED Architect__Tooling: Merge {PR} and close {ISSUE} -> Coordinator ({PR} merged)"
+                f"TODO AUTO-CLOSED Architect__Tooling: Merge it -> {PR} ({PR} merged)",
+                f"TODO AUTO-CLOSED Architect__Tooling: Close it -> {ISSUE} ({ISSUE} closed)",
             ],
         )
         shown, events = self.cycle({PR: "merged", ISSUE: "closed"})
         self.assertEqual((shown, events), ([], []))
 
-    def test_one_open_link_keeps_the_item(self):
-        self.write(f"Merge {PR} and close {ISSUE} -> Coordinator")
+    def test_open_target_keeps_the_item(self):
+        self.write(f"Merge it -> {PR}", f"Close it -> {ISSUE}")
         shown, events = self.cycle({PR: "merged", ISSUE: "open"})
-        self.assertEqual(len(shown), 1)
-        self.assertEqual(events, [])
+        self.assertEqual(shown, [f"Close it -> {ISSUE}"])
+        self.assertEqual(len(events), 1)
 
-    def test_item_without_a_link_stays_and_is_not_looked_up(self):
-        self.write("Approve the design -> Coordinator")
-        shown, events = self.cycle({})
-        self.assertEqual(len(shown), 1)
-        self.assertEqual((events, self.calls), ([], []))
+    def test_item_without_a_github_target_stays_and_is_not_looked_up(self):
+        for text in (
+            "Approve the design -> Coordinator",
+            "Approve the design",
+            "Approve the design -> Architect::Tooling",
+            "Approve the design -> pane 3",
+            "Approve the design -> https://gitlab.com/acme/app/-/merge_requests/7",
+            "Approve the design -> https://example.com/acme/app/pull/7",
+            f"Approve the design -> {PR} and {ISSUE}",
+            f"Approve the design -> {PR} now",
+            "Approve the design -> https://github.com/acme/app/pull/7draft",
+            "Approve the design -> https://github.com/acme/app/pull/7-draft",
+            "Approve the design -> https://github.com/acme/app/pull/7_x",
+            "Approve the design -> https://evil.github.com/acme/app/pull/7",
+            "Approve the design -> https://notgithub.com/acme/app/pull/7",
+        ):
+            with self.subTest(text=text):
+                self.write(text)
+                self.before = None
+                (self.root / "state.json").unlink(missing_ok=True)
+                shown, events = self.cycle({PR: "merged", ISSUE: "closed"})
+                self.assertEqual((len(shown), events, self.calls), (1, [], []))
+
+    def test_a_url_in_the_text_does_not_close_the_item(self):
+        for text in (
+            f"Smoke-test staging now that {PR} is merged -> Coordinator",
+            f"Deploy {PR} now that it merged? [1: deploy now] [2: wait] -> Architect::Tooling",
+            f"Merge {PR} and close {ISSUE}",
+        ):
+            with self.subTest(text=text):
+                self.write(text)
+                self.before = None
+                (self.root / "state.json").unlink(missing_ok=True)
+                shown, events = self.cycle({PR: "merged", ISSUE: "closed"})
+                self.assertEqual((len(shown), events, self.calls), (1, [], []))
+
+    def test_an_item_with_answer_choices_stays_when_its_target_resolves(self):
+        text = f"Deploy now that it merged? [1: deploy now] [2: wait] -> {PR}"
+        self.write(text)
+        shown, events = self.cycle({PR: "merged"})
+        self.assertEqual((shown, events, self.calls), ([text], [], []))
+
+    def test_a_pr_target_closes_when_the_pr_merges(self):
+        self.write(f"Merge PR 7 -> {PR}")
+        self.assertEqual(self.cycle({PR: "open"})[0], [f"Merge PR 7 -> {PR}"])
+        self.age_links()
+        shown, events = self.cycle({PR: "merged"})
+        self.assertEqual((shown, len(events)), ([], 1))
 
     def test_failed_lookup_keeps_the_item(self):
-        self.write(f"Merge {PR} -> Coordinator")
+        self.write(f"Merge it -> {PR}")
         shown, events = self.cycle({})
         self.assertEqual(len(shown), 1)
         self.assertEqual(events, [])
 
     def test_changed_text_after_auto_close_shows_again(self):
-        self.write(f"Merge {PR} -> Coordinator")
+        self.write(f"Merge it -> {PR}")
         self.assertEqual(self.cycle({PR: "merged"})[0], [])
-        self.write(f"Review {ISSUE} first -> Coordinator")
+        self.write(f"Review it first -> {ISSUE}")
         shown, events = self.cycle({ISSUE: "open"})
         self.assertEqual(len(shown), 1)
         self.assertEqual(events, [])
 
     def test_resolved_state_is_cached_across_cycles(self):
-        self.write(f"Merge {PR} and see {ISSUE} -> Coordinator")
+        self.write(f"Merge it -> {PR}", f"See it -> {ISSUE}")
         self.cycle({PR: "merged", ISSUE: "open"})
         self.age_links()
         self.cycle({PR: "merged", ISSUE: "open"})
@@ -107,7 +151,7 @@ class TodoStaleTest(IsolatedTestCase):
         self.assertEqual(self.calls.count(ISSUE), 2)
 
     def test_open_state_is_looked_up_again_after_the_ttl(self):
-        self.write(f"Merge {PR} -> Coordinator")
+        self.write(f"Merge it -> {PR}")
         self.cycle({PR: "open"})
         self.cycle({PR: "open"})
         self.assertEqual(self.calls, [PR])
@@ -117,7 +161,7 @@ class TodoStaleTest(IsolatedTestCase):
 
     def test_lookups_per_cycle_are_bounded(self):
         urls = [f"https://github.com/acme/app/pull/{n}" for n in range(1, 9)]
-        self.write(*(f"Merge {url} -> Coordinator" for url in urls))
+        self.write(*(f"Merge it -> {url}" for url in urls))
         self.cycle({url: "open" for url in urls})
         self.assertEqual(len(self.calls), w.todo_module().LINK_LOOKUPS_MAX)
         self.cycle({url: "open" for url in urls})
@@ -125,7 +169,7 @@ class TodoStaleTest(IsolatedTestCase):
 
     def test_lookups_stop_when_the_cycle_budget_is_spent(self):
         urls = [f"https://github.com/acme/app/pull/{n}" for n in range(1, 4)]
-        self.write(*(f"Merge {url} -> Coordinator" for url in urls))
+        self.write(*(f"Merge it -> {url}" for url in urls))
         todo = w.todo_module()
         ticks = iter([0, 0, 6, todo.LINK_BUDGET_SECONDS, todo.LINK_BUDGET_SECONDS + 1])
         timeouts = []
@@ -156,7 +200,7 @@ class TodoStaleTest(IsolatedTestCase):
 
     def test_expired_early_links_do_not_starve_never_checked_ones(self):
         urls = [f"https://github.com/acme/app/pull/{n}" for n in range(1, 9)]
-        self.write(*(f"Merge {url} -> Coordinator" for url in urls))
+        self.write(*(f"Merge it -> {url}" for url in urls))
         self.cycle({url: "open" for url in urls})
         self.age_links()
         self.calls.clear()
@@ -164,9 +208,9 @@ class TodoStaleTest(IsolatedTestCase):
         self.assertEqual(self.calls[:3], urls[5:])
 
     def test_cached_resolution_survives_a_merge_without_links(self):
-        self.write(f"Merge {PR} -> Coordinator")
+        self.write(f"Merge it -> {PR}")
         self.assertEqual(self.cycle({PR: "merged"})[0], [])
-        self.write(f"Merge {PR} again -> Coordinator")
+        self.write(f"Merge it again -> {PR}")
         todo = w.todo_module()
         todo.merge(self.status, self.root / "todo.md", self.root / "state.json")
         state = json.loads((self.root / "state.json").read_text())
@@ -175,16 +219,16 @@ class TodoStaleTest(IsolatedTestCase):
     def test_cached_resolution_applies_to_a_changed_item_after_the_original_was_dismissed(
         self,
     ):
-        self.write(f"Merge {PR} -> Coordinator")
+        self.write(f"Merge it -> {PR}")
         self.cycle({PR: "merged"})
         self.cycle({})
-        self.write(f"Merge {PR} again -> Coordinator")
+        self.write(f"Merge it again -> {PR}")
         shown, events = self.cycle({})
         self.assertEqual(shown, [])
         self.assertEqual(len(events), 1)
 
     def test_auto_closed_events_survive_a_watcher_state_reset(self):
-        self.write(f"Merge {PR} -> Coordinator")
+        self.write(f"Merge it -> {PR}")
         base = self.root / "watch"
         base.mkdir()
         (base / "todo.json").write_text("{not json")
@@ -201,7 +245,7 @@ class TodoStaleTest(IsolatedTestCase):
         return (self.root / "todo.md").read_text()
 
     def test_item_stays_and_its_event_is_sent_after_a_collect_failure(self):
-        self.write(f"Merge {PR} -> Coordinator")
+        self.write(f"Merge it -> {PR}")
         base = self.root / "watch"
         self.run_cycle(base)
         (self.root / "state.json").unlink()
@@ -215,7 +259,7 @@ class TodoStaleTest(IsolatedTestCase):
         self.assertNotIn(PR, self.shown_in_output())
 
     def test_item_stays_and_its_event_is_sent_after_a_publish_failure(self):
-        self.write(f"Merge {PR} -> Coordinator")
+        self.write(f"Merge it -> {PR}")
         base = self.root / "watch"
         with patch.object(w, "publish_events", side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
@@ -225,91 +269,61 @@ class TodoStaleTest(IsolatedTestCase):
         self.assertEqual(sum("AUTO-CLOSED" in e for e in second), 1)
         self.assertNotIn(PR, self.shown_in_output())
 
-    def test_every_url_form_must_resolve_before_the_item_closes(self):
-        forms = (
-            "http://github.com/acme/app/issues/8",
-            "https://www.github.com/acme/app/issues/8",
-            "www.github.com/acme/app/issues/8",
-            "github.com/acme/app/issues/8",
-            "HTTPS://GitHub.com/acme/app/issues/8",
-        )
-        for form in forms:
-            with self.subTest(form=form):
-                self.write(f"Merge {PR} then close {form} -> Coordinator")
-                self.before = None
-                (self.root / "state.json").unlink(missing_ok=True)
-                shown, events = self.cycle({PR: "merged", ISSUE: "open"})
-                self.assertEqual(len(shown), 1)
-                self.assertEqual(events, [])
-
     def test_url_forms_are_looked_up_as_one_https_url(self):
-        self.write("Merge HTTP://www.GitHub.com/Acme/App/pull/7 -> Coordinator")
+        self.write("Merge it -> HTTP://www.GitHub.com/Acme/App/pull/7")
         self.cycle({PR: "merged"})
         self.assertEqual(self.calls, [PR])
 
-    def test_an_unresolvable_reference_keeps_the_item(self):
-        for tail in (
-            "and fix #123",
-            "and PR 124",
-            "and issue 125",
-            "and Pull Request #126",
-            "and acme/app#127",
-            "and PRs 7 and 128",
-            "and issues 129, 130",
-            "and PRs 7, 7, and 132",
-            "and PRs 7 or 131",
-        ):
-            with self.subTest(tail=tail):
-                self.write(f"Merge {PR} {tail} -> Coordinator")
-                self.before = None
-                (self.root / "state.json").unlink(missing_ok=True)
-                shown, events = self.cycle({PR: "merged"})
-                self.assertEqual(len(shown), 1)
-                self.assertEqual(events, [])
+    def test_a_reopened_pr_shows_a_rewritten_item_after_the_ttl(self):
+        self.write(f"Merge it -> {PR}")
+        self.cycle({PR: "closed"})
+        self.age_links()
+        self.write(f"PR reopened, review it again -> {PR}")
+        shown, events = self.cycle({PR: "open"})
+        self.assertEqual((len(shown), events), (1, []))
+        self.assertEqual(self.calls, [PR, PR])
 
-    def test_a_number_followed_by_word_characters_is_not_a_link(self):
-        for other in ("pull/7draft", "pull/7-draft", "pull/7_x"):
-            with self.subTest(other=other):
-                self.write(f"Merge https://github.com/acme/app/{other} -> Coordinator")
-                shown, events = self.cycle({PR: "merged"})
-                self.assertEqual((len(shown), events, self.calls), (1, [], []))
+    def test_failed_state_is_looked_up_again_only_after_the_ttl(self):
+        self.write(f"Merge it -> {PR}")
+        self.cycle({})
+        self.cycle({})
+        self.assertEqual(self.calls, [PR])
+        self.age_links()
+        self.cycle({})
+        self.assertEqual(self.calls, [PR, PR])
 
-    def test_urls_on_other_hosts_are_not_links(self):
-        for other in (
-            "https://example.com/github.com/acme/app/pull/7",
-            "https://evil.github.com/acme/app/pull/7",
-            "https://notgithub.com/acme/app/pull/7",
-        ):
-            with self.subTest(other=other):
-                self.write(f"Merge {other} -> Coordinator")
-                shown, events = self.cycle({PR: "merged"})
-                self.assertEqual((len(shown), events, self.calls), (1, [], []))
+    def test_a_dismissed_item_causes_no_lookup(self):
+        self.write(f"Merge it -> {PR}")
+        self.cycle({PR: "closed"})
+        self.age_links()
+        self.calls.clear()
+        self.cycle({})
+        self.assertEqual(self.calls, [])
 
-    def test_coverage_matches_kind_and_number(self):
-        keeps = (
-            f"Merge PR 7 in acme/service after {ISSUE.replace('/8', '/7')}",
-            f"Merge issue 7 after {PR}",
-            f"Merge PRs 7 and issues 8 after {PR}",
+    def test_a_dismissed_item_sharing_a_resolved_url_emits_no_event(self):
+        todo = w.todo_module()
+        self.write(f"Merge it -> {PR}")
+        self.cycle({PR: "merged"})
+        self.write(f"Merge it -> {PR}", f"Merge it too -> {PR}")
+        raw = todo.merge(
+            self.status,
+            self.root / "todo.md",
+            self.root / "state.json",
+            links={PR: {"state": "merged", "at": 0}},
         )
-        for text in keeps:
-            with self.subTest(text=text):
-                self.write(f"{text} -> Coordinator")
-                self.before = None
-                (self.root / "state.json").unlink(missing_ok=True)
-                shown, events = self.cycle(
-                    {PR: "merged", ISSUE.replace("/8", "/7"): "closed"}
-                )
-                self.assertEqual((len(shown), events), (1, []))
+        self.assertEqual(
+            [i["text"] for i in raw["auto_closed"]], [f"Merge it too -> {PR}"]
+        )
 
-    def test_a_bare_hash_number_is_covered_by_either_kind(self):
-        self.write(f"Close #8 ({ISSUE}) -> Coordinator")
-        shown, events = self.cycle({ISSUE: "closed"})
-        self.assertEqual((shown, len(events)), ([], 1))
-
-    def test_a_reference_covered_by_a_url_does_not_keep_the_item(self):
-        self.write(f"Merge PR 7 and #7 ({PR}) -> Coordinator")
+    def test_a_failed_dismissal_repeats_the_event_next_cycle(self):
+        self.write(f"Merge it -> {PR}")
+        todo = w.todo_module()
+        with patch.object(todo, "dismiss_item", side_effect=OSError("disk full")):
+            shown, events = self.cycle({PR: "merged"})
+        self.assertEqual(len(events), 1)
         shown, events = self.cycle({PR: "merged"})
-        self.assertEqual((shown, len(events)), ([], 1))
+        self.assertEqual(len(events), 1)
+        self.assertEqual(self.cycle({PR: "merged"}), ([], []))
 
     def test_github_link_state_passes_the_timeout_to_gh(self):
         seen = []

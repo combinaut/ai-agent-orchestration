@@ -30,10 +30,6 @@ LINK = re.compile(
     r"(?<![\w./@-])(?:https?://)?(?:www\.)?github\.com/([\w.-]+)/([\w.-]+)/(pull|issues)/(\d+)(?![\w-])",
     re.IGNORECASE,
 )
-REFERENCE = re.compile(
-    r"(?:(?<![\w/])(pull\s+request|pr|issue)s?\s*#?|#)(\d+(?:\s*(?:,\s*(?:and|or|&)?|and|or|&)\s*#?\d+)*)",
-    re.IGNORECASE,
-)
 LINK_TTL = 300
 LINK_LOOKUPS_MAX = 5
 LINK_BUDGET_SECONDS = 10
@@ -107,32 +103,15 @@ def atomic_write(path, data):
             os.unlink(name)
 
 
-def item_links(text):
-    return list(
-        dict.fromkeys(
-            f"https://github.com/{owner}/{repo}/{kind}/{number}".lower()
-            for owner, repo, kind, number in LINK.findall(text)
-        )
-    )
-
-
-def unresolved_reference(text):
-    """True when the text names a PR or issue number that no linked URL of that kind covers."""
-    covered = {"pull": set(), "issues": set()}
-    for _, _, kind, number in LINK.findall(text):
-        covered[kind.lower()].add(number)
-    for word, group in REFERENCE.findall(LINK.sub(" ", text)):
-        kinds = (
-            ("issues",)
-            if word.lower() == "issue"
-            else ("pull",)
-            if word
-            else ("pull", "issues")
-        )
-        for number in re.findall(r"\d+", group):
-            if not any(number in covered[kind] for kind in kinds):
-                return True
-    return False
+def item_link(text):
+    """The normalised URL when the item's target is one GitHub PR or issue and the item has no answer choices."""
+    if todo_answers.choices(text):
+        return None
+    match = LINK.fullmatch(target(text))
+    if not match:
+        return None
+    owner, repo, kind, number = match.groups()
+    return f"https://github.com/{owner}/{repo}/{kind}/{number}".lower()
 
 
 def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic):
@@ -147,8 +126,7 @@ def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic)
     urls = [
         url
         for item in status_items(directory)[0]
-        if item["id"] not in dismissed
-        for url in item_links(item["text"])
+        if item["id"] not in dismissed and (url := item_link(item["text"]))
     ]
     links, budget = {}, LINK_LOOKUPS_MAX
     deadline = clock() + LINK_BUDGET_SECONDS
@@ -162,7 +140,7 @@ def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic)
         if (
             isinstance(entry, dict)
             and entry.get("state") in RESOLVED + ("open", "unknown")
-            and (entry["state"] in RESOLVED or now - entry.get("at", 0) < LINK_TTL)
+            and (entry["state"] == "merged" or now - entry.get("at", 0) < LINK_TTL)
         ):
             links[url] = entry
         elif budget > 0 and clock() < deadline:
@@ -211,21 +189,18 @@ def merge(directory, output, state_path, now=None, links=None):
         dismissed &= present
         auto_closed = []
         for item in current:
-            urls = item_links(item["text"])
+            url = item_link(item["text"])
             if (
                 item["id"] not in dismissed
-                and urls
-                and not unresolved_reference(item["text"])
-                and all(links.get(url, {}).get("state") in RESOLVED for url in urls)
+                and url
+                and links.get(url, {}).get("state") in RESOLVED
             ):
-                auto_closed.append(
-                    dict(item, url=urls[0], resolution=links[urls[0]]["state"])
-                )
+                auto_closed.append(dict(item, url=url, resolution=links[url]["state"]))
         known = state.get("links", {})
         state["links"] = {
             url: entry
             for item in current
-            for url in item_links(item["text"])
+            if (url := item_link(item["text"]))
             if (entry := links.get(url) or known.get(url))
         }
         state["first_seen"] = {
