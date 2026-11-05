@@ -309,7 +309,7 @@ def command(runtime, model, schema, out):
     return [
         "claude", "-p", "--model", model, "--output-format", "json",
         "--json-schema", Path(schema).read_text(), "--permission-mode", "dontAsk",
-        "--strict-mcp-config", "--no-session-persistence",
+        "--setting-sources", "user", "--strict-mcp-config", "--no-session-persistence",
         "--allowedTools", *CLAUDE_TOOLS, "--disallowedTools", "Edit", "Write", "NotebookEdit",
     ]  # fmt: skip
 
@@ -567,8 +567,11 @@ def sweep_outcomes(body):
         return None
     if not isinstance(record, dict) or record.get("tool") != "orch-sweep":
         return None
+    items, dropped = record.get("items", []), record.get("dropped", [])
+    if not isinstance(items, list) or not isinstance(dropped, list):
+        return None
     lines = []
-    for f in [*record.get("items", []), *record.get("dropped", [])]:
+    for f in [*items, *dropped]:
         if isinstance(f, dict):
             lines.append(
                 f"- {f.get('file')}:{f.get('line')} {f.get('category')} {f.get('class')} {f.get('verdict')}: {f.get('summary')}"

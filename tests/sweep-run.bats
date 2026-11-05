@@ -202,6 +202,7 @@ for line in open(sys.argv[1]):
     argv = json.loads(line)["argv"]
     assert argv[:3] == ["-p", "--model", "sonnet"], argv
     assert argv[argv.index("--permission-mode") + 1] == "dontAsk", argv
+    assert argv[argv.index("--setting-sources") + 1] == "user", argv
     assert argv[-4:] == ["--disallowedTools", "Edit", "Write", "NotebookEdit"], argv
     assert not any(a.startswith(("Edit", "Write")) for a in argv[argv.index("--allowedTools"):-4]), argv' "$TMP/agent.calls"
 }
@@ -393,6 +394,19 @@ json.dump([[{"user": {"login": "reviewer"}, "body": body}] + later], open(sys.ar
   FAKE_FINDINGS=1 run_sweep --no-comment
   [ "$status" -eq 0 ]
   grep -q "OLD-REJECTED-MARK" "$TMP"/prompts/validator.*
+}
+
+@test "a sweep comment whose record lists are not lists counts as an ordinary comment" {
+  cd "$REPO"
+  python3 -c 'import json,sys
+def body(n, record):
+    return f"<!-- orch-sweep v1 -->\nMALFORMED-MARK-{n}\n```json\n{json.dumps(record)}\n```\n"
+records = [{"tool": "orch-sweep", "items": None, "dropped": []}, {"tool": "orch-sweep", "items": [], "dropped": 7}]
+json.dump([[{"user": {"login": "someone"}, "body": body(n, r)} for n, r in enumerate(records)]], open(sys.argv[1], "w"))' "$TMP/comments.json"
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  grep -q "MALFORMED-MARK-0" "$TMP"/prompts/validator.*
+  grep -q "MALFORMED-MARK-1" "$TMP"/prompts/validator.*
 }
 
 @test "a large sweep still posts one comment under the size limit that carries the whole record" {
