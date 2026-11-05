@@ -31,15 +31,6 @@ class TypedTextTest(IsolatedTestCase):
         line = '❯\xa0\x1b[0m\x1b[2mTry "create a util logging.py that..."\x1b[0m\r'
         self.assertEqual(composer.typed_text(screen(line)), "")
 
-    def test_dim_next_prompt_suggestion_is_empty(self):
-        line = "❯\xa0\x1b[0m\x1b[2mcontinue with step 2\x1b[0m\r"
-        self.assertEqual(composer.typed_text(screen(line)), "")
-
-    def test_typed_text_counts(self):
-        self.assertEqual(
-            composer.typed_text(screen("❯\xa0hello typed\r")), "hello typed"
-        )
-
     def test_pending_paste_counts(self):
         line = "❯\xa0[Pasted text #1 +29 lines]\r"
         self.assertEqual(
@@ -77,11 +68,36 @@ class TypedTextTest(IsolatedTestCase):
         pink = "\x1b[0m\x1b[38;2;253;93;177m!\xa0\x1b[0m\r"
         self.assertEqual(composer.typed_text(screen(pink)), "!")
 
-    def test_a_typed_rule_stays_inside_the_composer(self):
-        typed = composer.typed_text(
-            screen("❯\xa0above\r", "─" * 10 + "\r", "  below\r")
-        )
-        self.assertEqual(typed, "above\n" + "─" * 10 + "\nbelow")
+    def test_typed_rule_and_prompt_stay_inside_the_composer(self):
+        rule = "─" * 10
+        typed = composer.typed_text(screen("❯\xa0keep this\r", f"  {rule}\r", "  ❯\r"))
+        self.assertEqual(typed, f"keep this\n{rule}\n❯")
+
+    def test_top_border_off_screen_is_none(self):
+        typed = f"❯\xa0keep this\r\n  {'─' * 10}\r\n  ❯\r\n{RULE}\n{FOOTER}"
+        self.assertIsNone(composer.typed_text(typed))
+
+    def test_zero_padded_sgr_codes(self):
+        for line, expected in (
+            ("❯\xa0\x1b[2mghost\x1b[022mreal\x1b[0m\r", "real"),
+            ("❯\xa0\x1b[2mghost\x1b[00mreal\r", "real"),
+            ("❯\xa0\x1b[002mghost\x1b[0m\r", ""),
+            ("❯\xa0\x1b[038;2;136;136;136mreal\x1b[0m\r", "real"),
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(composer.typed_text(screen(line)), expected)
+
+    def test_typed_marker_after_a_dim_marker_counts(self):
+        line = "\x1b[2m❯\xa0\x1b[22m❯\r"
+        self.assertEqual(composer.typed_text(screen(line)), "❯")
+
+    def test_private_csi_is_not_text_and_not_sgr(self):
+        for line, expected in (
+            ("❯\xa0\x1b[?25l\r", ""),
+            ("❯\xa0\x1b[>4;2mreal\r", "real"),
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(composer.typed_text(screen(line)), expected)
 
     def test_transcript_prompt_does_not_count(self):
         above = "❯\xa0an earlier message\r"

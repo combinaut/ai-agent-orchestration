@@ -13,8 +13,9 @@ import subprocess
 import sys
 
 ESCAPE = re.compile(
-    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC
-    r"|\x1b\[([0-9;:]*)([@-~])"  # CSI
+    r"\x1b\[([0-9;:]*)m"  # SGR
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC
+    r"|\x1b\[[0-?]*[ -/]*[@-~]"  # other CSI
     r"|\x1b[@-_]"
 )
 BROAD_COLOR = {"38", "48", "58"}
@@ -24,7 +25,7 @@ BASH_PROMPT = "!"
 
 def dim_after(params, dim):
     """The dim state after one SGR parameter list; colour arguments are not attributes."""
-    codes = params.split(";")
+    codes = [code.lstrip("0") or "0" for code in params.split(";")]
     index = 0
     while index < len(codes):
         code = codes[index]
@@ -32,7 +33,7 @@ def dim_after(params, dim):
             mode = codes[index + 1] if index + 1 < len(codes) else ""
             index += {"5": 3, "2": 5}.get(mode, 2)
             continue
-        if code in ("", "0", "22"):
+        if code in ("0", "22"):
             dim = False
         elif code == "2":
             dim = True
@@ -41,7 +42,7 @@ def dim_after(params, dim):
 
 
 def parse_lines(screen):
-    """(all text, text outside dim) per line of an ANSI snapshot."""
+    """(all text, the same text with dim characters blanked) per line of an ANSI snapshot."""
     lines = []
     dim = False
     for raw in screen.split("\n"):
@@ -50,22 +51,22 @@ def parse_lines(screen):
         for match in [*ESCAPE.finditer(raw), None]:
             chunk = raw[position : match.start() if match else None]
             plain.append(chunk)
-            if not dim:
-                undimmed.append(chunk)
+            undimmed.append(" " * len(chunk) if dim else chunk)
             if match:
                 position = match.end()
-                if match.group(2) == "m":
+                if match.group(1) is not None:
                     dim = dim_after(match.group(1), dim)
         lines.append(("".join(plain), "".join(undimmed)))
     return lines
 
 
 def is_rule(plain):
-    return plain.strip().startswith("───")
+    """Composer borders start at column 0; typed continuation lines are indented."""
+    return plain.startswith("───")
 
 
 def is_prompt(plain):
-    return plain.lstrip().startswith((PROMPT, BASH_PROMPT))
+    return plain.startswith((PROMPT, BASH_PROMPT))
 
 
 def typed_text(screen):
@@ -75,18 +76,11 @@ def typed_text(screen):
     if not rules:
         return None
     bottom = rules[-1]
-    top = next(
-        (
-            i
-            for i in reversed(rules[:-1])
-            if i + 1 < bottom and is_prompt(lines[i + 1][0])
-        ),
-        None,
-    )
+    top = next((i for i in reversed(rules[:-1]) if is_prompt(lines[i + 1][0])), None)
     if top is None:
         return None
     body = [undimmed for _, undimmed in lines[top + 1 : bottom]]
-    body[0] = body[0].lstrip().removeprefix(PROMPT)
+    body[0] = body[0].removeprefix(PROMPT)
     return "\n".join(part.strip() for part in body).strip()
 
 

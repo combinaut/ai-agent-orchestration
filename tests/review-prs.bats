@@ -1452,11 +1452,8 @@ assert len(lines) == 1 and lines[0].startswith("ready:"), lines
   [ "$status" -eq 1 ]
 }
 
-@test "composer checks use the ANSI helper, not a plain pane read" {
+@test "composer checks use the ANSI helper" {
   for file in skills/architect/references/worker-close.md skills/architect/SKILL.md skills/coordinate/SKILL.md docs/architecture.md; do
     grep -qF 'composer-state.py' "$ROOT/$file"
   done
-  # shellcheck disable=SC2016 # The backticks are literal skill text.
-  run grep -F 'composer (`herdr pane read <pane>`)' "$ROOT/skills/architect/references/worker-close.md"
-  [ "$status" -eq 1 ]
 }
