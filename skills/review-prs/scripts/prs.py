@@ -197,17 +197,53 @@ def text_hash(pr):
     return hashlib.sha1(raw.encode()).hexdigest()[:12]
 
 
+def head_records(known, sha):
+    """The records of one head: the SHA itself and its sha#text keys."""
+    return {
+        key: record
+        for key, record in known.items()
+        if key == sha or key.startswith(f"{sha}#")
+    }
+
+
+def latest_done_key(known, sha):
+    """The key of the newest completed review of this head, or None."""
+    done = [
+        (record.get("at") or "", key)
+        for key, record in head_records(known, sha).items()
+        if record.get("state") == "done"
+    ]
+    return max(done)[1] if done else None
+
+
+def head_pending(known, sha):
+    """Whether a review of this head is running."""
+    return any(
+        record.get("state") == "pending" for record in head_records(known, sha).values()
+    )
+
+
 def claim_key(known, sha, text):
-    """The record key: the head SHA, or sha#text once the title or body changed after a done review of that head."""
-    record = known.get(sha)
-    if (
-        not text
-        or record is None
-        or record.get("state") != "done"
-        or record.get("text") in (None, text)
-    ):
+    """The record key: the head SHA, or sha#text when the newest completed review of this head holds other text."""
+    latest = latest_done_key(known, sha)
+    if not text or latest is None:
         return sha
-    return f"{sha}#{text}"
+    return latest if known[latest].get("text") in (None, text) else f"{sha}#{text}"
+
+
+def review_taken(known, sha, key):
+    """Whether key needs no new review: a review of this head is running, or key holds the newest completed one."""
+    record = known.get(key)
+    return head_pending(known, sha) or bool(
+        record and (record.get("state") != "done" or key == latest_done_key(known, sha))
+    )
+
+
+def review_done(known, sha, key):
+    """Whether key holds the newest completed review of this head."""
+    return (known.get(key) or {}).get("state") == "done" and key == latest_done_key(
+        known, sha
+    )
 
 
 def dispatched_records(pr, dispatched):
@@ -220,8 +256,9 @@ def dispatched_current_head_done(pr, dispatched):
     """Whether a completed local dispatch already covers this PR head."""
     head = pr.get("headRefOid") or ""
     records = dispatched_records(pr, dispatched)
-    key = claim_key(records, head, text_hash(pr))
-    return bool(head) and records.get(key, {}).get("state") == "done"
+    return bool(head) and review_done(
+        records, head, claim_key(records, head, text_hash(pr))
+    )
 
 
 def dispatched_text_changed(pr, dispatched):
@@ -229,7 +266,7 @@ def dispatched_text_changed(pr, dispatched):
     head = pr.get("headRefOid") or ""
     records = dispatched_records(pr, dispatched)
     key = claim_key(records, head, text_hash(pr))
-    return bool(head) and key != head and records.get(key, {}).get("state") != "done"
+    return bool(head) and key != head and not review_done(records, head, key)
 
 
 def dispatched_done_on_other_head(pr, dispatched):
@@ -488,7 +525,7 @@ def needs_dispatch(pr, dispatched):
     entry = dispatched.get(pr["url"]) if isinstance(dispatched, dict) else None
     known = heads(entry)
     key = claim_key(known, sha, text_hash(pr))
-    if sha and key in known:
+    if sha and review_taken(known, sha, key):
         return False, None
     if key != sha:
         return True, "text-re-review"
@@ -888,7 +925,7 @@ def cmd_claim_dispatched(args, _scope, _label):
     def claim(data):
         known = heads(data.get(args.url) or {})
         key = claim_key(known, args.sha, args.text)
-        if key in known:
+        if review_taken(known, args.sha, key):
             taken.append(True)
             return
         set_head(data, args.url, key, head_record(args, "pending"))

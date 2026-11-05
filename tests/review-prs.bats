@@ -1418,6 +1418,74 @@ print(" ".join(s + "=" + h["state"] for s, h in sorted(prs.heads(e).items())))
   [ "$(states)" = 'a=done a#t2=done' ]
 }
 
+@test "restoring an earlier reviewed title or body at the same head is due against the newest completed review" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "number": 7, "title": "t", "body": "old", "isDraft": False,
+      "mergeable": "MERGEABLE", "headRefOid": "A",
+      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
+      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+      "myReviews": {"nodes": [{"commit": {"oid": "A"}}]}}
+old = prs.text_hash(pr)
+pr["body"] = "new"
+new = prs.text_hash(pr)
+heads = {"A": {"state": "done", "text": old, "at": "1"},
+         "A#" + new: {"state": "done", "text": new, "at": "2"}}
+dispatched = {url: {"heads": heads}}
+assert prs.needs_dispatch(pr, dispatched) == (False, None)
+pr["body"] = "old"
+assert prs.needs_dispatch(pr, dispatched) == (True, "text-re-review")
+assert prs.dispatched_text_changed(pr, dispatched)
+assert not prs.dispatched_current_head_done(pr, dispatched)
+heads["A#" + old] = {"state": "done", "text": old, "at": "3"}
+assert prs.needs_dispatch(pr, dispatched) == (False, None)
+assert prs.dispatched_current_head_done(pr, dispatched)
+pr["body"] = "new"
+assert prs.needs_dispatch(pr, dispatched) == (True, "text-re-review")
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a pending review of a head blocks every other claim on that head until it completes or is released" {
+  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
+  pr_url=https://github.com/acme/app/pull/7
+  prs claim-dispatched --url "$pr_url" --sha a --text t0
+  prs mark-dispatched --url "$pr_url" --sha a --text t0 --state "done"
+  prs claim-dispatched --url "$pr_url" --sha a --text t1
+  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t2
+  [ "$status" -eq 3 ]
+  prs release-dispatched --url "$pr_url" --sha a --text t2
+  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t2
+  [ "$status" -eq 3 ]
+  prs mark-dispatched --url "$pr_url" --sha a --text t1 --state "done"
+  prs claim-dispatched --url "$pr_url" --sha a --text t2
+  prs release-dispatched --url "$pr_url" --sha a --text t2
+  prs claim-dispatched --url "$pr_url" --sha a --text t0
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "number": 7, "title": "t", "body": "x", "isDraft": False,
+      "mergeable": "MERGEABLE", "headRefOid": "a",
+      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
+      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+      "myReviews": {"nodes": [{"commit": {"oid": "a"}}]}}
+heads = {"a": {"state": "done", "text": "t0", "at": "1"}, "a#t1": {"state": "pending", "text": "t1", "at": "2"}}
+assert prs.needs_dispatch(pr, {url: {"heads": heads}}) == (False, None)
+heads["a#t1"]["state"] = "done"
+assert prs.needs_dispatch(pr, {url: {"heads": heads}}) == (True, "text-re-review")
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
 @test "the watcher reports a title or body edit at the same head as ready" {
   # shellcheck disable=SC2016 # Python source.
   run python3 -c '
