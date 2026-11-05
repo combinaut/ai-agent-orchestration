@@ -5,7 +5,7 @@
   prs.py watch         [scope] [--interval S]     one line per change, forever
   prs.py dispatch-queue [scope]                   JSON: Ready PRs needing (re)review
   prs.py mark-dispatched --url U --sha S [--text T] [--state pending|blocked|done] [--reason R] [--agent N] [--pane P]
-  prs.py claim-dispatched --url U --sha S [--text T] [--agent N]   marks S pending; exit 3 when S is already pending, blocked, or done
+  prs.py claim-dispatched --url U --sha S [--text T] [--agent N]   marks S pending; exit 3 when a review of S is pending, S is blocked, or S's newest completed review holds the same text
   prs.py release-dispatched --url U --sha S [--text T]   drops S while it is pending or blocked
   prs.py remote --cwd C --repo R                  the remote of clone C (origin or upstream) that is the GitHub repo R
   prs.py review-ids --login L                     stdin: gh api --paginate --slurp .../reviews; ids of L's submitted reviews
@@ -232,7 +232,7 @@ def claim_key(known, sha, text):
 
 
 def review_taken(known, sha, key):
-    """Whether key needs no new review: a review of this head is running, key's record is not done, or key holds the newest completed one."""
+    """Whether key needs no new review: a review of this head is running, key has a pending or blocked record, or key holds the newest completed one."""
     record = known.get(key)
     return head_pending(known, sha) or bool(
         record and (record.get("state") != "done" or key == latest_done_key(known, sha))

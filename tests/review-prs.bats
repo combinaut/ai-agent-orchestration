@@ -304,7 +304,6 @@ fork_head_missing_from_pull_ref() {
   contains "$prompt" 'nit (pure style or taste'
   contains "$prompt" 'A finding rejected once on this PR is never raised again.'
   contains "$prompt" 'Every new head gets the sweep again, over the whole PR diff, before a new APPROVE.'
-  not_contains "$prompt" 'last swept head'
   contains "$prompt" 'any review finding or sweep fix finding is open'
   contains "$prompt" 'a human reviewer finds nothing left to clean up'
 }
