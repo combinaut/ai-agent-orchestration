@@ -38,9 +38,12 @@ def problem(path, head, base=None):
     missing = [field for field in FIELDS if field not in record]
     if missing:
         return f"{path}: missing field {missing[0]}", None
-    for sha in (record["head"], record["base"], head, *([base] if base else [])):
+    for name, sha in (("head", record["head"]), ("base", record["base"])):
         if not isinstance(sha, str) or not SHA.fullmatch(sha):
-            return f"{path}: {sha!r} is not a full 40-character SHA", None
+            return f"{path}: {name} {sha!r} is not a full 40-character SHA", None
+    for name, sha in (("--head", head), ("--base", base)):
+        if sha is not None and not SHA.fullmatch(sha):
+            return f"{name} {sha!r} is not a full 40-character SHA", None
     if record["clean"] is not True:
         return (
             f"{path}: clean must be true; the sweep needs a committed head and a clean tree",

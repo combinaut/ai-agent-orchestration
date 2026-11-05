@@ -85,7 +85,7 @@ check() {
   record 4 1 '{"FALSE": 4}' --upload-pack=x
   check
   [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: '--upload-pack=x' is not a full 40-character SHA" ]
+  [ "$stderr" = "ERROR: $REC: head '--upload-pack=x' is not a full 40-character SHA" ]
 }
 
 @test "findings with no validator fail" {
@@ -185,7 +185,7 @@ check() {
   BASE=abc123 record 5 1 '{"FALSE": 5}'
   check
   [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: 'abc123' is not a full 40-character SHA" ]
+  [ "$stderr" = "ERROR: $REC: base 'abc123' is not a full 40-character SHA" ]
 }
 
 @test "a base git cannot resolve fails" {
@@ -236,4 +236,18 @@ check() {
   [ "${#lines[@]}" -eq 0 ]
   [ "$(printf '%s\n' "$stderr" | wc -l | tr -d ' ')" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: unknown verdict PENDING\\nSECOND" ]
+}
+
+@test "a --head that is not a full SHA blames the argument, not the record" {
+  record 5 1 '{"FALSE": 5}'
+  check abc123
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: --head 'abc123' is not a full 40-character SHA" ]
+}
+
+@test "a --base that is not a full SHA blames the argument, not the record" {
+  record 5 1 '{"FALSE": 5}'
+  EXPECT_BASE=abc123 check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: --base 'abc123' is not a full 40-character SHA" ]
 }
