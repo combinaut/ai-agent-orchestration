@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 
 import discovery
-from question_lock import DENIED, Unwritable, answers_lock, guarded, questions_directory
+from question_lock import DENIED, answers_lock, questions_directory
 from question_remind import atomic_write
 from question_text import strip_controls
 
@@ -36,16 +36,23 @@ def directory():
     return Path.home() / ".claude/coordinator/worker-signals"
 
 
+def read_text(path):
+    try:
+        return path.read_text()
+    except PermissionError as error:
+        error.read_denied = True
+        raise
+
+
 def read(path):
     try:
-        return json.loads(path.read_text())
+        return json.loads(read_text(path))
     except FileNotFoundError:
         return None
 
 
 def write(path, value):
-    with guarded(directory()):
-        atomic_write(path, json.dumps(value))
+    atomic_write(path, json.dumps(value))
 
 
 def pane_path(pane):
@@ -63,19 +70,16 @@ def answer_path(identifier):
 
 
 def escalation_directory(error):
-    """The directory to name for a denied write: the known root the path lies under, else its nearest existing directory."""
-    if isinstance(error, Unwritable):
-        return error.directory
-    if not error.filename:
-        return directory()
+    """The questions or worker-signals directory a denied write or lock lies under; None for anything else."""
+    if error.errno not in DENIED or not error.filename:
+        return None
+    if getattr(error, "read_denied", False):
+        return None
     path = Path(os.path.abspath(error.filename))
     for root in (questions_directory(), directory()):
         if path == root or root in path.parents:
             return root
-    return next(
-        (candidate for candidate in (path, *path.parents) if candidate.is_dir()),
-        Path(path.anchor),
-    )
+    return None
 
 
 def worktree_of(path):
@@ -226,32 +230,28 @@ def remove_question(record, close_panel=True, close_timeout=CLEANUP_SECONDS):
         if not close_panel:
             record["cleanup"] = True
             write(question_path(identifier), record)
-            with guarded(directory()):
-                answer_path(identifier).unlink(missing_ok=True)
-            with guarded(questions_directory()):
-                panel.with_suffix(".remind").unlink(missing_ok=True)
+            answer_path(identifier).unlink(missing_ok=True)
+            panel.with_suffix(".remind").unlink(missing_ok=True)
             return False
         try:
             if open_user_question("close", identifier, timeout=close_timeout) != 0:
                 return False
         except (OSError, subprocess.SubprocessError):
             return False
-    with guarded(directory()):
-        question_path(identifier).unlink(missing_ok=True)
-        answer_path(identifier).unlink(missing_ok=True)
+    question_path(identifier).unlink(missing_ok=True)
+    answer_path(identifier).unlink(missing_ok=True)
     questions = questions_directory()
-    with guarded(questions):
-        for suffix in (
-            "md",
-            "remind",
-            "asker-pane",
-            "answer",
-            "answer.seen",
-            "opening",
-        ):
-            (questions / f"{identifier}.{suffix}").unlink(missing_ok=True)
-        for path in questions.glob(f"{identifier}.*.answer.*"):
-            path.unlink(missing_ok=True)
+    for suffix in (
+        "md",
+        "remind",
+        "asker-pane",
+        "answer",
+        "answer.seen",
+        "opening",
+    ):
+        (questions / f"{identifier}.{suffix}").unlink(missing_ok=True)
+    for path in questions.glob(f"{identifier}.*.answer.*"):
+        path.unlink(missing_ok=True)
     return True
 
 
@@ -326,7 +326,7 @@ def wait_answer(record, timeout, deadline=None):
             with answers_lock(timeout=max(0, deadline - time.monotonic())):
                 path = answer_path(record["id"])
                 if path.exists():
-                    text = path.read_text().strip()
+                    text = read_text(path).strip()
                     remove_question(record, close_panel=False)
                     return text
                 remaining = deadline - time.monotonic()
@@ -369,22 +369,19 @@ def answer(identifier, text, to_user=False):
             # Use the existing reminder retry mechanism if opening the Q panel fails.
             from question_remind import write_remind
 
-            with guarded(questions_directory()):
-                atomic_write(
-                    target,
-                    strip_controls(
-                        f"# Worker question {identifier}\n\n{record['question']}\n\n{choices}"
-                    ),
-                )
-                write_remind(target, time.time())
+            atomic_write(
+                target,
+                strip_controls(
+                    f"# Worker question {identifier}\n\n{record['question']}\n\n{choices}"
+                ),
+            )
+            write_remind(target, time.time())
             if open_user_question(identifier, target) in (0, 73):
-                with guarded(questions_directory()):
-                    target.with_suffix(".remind").unlink(missing_ok=True)
+                target.with_suffix(".remind").unlink(missing_ok=True)
         else:
             if not text or not text.strip():
                 raise ValueError("answer text is required")
-            with guarded(directory()):
-                atomic_write(answer_path(identifier), text)
+            atomic_write(answer_path(identifier), text)
 
 
 def bridge_user_answer(identifier, text):
@@ -616,11 +613,12 @@ def main():
             record_signal(identity(recover=True), args.action, **fields)
         return 0
     except OSError as error:
-        if error.errno not in DENIED:
+        denied = escalation_directory(error)
+        if denied is None:
             print(f"orch-signal: {error}", file=sys.stderr)
             return 1
         print(
-            f"orch-signal: cannot write {escalation_directory(error)} (sandbox?); run this command escalated",
+            f"orch-signal: cannot write {denied} (sandbox?); run this command escalated",
             file=sys.stderr,
         )
         return EXIT_UNWRITABLE

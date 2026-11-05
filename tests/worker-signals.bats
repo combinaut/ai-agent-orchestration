@@ -3,6 +3,7 @@
 
 setup() {
   ROOT=$(cd "$BATS_TEST_DIRNAME/.." && pwd -P)
+  PYTHON=$(python3 -c 'import sys; print(sys.executable)')
   TMP=$(mktemp -d "${TMPDIR:-/tmp}/worker-signals-bats.XXXXXX")
   export HOME="$TMP/home" ORCH_CONFIG="$TMP/config.toml" ORCH_ENV=herdr
   mkdir -p "$HOME" "$TMP/bin"
@@ -156,13 +157,6 @@ elif mode in ("unlink-remind", "unlink-signal"):
         return unlink(self, missing_ok=missing_ok)
 
     pathlib.Path.unlink = deny_unlink
-elif mode == "raw":
-    import discovery
-
-    def deny_open_work(command):
-        raise denied(os.environ["ORCH_TEST_DENY_PATH"])
-
-    discovery.open_work = deny_open_work
 PY
   export PYTHONPATH="$TMP/stub:$ROOT/coordinator/watchers"
 }
@@ -327,21 +321,32 @@ assert_escalate() {
   done
 }
 
-@test "worker signals fallback names the questions directory for a denied path below it" {
-  export ORCH_USER_QUESTIONS_DIR="$TMP/q"
+@test "worker signals to-do answers report the to-do directory when its write is denied" {
   deny_with_stub
-  run env ORCH_TEST_DENY=raw ORCH_TEST_DENY_PATH="$TMP/q/sub/missing" "$ROOT/orch-signal" list
-  assert_escalate "$TMP/q"
+  todo="$HOME/.claude/coordinator/todo-answers"
+  mkdir -p "$todo"
+  chmod 555 "$todo"
+  run env PYTHONPATH="$ROOT/coordinator/watchers" "$PYTHON" -c '
+import sys
+import todo_answers
+
+try:
+    todo_answers.write(todo_answers.directory() / "answer.json", {})
+except OSError as error:
+    print(error)
+    sys.exit(3)
+'
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"/todo-answers/"* ]] || { echo "$output"; false; }
+  [[ "$output" != *"coordinator/worker-signals"* ]]
 }
 
-@test "worker signals fallback names the signals directory for a denied path below it" {
-  deny_with_stub
-  run env ORCH_TEST_DENY=raw ORCH_TEST_DENY_PATH="$HOME/.claude/coordinator/worker-signals/x.json" "$ROOT/orch-signal" list
-  assert_escalate "$HOME/.claude/coordinator/worker-signals"
-}
-
-@test "worker signals fallback names the nearest existing parent for a denied path outside both roots" {
-  deny_with_stub
-  run env ORCH_TEST_DENY=raw ORCH_TEST_DENY_PATH="$TMP/outside/a/b" "$ROOT/orch-signal" list
-  assert_escalate "$TMP"
+@test "worker signals a mode 000 record in a writable directory exits 1 naming the file" {
+  run "$ROOT/orch-signal" heartbeat --new-job
+  [ "$status" -eq 0 ]
+  chmod 000 "$HOME/.claude/coordinator/worker-signals/"pane-*.json
+  run "$ROOT/orch-signal" heartbeat --new-job
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Permission denied"*"/worker-signals/pane-"* ]] || { echo "$output"; false; }
+  [[ "$output" != *"escalated"* ]]
 }

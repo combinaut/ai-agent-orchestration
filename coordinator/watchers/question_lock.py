@@ -21,21 +21,13 @@ def questions_directory():
 DENIED = (errno.EPERM, errno.EACCES, errno.EROFS)
 
 
-class Unwritable(OSError):
-    """A write or lock the sandbox or file modes deny; `directory` is the one the caller meant to use."""
-
-    def __init__(self, error, directory):
-        super().__init__(error.errno, error.strerror, str(directory))
-        self.directory = Path(directory)
-
-
-@contextmanager
-def guarded(directory):
+def flock(lock, operation, path):
+    """flock errors carry no filename; the lock file's path lets callers name the directory."""
     try:
-        yield
+        fcntl.flock(lock, operation)
     except OSError as error:
-        if error.errno in DENIED and not isinstance(error, Unwritable):
-            raise Unwritable(error, directory) from error
+        if error.filename is None:
+            error.filename = str(path)
         raise
 
 
@@ -52,24 +44,22 @@ def answers_lock(directory=None, timeout=None):
         yield
         return
     directory = Path(directory) if directory else questions_directory()
-    with guarded(directory):
-        directory.mkdir(parents=True, exist_ok=True)
-        lock = (directory / ".answers.lock").open("a")
-    with lock:
-        with guarded(directory):
-            if timeout is None:
-                fcntl.flock(lock, fcntl.LOCK_EX)
-            else:
-                deadline = time.monotonic() + timeout
-                while True:
-                    try:
-                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        break
-                    except BlockingIOError:
-                        remaining = deadline - time.monotonic()
-                        if remaining <= 0:
-                            raise TimeoutError("question lock wait timed out") from None
-                        time.sleep(min(0.05, remaining))
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / ".answers.lock"
+    with path.open("a") as lock:
+        if timeout is None:
+            flock(lock, fcntl.LOCK_EX, path)
+        else:
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB, path)
+                    break
+                except BlockingIOError:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("question lock wait timed out") from None
+                    time.sleep(min(0.05, remaining))
         yield
 
 
