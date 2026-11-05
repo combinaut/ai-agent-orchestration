@@ -109,8 +109,10 @@ Skip entries whose claim (`sha`, plus `text` for a `text-re-review`) is already 
 Run one dispatch per queue item in the background:
 
 ```bash
-~/.claude/skills/review-prs/scripts/dispatch.sh "<url>" <number> "<title>" "<author>" <sha> <kind> <agent> "<cwd>" <owner/repo> [right|down] [<text>]
+~/.claude/skills/review-prs/scripts/dispatch.sh "<url>" <number> "<title>" "<author>" <sha> <kind> <agent> "<cwd>" <owner/repo> right|down <text>
 ```
+
+Pass the queue item's `text` as the 11th argument for every kind; `dispatch.sh` exits before claiming without it.
 
 Set `ORCH_REVIEW_EXTRA_STEPS` when dispatching to add review-specific instructions; `dispatch.sh` includes them in the authorized review prompt.
 Any follow-up sent to a review pane must repeat that it must post without asking for confirmation.
@@ -137,7 +139,7 @@ Close review panes only with `~/.claude/coordinator/watchers/close-pane.sh <pane
 
 ### Re-review
 
-A claim is the head SHA plus a hash of the PR title and body. A title or body edit at the same head, after a done review, makes the PR due again as `kind: text-re-review`; the text is compared with the newest completed review of that head, and one review of a head runs at a time; `dispatch.sh` takes the queue item's `text` as its last argument, and exits without claiming when a `text-re-review` has none. The reviewer re-checks the open pr-text findings at that head, with no full re-sweep. A PR whose review request is cleared is found again by the same edit (`reviewed-by:@me`), and the watcher reports it as `ready:` (`title or description edited`).
+A claim is the head SHA plus a hash of the PR title and body. A title or body edit at the same head, after a done review, makes the PR due again as `kind: text-re-review`; the text is compared with the newest completed review of that head, and one review of a head runs at a time; `dispatch.sh` takes the queue item's `text` as its last argument for every kind. The reviewer re-checks the open pr-text findings at that head, with no full re-sweep. A PR whose review request is cleared is found again by the same edit (`reviewed-by:@me`), and the watcher reports it as `ready:` (`title or description edited`).
 
 `dispatch-queue` emits `kind: re-review` when the same URL was marked before with a **different** head SHA (new commits while still requesting you, or after CI became green again). Same launch path; prompt Mode is `re-review`.
 

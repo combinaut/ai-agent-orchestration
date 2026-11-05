@@ -93,7 +93,7 @@ EOF
     export PATH="$TMP/fetch-ok:$PATH"
   fi
   run env ORCH_CONFIG="$TMP/none.toml" bash "$ROOT/$SKILL_DIR/scripts/dispatch.sh" \
-    https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" "${KIND:-review}" rev7 "$TMP/app" acme/app right "${TEXT:-}"
+    https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" "${KIND:-review}" rev7 "$TMP/app" acme/app right "${TEXT-5ba93c9db0cf}"
 }
 
 fork_head_missing_from_pull_ref() {
@@ -1554,14 +1554,16 @@ print(sorted((k.split("#")[-1] if "#" in k else "-", v["state"]) for k, v in h.i
   [ "$output" = "[('-', 'done'), ('new222', 'done')]" ]
 }
 
-@test "a text re-review without the text hash exits before claiming" {
+@test "a dispatch of any kind without the text hash exits before claiming" {
   stub_review_tools
   : >"$TMP/none.toml"
-  KIND=text-re-review dispatch
-  [ "$status" -ne 0 ]
-  contains "$output" 'text-re-review needs the text hash as the 11th argument'
-  [ ! -e "$HOME/.cache/review-prs/dispatched.json" ]
-  [ ! -e "$TMP/review-herdr.calls" ]
+  for kind in review re-review text-re-review; do
+    KIND=$kind TEXT='' dispatch
+    [ "$status" -ne 0 ]
+    contains "$output" 'the text hash is the 11th argument'
+    [ ! -e "$HOME/.cache/review-prs/dispatched.json" ]
+    [ ! -e "$TMP/review-herdr.calls" ]
+  done
 }
 
 @test "a first review prompt has no text re-review rule" {
