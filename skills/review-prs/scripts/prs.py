@@ -232,7 +232,7 @@ def claim_key(known, sha, text):
 
 
 def review_taken(known, sha, key):
-    """Whether key needs no new review: a review of this head is running, or key holds the newest completed one."""
+    """Whether key needs no new review: a review of this head is running, key's record is not done, or key holds the newest completed one."""
     record = known.get(key)
     return head_pending(known, sha) or bool(
         record and (record.get("state") != "done" or key == latest_done_key(known, sha))
