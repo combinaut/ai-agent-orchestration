@@ -25,7 +25,7 @@ record() {
   local ids="" i
   for ((i = 1; i <= $2; i++)); do ids="${ids:+$ids, }\"agent-$i\""; done
   cat >"$REC" <<JSON
-{"head": "${4:-$HEAD_SHA}", "base": "abc123", "slices": 3, "sweep_agents": 6,
+{"head": "${4:-$HEAD_SHA}", "base": "abc123", "clean": ${CLEAN:-true}, "slices": 3, "sweep_agents": 6,
  "validators": $2, "validator_ids": [$ids], "findings": $1, "verdicts": $3}
 JSON
 }
@@ -138,4 +138,34 @@ check() {
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: validator_ids must be a list of non-empty strings" ]
+}
+
+@test "a verdict outside the skill's list fails naming it" {
+  record 5 1 '{"PENDING": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: unknown verdict PENDING" ]
+}
+
+@test "a record from a dirty tree fails" {
+  CLEAN=false record 5 1 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: $REC: clean must be true"* ]]
+}
+
+@test "a record without the clean field fails" {
+  record 5 1 '{"FALSE": 5}'
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); del d["clean"]; json.dump(d, open(sys.argv[1], "w"))' "$REC"
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: missing field clean" ]
+}
+
+@test "every verdict the checker accepts is a row of the skill's verdict table" {
+  local verdicts v
+  # shellcheck disable=SC2016 # Backticks in the grep pattern are literal.
+  mapfile -t verdicts < <(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import sweep_record; print(*sweep_record.VERDICTS, sep="\n")' "$ROOT/lib")
+  [ "${#verdicts[@]}" -eq "$(grep -c '^| `[A-Z_]*` |' "$ROOT/skills/finalize-sweep/SKILL.md")" ]
+  for v in "${verdicts[@]}"; do grep -qF "| \`$v\` |" "$ROOT/skills/finalize-sweep/SKILL.md"; done
 }

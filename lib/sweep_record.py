@@ -9,7 +9,18 @@ import sys
 
 SHA = re.compile(r"[0-9a-f]{40}")
 COUNTS = ("slices", "sweep_agents", "validators", "findings")
-FIELDS = ("head", "base", *COUNTS, "validator_ids", "verdicts")
+FIELDS = ("head", "base", "clean", *COUNTS, "validator_ids", "verdicts")
+VERDICTS = (
+    "CONFIRMED_NEW",
+    "CONFIRMED_REGRESSED",
+    "DISPUTED_DROP",
+    "RESPECT_DROP",
+    "ALREADY_FIXED",
+    "ALLOWED_PLANNED",
+    "PREEXISTING",
+    "FALSE",
+    "NOT_WORTH_IT",
+)
 
 
 def problem(path, head):
@@ -29,6 +40,8 @@ def problem(path, head):
     for sha in (record["head"], head):
         if not isinstance(sha, str) or not SHA.fullmatch(sha):
             return f"{path}: {sha!r} is not a full 40-character SHA"
+    if record["clean"] is not True:
+        return f"{path}: clean must be true; the sweep needs a committed head and a clean tree"
     for field in COUNTS:
         value = record[field]
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -39,6 +52,9 @@ def problem(path, head):
         for n in verdicts.values()
     ):
         return f"{path}: verdicts must map each verdict to a count"
+    unknown = [key for key in verdicts if key not in VERDICTS]
+    if unknown:
+        return f"{path}: unknown verdict {unknown[0]}"
     ids = record["validator_ids"]
     if not isinstance(ids, list) or not all(isinstance(i, str) and i for i in ids):
         return f"{path}: validator_ids must be a list of non-empty strings"

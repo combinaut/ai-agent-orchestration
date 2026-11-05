@@ -17,7 +17,7 @@ It runs `/finalize-code-comments` and `/finalize-change-footprint` per slice. Mo
 
 ## 1. Scope
 
-- Record the commit the sweep runs at. Before reporting, check whether the head has moved, and say so if it has.
+- Commit first, and check that `git status --porcelain` is empty before slicing; the sweep covers a committed head with a clean tree. Record that commit as `head`. Before reporting, check whether the head has moved, and say so if it has.
 - Cover the complete PR diff, never only what changed since an earlier sweep. Include staged, unstaged and untracked changes.
 - Resolve the merge base once, with `git merge-base HEAD <base>` and the base from Input. Use that commit for everything below.
 - List the changed paths with `git diff --name-status -z <merge-base>`, which covers committed, staged and unstaged changes, deleted files included. A renamed file counts once, under its new name, and keeps its old name for step 3. Add each file from `git ls-files --others --exclude-standard`.
@@ -75,5 +75,5 @@ A `real-bug` finding must be traced to a concrete failure, otherwise it is `FALS
 1. Merge duplicates across slices.
 2. Re-check every bug claim yourself against the code. A validator can be confidently wrong.
 3. Present the kept findings as a table, one row each with file and line, category, verdict and recommendation, and wait for approval before changing anything. Below it, give the raw finding count, the kept count and the count per verdict.
-4. Write the sweep record as JSON, next to the findings table, at a path you give in your report. Put the same JSON in a fenced `json` block in the findings PR comment. Fields: `head` (full 40-character SHA swept), `base`, `slices`, `sweep_agents` and `validators` (counts started), `validator_ids` (the agent or task id of each validator), `findings` (raw count), `verdicts` (count per verdict; the counts add up to `findings`). `orch-sweep-record check --record <path> --head <sha>` verifies it.
+4. Write the sweep record as JSON, next to the findings table, at a path you give in your report. Put the same JSON in a fenced `json` block in the findings PR comment. Fields: `head` (full 40-character SHA swept), `base`, `clean` (`true`: the tree was clean at `head`), `slices`, `sweep_agents` and `validators` (counts started), `validator_ids` (the agent or task id of each validator), `findings` (raw count), `verdicts` (count per verdict; the counts add up to `findings`). `orch-sweep-record check --record <path> --head <sha>` verifies it.
 5. Apply only the approved changes, then run the linters and tests for the touched surfaces. Do **not** commit or push unless asked.
