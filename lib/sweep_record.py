@@ -25,7 +25,7 @@ VERDICTS = (
 
 
 def problem(path, head, base=None):
-    """(why, record): why the record at path is malformed or its SHAs are not full SHAs, else None."""
+    """(why, record): why the record fails the checks that need no git, else (None, record)."""
     try:
         with open(path, encoding="utf-8") as handle:
             record = json.load(handle)

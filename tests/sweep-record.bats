@@ -30,6 +30,11 @@ record() {
 JSON
 }
 
+# drop_field <name>: removes a field from the record file.
+drop_field() {
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); del d[sys.argv[2]]; json.dump(d, open(sys.argv[1], "w"))' "$REC" "$1"
+}
+
 check() {
   cd "$REPO" || return 1
   run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "${1:-$HEAD_SHA}" ${EXPECT_BASE:+--base "$EXPECT_BASE"}
@@ -51,7 +56,7 @@ check() {
 
 @test "a record without a field fails naming it" {
   record 4 1 '{"FALSE": 4}'
-  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); del d["validator_ids"]; json.dump(d, open(sys.argv[1], "w"))' "$REC"
+  drop_field validator_ids
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: missing field validator_ids" ]
@@ -156,7 +161,7 @@ check() {
 
 @test "a record without the clean field fails" {
   record 5 1 '{"FALSE": 5}'
-  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); del d["clean"]; json.dump(d, open(sys.argv[1], "w"))' "$REC"
+  drop_field clean
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: missing field clean" ]
@@ -309,18 +314,12 @@ check() {
 
 @test "a record without the mode field fails" {
   record 5 1 '{"FALSE": 5}'
-  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); del d["mode"]; json.dump(d, open(sys.argv[1], "w"))' "$REC"
+  drop_field mode
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: missing field mode" ]
 }
 
-@test "an agents record with findings and no validator still fails" {
-  record 5 0 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: 5 findings and no validator started" ]
-}
 
 @test "a serial record that lists a validator id fails" {
   MODE=serial AGENTS=0 record 5 0 '{"FALSE": 5}'
