@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Runs /finalize-sweep as a script: feature slices, headless agents, validators, the record and the PR comment."""
 
+import atexit
 import concurrent.futures
 import hashlib
 import json
 import math
 import os
 import re
+import shutil
 import signal
 import stat
 import subprocess
@@ -36,16 +38,7 @@ ROLES = {
 TEST_DIRS = {"test", "tests", "spec", "__tests__"}
 TEST_NAME = re.compile(r"^test_|_(spec|test)\.[^.]+$|\.(test|spec)\.[^.]+$|\.bats$")
 PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
-CLAUDE_TOOLS = [
-    "Read",
-    "Grep",
-    "Glob",
-    "Bash(git diff:*)",
-    "Bash(git show:*)",
-    "Bash(git ls-files:*)",
-    "Bash(git merge-base:*)",
-    "Bash(rg:*)",
-]
+CLAUDE_TOOLS = ["Read", "Grep", "Glob"]
 TRAILERS = {
     "codex": "*(Generated using Codex)*",
     "claude": "*(Generated using Claude Code)*",
@@ -299,7 +292,7 @@ def model_for(runtime, given):
     return "sonnet" if "sonnet" in tiers or not tiers else tiers[0]
 
 
-def command(runtime, model, schema, out):
+def command(runtime, model, schema, out, diffs):
     if runtime == "codex":
         return [
             "codex", "exec", "-m", model, "-C", os.getcwd(), "-s", "read-only",
@@ -310,6 +303,7 @@ def command(runtime, model, schema, out):
         "claude", "-p", "--model", model, "--output-format", "json",
         "--json-schema", Path(schema).read_text(), "--permission-mode", "dontAsk",
         "--setting-sources", "user", "--strict-mcp-config", "--no-session-persistence",
+        "--tools", ",".join(CLAUDE_TOOLS), "--add-dir", diffs,
         "--allowedTools", *CLAUDE_TOOLS, "--disallowedTools", "Edit", "Write", "NotebookEdit",
     ]  # fmt: skip
 
@@ -333,8 +327,11 @@ def stop(proc):
 class Runner:
     """Runs agent jobs in a pool of at most `concurrency`, one retry each within a retry budget and a deadline."""
 
-    def __init__(self, runtime, model, concurrency, agent_timeout, deadline, retries):
+    def __init__(
+        self, runtime, model, concurrency, agent_timeout, deadline, retries, diffs
+    ):
         self.runtime = runtime
+        self.diffs = diffs
         self.model = model
         self.concurrency = concurrency
         self.agent_timeout = agent_timeout
@@ -360,7 +357,7 @@ class Runner:
         with tempfile.TemporaryDirectory(prefix="orch-sweep-") as scratch:
             schema, out = Path(scratch, "schema.json"), Path(scratch, "answer.json")
             schema.write_text(json.dumps(job["schema"]))
-            argv = command(self.runtime, self.model, str(schema), str(out))
+            argv = command(self.runtime, self.model, str(schema), str(out), self.diffs)
             with self.lock:
                 if self.failed.is_set():
                     raise AgentError(
@@ -492,10 +489,19 @@ def file_lines(files):
     return "\n".join(out)
 
 
-def sweep_prompt(skill, chunk, base, head):
+def write_diff(path, base, head, files):
+    """The diff of files (all with None) from base to head, written outside the checkout for the agents."""
+    names = [n for f in files for n in (f["path"], f["old"]) if n] if files else []
+    Path(path).write_text(
+        git("diff", "--no-ext-diff", "--no-textconv", "-M", base, head, "--", *names)
+    )
+    return path
+
+
+def sweep_prompt(skill, chunk, base, head, diff):
     return f"""ROLE: {ROLES[skill]}
 Run the {skill} skill below, report-only, over one slice of a pull request.
-Repository: the current directory, at commit {head}. Base ref: {base}. Diff each file with git diff {base} {head} -- <path>.
+Repository: the current directory, at commit {head}. Base ref: {base}. The diff of these files from {base} to {head} is in {diff}; read it with your file tools.
 Files:
 {file_lines(chunk["files"])}
 
@@ -505,9 +511,9 @@ Files:
 {skill_text(skill)}"""
 
 
-def pr_text_prompt(pr, base, head):
+def pr_text_prompt(pr, base, head, diff):
     return f"""ROLE: pr-text
-Check every factual claim in the pull request title and body below against the code. The diff is git diff {base} {head}.
+Check every factual claim in the pull request title and body below against the code. The diff from {base} to {head} is in {diff}; the code at {head} is in the current directory.
 - List every factual claim: UAT steps, verification paragraphs, file names, counts, blanket claims with "every" or "all", named behaviour.
 - Check each against the diff and the code. For a blanket claim, list every item it covers, including code this PR did not change, and check each.
 - Each claim that fails or cannot be verified is a finding in category pr-text that quotes the claim; file is the path at fault, or "PR body". A claim the code cannot show, such as a manual test, is a finding that names the missing evidence.
@@ -526,9 +532,9 @@ CONFIRMED_NEW (true, never raised, worth doing; keep), CONFIRMED_REGRESSED (repo
 A real-bug finding must be traced to a concrete failure, otherwise it is FALSE or NOT_WORTH_IT."""
 
 
-def validator_prompt(chunk, context, merge_base, head):
+def validator_prompt(chunk, context, merge_base, head, diff):
     return f"""ROLE: validator
-Validate the sweep findings below for a pull request at commit {head} (merge base {merge_base}). Report only: create, change or delete no file in the repository.
+Validate the sweep findings below for a pull request at commit {head} (merge base {merge_base}). The PR diff is in {diff}; the code at {head} is in the current directory. Report only: create, change or delete no file in the repository.
 For each finding check: is it true of the code, was it raised before and with what outcome (the PR comments below hold earlier sweeps; a finding rejected once on this PR is never raised again: RESPECT_DROP), and does the plan allow it or did this PR not cause it.
 {VERDICT_TABLE}
 {CLASSES}
@@ -710,27 +716,38 @@ def run(args):
             f"{len(slices)} slices; the limit is {MAX_SLICES}; ask the user whether to continue or split the PR",
             3,
         )
+    diffs = tempfile.mkdtemp(prefix="orch-sweep-diffs-")
+    atexit.register(shutil.rmtree, diffs, True)
+    if Path(diffs).resolve().is_relative_to(top):
+        raise Failure(
+            f"the diff folder {diffs} is inside the checkout; set TMPDIR outside it"
+        )
+    pr_diff = write_diff(f"{diffs}/pr.diff", merge_base, args.head, None)
+    slice_diffs = [
+        write_diff(f"{diffs}/slice-{n + 1}.diff", merge_base, args.head, chunk["files"])
+        for n, chunk in enumerate(slices)
+    ]
     before = tree()
     runner = Runner(
         args.runtime, model, args.concurrency, args.agent_timeout,
-        time.monotonic() + args.timeout, len(slices),
+        time.monotonic() + args.timeout, len(slices), diffs,
     )  # fmt: skip
     for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(signum, runner.stop_all)
     jobs = [
         {
             "name": f"{ROLES[skill]} {chunk['name']}",
-            "prompt": sweep_prompt(skill, chunk, merge_base, args.head),
+            "prompt": sweep_prompt(skill, chunk, merge_base, args.head, diff),
             "schema": FINDINGS_SCHEMA,
             "check": findings_check,
         }
-        for chunk in slices
+        for chunk, diff in zip(slices, slice_diffs)
         for skill in ROLES
     ]
     jobs.append(
         {
             "name": "pr-text",
-            "prompt": pr_text_prompt(pr, merge_base, args.head),
+            "prompt": pr_text_prompt(pr, merge_base, args.head, pr_diff),
             "schema": FINDINGS_SCHEMA,
             "check": findings_check,
         }
@@ -752,7 +769,7 @@ def run(args):
         [
             {
                 "name": f"validator {n + 1}",
-                "prompt": validator_prompt(chunk, text, merge_base, args.head),
+                "prompt": validator_prompt(chunk, text, merge_base, args.head, pr_diff),
                 "schema": VERDICTS_SCHEMA,
                 "check": verdicts_check([f["id"] for f in chunk]),
             }
