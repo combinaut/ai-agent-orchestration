@@ -31,7 +31,8 @@ LINK = re.compile(
     re.IGNORECASE,
 )
 REFERENCE = re.compile(
-    r"(?<![\w/])(?:#|(?:pull\s+request|pr|issue)s?\s*#?)(\d+)", re.IGNORECASE
+    r"(?:(?<![\w/])(?:pull\s+request|pr|issue)s?\s*#?|#)(\d+(?:\s*(?:,|and|&)\s*#?\d+)*)",
+    re.IGNORECASE,
 )
 LINK_TTL = 300
 LINK_LOOKUPS_MAX = 5
@@ -119,7 +120,9 @@ def unresolved_reference(text):
     """True when the text names a PR or issue number that no linked URL covers."""
     covered = {match[3] for match in LINK.findall(text)}
     return any(
-        number not in covered for number in REFERENCE.findall(LINK.sub(" ", text))
+        number not in covered
+        for group in REFERENCE.findall(LINK.sub(" ", text))
+        for number in re.findall(r"\d+", group)
     )
 
 

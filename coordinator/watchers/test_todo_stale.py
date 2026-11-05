@@ -253,6 +253,9 @@ class TodoStaleTest(IsolatedTestCase):
             "and PR 124",
             "and issue 125",
             "and Pull Request #126",
+            "and acme/app#127",
+            "and PRs 7 and 128",
+            "and issues 129, 130",
         ):
             with self.subTest(tail=tail):
                 self.write(f"Merge {PR} {tail} -> Coordinator")
