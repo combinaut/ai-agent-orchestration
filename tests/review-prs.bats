@@ -292,7 +292,7 @@ fork_head_missing_from_pull_ref() {
   : >"$TMP/none.toml"
   dispatch
   prompt=$(cat "$TMP/review.prompt")
-  contains "$prompt" 'every review includes the finalize sweep over the whole PR diff'
+  contains "$prompt" 'every review except a text re-review includes the finalize sweep over the whole PR diff'
   contains "$prompt" 'Read ~/.claude/skills/finalize-sweep/SKILL.md'
   contains "$prompt" 'then its validator step'
   contains "$prompt" 'github_write.py --timeout 240 api -X POST repos/acme/app/issues/7/comments --input -'
@@ -310,6 +310,7 @@ fork_head_missing_from_pull_ref() {
 }
 
 @test "the review texts carry the sweep rules" {
+  grep -qF 'Every review except a text re-review runs the finalize sweep' "$ROOT/$SKILL_DIR/SKILL.md"
   grep -qF 'An open kept fix finding blocks APPROVE; nits and dropped findings never block.' "$ROOT/$SKILL_DIR/SKILL.md"
   grep -qF 'finding blocks APPROVE; nits and dropped findings never block.' "$ROOT/README.md"
   grep -qF 'always names the swept head SHA in full (40 characters)' "$ROOT/$SKILL_DIR/SKILL.md"
