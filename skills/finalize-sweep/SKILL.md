@@ -19,11 +19,11 @@ Run the skill again after every merge or rebase of the base into the PR branch. 
 
 ## 1. Scope
 
-- Record the commit the sweep runs at. Before reporting, check whether the head has moved, and say so if it has.
-- Cover the complete PR diff, never only what changed since an earlier sweep. Include staged, unstaged and untracked changes.
+- The sweep needs a committed head and a clean tree: `git status --porcelain` must be empty before slicing. When the tree is dirty, stop and tell the caller to commit first. Record the head commit as `head`. Before reporting, check whether the head has moved, and say so if it has.
+- Cover the complete PR diff, never only what changed since an earlier sweep. The scope is the committed diff `<merge-base>..HEAD`.
 - Resolve the merge base once, with `git merge-base HEAD <base>` and the base from Input. Use that commit for everything below.
-- List the changed paths with `git diff --name-status -z <merge-base>`, which covers committed, staged and unstaged changes, deleted files included. A renamed file counts once, under its new name, and keeps its old name for step 3. Add each file from `git ls-files --others --exclude-standard`.
-- Count additions plus deletions per path with `git diff --numstat -z <merge-base>`, and all lines for an untracked file. A binary file has no line count.
+- List the changed paths with `git diff --name-status -z <merge-base> HEAD`, deleted files included. A renamed file counts once, under its new name, and keeps its old name for step 3.
+- Count additions plus deletions per path with `git diff --numstat -z <merge-base> HEAD`. A binary file has no line count.
 
 ## 2. Slice
 
@@ -50,7 +50,7 @@ Brief every agent with these rules. They override any step of the skill that edi
 - **Report only.** Create, change or delete no file in the repository, even temporarily, and run no tests. The only write is one report file outside the repository.
 - **Evidence.** Verify every finding against the code at `file:line`, naming the callers or the covering test. Drop anything unverified. A Keep needs the same evidence. Report a behaviour bug you notice as `real-bug`, with the concrete failure.
 
-Before starting them, record `git rev-parse HEAD`, `git status --porcelain`, a hash of `git diff HEAD`, a hash of `git diff --cached HEAD`, and a hash over each untracked file's path, mode and content. Compare all five when the agents finish, so existing uncommitted work stays out of the check. A difference means an agent broke the report-only rule: stop and report it.
+Before starting them, record `git rev-parse HEAD`, `git status --porcelain`, a hash of `git diff HEAD`, a hash of `git diff --cached HEAD`, and a hash over each untracked file's path, mode and content. Compare all five when the agents finish. A difference means an agent broke the report-only rule: stop and report it.
 
 ## 4. PR text
 
@@ -86,4 +86,5 @@ A `real-bug` finding must be traced to a concrete failure, otherwise it is `FALS
 1. Merge duplicates across slices.
 2. Re-check every bug claim yourself against the code. A validator can be confidently wrong.
 3. Present the kept findings as a table, one row each with file and line (or the missing evidence), category, verdict and recommendation, and wait for approval before changing anything. Below it, give the raw finding count, the kept count and the count per verdict.
-4. Apply only the approved changes, then run the linters and tests for the touched surfaces. An approved `pr-text` finding changes the PR title or body, unless the approval says the code is wrong. After applying, record the five values from step 3 again, run step 4 over the changed code, and compare them when it finishes. Send each new `pr-text` finding through steps 5 and 6. Do **not** commit or push unless asked.
+4. Write the sweep record as JSON, next to the findings table, at a path outside the repository that you give in your report. Put the same JSON in a fenced `json` block in the findings PR comment. Fields: `head` (full 40-character SHA swept), `base` (full 40-character SHA of the merge base from step 1), `clean` (`true`: the tree was clean at `head`), `mode` (`agents`, or `serial` when the runtime cannot start subagents and ran the slices one after another; a serial record has `sweep_agents`, `validators` and `validator_ids` at 0 and empty), `slices`, `sweep_agents` and `validators` (counts started), `validator_ids` (the agent or task id of each validator), `findings` (raw count), `verdicts` (count per verdict; the counts add up to `findings`). `orch-sweep-record check --record <path> --head <sha> [--base <sha>]` verifies it. The record is self-reported: the check proves it is complete and matches the PR head, not that the agents ran.
+5. Apply only the approved changes, then run the linters and tests for the touched surfaces. An approved `pr-text` finding changes the PR title or body, unless the approval says the code is wrong. After applying, record the five values from step 3 again, run step 4 over the changed code, and compare them when it finishes. Send each new `pr-text` finding through steps 5 and 6. Do **not** commit or push unless asked.

@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
-# shellcheck disable=SC2030,SC2031 # Bats runs each test in a subshell.
+# shellcheck disable=SC2030,SC2031,SC2154 # Bats runs each test in a subshell; run --separate-stderr sets stderr.
+
+bats_require_minimum_version 1.5.0
 
 setup() {
   ROOT=$(cd "$BATS_TEST_DIRNAME/.." && pwd -P)
@@ -505,4 +507,74 @@ ENV
   [ "$(grep -c scan "$TMP/snippets/acme/web-app.toml")" = 0 ]
   grep -qx 'scan = true' "$TMP/snippets/acme-web/app.toml"
   [ "$(grep -c 'big_repo' "$TMP/snippets/acme-web/app.toml")" = 0 ]
+}
+
+# finalize_warning <commands-toml-list> [exported-value]: loads a repo whose committed file sets review.finalize_commands, with an optional exported override.
+finalize_warning() {
+  local exported=()
+  [ $# -lt 2 ] || exported=("ORCH_REVIEW_FINALIZE_COMMANDS=$2")
+  CLONE="$TMP/clone"
+  git init -q "$CLONE"
+  : >"$ORCH_CONFIG"
+  printf '[review]\nfinalize_commands = %s\n' "$1" >"$CLONE/.orchestration.toml"
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run --separate-stderr env ${exported[@]+"${exported[@]}"} bash -c '. "$1/coordinator/watchers/coord-lib.sh"
+    orch_python >/dev/null && "$ORCH_LOADER_PYTHON" -I "$2" repo "$3"' _ "$ROOT" "$SETTINGS" "$CLONE"
+}
+
+@test "a repo file naming the old finalize pair warns once and leaves stdout alone" {
+  finalize_warning '["/finalize-change-footprint", "/finalize-code-comments"]'
+  [ "$status" -eq 0 ]
+  [ "$stderr" = "WARNING: $CLONE/.orchestration.toml sets review.finalize_commands to /finalize-change-footprint /finalize-code-comments; /finalize-sweep replaces /finalize-change-footprint and /finalize-code-comments" ]
+  [[ "$output" == *"orch_set_default ORCH_REVIEW_FINALIZE_COMMANDS '/finalize-change-footprint|/finalize-code-comments'"* ]]
+}
+
+@test "a repo file naming /finalize-sweep does not warn" {
+  finalize_warning '["/finalize-sweep", "/finalize-code-comments"]'
+  [ "$status" -eq 0 ]
+  [ "$stderr" = "" ]
+}
+
+@test "an empty finalize list does not warn" {
+  finalize_warning '[]'
+  [ "$status" -eq 0 ]
+  [ "$stderr" = "" ]
+}
+
+@test "the global file naming the old pair warns from orch-settings" {
+  printf '[review]\nfinalize_commands = ["/finalize-code-comments"]\n' >"$ORCH_CONFIG"
+  run --separate-stderr "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  [ "$stderr" = "WARNING: $ORCH_CONFIG sets review.finalize_commands to /finalize-code-comments; /finalize-sweep replaces /finalize-change-footprint and /finalize-code-comments" ]
+  printf '%s\n' "$output" | grep -qxF "ORCH_REVIEW_FINALIZE_COMMANDS=/finalize-code-comments"
+}
+
+@test "an exported /finalize-sweep silences a file that names the old pair" {
+  finalize_warning '["/finalize-code-comments"]' '/finalize-sweep'
+  [ "$status" -eq 0 ]
+  [ "$stderr" = "" ]
+}
+
+@test "an exported old pair warns naming the variable even over a sweep file" {
+  finalize_warning '["/finalize-sweep"]' '/finalize-code-comments'
+  [ "$status" -eq 0 ]
+  [ "$stderr" = "WARNING: ORCH_REVIEW_FINALIZE_COMMANDS sets review.finalize_commands to /finalize-code-comments; /finalize-sweep replaces /finalize-change-footprint and /finalize-code-comments" ]
+}
+
+@test "an exported old pair warns from orch-settings naming the variable" {
+  printf '[review]\nfinalize_commands = ["/finalize-sweep"]\n' >"$ORCH_CONFIG"
+  ORCH_REVIEW_FINALIZE_COMMANDS=/finalize-code-comments run --separate-stderr "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  [ "$stderr" = "WARNING: ORCH_REVIEW_FINALIZE_COMMANDS sets review.finalize_commands to /finalize-code-comments; /finalize-sweep replaces /finalize-change-footprint and /finalize-code-comments" ]
+  printf '%s\n' "$output" | grep -qxF "ORCH_REVIEW_FINALIZE_COMMANDS=/finalize-code-comments"
+}
+
+@test "a settings path holding a newline still gives a one-line warning" {
+  local odd="$TMP/odd
+name.toml"
+  printf '[review]\nfinalize_commands = ["/finalize-code-comments"]\n' >"$odd"
+  ORCH_CONFIG=$odd run --separate-stderr "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$stderr" | wc -l | tr -d ' ')" -eq 1 ]
+  [[ "$stderr" == "WARNING: $TMP/odd\\nname.toml sets review.finalize_commands to /finalize-code-comments;"* ]]
 }

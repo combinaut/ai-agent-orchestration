@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Runs /finalize-sweep as a script: orch-sweep run|plan|tree (see lib/sweep_run.py).
+set -euo pipefail
+
+self=${BASH_SOURCE[0]}
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case "$link" in /*) self=$link ;; *) self=$(cd "$(dirname "$self")" && pwd)/$link ;; esac
+done
+root=$(cd "$(dirname "$self")" && pwd)
+. "$root/coordinator/watchers/coord-lib.sh"
+orch_python >/dev/null || exit 2
+exec "$ORCH_LOADER_PYTHON" -I "$root/lib/sweep_run.py" "$@"
