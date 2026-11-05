@@ -321,7 +321,7 @@ assert_escalate() {
   done
 }
 
-@test "worker signals to-do answers report the to-do directory when its write is denied" {
+@test "worker signals a denied to-do write keeps its own path in the error" {
   deny_with_stub
   todo="$HOME/.claude/coordinator/todo-answers"
   mkdir -p "$todo"
