@@ -372,7 +372,6 @@ check() {
 }
 
 @test "an unknown flag fails with one ERROR line and exit 1" {
-  record 0 0 '{}'
   cd "$REPO" || return 1
   run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --bogus
   [ "$status" -eq 1 ]
@@ -395,4 +394,19 @@ check() {
   [ "${#lines[@]}" -eq 0 ]
   [[ "$stderr" == "ERROR: "* ]]
   [ "$(printf '%s\n' "$stderr" | wc -l)" -eq 1 ]
+}
+
+@test "a missing --record fails with one ERROR line and exit 1" {
+  cd "$REPO" || return 1
+  run --separate-stderr "$ROOT/orch-sweep-record" check --head "$HEAD_SHA"
+  [ "$status" -eq 1 ]
+  [ "$output" = "" ]
+  [ "$stderr" = "ERROR: the following arguments are required: --record" ]
+}
+
+@test "a control character in a usage error is escaped" {
+  cd "$REPO" || return 1
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" $'--bo\ngus'
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'ERROR: unrecognized arguments: --bo\ngus' ]
 }
