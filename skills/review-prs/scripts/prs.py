@@ -6,7 +6,8 @@
   prs.py dispatch-queue [scope]                   JSON: Ready PRs needing (re)review
   prs.py mark-dispatched --url U --sha S [--text T] [--state pending|blocked|done] [--reason R] [--agent N] [--pane P]
   prs.py claim-dispatched --url U --sha S [--text T] [--agent N]   marks S pending; exit 3 when a review of S is pending, S is blocked, or S's newest completed review holds the same text
-  prs.py release-dispatched --url U --sha S [--text T]   drops S while it is pending or blocked
+  prs.py release-dispatched --url U --sha S [--text T]   drops S while it is pending, and every blocked record of its head
+  prs.py text-hash                                the hash of the PR title and body given as {"title","body"} JSON on stdin
   prs.py remote --cwd C --repo R                  the remote of clone C (origin or upstream) that is the GitHub repo R
   prs.py review-ids --login L                     stdin: gh api --paginate --slurp .../reviews; ids of L's submitted reviews
   prs.py last-review --login L --sha S --seen IDS stdin: the same; L's newest submitted review of S not in IDS
@@ -223,6 +224,14 @@ def head_pending(known, sha):
     )
 
 
+def blocked_record(known, sha):
+    """The blocked record of this head, whatever title and body it was blocked under, or None."""
+    for record in head_records(known, sha).values():
+        if record.get("state") == "blocked":
+            return record
+    return None
+
+
 def claim_key(known, sha, text):
     """The record key: the newest completed review's key when it holds this text or none, sha#text when it holds other text, else the head SHA."""
     latest = latest_done_key(known, sha)
@@ -232,10 +241,15 @@ def claim_key(known, sha, text):
 
 
 def review_taken(known, sha, key):
-    """Whether key needs no new review: a review of this head is running, key has a pending or blocked record, or key holds the newest completed one."""
+    """Whether key needs no new review: a review of this head is running or blocked, key has a record that is not done, or key holds the newest completed one."""
     record = known.get(key)
-    return head_pending(known, sha) or bool(
-        record and (record.get("state") != "done" or key == latest_done_key(known, sha))
+    return (
+        head_pending(known, sha)
+        or blocked_record(known, sha) is not None
+        or bool(
+            record
+            and (record.get("state") != "done" or key == latest_done_key(known, sha))
+        )
     )
 
 
@@ -841,8 +855,8 @@ def cmd_dispatch_queue(args, scope, label):
         else:
             records = dispatched_records(pr, dispatched)
             head = pr.get("headRefOid") or ""
-            record = records.get(claim_key(records, head, text_hash(pr)))
-            if (record or {}).get("state") == "blocked":
+            record = blocked_record(records, head)
+            if record:
                 blocked.append(
                     {
                         "url": pr["url"],
@@ -958,9 +972,17 @@ def cmd_release_dispatched(args, _scope, _label):
     def release(data):
         known = dict(heads(data.get(args.url) or {}))
         key = claim_key(known, args.sha, args.text)
-        if (known.get(key) or {}).get("state") not in ("pending", "blocked"):
+        drop = {
+            k
+            for k, r in head_records(known, args.sha).items()
+            if r.get("state") == "blocked"
+        }
+        if (known.get(key) or {}).get("state") == "pending":
+            drop.add(key)
+        if not drop:
             return
-        del known[key]
+        for k in drop:
+            del known[k]
         if known:
             data[args.url] = {"heads": known}
         else:
@@ -976,6 +998,11 @@ def submitted_reviews(login):
         for r in page
         if (r.get("user") or {}).get("login") == login and r.get("submitted_at")
     ]
+
+
+def cmd_text_hash(args, _scope, _label):
+    """Prints the text hash of the PR title and body given as JSON on stdin."""
+    print(text_hash(json.load(sys.stdin)))
 
 
 def cmd_review_ids(args, _scope, _label):
@@ -1009,6 +1036,7 @@ def main():
             "mark-dispatched",
             "release-dispatched",
             "remote",
+            "text-hash",
             "review-ids",
             "last-review",
         ],
@@ -1060,6 +1088,7 @@ def main():
         "mark-dispatched": cmd_mark_dispatched,
         "release-dispatched": cmd_release_dispatched,
         "remote": cmd_remote,
+        "text-hash": cmd_text_hash,
         "review-ids": cmd_review_ids,
         "last-review": cmd_last_review,
     }[args.mode](args, scope, label)

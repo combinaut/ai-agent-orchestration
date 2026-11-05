@@ -54,6 +54,18 @@ release() {
   "$py" "$here/prs.py" release-dispatched --url "$url" --sha "$sha" --text "$text" && echo "RELEASED $sha"
 }
 
+# The worker reads the title and body itself; a hash that no longer matches the queue item's would be recorded for text the worker did not review.
+if ! current=$(gh_bounded api "repos/$repo/pulls/$num" --jq '{title: .title, body: .body}' | "$py" "$here/prs.py" text-hash); then
+  echo "TEXT FAILED could not read the title and body of $url; prompt not sent"
+  release
+  exit 1
+fi
+if [ "$current" != "$text" ]; then
+  echo "TEXT CHANGED the title or body of $url changed since the queue; prompt not sent"
+  release
+  exit 1
+fi
+
 # Ids of your submitted reviews before this dispatch; only a review outside this set counts as its result.
 if ! me=$(gh_bounded api user --jq .login) ||
   ! snapshot=$(gh_bounded api --paginate --slurp "repos/$repo/pulls/$num/reviews") ||
@@ -181,7 +193,7 @@ $ORCH_REVIEW_EXTRA_STEPS"
 
 text_rules=""
 [ "$kind" != text-re-review ] || text_rules="
-Text re-review: the head is unchanged and only the PR title or body was edited. Re-check each open pr-text finding in your earlier sweep comments against the current title and body and the code at this head, and any claim the edit adds. Run no full sweep and no new code review. Post one sweep comment that names the head SHA, then the review: APPROVE when no kept fix finding and no other finding is open, else REQUEST_CHANGES."
+Text re-review: the head is unchanged and only the PR title or body was edited. Re-check each open pr-text finding in your earlier sweep comments against the current title and body and the code at this head, and any claim the edit adds. Run no full sweep and no new code review. Post one sweep comment before the review that names the swept head SHA in full, all 40 characters ($sha), through python3 $orch/lib/github_write.py --timeout 240 api -X POST repos/$repo/issues/$num/comments --input - with the JSON payload {\"body\":\"...\"} on stdin from a quoted heredoc, ending with *(Generated using Codex)* on its own line, and link it in the review body. Then the review: APPROVE when no kept fix finding and no other finding is open, else REQUEST_CHANGES."
 
 prompt="Review this GitHub pull request that requested my review.
 

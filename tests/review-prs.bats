@@ -37,6 +37,10 @@ EOF
 #!/usr/bin/env bash
 case "$*" in
   'api user --jq .login') echo reviewer ;;
+  'api repos/acme/app/pulls/7 --jq {title: .title, body: .body}')
+    [ -z "${TEXT_READ_FAILS:-}" ] || exit 1
+    printf '{"title":"%s","body":"%s"}\n' "${PR_TITLE-}" "${PR_BODY-}"
+    ;;
   'api repos/acme/app/pulls/7 --jq .base.ref') [ -z "${BASE_READ_FAILS:-}" ] || exit 1; echo main ;;
   'api repos/acme/app/pulls/7 --jq [.head.repo.owner.login // "-", .head.repo.name // "-", .head.ref // "-"] | @tsv')
     [ -z "${HEAD_READ_FAILS:-}" ] || exit 1
@@ -943,6 +947,38 @@ assert prs.needs_dispatch({**base, "headRefOid": "B"}, dispatched) == (True, "re
   [ "$(dispatch_state)" = 'True null' ]
 }
 
+@test "a blocked review of a head holds the head for every title and body until it is released" {
+  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
+  pr_url=https://github.com/acme/app/pull/7
+  prs claim-dispatched --url "$pr_url" --sha a --text t0
+  prs mark-dispatched --url "$pr_url" --sha a --text t0 --state done
+  prs claim-dispatched --url "$pr_url" --sha a --text t1
+  prs mark-dispatched --url "$pr_url" --sha a --text t1 --state blocked --reason 'hooks need review'
+  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t2
+  [ "$status" -eq 3 ]
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "number": 7, "title": "t", "body": "x", "isDraft": False,
+      "mergeable": "MERGEABLE", "headRefOid": "a",
+      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
+      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+      "myReviews": {"nodes": [{"commit": {"oid": "a"}}]}}
+heads = {"a": {"state": "done", "text": "t0", "at": "1"},
+         "a#t1": {"state": "blocked", "text": "t1", "reason": "hooks need review", "at": "2"}}
+dispatched = {url: {"heads": heads}}
+assert prs.needs_dispatch(pr, dispatched) == (False, None)
+assert prs.blocked_record(prs.heads(dispatched[url]), "a")["reason"] == "hooks need review"
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  prs release-dispatched --url "$pr_url" --sha a --text t2
+  prs claim-dispatched --url "$pr_url" --sha a --text t2
+}
+
 @test "dispatch-queue reports a blocked current head once with its reason" {
   # shellcheck disable=SC2016 # Python source.
   run python3 -c '
@@ -1517,25 +1553,29 @@ assert prs.snapshot([pr])[url]["text"] == prs.text_hash(pr)
 @test "a text re-review prompt re-checks the pr-text findings at the same head" {
   stub_review_tools
   : >"$TMP/none.toml"
-  KIND=text-re-review TEXT=abc123 dispatch
+  KIND=text-re-review PR_BODY=edited TEXT=787a81271575 dispatch
   prompt=$(cat "$TMP/review.prompt")
   contains "$prompt" 'Mode: text-re-review'
   contains "$prompt" 'only the PR title or body was edited'
   contains "$prompt" 'Run no full sweep and no new code review.'
   contains "$prompt" 'APPROVE when no kept fix finding and no other finding is open, else REQUEST_CHANGES.'
+  rule=$(grep '^Text re-review:' <<<"$prompt")
+  contains "$rule" "names the swept head SHA in full, all 40 characters ($SHA)"
+  contains "$rule" 'github_write.py --timeout 240 api -X POST repos/acme/app/issues/7/comments --input -'
+  contains "$rule" '*(Generated using Codex)* on its own line'
 }
 
 @test "dispatch claims and completes a review with the title and body hash" {
   stub_review_tools
   : >"$TMP/none.toml"
-  TEXT=abc123 dispatch
+  PR_BODY=edited TEXT=787a81271575 dispatch
   # shellcheck disable=SC2016 # Python source.
   run python3 -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
 print(json.dumps(d["https://github.com/acme/app/pull/7"]["heads"][sys.argv[2]].get("text")))
 ' "$HOME/.cache/review-prs/dispatched.json" "$SHA"
-  [ "$output" = '"abc123"' ]
+  [ "$output" = '"787a81271575"' ]
 }
 
 @test "dispatch of a text re-review claims the edited text on a head that is already done" {
@@ -1543,7 +1583,7 @@ print(json.dumps(d["https://github.com/acme/app/pull/7"]["heads"][sys.argv[2]].g
   : >"$TMP/none.toml"
   mkdir -p "$HOME/.cache/review-prs"
   printf '{"https://github.com/acme/app/pull/7":{"heads":{"%s":{"state":"done","text":"old111"}}}}' "$SHA" >"$HOME/.cache/review-prs/dispatched.json"
-  KIND=text-re-review TEXT=new222 dispatch
+  KIND=text-re-review PR_BODY=edited TEXT=787a81271575 dispatch
   [ -e "$TMP/review.prompt" ]
   # shellcheck disable=SC2016 # Python source.
   run python3 -c '
@@ -1551,7 +1591,22 @@ import json, sys
 h = json.load(open(sys.argv[1]))["https://github.com/acme/app/pull/7"]["heads"]
 print(sorted((k.split("#")[-1] if "#" in k else "-", v["state"]) for k, v in h.items()))
 ' "$HOME/.cache/review-prs/dispatched.json"
-  [ "$output" = "[('-', 'done'), ('new222', 'done')]" ]
+  [ "$output" = "[('-', 'done'), ('787a81271575', 'done')]" ]
+}
+
+@test "dispatch releases its claim and sends nothing when the title or body changed since the queue" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PR_BODY=edited dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'TEXT CHANGED'
+  contains "$output" "RELEASED $SHA"
+  [ "$(dispatch_state)" = 'True null' ]
+  [ ! -e "$TMP/review.prompt" ]
+  TEXT_READ_FAILS=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'TEXT FAILED'
+  [ "$(dispatch_state)" = 'True null' ]
 }
 
 @test "a dispatch of any kind without the text hash exits before claiming" {
