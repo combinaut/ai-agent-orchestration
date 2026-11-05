@@ -44,13 +44,13 @@ commit() {
   git -C "$REPO" commit -qm "$1"
 }
 
-# stub_gh: a gh for acme/app#7 that serves $TMP/comments.json and saves a posted comment.
+# stub_gh: a gh for acme/app#7 that saves a posted comment.
 stub_gh() {
   cat >"$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   'api repos/acme/app/pulls/7') echo '{"title":"Add alpha","body":"Adds alpha and its test.","base":{"ref":"main"}}' ;;
-  'api --paginate --slurp repos/acme/app/issues/7/comments') cat "$TMP/comments.json" 2>/dev/null || echo '[[]]' ;;
+  'api --paginate --slurp repos/acme/app/issues/7/comments') echo '[[]]' ;;
   'api --paginate --slurp repos/acme/app/pulls/7/comments') echo '[[]]' ;;
   'api -X POST repos/acme/app/issues/7/comments --input -')
     cat >"$TMP/posted.json"
@@ -88,10 +88,6 @@ plan() {
 # slice_of <path>: the name of the slice holding that path.
 slice_of() {
   python3 -c 'import json,sys; print(next(s["name"] for s in json.loads(sys.argv[1])["slices"] for f in s["files"] if f["path"] == sys.argv[2]))' "$PLAN" "$1"
-}
-
-slice_count() {
-  python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])["slices"]))' "$PLAN"
 }
 
 @test "a test file joins the slice of the source file with the same stem" {
@@ -297,6 +293,8 @@ for line in open(sys.argv[1]):
   [ "$(field 'len(r["items"])')" -eq 4 ]
   FAKE_FINDINGS=1 FAKE_VERDICT=FALSE run_sweep --no-comment
   [ "$(field 'len(r["items"])')" -eq 0 ]
+  [ "$(field 'len(r["dropped"])')" -eq 4 ]
+  [ "$(field 'r["dropped"][0]["verdict"]')" = FALSE ]
   [ "$(field 'r["verdicts"]["FALSE"]')" -eq 4 ]
 }
 
@@ -311,7 +309,8 @@ assert sys.argv[3] in body
 block = re.search(r"```json\n(.*?)\n```", body, re.S).group(1)
 assert json.loads(block) == record
 assert body.rstrip().endswith("*(Generated using Codex)*"), body
-assert "| fix |" in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_SHA"
+assert "**Kept**" in body and "| fix |" in body
+assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_SHA"
   [ -f "$XDG_CACHE_HOME/review-prs/sweeps/acme/app/7/$HEAD_SHA.json" ]
 }
 
@@ -344,4 +343,13 @@ assert "| fix |" in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_SHA"
   for agent in $agents; do
     ! kill -0 "$agent" 2>/dev/null
   done
+}
+
+@test "the comment lists dropped findings in their own table" {
+  FAKE_FINDINGS=1 FAKE_VERDICT=FALSE run_sweep
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys
+body = json.load(open(sys.argv[1]))["body"]
+assert "**Dropped**" in body and "**Kept**" not in body, body
+assert body.count("| FALSE |") == 4, body' "$TMP/posted.json"
 }

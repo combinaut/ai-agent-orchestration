@@ -40,9 +40,9 @@ Every run sweeps the whole PR diff from the merge base, also after a fix push. T
 
 ## Record and comment
 
-The record holds the fields `/finalize-sweep` names, plus `tool`, `version`, `pr`, `runtime`, `model`, `kind` (`full`), `tree`, `plan`, `pr_text`, `sweep_agent_ids` (the Codex thread or Claude session id of each sweep agent), `items` (the kept findings, each `fix` or `nit`), `open_fix` (the count of kept `fix` findings) and `deviation`. `orch-sweep-record check` checks those fields when `tool` is `orch-sweep`; `--exact` also requires the record's head to be the given head.
+The record holds the fields `/finalize-sweep` names, plus `tool`, `version`, `pr`, `runtime`, `model`, `kind` (`full`), `tree`, `plan`, `pr_text`, `sweep_agent_ids` (the Codex thread or Claude session id of each sweep agent), `items` (the kept findings, each `fix` or `nit`), `dropped` (the other findings, with their verdicts), `open_fix` (the count of kept `fix` findings) and `deviation`. `orch-sweep-record check` checks those fields when `tool` is `orch-sweep`; `--exact` also requires the record's head to be the given head.
 
-The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json` (and `--record`), and posts one comment through `lib/github_write.py`: the marker `<!-- orch-sweep v1 -->`, the full head SHA, the kept findings table, the record in a fenced `json` block, and the runtime's attribution trailer. `--no-comment` skips the post.
+The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json` (and `--record`), and posts one comment through `lib/github_write.py`: the marker `<!-- orch-sweep v1 -->`, the full head SHA, a table of kept findings and one of dropped findings, the record in a fenced `json` block, and the runtime's attribution trailer. `--no-comment` skips the post.
 
 ## Capacity
 
@@ -52,7 +52,7 @@ The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<numb
 | Agents at once | `--concurrency`, default 4, a bounded pool |
 | Per agent | `--agent-timeout`, default 900 s; the process group is stopped on expiry |
 | Per sweep | `--timeout`, default 3600 s; no agent starts after it |
-| Retries | one per agent, at most one per slice in the whole run; the first failure stops new agents and the run exits 4 |
+| Retries | each agent retries at most once; the whole run allows at most `slices` retries; the first failure stops new agents and the run exits 4 |
 | GitHub reads | 45 s each |
 | Stopping | SIGINT, SIGTERM or SIGHUP stops every running agent's process group; the run exits 128 + the signal |
 

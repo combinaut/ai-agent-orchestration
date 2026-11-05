@@ -414,8 +414,10 @@ check() {
 # script_record [python statement]: a valid orch-sweep record, then the statement run on it as r.
 script_record() {
   python3 - "$REC" "$HEAD_SHA" "$ZERO_SHA" "${1:-pass}" <<'PY'
-import json, sys
+import hashlib, json, sys
 path, head, base, change = sys.argv[1:5]
+empty = hashlib.sha256(b"").hexdigest()
+tree = {"head": head, "status": empty, "diff": empty, "cached": empty, "untracked": {}, "untracked_hash": hashlib.sha256(b"{}").hexdigest()}
 plan = [
     {"name": "lib", "lines": 30, "files": [{"path": "lib/a.py", "old": None, "status": "M", "lines": 20}, {"path": "tests/a.bats", "old": None, "status": "A", "lines": 10}]},
     {"name": "binary", "lines": 0, "files": [{"path": "img/x.png", "old": None, "status": "A", "lines": None}]},
@@ -424,12 +426,13 @@ r = {"head": head, "base": base, "clean": True, "mode": "agents", "slices": 2, "
      "validators": 1, "validator_ids": ["v-1"], "findings": 3,
      "verdicts": {"CONFIRMED_NEW": 2, "FALSE": 1}, "tool": "orch-sweep", "version": 1,
      "pr": "https://github.com/acme/app/pull/7", "runtime": "codex", "model": "gpt-test",
-     "kind": "full", "tree": {"head": head}, "plan": plan, "pr_text": 1,
+     "kind": "full", "tree": tree, "plan": plan, "pr_text": 1,
      "sweep_agent_ids": ["s-1", "s-2", "s-3", "s-4", "s-5"],
      "items": [
          {"id": "F1", "file": "lib/a.py", "line": 3, "category": "comment", "class": "fix", "verdict": "CONFIRMED_NEW", "summary": "x"},
          {"id": "F2", "file": "lib/a.py", "line": 9, "category": "comment", "class": "nit", "verdict": "CONFIRMED_NEW", "summary": "y"},
      ],
+     "dropped": [{"id": "F3", "file": "lib/a.py", "line": 4, "category": "comment", "class": "nit", "verdict": "FALSE", "summary": "z"}],
      "open_fix": 1, "deviation": None}
 exec(change)
 json.dump(r, open(path, "w"))
@@ -534,5 +537,33 @@ PY
   script_record 'r["tree"]["head"] = sys.argv[3]'
   check
   [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: tree must hold the five tree values taken at head" ]
+  [ "$stderr" = "ERROR: $REC: tree must hold the five tree values of a clean tree at head" ]
+}
+
+@test "a tree with only its head fails" {
+  script_record 'r["tree"] = {"head": r["head"]}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: tree must hold the five tree values of a clean tree at head" ]
+}
+
+@test "a tree with a changed diff hash fails" {
+  script_record 'r["tree"]["diff"] = "0" * 64'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: tree must hold the five tree values of a clean tree at head" ]
+}
+
+@test "dropped findings that do not make up the rest of the findings fail" {
+  script_record 'r["dropped"] = []'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: 2 items and 0 dropped for 3 findings" ]
+}
+
+@test "a dropped finding with a keep verdict fails" {
+  script_record 'r["dropped"][0]["verdict"] = "CONFIRMED_NEW"'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: a dropped finding has a verdict that keeps it" ]
 }

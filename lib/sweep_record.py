@@ -2,6 +2,7 @@
 """Checks the record /finalize-sweep writes at the end of its validate step."""
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -34,9 +35,18 @@ SCRIPT_FIELDS = (
     "pr_text",
     "sweep_agent_ids",
     "items",
+    "dropped",
     "open_fix",
 )
 ITEM_FIELDS = ("id", "file", "line", "category", "class", "verdict", "summary")
+EMPTY_HASH = hashlib.sha256(b"").hexdigest()
+CLEAN_TREE = {
+    "status": EMPTY_HASH,
+    "diff": EMPTY_HASH,
+    "cached": EMPTY_HASH,
+    "untracked": {},
+    "untracked_hash": hashlib.sha256(b"{}").hexdigest(),
+}
 
 
 def plan_problem(slices, paths=None):
@@ -110,8 +120,12 @@ def script_problem(record):
     if len(set(ids)) != len(ids) or len(ids) != record["sweep_agents"]:
         return f"{len(set(ids))} distinct sweep_agent_ids for {record['sweep_agents']} sweep agents"
     tree = record["tree"]
-    if not isinstance(tree, dict) or tree.get("head") != record["head"]:
-        return "tree must hold the five tree values taken at head"
+    if (
+        not isinstance(tree, dict)
+        or tree.get("head") != record["head"]
+        or any(tree.get(k) != v for k, v in CLEAN_TREE.items())
+    ):
+        return "tree must hold the five tree values of a clean tree at head"
     why = plan_problem(record["plan"])
     if why:
         return f"plan: {why}"
@@ -127,6 +141,17 @@ def script_problem(record):
     kept = sum(record["verdicts"].get(v, 0) for v in KEEP)
     if len(items) != kept:
         return f"{len(items)} items for {kept} kept verdicts"
+    dropped = record["dropped"]
+    if not isinstance(dropped, list) or not all(
+        isinstance(i, dict) and all(k in i for k in ITEM_FIELDS) for i in dropped
+    ):
+        return (
+            f"dropped must be a list of dropped findings with {', '.join(ITEM_FIELDS)}"
+        )
+    if any(i["verdict"] in KEEP or i["verdict"] not in VERDICTS for i in dropped):
+        return "a dropped finding has a verdict that keeps it"
+    if len(items) + len(dropped) != record["findings"]:
+        return f"{len(items)} items and {len(dropped)} dropped for {record['findings']} findings"
     fixes = sum(1 for i in items if i["class"] == "fix")
     if record["open_fix"] != fixes:
         return f"open_fix is {record['open_fix']}, the items hold {fixes} fix findings"

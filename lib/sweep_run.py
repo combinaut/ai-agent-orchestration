@@ -571,21 +571,25 @@ def comment_body(record):
         f"{record['sweep_agents']} sweep agents, {record['validators']} validators.",
         "",
     ]
-    if record["items"]:
+    for title, rows in (("Kept", record["items"]), ("Dropped", record["dropped"])):
+        if not rows:
+            continue
         lines += [
+            f"**{title}**",
+            "",
             "| id | class | where | category | verdict | finding |",
             "|---|---|---|---|---|---|",
         ]
-        for i in record["items"]:
+        for i in rows:
             where = f"{i['file']}:{i['line']}" if i["line"] else i["file"]
             lines.append(
                 f"| {i['id']} | {i['class']} | `{cell(where)}` | {cell(i['category'])} | {i['verdict']} | {cell(i['summary'])} |"
             )
-    else:
-        lines.append("No findings.")
+        lines.append("")
+    if not record["items"] and not record["dropped"]:
+        lines += ["No findings.", ""]
     counts = ", ".join(f"{k} {v}" for k, v in record["verdicts"].items() if v)
     lines += [
-        "",
         f"Raw findings {record['findings']}, kept {len(record['items'])}, open fix {record['open_fix']}."
         + (f" Verdicts: {counts}." if counts else ""),
         "",
@@ -684,17 +688,15 @@ def run(args):
     for result in checked:
         given.update(result["answer"])
     verdicts = {v: 0 for v in sweep_record.VERDICTS}
-    items = []
+    items, dropped = [], []
     for f in found:
         v = given[f["id"]]
         verdicts[v["verdict"]] += 1
-        if v["verdict"] in sweep_record.KEEP:
-            items.append(
-                {
-                    "id": f["id"], "file": f["file"], "line": f["line"], "category": f["category"],
-                    "class": v["class"], "verdict": v["verdict"], "summary": f["summary"],
-                }
-            )  # fmt: skip
+        entry = {
+            "id": f["id"], "file": f["file"], "line": f["line"], "category": f["category"],
+            "class": v["class"], "verdict": v["verdict"], "summary": f["summary"],
+        }  # fmt: skip
+        (items if v["verdict"] in sweep_record.KEEP else dropped).append(entry)
     record = {
         "head": args.head,
         "base": merge_base,
@@ -717,6 +719,7 @@ def run(args):
         "pr_text": 1,
         "sweep_agent_ids": [r["id"] for r in swept],
         "items": items,
+        "dropped": dropped,
         "open_fix": sum(1 for i in items if i["class"] == "fix"),
         "deviation": None,
     }
