@@ -22,6 +22,7 @@ model=${ORCH_CODEX_WORKER_MODEL:-}
 # One Codex model serves both tiers.
 case "$model" in "" | "<"*">") model=${ORCH_CODEX_SMART_MODEL:-} ;; esac
 case "$model" in "" | "<"*">") orch_die "set models.codex_worker or models.codex_smart (ORCH_CODEX_WORKER_MODEL, ORCH_CODEX_SMART_MODEL) in $(orch_config_path)" ;; esac
+[ "$kind" != text-re-review ] || [ -n "$text" ] || orch_die "text-re-review needs the text hash as the 11th argument"
 review_extra_steps=${ORCH_REVIEW_EXTRA_STEPS:-}
 extra_steps_size=$(LC_ALL=C printf '%s' "$review_extra_steps" | wc -c | tr -d ' ')
 if [ "$extra_steps_size" -gt 16384 ]; then

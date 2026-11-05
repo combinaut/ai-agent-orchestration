@@ -1452,7 +1452,7 @@ assert prs.snapshot([pr])[url]["text"] == prs.text_hash(pr)
 @test "a text re-review prompt re-checks the pr-text findings at the same head" {
   stub_review_tools
   : >"$TMP/none.toml"
-  KIND=text-re-review dispatch
+  KIND=text-re-review TEXT=abc123 dispatch
   prompt=$(cat "$TMP/review.prompt")
   contains "$prompt" 'Mode: text-re-review'
   contains "$prompt" 'only the PR title or body was edited'
@@ -1487,6 +1487,16 @@ h = json.load(open(sys.argv[1]))["https://github.com/acme/app/pull/7"]["heads"]
 print(sorted((k.split("#")[-1] if "#" in k else "-", v["state"]) for k, v in h.items()))
 ' "$HOME/.cache/review-prs/dispatched.json"
   [ "$output" = "[('-', 'done'), ('new222', 'done')]" ]
+}
+
+@test "a text re-review without the text hash exits before claiming" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  KIND=text-re-review dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'text-re-review needs the text hash as the 11th argument'
+  [ ! -e "$HOME/.cache/review-prs/dispatched.json" ]
+  [ ! -e "$TMP/review-herdr.calls" ]
 }
 
 @test "a first review prompt has no text re-review rule" {

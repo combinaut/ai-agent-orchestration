@@ -831,7 +831,7 @@ HEADS_KEPT = 20
 
 
 def heads(entry):
-    """sha -> {state, agent, pane, at} for one PR; a mark from before per-head records counts as done."""
+    """key (sha or sha#text) -> {state, agent, pane, at} for one PR; a mark from before per-head records counts as done."""
     if not isinstance(entry, dict):
         return {}
     records = entry.get("heads")
