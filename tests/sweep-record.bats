@@ -163,9 +163,12 @@ check() {
 }
 
 @test "every verdict the checker accepts is a row of the skill's verdict table" {
-  local verdicts v
-  mapfile -t verdicts < <(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import sweep_record; print(*sweep_record.VERDICTS, sep="\n")' "$ROOT/lib")
+  local verdicts v count=0
+  verdicts=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import sweep_record; print(*sweep_record.VERDICTS, sep="\n")' "$ROOT/lib")
+  while IFS= read -r v; do
+    grep -qF "| \`$v\` |" "$ROOT/skills/finalize-sweep/SKILL.md"
+    count=$((count + 1))
+  done <<<"$verdicts"
   # shellcheck disable=SC2016 # Backticks in the grep pattern are literal.
-  [ "${#verdicts[@]}" -eq "$(grep -c '^| `[A-Z_]*` |' "$ROOT/skills/finalize-sweep/SKILL.md")" ]
-  for v in "${verdicts[@]}"; do grep -qF "| \`$v\` |" "$ROOT/skills/finalize-sweep/SKILL.md"; done
+  [ "$count" -eq "$(grep -c '^| `[A-Z_]*` |' "$ROOT/skills/finalize-sweep/SKILL.md")" ]
 }
