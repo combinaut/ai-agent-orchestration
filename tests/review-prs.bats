@@ -61,8 +61,30 @@ case "$*" in
     [ -z "${GH_REVIEWS_FAIL:-}" ] || exit 1 ;;
 esac
 EOF
-  chmod +x "$BIN/herdr-review" "$BIN/gh"
+  cat >"$BIN/heavy-slot" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TMP/heavy-slot.calls"
+while [ "$1" != -- ]; do shift; done
+shift
+exec "$@"
+EOF
+  cat >"$BIN/orch-sweep-stub" <<'EOF'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$(pwd -P)" "$*" >>"$TMP/sweep.calls"
+case " $* " in *" --kind text "*) [ -z "${SWEEP_TEXT_NEEDS_FULL:-}" ] || { echo "ERROR: a text sweep needs a full sweep of $SHA first" >&2; exit 1; } ;; esac
+[ -z "${SWEEP_FAILS:-}" ] || { echo "ERROR: validator 1: exited 1" >&2; exit 4; }
+echo "COMMENT https://github.com/acme/app/pull/7#issuecomment-9"
+echo "OK open_fix=${SWEEP_OPEN_FIX:-0} kept=0 findings=0"
+EOF
+  cat >"$BIN/orch-sweep-record-stub" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TMP/gate.calls"
+[ -z "${GATE_FAILS:-}" ] || { echo "ERROR: the full sweep of $SHA has 1 open fix findings" >&2; exit 1; }
+echo "OK: the sweep of $SHA allows APPROVE"
+EOF
+  chmod +x "$BIN/herdr-review" "$BIN/gh" "$BIN/heavy-slot" "$BIN/orch-sweep-stub" "$BIN/orch-sweep-record-stub"
   export HERDR_TEST_STUB="$BIN/herdr-review" HERDR_STUB_DIRECT=1
+  export ORCH_SWEEP_BIN="$BIN/orch-sweep-stub" ORCH_SWEEP_RECORD_BIN="$BIN/orch-sweep-record-stub"
   export ORCH_CODEX_WORKER_MODEL=test-worker-model ORCH_CLOSED_DIR="$TMP/closed"
   git init -q "$TMP/app"
   git -C "$TMP/app" -c user.email=test@example.invalid -c user.name=test commit -q --allow-empty -m pr
@@ -282,48 +304,83 @@ fork_head_missing_from_pull_ref() {
   : >"$TMP/none.toml"
   dispatch
   prompt=$(cat "$TMP/review.prompt")
-  contains "$prompt" '"event":"APPROVE|REQUEST_CHANGES|COMMENT"'
-  contains "$prompt" '"comments":[{"path":"...","line":123,"side":"RIGHT","body":"..."}]'
-  contains "$prompt" 'github_write.py --timeout 240 api -X POST repos/acme/app/pulls/7/reviews --input -'
+  contains "$prompt" "$BIN/orch-sweep-stub post-review --pr https://github.com/acme/app/pull/7 --head $SHA --event APPROVE|REQUEST_CHANGES|COMMENT --input -"
+  contains "$prompt" '{"body":"...","comments":[{"path":"...","line":123,"side":"RIGHT","body":"..."}]}'
+  not_contains "$prompt" 'repos/acme/app/pulls/7/reviews'
+  contains "$prompt" 'When post-review refuses APPROVE, post REQUEST_CHANGES that quotes its ERROR line.'
   contains "$prompt" 'quoted heredoc'
   not_contains "$prompt" 'mktemp'
   not_contains "$prompt" 'review_dir'
   contains "$prompt" 'APPROVE|COMMENT|REQUEST_CHANGES'
 }
 
-@test "review prompt runs the finalize sweep, posts one comment and gates APPROVE on it" {
+@test "dispatch runs orch-sweep at the head in the review worktree before the prompt" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  SWEEP_OPEN_FIX=2 dispatch
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$TMP/sweep.calls")" == */review-prs/worktrees/rev7"|run --pr https://github.com/acme/app/pull/7 --head $SHA --base-ref origin/main --kind full" ]]
+  grep -qx "take review-rev7-sweep --note orch sweep -- $BIN/orch-sweep-stub run --pr https://github.com/acme/app/pull/7 --head $SHA --base-ref origin/main --kind full" "$TMP/heavy-slot.calls"
+  prompt=$(cat "$TMP/review.prompt")
+  contains "$prompt" "this dispatch already ran orch-sweep, the finalize sweep as a script, at $SHA and posted its findings comment: https://github.com/acme/app/pull/7#issuecomment-9 (open kept fix findings: 2)"
+  contains "$prompt" 'Do not run a sweep yourself and do not post a sweep comment.'
+  contains "$prompt" 'Each kept fix finding in it is open: list it in the review body and make the review REQUEST_CHANGES. Nits and dropped findings never block.'
+  contains "$prompt" 'any review finding or sweep fix finding is open'
+  not_contains "$prompt" 'finalize-sweep/SKILL.md'
+  not_contains "$prompt" 'repos/acme/app/issues/7/comments'
+}
+
+@test "a failed sweep blocks the head, sends no prompt and removes the worktree" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  SWEEP_FAILS=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'ERROR: validator 1: exited 1'
+  contains "$output" 'SWEEP FAILED exit 4'
+  contains "$output" '"reason": "sweep failed: exit 4"'
+  [ ! -e "$TMP/review.prompt" ]
+  [ ! -e "$HOME/.cache/review-prs/worktrees/rev7" ]
+  [ "$(dispatch_state)" = 'False "blocked"' ]
+}
+
+@test "an APPROVE that fails the sweep gate after the turn blocks the head" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GATE_FAILS=1 dispatch
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TMP/gate.calls")" = "gate --pr https://github.com/acme/app/pull/7 --head $SHA" ]
+  contains "$output" "GATE FAILED $SHA the full sweep of $SHA has 1 open fix findings"
+  contains "$output" "\"reason\": \"sweep gate failed: the full sweep of $SHA has 1 open fix findings\""
+  [ "$(dispatch_state)" = 'False "blocked"' ]
+}
+
+@test "an APPROVE that passes the sweep gate is done, and a REQUEST_CHANGES is not gated" {
   stub_review_tools
   : >"$TMP/none.toml"
   dispatch
-  prompt=$(cat "$TMP/review.prompt")
-  contains "$prompt" 'every review except a text re-review includes the finalize sweep over the whole PR diff'
-  contains "$prompt" 'Read ~/.claude/skills/finalize-sweep/SKILL.md'
-  contains "$prompt" 'then its validator step'
-  contains "$prompt" 'github_write.py --timeout 240 api -X POST repos/acme/app/issues/7/comments --input -'
-  contains "$prompt" 'as ONE PR comment, before the review'
-  contains "$prompt" "always names the swept head SHA in full, all 40 characters ($SHA)"
-  contains "$prompt" 'that SHA and "no findings"'
-  contains "$prompt" 'An open kept fix finding blocks APPROVE; nits and dropped findings never block.'
-  contains "$prompt" 'Class every finding: fix'
-  contains "$prompt" 'nit (pure style or taste'
-  contains "$prompt" 'A finding rejected once on this PR is never raised again.'
-  contains "$prompt" 'Every new head gets the sweep again, over the whole PR diff, before a new APPROVE.'
-  contains "$prompt" 'any review finding or sweep fix finding is open'
-  contains "$prompt" 'a human reviewer finds nothing left to clean up'
+  [ -s "$TMP/gate.calls" ]
+  [ "$(dispatch_state)" = 'False "done"' ]
+  rm -f "$TMP/gate.calls" "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
+  rm -rf "$HOME/.cache/review-prs/worktrees/rev7"
+  REVIEWS_JSON='[[{"id":2,"user":{"login":"reviewer"},"commit_id":"'"$SHA"'","state":"CHANGES_REQUESTED","submitted_at":"2099-01-01T00:00:00Z","html_url":"https://github.com/acme/app/pull/7#review-2"}]]' GATE_FAILS=1 dispatch
+  [ "$status" -eq 0 ]
+  [ ! -e "$TMP/gate.calls" ]
+  [ "$(dispatch_state)" = 'False "done"' ]
 }
 
 @test "the review texts carry the sweep rules" {
-  grep -qF 'Every review except a text re-review runs the finalize sweep' "$ROOT/$SKILL_DIR/SKILL.md"
+  grep -qF 'orch-sweep run --pr <url> --head <sha> --base-ref <remote>/<base> --kind full' "$ROOT/$SKILL_DIR/SKILL.md"
   grep -qF 'An open kept fix finding blocks APPROVE; nits and dropped findings never block.' "$ROOT/$SKILL_DIR/SKILL.md"
   grep -qF 'finding blocks APPROVE; nits and dropped findings never block.' "$ROOT/README.md"
-  grep -qF 'always names the swept head SHA in full (40 characters)' "$ROOT/$SKILL_DIR/SKILL.md"
+  grep -qF 'orch-sweep post-review --pr <url> --head <sha> --event APPROVE|REQUEST_CHANGES|COMMENT --input -' "$ROOT/$SKILL_DIR/SKILL.md"
   grep -qF 'An open kept fix finding blocks APPROVE; nits and dropped findings never block.' "$ROOT/skills/architect/references/reviewer.md"
-  grep -qF 'always names the swept head SHA in full (40 characters)' "$ROOT/skills/architect/references/reviewer.md"
-  grep -qF 'a finding rejected once on this PR is never raised again' "$ROOT/skills/architect/references/reviewer.md"
+  grep -qF 'orch-sweep run --pr <PR url> --head <sha>' "$ROOT/skills/architect/references/reviewer.md"
+  grep -qF 'orch-sweep post-review --pr <PR url> --head <sha>' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 'Every new head gets the sweep again over the whole PR diff.' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 'Every new head gets the sweep again over the whole PR diff before a new APPROVE.' "$ROOT/$SKILL_DIR/SKILL.md"
-  grep -qF 'report-only: skip its approval and apply steps' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 'Use the comment for the verdict' "$ROOT/skills/architect/references/reviewer.md"
+  run grep -F 'Read ~/.claude/skills/finalize-sweep/SKILL.md' "$ROOT/$SKILL_DIR/scripts/dispatch.sh"
+  [ "$status" -eq 1 ]
 }
 
 @test "the skill closes panes only through close-pane.sh" {
@@ -1550,19 +1607,25 @@ assert prs.snapshot([pr])[url]["text"] == prs.text_hash(pr)
   [ "$status" -eq 0 ]
 }
 
-@test "a text re-review prompt re-checks the pr-text findings at the same head" {
+@test "a text re-review prompt runs a text sweep and no new code review at the same head" {
   stub_review_tools
   : >"$TMP/none.toml"
   KIND=text-re-review PR_BODY=edited TEXT=787a81271575 dispatch
   prompt=$(cat "$TMP/review.prompt")
   contains "$prompt" 'Mode: text-re-review'
   contains "$prompt" 'only the PR title or body was edited'
-  contains "$prompt" 'Run no full sweep and no new code review.'
+  contains "$prompt" 'Run no new code review: check the sweep comment below and any open review finding.'
   contains "$prompt" 'APPROVE when no kept fix finding and no other finding is open, else REQUEST_CHANGES.'
-  rule=$(grep '^Text re-review:' <<<"$prompt")
-  contains "$rule" "names the swept head SHA in full, all 40 characters ($SHA)"
-  contains "$rule" 'github_write.py --timeout 240 api -X POST repos/acme/app/issues/7/comments --input -'
-  contains "$rule" '*(Generated using Codex)* on its own line'
+  grep -q -- '--kind text$' "$TMP/sweep.calls"
+}
+
+@test "a text re-review runs a full sweep when the head has none" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  KIND=text-re-review PR_BODY=edited TEXT=787a81271575 SWEEP_TEXT_NEEDS_FULL=1 dispatch
+  [ "$status" -eq 0 ]
+  [ "$(sed 's/.*--kind //' "$TMP/sweep.calls" | paste -sd ' ' -)" = 'text full' ]
+  [ -e "$TMP/review.prompt" ]
 }
 
 @test "dispatch claims and completes a review with the title and body hash" {

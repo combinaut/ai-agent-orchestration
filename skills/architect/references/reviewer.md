@@ -11,11 +11,10 @@ Write <report path> as this table and nothing else before it:
 
 | claim | file:line opened | verdict | evidence | rung | fix the author can apply |
 
-Then run /finalize-sweep over the whole PR diff, report-only: skip its approval and apply steps. Add its kept findings table below the claims table.
-Class each finding fix (false, misleading or redundant; dead or duplicate code or specs; a message that blames the wrong cause) or nit (pure style or taste).
-Read the earlier sweep comments on the PR first: a finding rejected once on this PR is never raised again.
-Post the table as ONE PR comment: python3 <orch-root>/lib/github_write.py --timeout 240 api -X POST repos/<owner>/<repo>/issues/<number>/comments --input -
-The comment always names the swept head SHA in full (40 characters), also with no findings; with none it says the sweep ran, that SHA and "no findings". Use the comment for the verdict. An open kept fix finding blocks APPROVE; nits and dropped findings never block.
+Then run the finalize sweep as a script in this worktree, as one heavy job: heavy-slot take review-<name>-sweep --note "orch sweep" -- orch-sweep run --pr <PR url> --head <sha> --base-ref origin/<base branch> --runtime claude
+It posts ONE PR comment with the findings, each fix or nit, the full head SHA and the sweep record. Do not run /finalize-sweep by hand and do not post another sweep comment. Add its kept findings below the claims table.
+Use the comment for the verdict. An open kept fix finding blocks APPROVE; nits and dropped findings never block.
+Post any review only through: orch-sweep post-review --pr <PR url> --head <sha> --event APPROVE|REQUEST_CHANGES|COMMENT --input - (JSON {"body": ..., "comments": [...]} on stdin). It refuses APPROVE unless the sweep gate passes for that exact head.
 Every new head gets the sweep again over the whole PR diff.
 Goal: when you pass the PR, a human reviewer finds nothing left to clean up.
 ```

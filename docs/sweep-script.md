@@ -3,11 +3,14 @@
 `orch-sweep` (`lib/sweep_run.py`) runs [`/finalize-sweep`](../skills/finalize-sweep/SKILL.md) as a script: it cuts the slices, starts every agent as its own headless process, checks the tree, runs the validators, writes the sweep record and posts the findings comment.
 
 ```bash
-orch-sweep run --pr <url> --head <sha> --base-ref <remote>/<base branch> \
+orch-sweep run --pr <url> --head <sha> --base-ref <remote>/<base branch> [--kind full|text] \
   [--runtime codex|claude] [--model <model>] [--concurrency 4] \
   [--agent-timeout 900] [--timeout 3600] [--record <path>] [--no-comment]
 orch-sweep plan --base <rev> [--head <rev>]   # the slice plan as JSON
 orch-sweep tree                               # the five tree values and the untracked map's hash, as JSON
+orch-sweep allow --pr <url> --head <sha> --what slices-over-25 --reason <text>   # the user's OK, typed on a terminal
+orch-sweep post-review --pr <url> --head <sha> --event APPROVE|REQUEST_CHANGES|COMMENT --input -
+orch-sweep-record gate --pr <url> --head <sha>   # may this head be approved
 ```
 
 Run it inside a clean checkout whose `HEAD` is `--head`. It stops with one `ERROR:` line and exit 1 when `HEAD` differs, the tree is dirty, or `--record` or the record cache resolves inside the checkout.
@@ -57,6 +60,26 @@ The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<numb
 | Stopping | SIGINT, SIGTERM or SIGHUP stops every running agent's process group; the run exits 128 + the signal |
 
 Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- orch-sweep run ...`.
+
+## Text sweeps
+
+`--kind text` sweeps the PR title and body at a head that already has a full sweep: it starts only the PR-text agent and the validators, and writes a record with `kind: text`, `slices: 0` and `plan: []`, kept at `<head>.text.json` in the cache. Without a full record of that head in the cache it stops with exit 1.
+
+## The gate
+
+`orch-sweep-record gate --pr <url> --head <sha>` passes (exit 0) when the PR head is `<sha>` and the newest `orch-sweep` comment by the `gh` login for that exact head holds a full record that:
+
+- passes the checks of `orch-sweep-record check`;
+- equals the copy in `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json`, which only a run on this machine writes;
+- has no open kept fix finding.
+
+When a text sweep of that head is newer than the full one, its record must pass the same checks against `<head>.text.json` with no open fix finding, and the full record may hold open fix findings only in the `pr-text` category. Any other result exits 1 with one `ERROR:` line.
+
+`orch-sweep post-review` reads `{"body": "...", "comments": [...]}` on stdin and posts the review pinned to `--head` through `lib/github_write.py`. For APPROVE it runs the gate first and posts nothing when the gate fails.
+
+## Deviations
+
+The only deviation is a sweep over 25 slices. The user allows it for one head with `orch-sweep allow`, which reads a typed `yes` from `/dev/tty` and stops without a terminal; it writes `<head>.allow.json` next to the record copy. A run over 25 slices continues only when that file names `slices-over-25` and the head; the record's `deviation` then holds the reason, the time and the file's sha256, and the comment says "Deviation approved by the user". The gate accepts that record only while the file's hash still matches. A terminal can be faked (`script`), so this proves a terminal answered, not who typed.
 
 ## Exit codes
 

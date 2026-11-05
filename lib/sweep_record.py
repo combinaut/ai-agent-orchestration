@@ -4,9 +4,12 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 SHA = re.compile(r"[0-9a-f]{40}")
 COUNTS = ("slices", "sweep_agents", "validators", "findings")
@@ -25,6 +28,12 @@ VERDICTS = (
 )
 KEEP = ("CONFIRMED_NEW", "CONFIRMED_REGRESSED", "DISPUTED_DROP")
 SLICE_LINES = 400
+MAX_SLICES = 25
+KINDS = ("full", "text")
+DEVIATIONS = ("slices-over-25",)
+MARKER = "<!-- orch-sweep v1 -->"
+PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
+GH_TIMEOUT = 45
 SCRIPT_FIELDS = (
     "pr",
     "runtime",
@@ -37,6 +46,7 @@ SCRIPT_FIELDS = (
     "items",
     "dropped",
     "open_fix",
+    "deviation",
 )
 ITEM_FIELDS = ("id", "file", "line", "category", "class", "verdict", "summary")
 EMPTY_HASH = hashlib.sha256(b"").hexdigest()
@@ -107,8 +117,8 @@ def script_problem(record):
         return "runtime must be codex or claude"
     if not isinstance(record["model"], str) or not record["model"]:
         return "model must name the agents' model"
-    if record["kind"] != "full":
-        return "kind must be full"
+    if record["kind"] not in KINDS:
+        return "kind must be full or text"
     if record["pr_text"] != 1 or isinstance(record["pr_text"], bool):
         return "pr_text must be 1; every orch-sweep run checks the PR title and body"
     expected = 2 * record["slices"] + record["pr_text"]
@@ -126,11 +136,32 @@ def script_problem(record):
         or any(tree.get(k) != v for k, v in CLEAN_TREE.items())
     ):
         return "tree must hold the five tree values of a clean tree at head"
-    why = plan_problem(record["plan"])
-    if why:
-        return f"plan: {why}"
-    if len(record["plan"]) != record["slices"]:
-        return f"plan has {len(record['plan'])} slices, slices is {record['slices']}"
+    if record["kind"] == "text":
+        if record["plan"] != [] or record["slices"] != 0:
+            return "a text record sweeps no slices: plan [] and slices 0"
+    else:
+        why = plan_problem(record["plan"])
+        if why:
+            return f"plan: {why}"
+        if len(record["plan"]) != record["slices"]:
+            return (
+                f"plan has {len(record['plan'])} slices, slices is {record['slices']}"
+            )
+    deviation = record["deviation"]
+    if deviation is not None and not (
+        isinstance(deviation, dict)
+        and deviation.get("what") in DEVIATIONS
+        and isinstance(deviation.get("reason"), str)
+        and deviation["reason"].strip()
+        and isinstance(deviation.get("sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", deviation["sha256"])
+    ):
+        return f"deviation must be null or name one of {', '.join(DEVIATIONS)} with a reason and the sha256 of the user's allow file"
+    if (
+        record["slices"] > MAX_SLICES
+        and (deviation or {}).get("what") != "slices-over-25"
+    ):
+        return f"{record['slices']} slices pass the limit of {MAX_SLICES} without the user's slices-over-25 allow"
     items = record["items"]
     if not isinstance(items, list) or not all(
         isinstance(i, dict) and all(k in i for k in ITEM_FIELDS) for i in items
@@ -199,7 +230,8 @@ def problem(path, head, base=None):
     if record["mode"] not in MODES:
         return f"{path}: mode must be agents or serial", None
     serial = record["mode"] == "serial"
-    if record["slices"] < 1:
+    text = record.get("tool") == "orch-sweep" and record.get("kind") == "text"
+    if record["slices"] < 1 and not text:
         return f"{path}: slices must be at least 1", None
     if not serial and record["sweep_agents"] < 1:
         return f"{path}: sweep_agents must be at least 1", None
@@ -279,6 +311,132 @@ def since(path, swept, base, head):
     return None, commits
 
 
+def cache_path(repo, number, head, kind="full"):
+    """Where orch-sweep keeps its copy of a record; an allow file has kind allow."""
+    root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    name = f"{head}.json" if kind == "full" else f"{head}.{kind}.json"
+    return root / "review-prs" / "sweeps" / repo / str(number) / name
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def file_hash(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def comment_record(body):
+    """The orch-sweep record in a sweep comment's json block, else None."""
+    if MARKER not in body:
+        return None
+    block = re.search(r"```json\n(.*?)\n```", body, re.S)
+    try:
+        record = json.loads(block.group(1)) if block else None
+    except ValueError:
+        return None
+    if not isinstance(record, dict) or record.get("tool") != "orch-sweep":
+        return None
+    return record
+
+
+class GateError(Exception):
+    """A gate that cannot read what it checks."""
+
+
+def gh_json(*args):
+    try:
+        done = subprocess.run(
+            ["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT
+        )
+    except subprocess.TimeoutExpired:
+        raise GateError(f"gh {' '.join(args)} timed out after {GH_TIMEOUT}s") from None
+    except OSError as error:
+        raise GateError(f"cannot run gh: {error}") from error
+    if done.returncode:
+        tail = done.stderr.strip().splitlines()[-1:] or [""]
+        raise GateError(f"gh {' '.join(args)} failed: {tail[0]}")
+    try:
+        return json.loads(done.stdout)
+    except ValueError as error:
+        raise GateError(f"gh {' '.join(args)}: not JSON: {error}") from error
+
+
+def record_problem(record, repo, number, head):
+    """Why a comment's record fails the gate's checks of its own, else None."""
+    with tempfile.TemporaryDirectory(prefix="orch-gate-") as scratch:
+        path = Path(scratch, "record.json")
+        path.write_text(json.dumps(record))
+        why, _ = problem(str(path), head)
+    kind = record.get("kind")
+    if why:
+        return f"the {kind} sweep record of {head}: {why.split(': ', 1)[1]}"
+    copy = cache_path(repo, number, head, kind)
+    try:
+        cached = json.loads(copy.read_text())
+    except (OSError, ValueError):
+        return f"no readable local copy of the {kind} sweep record at {copy}; orch-sweep run writes it"
+    if canonical(cached) != canonical(record):
+        return f"the {kind} sweep record in the comment differs from the local copy at {copy}"
+    deviation = record["deviation"]
+    if deviation is not None:
+        allow = cache_path(repo, number, head, "allow")
+        try:
+            allowed = file_hash(allow)
+        except OSError:
+            return f"the record names the deviation {deviation['what']}, and the user's allow file {allow} is missing"
+        if allowed != deviation["sha256"]:
+            return (
+                f"the user's allow file {allow} does not match the record's deviation"
+            )
+    return None
+
+
+def gate(url, head):
+    """Why the PR at url may not be approved at head, else None; raises GateError when GitHub cannot be read."""
+    match = PR_URL.fullmatch(url)
+    if not match:
+        return f"--pr {url!r} is not a GitHub pull request URL"
+    if not SHA.fullmatch(head):
+        return f"--head {head!r} is not a full 40-character SHA"
+    repo, number = match.group(1), int(match.group(2))
+    live = (gh_json("api", f"repos/{repo}/pulls/{number}").get("head") or {}).get("sha")
+    if live != head:
+        return f"the PR head is {live}, not {head}"
+    me = gh_json("api", "user").get("login")
+    pages = gh_json(
+        "api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"
+    )
+    order = []
+    for comment in (c for page in pages for c in page):
+        if (comment.get("user") or {}).get("login") != me:
+            continue
+        record = comment_record(comment.get("body") or "")
+        if record and record.get("head") == head and record.get("kind") in KINDS:
+            order.append(record)
+    latest = {record["kind"]: record for record in order}
+    if "full" not in latest:
+        return f"no full orch-sweep comment by {me} for the exact head {head}"
+    for record in latest.values():
+        why = record_problem(record, repo, number, head)
+        if why:
+            return why
+    full = latest["full"]
+    if order[-1]["kind"] == "text":
+        code = sum(
+            1
+            for i in full["items"]
+            if i["class"] == "fix" and i["category"] != "pr-text"
+        )
+        if code:
+            return f"the full sweep of {head} has {code} open fix findings outside the PR text"
+        if latest["text"]["open_fix"]:
+            return f"the text sweep of {head} has {latest['text']['open_fix']} open fix findings"
+    elif full["open_fix"]:
+        return f"the full sweep of {head} has {full['open_fix']} open fix findings"
+    return None
+
+
 def one_line(text):
     """The text with control characters escaped, so a diagnostic stays one line."""
     return re.sub(r"[\x00-\x1f\x7f]", lambda m: repr(m.group())[1:-1], text)
@@ -300,7 +458,20 @@ def main(argv):
     check.add_argument("--head", required=True)
     check.add_argument("--base")
     check.add_argument("--exact", action="store_true")
+    approve = commands.add_parser("gate")
+    approve.add_argument("--pr", required=True)
+    approve.add_argument("--head", required=True)
     args = parser.parse_args(argv[1:])
+    if args.command == "gate":
+        try:
+            found = gate(args.pr, args.head)
+        except GateError as error:
+            found = f"cannot check the gate: {error}"
+        if found:
+            print(f"ERROR: {one_line(found)}", file=sys.stderr)
+            return 1
+        print(f"OK: the sweep of {args.head} allows APPROVE")
+        return 0
     found, record = problem(args.record, args.head, args.base)
     commits = ""
     if not found and args.exact and record["head"] != args.head:

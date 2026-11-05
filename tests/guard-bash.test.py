@@ -984,6 +984,75 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         'gh --repo owner/repo pr create --body "Generated with Claude Code"',
         True,
     )
+    approve_input = root / "approve-review.json"
+    approve_input.write_text('{"commit_id":"x","event":"APPROVE","body":"ok"}')
+    for name, command, deny in [
+        ("gh pr review approve", "gh pr review 7 --approve", True),
+        ("gh pr review short approve", "gh pr review 7 -a -b ok", True),
+        ("gh pr review approve=true", "gh pr review 7 --approve=true", True),
+        (
+            "gh pr review request changes naming APPROVE",
+            "gh pr review 7 --request-changes -b 'no APPROVE yet'",
+            False,
+        ),
+        (
+            "API review event field",
+            "gh api -X POST repos/a/b/pulls/7/reviews -f event=APPROVE",
+            True,
+        ),
+        (
+            "API review comment naming APPROVE",
+            "gh api -X POST repos/a/b/pulls/7/reviews -f event=COMMENT -f body='APPROVE later'",
+            False,
+        ),
+        (
+            "API review heredoc",
+            'gh api -X POST repos/a/b/pulls/7/reviews --input - <<\'JSON\'\n{"event":"APPROVE"}\nJSON',
+            True,
+        ),
+        (
+            "github_write review heredoc",
+            'python3 lib/github_write.py --timeout 240 api -X POST repos/a/b/pulls/7/reviews --input - <<\'JSON\'\n{"event": "APPROVE"}\nJSON',
+            True,
+        ),
+        (
+            "github_write request changes heredoc",
+            'python3 lib/github_write.py --timeout 240 api -X POST repos/a/b/pulls/7/reviews --input - <<\'JSON\'\n{"event":"REQUEST_CHANGES"}\nJSON',
+            False,
+        ),
+        (
+            "API review from unseen stdin",
+            "cat r.json | gh api repos/a/b/pulls/7/reviews --input -",
+            True,
+        ),
+        (
+            "API review input file",
+            f"gh api repos/a/b/pulls/7/reviews --input {approve_input}",
+            True,
+        ),
+        (
+            "API pending review submit",
+            "gh api -X POST repos/a/b/pulls/7/reviews/9/events -f event=APPROVE",
+            True,
+        ),
+        (
+            "GraphQL review submit",
+            "gh api graphql -f query='mutation{submitPullRequestReview(input:{pullRequestReviewId:\"x\",event:APPROVE}){clientMutationId}}'",
+            True,
+        ),
+        (
+            "GraphQL comment review",
+            "gh api graphql -f query='mutation{addPullRequestReview(input:{pullRequestId:\"x\",event:COMMENT}){clientMutationId}}'",
+            False,
+        ),
+        ("API review list", "gh api repos/a/b/pulls/7/reviews --jq '.[].state'", False),
+        (
+            "orch-sweep post-review",
+            'orch-sweep post-review --pr https://github.com/a/b/pull/7 --head x --event APPROVE --input - <<\'JSON\'\n{"body":"ok"}\nJSON',
+            False,
+        ),
+    ]:
+        case(name, command, deny)
     case("shared fetch", "git fetch --depth=2 origin", True)
     case("worktree pull", "git pull --unshallow", True, wt)
     case("shared deepen fetch", "git fetch --deepen 50 origin", True, wt)

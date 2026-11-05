@@ -434,6 +434,57 @@ def guard_attribution(args, cwd, opts, raw):
     return None
 
 
+APPROVE_REASON = "An APPROVE review goes only through orch-sweep post-review, which checks the sweep gate for the exact head: orch-sweep post-review --pr <url> --head <sha> --event APPROVE --input - (docs/sweep-script.md)."
+APPROVE_EVENT = re.compile(r"""["']?event["']?\s*[:=]\s*["']?APPROVE\b""")
+OTHER_EVENT = re.compile(
+    r"""["']?event["']?\s*[:=]\s*["']?(?:REQUEST_CHANGES|COMMENT)\b"""
+)
+REVIEW_ENDPOINT = re.compile(
+    r"/?repos/[^/]+/[^/]+/pulls/\d+/reviews(?:/\d+/events)?/?(?:\?[^#]*)?"
+)
+REVIEW_MUTATION = re.compile(r"(?:add|submit)PullRequestReview\b")
+
+
+def guard_approve(args, cwd, opts, raw):
+    """Denies an APPROVE review posted with gh; orch-sweep post-review posts it after the sweep gate."""
+    if len(args) >= 2 and args[:2] == ["pr", "review"]:
+        if any(
+            a in ("-a", "--approve") or a.startswith("--approve=") for a in args[2:]
+        ):
+            return APPROVE_REASON
+        return None
+    if not args or args[0] != "api":
+        return None
+    endpoint = api_endpoint(args[1:])
+    graphql = endpoint == "graphql"
+    if not graphql and not REVIEW_ENDPOINT.fullmatch(endpoint):
+        return None
+    texts = [raw]
+    for name in flag_values(args, ("--input",)):
+        if (
+            not graphql
+            and name in ("-", "/dev/stdin", "/dev/fd/0")
+            and not OTHER_EVENT.search(raw)
+        ):
+            return APPROVE_REASON
+        content = file_text(name, cwd)
+        if content in (FILE_TOO_LARGE_REASON, FILE_NONREGULAR_REASON):
+            return content
+        texts.append(content)
+    for field in flag_values(args, ("-f", "-F", "--raw-field", "--field")):
+        key, _, value = field.partition("=")
+        if value.startswith("@"):
+            texts.append(file_text(value[1:], cwd))
+        if not graphql and key == "event" and value.upper() == "APPROVE":
+            return APPROVE_REASON
+    for text in texts:
+        if graphql and REVIEW_MUTATION.search(text) and "APPROVE" in text:
+            return APPROVE_REASON
+        if not graphql and APPROVE_EVENT.search(text):
+            return APPROVE_REASON
+    return None
+
+
 BROAD_KILL_REASON = "feedback_never_pkill_f + reference_macos_pkill_options_after_pattern: never use pkill or feed pgrep -f into kill; stop only your own PID with kill -TERM <pid> (or your slot pidfile)."
 PROTECTED_PROCESS = re.compile(
     r"(?:vite|puma|rails|bin/dev|dev-instance|node|ruby|bundle|sidekiq|esbuild|foreman|overmind)",
@@ -2167,14 +2218,14 @@ def evaluate_words(words, where, command, disabled, pipeline):
         guards = (guard_push, guard_attribution, guard_memory, guard_big_repo_reads)
     elif executable == "gh":
         args = unwrap_gh(args)
-        guards = (guard_attribution,)
+        guards = (guard_attribution, guard_approve)
     elif (wrapped_args := github_write_gh_args(words)) is GITHUB_WRITE_INVALID:
         return GITHUB_WRITE_OPTION_REASON
     elif wrapped_args:
         if (wrapped_args := unwrap_github_write(wrapped_args)) is None:
             return GITHUB_WRITE_OPTION_REASON
         args = unwrap_gh(wrapped_args)
-        guards = (guard_attribution,)
+        guards = (guard_attribution, guard_approve)
     elif executable in ("herdr", "pi", "cursor", "cursor-agent", "agent"):
         return (
             None

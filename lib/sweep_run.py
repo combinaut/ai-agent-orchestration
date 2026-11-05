@@ -23,19 +23,19 @@ import orch_settings  # noqa: E402
 import sweep_record  # noqa: E402
 
 LIMIT = sweep_record.SLICE_LINES
-MAX_SLICES = 25
+MAX_SLICES = sweep_record.MAX_SLICES
 PER_VALIDATOR = 40
 MAX_VALIDATORS = 12
 GH_TIMEOUT = 45
 COMMENT_LIMIT = 65536
-MARKER = "<!-- orch-sweep v1 -->"
+MARKER = sweep_record.MARKER
 ROLES = {
     "finalize-code-comments": "sweep-comments",
     "finalize-change-footprint": "sweep-footprint",
 }
 TEST_DIRS = {"test", "tests", "spec", "__tests__"}
 TEST_NAME = re.compile(r"^test_|_(spec|test)\.[^.]+$|\.(test|spec)\.[^.]+$|\.bats$")
-PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
+PR_URL = sweep_record.PR_URL
 CLAUDE_TOOLS = [
     "Read",
     "Grep",
@@ -560,12 +560,8 @@ def pr_data(repo, number):
 
 def sweep_outcomes(body):
     """One line per finding of the orch-sweep record in a sweep comment, else None."""
-    block = re.search(r"```json\n(.*?)\n```", body, re.S)
-    try:
-        record = json.loads(block.group(1)) if block else None
-    except ValueError:
-        return None
-    if not isinstance(record, dict) or record.get("tool") != "orch-sweep":
+    record = sweep_record.comment_record(body)
+    if record is None:
         return None
     items, dropped = record.get("items", []), record.get("dropped", [])
     if not isinstance(items, list) or not isinstance(dropped, list):
@@ -584,11 +580,7 @@ def context(pr, comments, threads):
     parts = [f"Title: {pr['title']}", f"Body:\n{pr['body'] or ''}"]
     others = []
     for c in comments:
-        outcomes = (
-            sweep_outcomes(c.get("body") or "")
-            if MARKER in (c.get("body") or "")
-            else None
-        )
+        outcomes = sweep_outcomes(c.get("body") or "")
         if outcomes is None:
             others.append(c)
         else:
@@ -613,11 +605,20 @@ def comment_body(record, tables=("Kept", "Dropped"), indent=1):
         MARKER,
         f"### Finalize sweep at `{record['head']}`",
         "",
-        f"Full sweep of the PR diff, merge base `{record['base']}`. "
-        f"Runtime {record['runtime']}, model {record['model']}: {record['slices']} slices, "
+        (
+            f"Full sweep of the PR diff, merge base `{record['base']}`. "
+            if record["kind"] == "full"
+            else f"Text sweep: the PR title and body against the code, merge base `{record['base']}`. "
+        )
+        + f"Runtime {record['runtime']}, model {record['model']}: {record['slices']} slices, "
         f"{record['sweep_agents']} sweep agents, {record['validators']} validators.",
         "",
     ]
+    if record["deviation"]:
+        lines += [
+            f"Deviation approved by the user: {record['deviation']['what']} — {cell(record['deviation']['reason'])}",
+            "",
+        ]
     for title, rows in (("Kept", record["items"]), ("Dropped", record["dropped"])):
         if not rows or title not in tables:
             continue
@@ -671,16 +672,36 @@ def fitting_body(record):
     )
 
 
-def cache_path(repo, number, head):
-    root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-    return root / "review-prs" / "sweeps" / repo / str(number) / f"{head}.json"
+def pr_ref(url):
+    match = PR_URL.fullmatch(url)
+    if not match:
+        raise Failure(f"--pr {url!r} is not a GitHub pull request URL")
+    return match.group(1), int(match.group(2))
+
+
+def allowed(repo, number, head, what):
+    """The record's deviation from the user's allow file for this head, else None."""
+    path = sweep_record.cache_path(repo, number, head, "allow")
+    try:
+        allow = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    if (
+        not isinstance(allow, dict)
+        or allow.get("what") != what
+        or allow.get("head") != head
+    ):
+        return None
+    return {
+        "what": what,
+        "reason": allow.get("reason"),
+        "at": allow.get("at"),
+        "sha256": sweep_record.file_hash(path),
+    }
 
 
 def run(args):
-    match = PR_URL.fullmatch(args.pr)
-    if not match:
-        raise Failure(f"--pr {args.pr!r} is not a GitHub pull request URL")
-    repo, number = match.group(1), int(match.group(2))
+    repo, number = pr_ref(args.pr)
     actual = git("rev-parse", "HEAD").strip()
     if actual != args.head:
         raise Failure(f"HEAD is {actual}, not {args.head}")
@@ -690,30 +711,39 @@ def run(args):
     top = Path.cwd().resolve()
     for label, path in (
         ("--record", args.record),
-        ("the record cache", cache_path(repo, number, args.head)),
+        ("the record cache", sweep_record.cache_path(repo, number, args.head)),
     ):
         if path and Path(path).resolve().is_relative_to(top):
             raise Failure(f"{label} {path} is inside the checkout; write it outside")
+    if (
+        args.kind == "text"
+        and not sweep_record.cache_path(repo, number, args.head).exists()
+    ):
+        raise Failure(f"a text sweep needs a full sweep of {args.head} first")
     model = model_for(args.runtime, args.model)
     merge_base = git("merge-base", "HEAD", args.base_ref).strip()
     pr, comments, threads = pr_data(repo, number)
     files = changes(merge_base, args.head)
     if not files:
         raise Failure(f"no changes between {merge_base} and {args.head}")
-    slices = plan(files)
-    why = sweep_record.plan_problem(slices, [f["path"] for f in files])
-    if why:
-        raise Failure(f"slice plan: {why}")
+    deviation = None
+    slices = plan(files) if args.kind == "full" else []
+    if args.kind == "full":
+        why = sweep_record.plan_problem(slices, [f["path"] for f in files])
+        if why:
+            raise Failure(f"slice plan: {why}")
     print(f"PLAN {len(slices)} slices, {len(files)} files")
     if len(slices) > MAX_SLICES:
-        raise Failure(
-            f"{len(slices)} slices; the limit is {MAX_SLICES}; ask the user whether to continue or split the PR",
-            3,
-        )
+        deviation = allowed(repo, number, args.head, "slices-over-25")
+        if deviation is None:
+            raise Failure(
+                f"{len(slices)} slices; the limit is {MAX_SLICES}; the user allows more with orch-sweep allow --what slices-over-25, or the PR splits",
+                3,
+            )
     before = tree()
     runner = Runner(
         args.runtime, model, args.concurrency, args.agent_timeout,
-        time.monotonic() + args.timeout, len(slices),
+        time.monotonic() + args.timeout, max(1, len(slices)),
     )  # fmt: skip
     for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(signum, runner.stop_all)
@@ -789,7 +819,7 @@ def run(args):
         "pr": args.pr,
         "runtime": args.runtime,
         "model": model,
-        "kind": "full",
+        "kind": args.kind,
         "tree": before,
         "plan": slices,
         "pr_text": 1,
@@ -797,9 +827,9 @@ def run(args):
         "items": items,
         "dropped": dropped,
         "open_fix": sum(1 for i in items if i["class"] == "fix"),
-        "deviation": None,
+        "deviation": deviation,
     }
-    paths = [cache_path(repo, number, args.head)] + (
+    paths = [sweep_record.cache_path(repo, number, args.head, args.kind)] + (
         [Path(args.record)] if args.record else []
     )
     for path in paths:
@@ -823,6 +853,92 @@ def run(args):
     return 0
 
 
+def allow(args):
+    """Writes the user's allow file for one deviation at one head, after a typed yes on the terminal."""
+    repo, number = pr_ref(args.pr)
+    if not sweep_record.SHA.fullmatch(args.head):
+        raise Failure(f"--head {args.head!r} is not a full 40-character SHA")
+    if not args.reason.strip():
+        raise Failure("--reason must say why")
+    try:
+        tty = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+    except OSError:
+        raise Failure(
+            "orch-sweep allow reads the user's yes from a terminal; run it in a shell"
+        ) from None
+    try:
+        os.write(
+            tty,
+            f"Allow {args.what} for {args.pr} at {args.head}: {args.reason}\nType yes to allow: ".encode(),
+        )
+        answer = b""
+        while not answer.endswith(b"\n"):
+            chunk = os.read(tty, 64)
+            if not chunk:
+                break
+            answer += chunk
+    finally:
+        os.close(tty)
+    answer = answer.decode(errors="replace").strip()
+    if answer != "yes":
+        raise Failure("not allowed")
+    path = sweep_record.cache_path(repo, number, args.head, "allow")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "pr": args.pr,
+                "head": args.head,
+                "what": args.what,
+                "reason": args.reason,
+                "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+            indent=1,
+        )
+        + "\n"
+    )
+    print(f"ALLOWED {path}")
+    return 0
+
+
+def post_review(args):
+    """Posts one review at --head; APPROVE only when the sweep gate passes."""
+    repo, number = pr_ref(args.pr)
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError as error:
+        raise Failure(f"the review on stdin is not JSON: {error}") from error
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("body"), str)
+        or not isinstance(payload.get("comments", []), list)
+        or set(payload) - {"body", "comments"}
+    ):
+        raise Failure('the review on stdin is {"body": "...", "comments": [...]}')
+    if args.event == "APPROVE":
+        try:
+            why = sweep_record.gate(args.pr, args.head)
+        except sweep_record.GateError as error:
+            why = f"cannot check the gate: {error}"
+        if why:
+            raise Failure(f"APPROVE refused: {why}")
+    review = {
+        "commit_id": args.head,
+        "event": args.event,
+        "body": payload["body"],
+        "comments": payload.get("comments", []),
+    }
+    posted = subprocess.run(
+        [sys.executable, str(LIB / "github_write.py"), "--timeout", "240", "api", "-X", "POST",
+         f"repos/{repo}/pulls/{number}/reviews", "--input", "-"],
+        input=json.dumps(review), capture_output=True, text=True,
+    )  # fmt: skip
+    if posted.returncode:
+        raise Failure(f"posting the review failed: {posted.stderr.strip()}")
+    print(f"REVIEW {args.event} {json.loads(posted.stdout).get('html_url', '')}")
+    return 0
+
+
 def main(argv):
     parser = sweep_record.Parser(prog="orch-sweep")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -830,6 +946,7 @@ def main(argv):
     go.add_argument("--pr", required=True)
     go.add_argument("--head", required=True)
     go.add_argument("--base-ref", required=True)
+    go.add_argument("--kind", choices=sweep_record.KINDS, default="full")
     go.add_argument("--runtime", choices=("codex", "claude"), default="codex")
     go.add_argument("--model")
     go.add_argument("--concurrency", type=int, default=4)
@@ -841,8 +958,24 @@ def main(argv):
     show.add_argument("--base", required=True)
     show.add_argument("--head", default="HEAD")
     commands.add_parser("tree")
+    ok = commands.add_parser("allow")
+    ok.add_argument("--pr", required=True)
+    ok.add_argument("--head", required=True)
+    ok.add_argument("--what", required=True, choices=sweep_record.DEVIATIONS)
+    ok.add_argument("--reason", required=True)
+    review = commands.add_parser("post-review")
+    review.add_argument("--pr", required=True)
+    review.add_argument("--head", required=True)
+    review.add_argument(
+        "--event", required=True, choices=("APPROVE", "REQUEST_CHANGES", "COMMENT")
+    )
+    review.add_argument("--input", required=True, choices=("-",))
     args = parser.parse_args(argv[1:])
     try:
+        if args.command == "allow":
+            return allow(args)
+        if args.command == "post-review":
+            return post_review(args)
         os.chdir(git("rev-parse", "--show-toplevel").strip())
         if args.command == "plan":
             print(json.dumps({"slices": plan(changes(args.base, args.head))}, indent=1))
