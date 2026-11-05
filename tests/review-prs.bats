@@ -312,6 +312,7 @@ fork_head_missing_from_pull_ref() {
 
 @test "the review texts carry the sweep rules" {
   grep -qF 'An open kept fix finding blocks APPROVE; nits and dropped findings never block.' "$ROOT/$SKILL_DIR/SKILL.md"
+  grep -qF 'finding blocks APPROVE; nits and dropped findings never block.' "$ROOT/README.md"
   grep -qF 'always names the swept head SHA in full (40 characters)' "$ROOT/$SKILL_DIR/SKILL.md"
   grep -qF 'An open kept fix finding blocks APPROVE; nits and dropped findings never block.' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 'always names the swept head SHA in full (40 characters)' "$ROOT/skills/architect/references/reviewer.md"
