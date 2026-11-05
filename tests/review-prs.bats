@@ -303,6 +303,7 @@ fork_head_missing_from_pull_ref() {
   contains "$prompt" 'Class every finding: fix'
   contains "$prompt" 'nit (pure style or taste'
   contains "$prompt" 'A finding rejected once on this PR is never raised again.'
+  contains "$prompt" 'The sweep is exempt: after a fix push with no base merge or rebase it covers <last swept head>..<head>, and the main review still reads the full PR diff.'
   contains "$prompt" 'covers only the lines changed since the last swept head'
   contains "$prompt" 'covers the whole PR diff again, on the new head, before a new APPROVE'
   contains "$prompt" 'any review finding or sweep fix finding is open'
@@ -311,9 +312,11 @@ fork_head_missing_from_pull_ref() {
 
 @test "the review texts carry the sweep rules" {
   grep -qF 'An open fix finding blocks APPROVE; nits never do.' "$ROOT/$SKILL_DIR/SKILL.md"
-  grep -qF 'An open fix finding fails the review; nits never do.' "$ROOT/skills/architect/references/reviewer.md"
+  grep -qF 'an open fix finding fails the review; nits never do.' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 'a finding rejected once on this PR is never raised again' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 're-sweep only the lines changed since the last swept head' "$ROOT/skills/architect/references/reviewer.md"
+  grep -qF 'report-only: skip its approval and apply steps' "$ROOT/skills/architect/references/reviewer.md"
+  grep -qF 'Use the comment for the verdict' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 'the one exception is a review'"'"'s re-sweep after a fix push' "$ROOT/skills/finalize-sweep/SKILL.md"
   grep -qF 'instead of the merge base for the path list, the counts, the slices' "$ROOT/skills/finalize-sweep/SKILL.md"
   grep -qF 'the merge base stays for the' "$ROOT/skills/finalize-sweep/SKILL.md"
