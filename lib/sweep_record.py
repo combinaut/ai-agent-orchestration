@@ -141,8 +141,16 @@ def one_line(text):
     return re.sub(r"[\x00-\x1f\x7f]", lambda m: repr(m.group())[1:-1], text)
 
 
+class Parser(argparse.ArgumentParser):
+    """Reports usage errors as one escaped ERROR line and exit 1; subparsers share the class."""
+
+    def error(self, message):
+        print(f"ERROR: {one_line(message)}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main(argv):
-    parser = argparse.ArgumentParser(prog="sweep_record.py")
+    parser = Parser(prog="sweep_record.py")
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check")
     check.add_argument("--record", required=True)

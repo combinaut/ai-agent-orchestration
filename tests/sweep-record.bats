@@ -370,3 +370,29 @@ check() {
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: head equals base; the sweep covered an empty diff" ]
 }
+
+@test "an unknown flag fails with one ERROR line and exit 1" {
+  record 0 0 '{}'
+  cd "$REPO" || return 1
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --bogus
+  [ "$status" -eq 1 ]
+  [ "$output" = "" ]
+  [ "$stderr" = "ERROR: unrecognized arguments: --bogus" ]
+}
+
+@test "a missing --head fails with one ERROR line and exit 1" {
+  cd "$REPO" || return 1
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC"
+  [ "$status" -eq 1 ]
+  [ "$output" = "" ]
+  [ "$stderr" = "ERROR: the following arguments are required: --head" ]
+}
+
+@test "an unknown subcommand fails with one ERROR line and exit 1" {
+  cd "$REPO" || return 1
+  run --separate-stderr "$ROOT/orch-sweep-record" bogus
+  [ "$status" -eq 1 ]
+  [ "${#lines[@]}" -eq 0 ]
+  [[ "$stderr" == "ERROR: "* ]]
+  [ "$(printf '%s\n' "$stderr" | wc -l)" -eq 1 ]
+}
