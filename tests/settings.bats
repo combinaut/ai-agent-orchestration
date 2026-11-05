@@ -509,21 +509,22 @@ ENV
   [ "$(grep -c 'big_repo' "$TMP/snippets/acme-web/app.toml")" = 0 ]
 }
 
-# finalize_warning <commands-toml-list>: loads a repo whose committed file sets review.finalize_commands.
+# finalize_warning <commands-toml-list> [exported-value]: loads a repo whose committed file sets review.finalize_commands, with an optional exported override.
 finalize_warning() {
+  local exported=()
+  [ $# -lt 2 ] || exported=("ORCH_REVIEW_FINALIZE_COMMANDS=$2")
   CLONE="$TMP/clone"
   git init -q "$CLONE"
   : >"$ORCH_CONFIG"
   printf '[review]\nfinalize_commands = %s\n' "$1" >"$CLONE/.orchestration.toml"
   # shellcheck disable=SC2016 # The child shell expands these.
-  run --separate-stderr bash -c '. "$1/coordinator/watchers/coord-lib.sh"
+  run --separate-stderr env ${exported[@]+"${exported[@]}"} bash -c '. "$1/coordinator/watchers/coord-lib.sh"
     orch_python >/dev/null && "$ORCH_LOADER_PYTHON" -I "$2" repo "$3"' _ "$ROOT" "$SETTINGS" "$CLONE"
 }
 
 @test "a repo file naming the old finalize pair warns once and leaves stdout alone" {
   finalize_warning '["/finalize-change-footprint", "/finalize-code-comments"]'
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$stderr" | grep -c '^WARNING:')" = 1 ]
   [ "$stderr" = "WARNING: $CLONE/.orchestration.toml sets review.finalize_commands to /finalize-change-footprint /finalize-code-comments; /finalize-sweep replaces /finalize-change-footprint and /finalize-code-comments" ]
   [[ "$output" == *"orch_set_default ORCH_REVIEW_FINALIZE_COMMANDS '/finalize-change-footprint|/finalize-code-comments'"* ]]
 }
@@ -548,25 +549,22 @@ finalize_warning() {
   printf '%s\n' "$output" | grep -qxF "ORCH_REVIEW_FINALIZE_COMMANDS=/finalize-code-comments"
 }
 
-# finalize_exported <file-list> <exported-value>: the repo loader with an exported override.
-finalize_exported() {
-  CLONE="$TMP/clone"
-  git init -q "$CLONE"
-  : >"$ORCH_CONFIG"
-  printf '[review]\nfinalize_commands = %s\n' "$1" >"$CLONE/.orchestration.toml"
-  # shellcheck disable=SC2016 # The child shell expands these.
-  run --separate-stderr env ORCH_REVIEW_FINALIZE_COMMANDS="$2" bash -c '. "$1/coordinator/watchers/coord-lib.sh"
-    orch_python >/dev/null && "$ORCH_LOADER_PYTHON" -I "$2" repo "$3"' _ "$ROOT" "$SETTINGS" "$CLONE"
-}
-
 @test "an exported /finalize-sweep silences a file that names the old pair" {
-  finalize_exported '["/finalize-code-comments"]' '/finalize-sweep'
+  finalize_warning '["/finalize-code-comments"]' '/finalize-sweep'
   [ "$status" -eq 0 ]
   [ "$stderr" = "" ]
 }
 
 @test "an exported old pair warns naming the variable even over a sweep file" {
-  finalize_exported '["/finalize-sweep"]' '/finalize-code-comments'
+  finalize_warning '["/finalize-sweep"]' '/finalize-code-comments'
   [ "$status" -eq 0 ]
   [ "$stderr" = "WARNING: ORCH_REVIEW_FINALIZE_COMMANDS sets review.finalize_commands to /finalize-code-comments; /finalize-sweep replaces /finalize-change-footprint and /finalize-code-comments" ]
+}
+
+@test "an exported old pair warns from orch-settings naming the variable" {
+  printf '[review]\nfinalize_commands = ["/finalize-sweep"]\n' >"$ORCH_CONFIG"
+  ORCH_REVIEW_FINALIZE_COMMANDS=/finalize-code-comments run --separate-stderr "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  [ "$stderr" = "WARNING: ORCH_REVIEW_FINALIZE_COMMANDS sets review.finalize_commands to /finalize-code-comments; /finalize-sweep replaces /finalize-change-footprint and /finalize-code-comments" ]
+  printf '%s\n' "$output" | grep -qxF "ORCH_REVIEW_FINALIZE_COMMANDS=/finalize-code-comments"
 }

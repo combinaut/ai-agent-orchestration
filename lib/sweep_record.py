@@ -24,47 +24,56 @@ VERDICTS = (
 
 
 def problem(path, head):
-    """Why the record at path does not prove a sweep of head, else None."""
+    """(why, record): why the record at path does not prove a sweep of head, else None."""
     try:
         with open(path, encoding="utf-8") as handle:
             record = json.load(handle)
     except FileNotFoundError:
-        return f"{path}: no sweep record"
+        return f"{path}: no sweep record", None
     except (OSError, ValueError) as error:
-        return f"{path}: not valid JSON: {error}"
+        return f"{path}: not valid JSON: {error}", None
     if not isinstance(record, dict):
-        return f"{path}: the record must be a JSON object"
+        return f"{path}: the record must be a JSON object", None
     missing = [field for field in FIELDS if field not in record]
     if missing:
-        return f"{path}: missing field {missing[0]}"
+        return f"{path}: missing field {missing[0]}", None
     for sha in (record["head"], head):
         if not isinstance(sha, str) or not SHA.fullmatch(sha):
-            return f"{path}: {sha!r} is not a full 40-character SHA"
+            return f"{path}: {sha!r} is not a full 40-character SHA", None
     if record["clean"] is not True:
-        return f"{path}: clean must be true; the sweep needs a committed head and a clean tree"
+        return (
+            f"{path}: clean must be true; the sweep needs a committed head and a clean tree",
+            None,
+        )
     for field in COUNTS:
         value = record[field]
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            return f"{path}: {field} must be a non-negative integer"
+            return f"{path}: {field} must be a non-negative integer", None
     verdicts = record["verdicts"]
     if not isinstance(verdicts, dict) or any(
         isinstance(n, bool) or not isinstance(n, int) or n < 0
         for n in verdicts.values()
     ):
-        return f"{path}: verdicts must map each verdict to a count"
+        return f"{path}: verdicts must map each verdict to a count", None
     unknown = [key for key in verdicts if key not in VERDICTS]
     if unknown:
-        return f"{path}: unknown verdict {unknown[0]}"
+        return f"{path}: unknown verdict {unknown[0]}", None
     ids = record["validator_ids"]
     if not isinstance(ids, list) or not all(isinstance(i, str) and i for i in ids):
-        return f"{path}: validator_ids must be a list of non-empty strings"
+        return f"{path}: validator_ids must be a list of non-empty strings", None
     if len(ids) != record["validators"]:
-        return f"{path}: {len(ids)} validator_ids for {record['validators']} validators"
+        return (
+            f"{path}: {len(ids)} validator_ids for {record['validators']} validators",
+            None,
+        )
     if record["findings"] > 0 and record["validators"] < 1:
-        return f"{path}: {record['findings']} findings and no validator started"
+        return f"{path}: {record['findings']} findings and no validator started", None
     if sum(verdicts.values()) != record["findings"]:
-        return f"{path}: verdicts add up to {sum(verdicts.values())}, findings is {record['findings']}"
-    return None
+        return (
+            f"{path}: verdicts add up to {sum(verdicts.values())}, findings is {record['findings']}",
+            None,
+        )
+    return None, record
 
 
 def git(*args):
@@ -98,11 +107,10 @@ def main(argv):
     check.add_argument("--record", required=True)
     check.add_argument("--head", required=True)
     args = parser.parse_args(argv[1:])
-    found = problem(args.record, args.head)
+    found, record = problem(args.record, args.head)
     commits = ""
     if not found:
-        with open(args.record, encoding="utf-8") as handle:
-            swept = json.load(handle)["head"]
+        swept = record["head"]
         found, commits = since(args.record, swept, args.head)
     if found:
         print(f"ERROR: {found}", file=sys.stderr)
