@@ -109,8 +109,8 @@ def script_problem(record):
         return "model must name the agents' model"
     if record["kind"] != "full":
         return "kind must be full"
-    if record["pr_text"] not in (0, 1) or isinstance(record["pr_text"], bool):
-        return "pr_text must be 0 or 1"
+    if record["pr_text"] != 1 or isinstance(record["pr_text"], bool):
+        return "pr_text must be 1; every orch-sweep run checks the PR title and body"
     expected = 2 * record["slices"] + record["pr_text"]
     if record["sweep_agents"] != expected:
         return f"{record['sweep_agents']} sweep_agents; {record['slices']} slices and pr_text {record['pr_text']} start {expected}"
@@ -152,6 +152,11 @@ def script_problem(record):
         return "a dropped finding has a verdict that keeps it"
     if len(items) + len(dropped) != record["findings"]:
         return f"{len(items)} items and {len(dropped)} dropped for {record['findings']} findings"
+    for verdict in VERDICTS:
+        held = sum(1 for i in items + dropped if i["verdict"] == verdict)
+        said = record["verdicts"].get(verdict, 0)
+        if held != said:
+            return f"the findings hold {verdict} {held}, verdicts says {said}"
     fixes = sum(1 for i in items if i["class"] == "fix")
     if record["open_fix"] != fixes:
         return f"open_fix is {record['open_fix']}, the items hold {fixes} fix findings"

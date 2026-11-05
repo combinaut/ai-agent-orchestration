@@ -27,6 +27,7 @@ MAX_SLICES = 25
 PER_VALIDATOR = 40
 MAX_VALIDATORS = 12
 GH_TIMEOUT = 45
+COMMENT_LIMIT = 65536
 MARKER = "<!-- orch-sweep v1 -->"
 ROLES = {
     "finalize-code-comments": "sweep-comments",
@@ -232,7 +233,8 @@ def plan(files):
         for n, chosen in enumerate(bins, 1):
             slices.append(
                 {
-                    "name": key if len(bins) == 1 else f"{key}#{n}",
+                    "name": (key if len(bins) == 1 else f"{key}#{n}")
+                    + (" (text)" if key == "binary" and len(bins) == 1 else ""),
                     "lines": total(chosen),
                     "files": sorted(chosen, key=lambda f: f["path"]),
                 }
@@ -313,14 +315,19 @@ def command(runtime, model, schema, out):
 
 
 def stop(proc):
+    """SIGTERM to the agent's process group, then SIGKILL to whatever of the group is left."""
     try:
         os.killpg(proc.pid, signal.SIGTERM)
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
+        pass
+    except ProcessLookupError:
+        return
+    try:
         os.killpg(proc.pid, signal.SIGKILL)
-        proc.wait()
     except ProcessLookupError:
         pass
+    proc.wait()
 
 
 class Runner:
@@ -339,8 +346,8 @@ class Runner:
 
     def stop_all(self, signum, frame):
         """Stops every running agent's process group, then exits with 128 + the signal."""
-        self.failed.set()
         with self.lock:
+            self.failed.set()
             procs = list(self.live)
         for proc in procs:
             stop(proc)
@@ -354,16 +361,20 @@ class Runner:
             schema, out = Path(scratch, "schema.json"), Path(scratch, "answer.json")
             schema.write_text(json.dumps(job["schema"]))
             argv = command(self.runtime, self.model, str(schema), str(out))
-            try:
-                proc = subprocess.Popen(
-                    argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE, start_new_session=True,
-                )  # fmt: skip
-            except OSError as error:
-                raise AgentError(
-                    f"{job['name']}: cannot start {argv[0]}: {error}"
-                ) from error
             with self.lock:
+                if self.failed.is_set():
+                    raise AgentError(
+                        f"{job['name']}: not started after an earlier failure"
+                    )
+                try:
+                    proc = subprocess.Popen(
+                        argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, start_new_session=True,
+                    )  # fmt: skip
+                except OSError as error:
+                    raise AgentError(
+                        f"{job['name']}: cannot start {argv[0]}: {error}"
+                    ) from error
                 self.live.add(proc)
             try:
                 stdout, stderr = proc.communicate(
@@ -547,9 +558,42 @@ def pr_data(repo, number):
     return pr, pages[0], pages[1]
 
 
+def sweep_outcomes(body):
+    """One line per finding of the orch-sweep record in a sweep comment, else None."""
+    block = re.search(r"```json\n(.*?)\n```", body, re.S)
+    try:
+        record = json.loads(block.group(1)) if block else None
+    except ValueError:
+        return None
+    if not isinstance(record, dict) or record.get("tool") != "orch-sweep":
+        return None
+    lines = []
+    for f in [*record.get("items", []), *record.get("dropped", [])]:
+        if isinstance(f, dict):
+            lines.append(
+                f"- {f.get('file')}:{f.get('line')} {f.get('category')} {f.get('class')} {f.get('verdict')}: {f.get('summary')}"
+            )
+    return "\n".join(lines) or "- no findings"
+
+
 def context(pr, comments, threads):
+    """The PR text, every earlier sweep outcome, and the latest 50 other comments of each kind."""
     parts = [f"Title: {pr['title']}", f"Body:\n{pr['body'] or ''}"]
-    for label, items in (("Comment", comments), ("Review thread comment", threads)):
+    others = []
+    for c in comments:
+        outcomes = (
+            sweep_outcomes(c.get("body") or "")
+            if MARKER in (c.get("body") or "")
+            else None
+        )
+        if outcomes is None:
+            others.append(c)
+        else:
+            who = (c.get("user") or {}).get("login", "?")
+            parts.append(
+                f"Earlier sweep by {who}, every finding and its verdict:\n{outcomes}"
+            )
+    for label, items in (("Comment", others), ("Review thread comment", threads)):
         for c in items[-50:]:
             who = (c.get("user") or {}).get("login", "?")
             where = f" on {c['path']}:{c.get('line')}" if c.get("path") else ""
@@ -561,7 +605,7 @@ def cell(text):
     return str(text).replace("|", "\\|").replace("\n", " ")
 
 
-def comment_body(record):
+def comment_body(record, tables=("Kept", "Dropped"), indent=1):
     lines = [
         MARKER,
         f"### Finalize sweep at `{record['head']}`",
@@ -572,7 +616,7 @@ def comment_body(record):
         "",
     ]
     for title, rows in (("Kept", record["items"]), ("Dropped", record["dropped"])):
-        if not rows:
+        if not rows or title not in tables:
             continue
         lines += [
             f"**{title}**",
@@ -588,18 +632,40 @@ def comment_body(record):
         lines.append("")
     if not record["items"] and not record["dropped"]:
         lines += ["No findings.", ""]
+    elif len(tables) < 2:
+        lines += [
+            f"Tables left out to fit GitHub's comment limit: {', '.join(t for t in ('Kept', 'Dropped') if t not in tables)}; the record below holds every finding.",
+            "",
+        ]
     counts = ", ".join(f"{k} {v}" for k, v in record["verdicts"].items() if v)
     lines += [
         f"Raw findings {record['findings']}, kept {len(record['items'])}, open fix {record['open_fix']}."
         + (f" Verdicts: {counts}." if counts else ""),
         "",
         "```json",
-        json.dumps(record, indent=1),
+        json.dumps(record, indent=indent, separators=None if indent else (",", ":")),
         "```",
         "",
         TRAILERS[record["runtime"]],
     ]
     return "\n".join(lines) + "\n"
+
+
+def fitting_body(record):
+    """The fullest comment within COMMENT_LIMIT: indented record and both tables, then compact, then fewer tables."""
+    for tables, indent in (
+        (("Kept", "Dropped"), 1),
+        (("Kept", "Dropped"), None),
+        (("Kept",), None),
+        ((), None),
+    ):
+        body = comment_body(record, tables, indent)
+        if len(body) <= COMMENT_LIMIT:
+            return body
+    raise Failure(
+        f"the sweep comment needs {len(body)} characters; GitHub allows {COMMENT_LIMIT}; the record is kept locally",
+        5,
+    )
 
 
 def cache_path(repo, number, head):
@@ -618,6 +684,13 @@ def run(args):
     dirty = git("status", "--porcelain", "--untracked-files=all")
     if dirty:
         raise Failure(f"the tree is not clean; commit first: {dirty.splitlines()[0]}")
+    top = Path.cwd().resolve()
+    for label, path in (
+        ("--record", args.record),
+        ("the record cache", cache_path(repo, number, args.head)),
+    ):
+        if path and Path(path).resolve().is_relative_to(top):
+            raise Failure(f"{label} {path} is inside the checkout; write it outside")
     model = model_for(args.runtime, args.model)
     merge_base = git("merge-base", "HEAD", args.base_ref).strip()
     pr, comments, threads = pr_data(repo, number)
@@ -734,10 +807,11 @@ def run(args):
         raise Failure(f"the record fails its own check: {why}")
     print(f"RECORD {paths[-1]}")
     if not args.no_comment:
+        body = fitting_body(record)
         posted = subprocess.run(
             [sys.executable, str(LIB / "github_write.py"), "--timeout", "240", "api", "-X", "POST",
              f"repos/{repo}/issues/{number}/comments", "--input", "-"],
-            input=json.dumps({"body": comment_body(record)}), capture_output=True, text=True,
+            input=json.dumps({"body": body}), capture_output=True, text=True,
         )  # fmt: skip
         if posted.returncode:
             raise Failure(f"posting the sweep comment failed: {posted.stderr.strip()}")

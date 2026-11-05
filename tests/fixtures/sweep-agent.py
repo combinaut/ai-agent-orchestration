@@ -4,6 +4,7 @@
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import uuid
@@ -27,6 +28,10 @@ with (tmp / "live.max").open("a") as log:
 time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
 (live / str(os.getpid())).unlink()
 
+if os.environ.get("FAKE_CHILD") == role:
+    child = subprocess.Popen(["bash", "-c", "trap '' TERM; sleep 1000"])
+    with (tmp / "child.pids").open("a") as log:
+        log.write(f"{child.pid}\n")
 if os.environ.get("FAKE_HANG") == role:
     time.sleep(1000)
 if os.environ.get("FAKE_WRITE") == role:
@@ -63,7 +68,8 @@ else:
                 "file": files[0],
                 "line": i + 1,
                 "category": role,
-                "summary": f"{role} {os.getpid()} {i}",
+                "summary": f"{role} {os.getpid()} {i}"
+                + "x" * int(os.environ.get("FAKE_PAD", "0")),
                 "evidence": f"{files[0]}:{i + 1}",
             }
             for i in range(count)

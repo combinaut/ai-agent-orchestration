@@ -567,3 +567,17 @@ PY
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: a dropped finding has a verdict that keeps it" ]
 }
+
+@test "an orch-sweep record without the PR-text agent fails" {
+  script_record 'r["pr_text"] = 0; r["sweep_agents"] = 4; r["sweep_agent_ids"] = r["sweep_agent_ids"][:4]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: pr_text must be 1; every orch-sweep run checks the PR title and body" ]
+}
+
+@test "findings whose verdicts differ from the verdict counts fail" {
+  script_record 'r["dropped"][0]["verdict"] = "RESPECT_DROP"'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: the findings hold RESPECT_DROP 1, verdicts says 0" ]
+}

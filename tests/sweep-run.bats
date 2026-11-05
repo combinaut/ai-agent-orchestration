@@ -44,13 +44,13 @@ commit() {
   git -C "$REPO" commit -qm "$1"
 }
 
-# stub_gh: a gh for acme/app#7 that saves a posted comment.
+# stub_gh: a gh for acme/app#7 that serves $TMP/comments.json when present and saves a posted comment.
 stub_gh() {
   cat >"$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   'api repos/acme/app/pulls/7') echo '{"title":"Add alpha","body":"Adds alpha and its test.","base":{"ref":"main"}}' ;;
-  'api --paginate --slurp repos/acme/app/issues/7/comments') echo '[[]]' ;;
+  'api --paginate --slurp repos/acme/app/issues/7/comments') cat "$TMP/comments.json" 2>/dev/null || echo '[[]]' ;;
   'api --paginate --slurp repos/acme/app/pulls/7/comments') echo '[[]]' ;;
   'api -X POST repos/acme/app/issues/7/comments --input -')
     cat >"$TMP/posted.json"
@@ -352,4 +352,63 @@ assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_S
 body = json.load(open(sys.argv[1]))["body"]
 assert "**Dropped**" in body and "**Kept**" not in body, body
 assert body.count("| FALSE |") == 4, body' "$TMP/posted.json"
+}
+
+@test "a record path inside the checkout stops before any agent starts" {
+  sweep run --pr "$PR" --head "$HEAD_SHA" --base-ref main --no-comment --record "$REPO/lib/alpha.py"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: --record $REPO/lib/alpha.py is inside the checkout"* ]]
+  [ ! -e "$TMP/agent.calls" ]
+  XDG_CACHE_HOME="$REPO/.cache" run_sweep --no-comment
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: the record cache "*"/repo/.cache/review-prs/"*" is inside the checkout"* ]]
+}
+
+@test "a text file under a directory named binary does not take the binary slice name" {
+  write binary/main.py 5
+  commit dir
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  plan
+  [ "$(slice_of binary/main.py)" != binary ]
+  run_sweep --no-comment
+  [ "$status" -eq 0 ]
+}
+
+@test "a timed-out agent's whole process group is stopped" {
+  FAKE_CHILD=pr-text FAKE_HANG=pr-text run_sweep --no-comment --agent-timeout 2
+  [ "$status" -eq 4 ]
+  [ -s "$TMP/child.pids" ]
+  while read -r child; do
+    ! kill -0 "$child" 2>/dev/null
+  done <"$TMP/child.pids"
+}
+
+@test "earlier sweep outcomes reach the validators however many comments follow" {
+  cd "$REPO"
+  python3 -c 'import json,sys
+record = {"tool": "orch-sweep", "items": [], "dropped": [{"id": "F9", "file": "lib/alpha.py", "line": 2, "category": "redundant", "class": "nit", "verdict": "RESPECT_DROP", "summary": "OLD-REJECTED-MARK"}]}
+body = "<!-- orch-sweep v1 -->\n" + "x" * 5000 + "\n```json\n" + json.dumps(record) + "\n```\n"
+later = [{"user": {"login": "someone"}, "body": f"comment {n}"} for n in range(60)]
+json.dump([[{"user": {"login": "reviewer"}, "body": body}] + later], open(sys.argv[1], "w"))' "$TMP/comments.json"
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  grep -q "OLD-REJECTED-MARK" "$TMP"/prompts/validator.*
+}
+
+@test "a large sweep still posts one comment under the size limit that carries the whole record" {
+  FAKE_FINDINGS=25 FAKE_PAD=300 run_sweep
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,re,sys
+body = json.load(open(sys.argv[1]))["body"]
+assert len(body) <= 65536, len(body)
+block = re.search(r"```json\n(.*?)\n```", body, re.S).group(1)
+assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$TMP/record.json"
+}
+
+@test "a record too large for one comment fails before posting and keeps the record" {
+  FAKE_FINDINGS=40 FAKE_PAD=1500 run_sweep
+  [ "$status" -eq 5 ]
+  [[ "$stderr" == "ERROR: the sweep comment needs"*"characters; GitHub allows 65536"* ]]
+  [ ! -e "$TMP/posted.json" ]
+  [ -s "$TMP/record.json" ]
 }

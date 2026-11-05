@@ -10,7 +10,7 @@ orch-sweep plan --base <rev> [--head <rev>]   # the slice plan as JSON
 orch-sweep tree                               # the five tree values as JSON
 ```
 
-Run it inside a clean checkout whose `HEAD` is `--head`. It stops with one `ERROR:` line and exit 1 when `HEAD` differs or the tree is dirty.
+Run it inside a clean checkout whose `HEAD` is `--head`. It stops with one `ERROR:` line and exit 1 when `HEAD` differs, the tree is dirty, or `--record` or the record cache resolves inside the checkout.
 
 ## Agents
 
@@ -36,13 +36,13 @@ Before the agents start, after the sweep agents, and after the validators, the s
 
 ## Every head
 
-Every run sweeps the whole PR diff from the merge base, also after a fix push. The validators read the earlier sweep comments as PR context, so a finding rejected once on the PR is dropped again.
+Every run sweeps the whole PR diff from the merge base, also after a fix push. The validators get every finding and verdict of each earlier sweep comment, plus the latest 50 other comments and review-thread comments (each cut to 4000 characters), to judge `RESPECT_DROP`. Nothing in the script itself stops a rejected finding from being raised again.
 
 ## Record and comment
 
 The record holds the fields `/finalize-sweep` names, plus `tool`, `version`, `pr`, `runtime`, `model`, `kind` (`full`), `tree`, `plan`, `pr_text`, `sweep_agent_ids` (the Codex thread or Claude session id of each sweep agent), `items` (the kept findings, each `fix` or `nit`), `dropped` (the other findings, with their verdicts), `open_fix` (the count of kept `fix` findings) and `deviation`. `orch-sweep-record check` checks those fields when `tool` is `orch-sweep`; `--exact` also requires the record's head to be the given head.
 
-The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json` (and `--record`), and posts one comment through `lib/github_write.py`: the marker `<!-- orch-sweep v1 -->`, the full head SHA, a table of kept findings and one of dropped findings, the record in a fenced `json` block, and the runtime's attribution trailer. `--no-comment` skips the post.
+The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json` (and `--record`), and posts one comment through `lib/github_write.py`: the marker `<!-- orch-sweep v1 -->`, the full head SHA, a table of kept findings and one of dropped findings, the record in a fenced `json` block, and the runtime's attribution trailer. `--no-comment` skips the post. The comment stays within GitHub's 65536 characters: the record goes in compact when the indented one does not fit, then the dropped table and then the kept table are left out (the comment says so, and the record still holds every finding). When the record alone does not fit, the run exits 5 without posting and keeps the record file.
 
 ## Capacity
 
@@ -50,7 +50,7 @@ The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<numb
 |---|---|
 | Agents per sweep | `2 x slices + 1` sweep agents, then `ceil(findings / 40)` validators, at most 12; with the 25-slice cap, at most 63 |
 | Agents at once | `--concurrency`, default 4, a bounded pool |
-| Per agent | `--agent-timeout`, default 900 s; the process group is stopped on expiry |
+| Per agent | `--agent-timeout`, default 900 s; on expiry the agent's process group gets SIGTERM, then SIGKILL for whatever is left |
 | Per sweep | `--timeout`, default 3600 s; no agent starts after it |
 | Retries | each agent retries at most once; the whole run allows at most `slices` retries; the first failure stops new agents and the run exits 4 |
 | GitHub reads | 45 s each |
@@ -60,4 +60,4 @@ Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- or
 
 ## Exit codes
 
-`0` record written (and comment posted); `1` usage, checkout or GitHub error; `2` the tree changed; `3` over 25 slices; `4` an agent failed after its retry; `128 + n` stopped by signal `n`.
+`0` record written (and comment posted); `1` usage, checkout or GitHub error; `2` the tree changed; `3` over 25 slices; `4` an agent failed after its retry; `5` the record does not fit in one comment; `128 + n` stopped by signal `n`.
