@@ -3633,6 +3633,7 @@ pkill -f vite
         ("guard_inline_shell", "inline bash -c pkill"),
         ("guard_big_repo_reads", "webapp batch all objects"),
         ("guard_pi", "herdr pi start on DeepSeek"),
+        ("guard_approve", "github_write review heredoc"),
     ]:
         caught = [
             name
