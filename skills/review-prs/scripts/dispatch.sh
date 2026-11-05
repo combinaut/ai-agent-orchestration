@@ -54,7 +54,7 @@ release() {
   "$py" "$here/prs.py" release-dispatched --url "$url" --sha "$sha" --text "$text" && echo "RELEASED $sha"
 }
 
-# The worker reads the title and body itself; a hash that no longer matches the queue item's would be recorded for text the worker did not review.
+# The prompt is sent only when the live title and body hash equals $text.
 if ! current=$(gh_bounded api "repos/$repo/pulls/$num" --jq '{title: .title, body: .body}' | "$py" "$here/prs.py" text-hash); then
   echo "TEXT FAILED could not read the title and body of $url; prompt not sent"
   release

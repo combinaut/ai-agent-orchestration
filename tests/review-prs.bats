@@ -949,12 +949,12 @@ assert prs.needs_dispatch({**base, "headRefOid": "B"}, dispatched) == (True, "re
 
 @test "a blocked review of a head holds the head for every title and body until it is released" {
   prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
-  pr_url=https://github.com/acme/app/pull/7
-  prs claim-dispatched --url "$pr_url" --sha a --text t0
-  prs mark-dispatched --url "$pr_url" --sha a --text t0 --state done
-  prs claim-dispatched --url "$pr_url" --sha a --text t1
-  prs mark-dispatched --url "$pr_url" --sha a --text t1 --state blocked --reason 'hooks need review'
-  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t2
+  blocked_url=https://github.com/acme/app/pull/7
+  prs claim-dispatched --url "$blocked_url" --sha a --text t0
+  prs mark-dispatched --url "$blocked_url" --sha a --text t0 --state "done"
+  prs claim-dispatched --url "$blocked_url" --sha a --text t1
+  prs mark-dispatched --url "$blocked_url" --sha a --text t1 --state blocked --reason 'hooks need review'
+  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$blocked_url" --sha a --text t2
   [ "$status" -eq 3 ]
   # shellcheck disable=SC2016 # Python source.
   run python3 -c '
@@ -975,8 +975,8 @@ assert prs.blocked_record(prs.heads(dispatched[url]), "a")["reason"] == "hooks n
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
-  prs release-dispatched --url "$pr_url" --sha a --text t2
-  prs claim-dispatched --url "$pr_url" --sha a --text t2
+  prs release-dispatched --url "$blocked_url" --sha a --text t2
+  prs claim-dispatched --url "$blocked_url" --sha a --text t2
 }
 
 @test "dispatch-queue reports a blocked current head once with its reason" {
