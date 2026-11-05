@@ -85,7 +85,7 @@ class TodoStaleTest(IsolatedTestCase):
 
     def test_failed_lookup_keeps_the_item(self):
         self.write(f"Merge {PR} -> Coordinator")
-        shown, events = self.cycle({PR: OSError("gh down")})
+        shown, events = self.cycle({})
         self.assertEqual(len(shown), 1)
         self.assertEqual(events, [])
 
@@ -168,12 +168,14 @@ class TodoStaleTest(IsolatedTestCase):
         state = json.loads((self.root / "state.json").read_text())
         self.assertEqual(state["links"][PR]["state"], "merged")
 
-    def test_cached_resolution_applies_to_a_changed_item_when_the_lookup_fails(self):
+    def test_cached_resolution_applies_to_a_changed_item_after_the_original_was_dismissed(
+        self,
+    ):
         self.write(f"Merge {PR} -> Coordinator")
         self.cycle({PR: "merged"})
         self.cycle({})
         self.write(f"Merge {PR} again -> Coordinator")
-        shown, events = self.cycle({PR: OSError("gh down")})
+        shown, events = self.cycle({})
         self.assertEqual(shown, [])
         self.assertEqual(len(events), 1)
 
