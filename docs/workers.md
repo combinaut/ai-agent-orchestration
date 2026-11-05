@@ -22,6 +22,11 @@ claimed pane, workspace, Herdr socket and pane count.
 Recovery applies only to worker `heartbeat`, `done` and `ask` signals, never to
 the architect-facing `answer` or `list` commands.
 
+`orch-signal` writes `~/.claude/coordinator`, outside the Codex sandbox. Codex
+workers run every `orch-signal` command as an escalated command, like
+`heavy-slot`. When a write or lock is denied, it exits 73 with
+`orch-signal: cannot write <dir> (sandbox?); run this command escalated`.
+
 ```bash
 orch-signal heartbeat --new-job  # first command in every dispatched job
 orch-signal ask --question "Which API?" --options "v1,v2" --timeout 600

@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 
 import discovery
-from question_lock import answers_lock, questions_directory
+from question_lock import DENIED, answers_lock, questions_directory
 from question_remind import atomic_write
 from question_text import strip_controls
 
@@ -29,15 +29,24 @@ DONE_EVENTS_MAX = 200
 DONE_EVENTS_KEEP_SECONDS = 3600
 ID = re.compile(r"signal-[a-f0-9]{32}\Z")
 IDENTITY_KEYS = ("pane", "workspace", "owner")
+EXIT_UNWRITABLE = 73
 
 
 def directory():
     return Path.home() / ".claude/coordinator/worker-signals"
 
 
+def read_text(path):
+    try:
+        return path.read_text()
+    except PermissionError as error:
+        error.read_denied = True
+        raise
+
+
 def read(path):
     try:
-        return json.loads(path.read_text())
+        return json.loads(read_text(path))
     except FileNotFoundError:
         return None
 
@@ -58,6 +67,20 @@ def question_path(identifier):
 
 def answer_path(identifier):
     return question_path(identifier).with_suffix(".answer")
+
+
+def escalation_directory(error):
+    """The questions or worker-signals directory a denied write or lock lies under, or that a denied mkdir was creating; None for anything else."""
+    if error.errno not in DENIED or not error.filename:
+        return None
+    if getattr(error, "read_denied", False):
+        return None
+    path = Path(os.path.abspath(error.filename))
+    for root in (questions_directory(), directory()):
+        absolute = Path(os.path.abspath(root))
+        if path == absolute or absolute in path.parents or path in absolute.parents:
+            return root
+    return None
 
 
 def worktree_of(path):
@@ -218,10 +241,17 @@ def remove_question(record, close_panel=True, close_timeout=CLEANUP_SECONDS):
             return False
     question_path(identifier).unlink(missing_ok=True)
     answer_path(identifier).unlink(missing_ok=True)
-    directory = questions_directory()
-    for suffix in ("md", "remind", "asker-pane", "answer", "answer.seen", "opening"):
-        (directory / f"{identifier}.{suffix}").unlink(missing_ok=True)
-    for path in directory.glob(f"{identifier}.*.answer.*"):
+    questions = questions_directory()
+    for suffix in (
+        "md",
+        "remind",
+        "asker-pane",
+        "answer",
+        "answer.seen",
+        "opening",
+    ):
+        (questions / f"{identifier}.{suffix}").unlink(missing_ok=True)
+    for path in questions.glob(f"{identifier}.*.answer.*"):
         path.unlink(missing_ok=True)
     return True
 
@@ -297,7 +327,7 @@ def wait_answer(record, timeout, deadline=None):
             with answers_lock(timeout=max(0, deadline - time.monotonic())):
                 path = answer_path(record["id"])
                 if path.exists():
-                    text = path.read_text().strip()
+                    text = read_text(path).strip()
                     remove_question(record, close_panel=False)
                     return text
                 remaining = deadline - time.monotonic()
@@ -337,15 +367,15 @@ def answer(identifier, text, to_user=False):
                 for number, choice in enumerate(record["options"].split(","), 1)
                 if choice.strip()
             )
+            # Use the existing reminder retry mechanism if opening the Q panel fails.
+            from question_remind import write_remind
+
             atomic_write(
                 target,
                 strip_controls(
                     f"# Worker question {identifier}\n\n{record['question']}\n\n{choices}"
                 ),
             )
-            # Use the existing reminder retry mechanism if opening the Q panel fails.
-            from question_remind import write_remind
-
             write_remind(target, time.time())
             if open_user_question(identifier, target) in (0, 73):
                 target.with_suffix(".remind").unlink(missing_ok=True)
@@ -583,7 +613,17 @@ def main():
             fields.pop("action")
             record_signal(identity(recover=True), args.action, **fields)
         return 0
-    except (OSError, ValueError, discovery.Unavailable) as error:
+    except OSError as error:
+        denied = escalation_directory(error)
+        if denied is None:
+            print(f"orch-signal: {error}", file=sys.stderr)
+            return 1
+        print(
+            f"orch-signal: cannot write {denied} (sandbox?); run this command escalated",
+            file=sys.stderr,
+        )
+        return EXIT_UNWRITABLE
+    except (ValueError, discovery.Unavailable) as error:
         print(f"orch-signal: {error}", file=sys.stderr)
         return 1
 
