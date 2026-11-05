@@ -115,7 +115,7 @@ def item_link(text):
 
 
 def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic):
-    """Link states for the open items; resolved states are kept, others are looked up again after LINK_TTL. Lookups stop after LINK_LOOKUPS_MAX or LINK_BUDGET_SECONDS."""
+    """Link states for the open items; only merged is kept, other states are looked up again after LINK_TTL. Lookups stop after LINK_LOOKUPS_MAX or LINK_BUDGET_SECONDS."""
     now = time.time() if now is None else now
     try:
         state = json.loads(Path(state_path).read_text())
@@ -150,8 +150,6 @@ def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic)
             except Exception:
                 found = "unknown"
             links[url] = {"state": found, "at": now}
-        elif isinstance(entry, dict):
-            links[url] = entry
     return links
 
 

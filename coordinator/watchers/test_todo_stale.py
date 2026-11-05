@@ -59,6 +59,14 @@ class TodoStaleTest(IsolatedTestCase):
         shown = sorted(item["text"] for item in raw["now"])
         return shown, [e for e in events if e.startswith("TODO AUTO-CLOSED")]
 
+    def run_cycle(self, base):
+        with patch.object(w, "github_link_state", lambda url, timeout=None: "merged"):
+            line = w.cycle(base, "todo", w.collect_todo)
+        return json.loads(line)["events"] if line else []
+
+    def shown_in_output(self):
+        return (self.root / "todo.md").read_text()
+
     def test_resolved_target_hides_the_item_with_one_feed_line(self):
         self.write(f"Merge it -> {PR}", f"Close it -> {ISSUE}")
         shown, events = self.cycle({PR: "merged", ISSUE: "closed"})
@@ -232,17 +240,8 @@ class TodoStaleTest(IsolatedTestCase):
         base = self.root / "watch"
         base.mkdir()
         (base / "todo.json").write_text("{not json")
-        with patch.object(w, "github_link_state", lambda url, timeout=None: "merged"):
-            out = json.loads(w.cycle(base, "todo", w.collect_todo))
-        self.assertTrue(any(e.startswith("TODO AUTO-CLOSED ") for e in out["events"]))
-
-    def run_cycle(self, base):
-        with patch.object(w, "github_link_state", lambda url, timeout=None: "merged"):
-            line = w.cycle(base, "todo", w.collect_todo)
-        return json.loads(line)["events"] if line else []
-
-    def shown_in_output(self):
-        return (self.root / "todo.md").read_text()
+        events = self.run_cycle(base)
+        self.assertTrue(any(e.startswith("TODO AUTO-CLOSED ") for e in events))
 
     def test_item_stays_and_its_event_is_sent_after_a_collect_failure(self):
         self.write(f"Merge it -> {PR}")
@@ -283,6 +282,20 @@ class TodoStaleTest(IsolatedTestCase):
         self.assertEqual((len(shown), events), (1, []))
         self.assertEqual(self.calls, [PR, PR])
 
+    def test_an_expired_closed_target_not_looked_up_this_cycle_keeps_the_item(self):
+        self.write(f"Merge it -> {PR}")
+        self.cycle({PR: "closed"})
+        self.age_links()
+        fresh = [f"https://github.com/acme/app/pull/{n}" for n in range(11, 16)]
+        self.write(
+            f"PR reopened, review it -> {PR}", *(f"Merge it -> {u}" for u in fresh)
+        )
+        self.calls.clear()
+        shown, events = self.cycle({**{u: "open" for u in fresh}, PR: "closed"})
+        self.assertEqual(self.calls, fresh)
+        self.assertIn(f"PR reopened, review it -> {PR}", shown)
+        self.assertEqual(events, [])
+
     def test_failed_state_is_looked_up_again_only_after_the_ttl(self):
         self.write(f"Merge it -> {PR}")
         self.cycle({})
@@ -319,9 +332,9 @@ class TodoStaleTest(IsolatedTestCase):
         self.write(f"Merge it -> {PR}")
         todo = w.todo_module()
         with patch.object(todo, "dismiss_item", side_effect=OSError("disk full")):
-            shown, events = self.cycle({PR: "merged"})
+            _, events = self.cycle({PR: "merged"})
         self.assertEqual(len(events), 1)
-        shown, events = self.cycle({PR: "merged"})
+        _, events = self.cycle({PR: "merged"})
         self.assertEqual(len(events), 1)
         self.assertEqual(self.cycle({PR: "merged"}), ([], []))
 
