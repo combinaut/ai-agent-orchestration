@@ -110,7 +110,10 @@ def since(path, swept, base, head):
             f"{path}: swept {swept}, which is not an ancestor of the PR head {head}",
             "",
         )
-    return None, git("log", "--oneline", f"{swept}..{head}") or ""
+    commits = git("log", "--oneline", f"{swept}..{head}")
+    if commits is None:
+        return f"{path}: git log {swept}..{head} failed", ""
+    return None, commits
 
 
 def one_line(text):

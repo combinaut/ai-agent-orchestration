@@ -251,3 +251,16 @@ check() {
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: --base 'abc123' is not a full 40-character SHA" ]
 }
+
+@test "a failed git log fails instead of passing with no commits" {
+  local real
+  real=$(command -v git)
+  mkdir "$TMP/bin"
+  # shellcheck disable=SC2016 # The fake git expands its own $1 and "$@".
+  printf '#!/bin/sh\n[ "$1" = log ] && exit 1\nexec %s "$@"\n' "$real" >"$TMP/bin/git"
+  chmod +x "$TMP/bin/git"
+  record 4 1 '{"FALSE": 4}' "$FIRST_SHA"
+  PATH="$TMP/bin:$PATH" check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: git log $FIRST_SHA..$HEAD_SHA failed" ]
+}
