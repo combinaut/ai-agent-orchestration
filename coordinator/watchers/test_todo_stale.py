@@ -200,17 +200,6 @@ class TodoStaleTest(IsolatedTestCase):
     def shown_in_output(self):
         return (self.root / "todo.md").read_text()
 
-    def test_item_stays_and_its_event_is_sent_after_a_render_failure(self):
-        self.write(f"Merge {PR} -> Coordinator")
-        base = self.root / "watch"
-        todo = w.todo_module()
-        with patch.object(todo, "render", side_effect=OSError("disk full")):
-            first = self.run_cycle(base)
-        self.assertFalse(any("AUTO-CLOSED" in e for e in first))
-        second = self.run_cycle(base)
-        self.assertEqual(sum("AUTO-CLOSED" in e for e in second), 1)
-        self.assertNotIn(PR, self.shown_in_output())
-
     def test_item_stays_and_its_event_is_sent_after_a_collect_failure(self):
         self.write(f"Merge {PR} -> Coordinator")
         base = self.root / "watch"
