@@ -126,7 +126,7 @@ class TodoStaleTest(IsolatedTestCase):
         urls = [f"https://github.com/acme/app/pull/{n}" for n in range(1, 4)]
         self.write(*(f"Merge {url} -> Coordinator" for url in urls))
         todo = w.todo_module()
-        ticks = iter([0, 0, 0, todo.LINK_BUDGET_SECONDS, todo.LINK_BUDGET_SECONDS + 1])
+        ticks = iter([0, 0, 6, todo.LINK_BUDGET_SECONDS, todo.LINK_BUDGET_SECONDS + 1])
         timeouts = []
 
         def lookup(url, timeout):
@@ -141,7 +141,7 @@ class TodoStaleTest(IsolatedTestCase):
             clock=lambda: next(ticks),
         )
         self.assertEqual(self.calls, urls[:1])
-        self.assertEqual(timeouts, [todo.LINK_BUDGET_SECONDS])
+        self.assertEqual(timeouts, [todo.LINK_BUDGET_SECONDS - 6])
         self.assertEqual(list(links), urls[:1])
         todo.merge(
             self.status, self.root / "todo.md", self.root / "state.json", links=links
