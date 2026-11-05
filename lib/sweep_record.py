@@ -3,8 +3,11 @@
 
 import argparse
 import json
+import re
+import subprocess
 import sys
 
+SHA = re.compile(r"[0-9a-f]{40}")
 COUNTS = ("slices", "sweep_agents", "validators", "findings")
 FIELDS = ("head", "base", *COUNTS, "validator_ids", "verdicts")
 
@@ -23,8 +26,9 @@ def problem(path, head):
     missing = [field for field in FIELDS if field not in record]
     if missing:
         return f"{path}: missing field {missing[0]}"
-    if record["head"] != head:
-        return f"{path}: swept {record['head']}, the PR head is {head}"
+    for sha in (record["head"], head):
+        if not isinstance(sha, str) or not SHA.fullmatch(sha):
+            return f"{path}: {sha!r} is not a full 40-character SHA"
     for field in COUNTS:
         value = record[field]
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -47,6 +51,30 @@ def problem(path, head):
     return None
 
 
+def git(*args):
+    """Stdout of a git command in the current repo, else None."""
+    try:
+        done = subprocess.run(
+            ["git", *args], capture_output=True, text=True, timeout=30
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def since(path, swept, head):
+    """Why the swept commit does not lead to head, else the commits after it."""
+    for sha in (swept, head):
+        if git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}") is None:
+            return f"{path}: git cannot resolve {sha}", ""
+    if git("merge-base", "--is-ancestor", swept, head) is None:
+        return (
+            f"{path}: swept {swept}, which is not an ancestor of the PR head {head}",
+            "",
+        )
+    return None, git("log", "--oneline", f"{swept}..{head}") or ""
+
+
 def main(argv):
     parser = argparse.ArgumentParser(prog="sweep_record.py")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -55,10 +83,19 @@ def main(argv):
     check.add_argument("--head", required=True)
     args = parser.parse_args(argv[1:])
     found = problem(args.record, args.head)
+    commits = ""
+    if not found:
+        with open(args.record, encoding="utf-8") as handle:
+            swept = json.load(handle)["head"]
+        found, commits = since(args.record, swept, args.head)
     if found:
         print(f"ERROR: {found}", file=sys.stderr)
         return 1
-    print(f"OK: {args.record} covers {args.head}")
+    if commits:
+        print(f"OK: {args.record} swept {swept}; commits since:")
+        print(commits, end="")
+    else:
+        print(f"OK: {args.record} covers {args.head}")
     return 0
 
 

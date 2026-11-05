@@ -6,7 +6,13 @@ bats_require_minimum_version 1.5.0
 setup() {
   ROOT=$(cd "$BATS_TEST_DIRNAME/.." && pwd -P)
   TMP=$(mktemp -d "${TMPDIR:-/tmp}/sweep-record-bats.XXXXXX")
-  HEAD_SHA=0123456789abcdef0123456789abcdef01234567
+  REPO="$TMP/repo"
+  git init -q "$REPO"
+  for n in first second third; do
+    git -C "$REPO" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m "$n"
+  done
+  FIRST_SHA=$(git -C "$REPO" rev-parse HEAD~2)
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
   REC="$TMP/record.json"
 }
 
@@ -25,7 +31,8 @@ JSON
 }
 
 check() {
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA"
+  cd "$REPO" || return 1
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "${1:-$HEAD_SHA}"
 }
 
 @test "a missing record fails with one stderr line" {
@@ -50,11 +57,35 @@ check() {
   [ "$stderr" = "ERROR: $REC: missing field validator_ids" ]
 }
 
-@test "a record for another head fails" {
+@test "a record for an ancestor of the head passes and lists the commits since" {
+  record 4 1 '{"FALSE": 4}' "$FIRST_SHA"
+  check
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "OK: $REC swept $FIRST_SHA; commits since:" ]
+  [ "${#lines[@]}" -eq 3 ]
+  [[ "${lines[1]}" == *" third" ]]
+  [[ "${lines[2]}" == *" second" ]]
+}
+
+@test "a record whose head is not an ancestor fails" {
+  record 4 1 '{"FALSE": 4}' "$HEAD_SHA"
+  check "$FIRST_SHA"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: swept $HEAD_SHA, which is not an ancestor of the PR head $FIRST_SHA" ]
+}
+
+@test "a SHA git cannot resolve fails" {
   record 4 1 '{"FALSE": 4}' fedcba9876543210fedcba9876543210fedcba98
   check
   [ "$status" -eq 1 ]
-  [[ "$stderr" == *"swept fedcba98"*"the PR head is $HEAD_SHA" ]]
+  [ "$stderr" = "ERROR: $REC: git cannot resolve fedcba9876543210fedcba9876543210fedcba98" ]
+}
+
+@test "a head that is not a full SHA fails" {
+  record 4 1 '{"FALSE": 4}' --upload-pack=x
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: '--upload-pack=x' is not a full 40-character SHA" ]
 }
 
 @test "findings with no validator fail" {
