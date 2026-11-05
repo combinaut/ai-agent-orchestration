@@ -1,5 +1,6 @@
 """Serialize question cancellation with answer publication."""
 
+import errno
 import fcntl
 import os
 import signal
@@ -17,6 +18,19 @@ def questions_directory():
     )
 
 
+DENIED = (errno.EPERM, errno.EACCES, errno.EROFS)
+
+
+def flock(lock, operation, path):
+    """flock errors carry no filename; the lock file's path lets callers name the directory."""
+    try:
+        fcntl.flock(lock, operation)
+    except OSError as error:
+        if error.filename is None:
+            error.filename = str(path)
+        raise
+
+
 HELD = "ORCH_ANSWERS_LOCK_HELD"
 CLOSE_TIMEOUT = 30
 ACTION_TIMEOUT = 60
@@ -31,14 +45,15 @@ def answers_lock(directory=None, timeout=None):
         return
     directory = Path(directory) if directory else questions_directory()
     directory.mkdir(parents=True, exist_ok=True)
-    with (directory / ".answers.lock").open("a") as lock:
+    path = directory / ".answers.lock"
+    with path.open("a") as lock:
         if timeout is None:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            flock(lock, fcntl.LOCK_EX, path)
         else:
             deadline = time.monotonic() + timeout
             while True:
                 try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB, path)
                     break
                 except BlockingIOError:
                     remaining = deadline - time.monotonic()
