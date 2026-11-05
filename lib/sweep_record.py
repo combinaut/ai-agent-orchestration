@@ -31,7 +31,9 @@ def problem(path, head, base=None):
             record = json.load(handle)
     except FileNotFoundError:
         return f"{path}: no sweep record", None
-    except (OSError, ValueError) as error:
+    except OSError as error:
+        return f"{path}: cannot read: {error}", None
+    except ValueError as error:
         return f"{path}: not valid JSON: {error}", None
     if not isinstance(record, dict):
         return f"{path}: the record must be a JSON object", None
@@ -53,6 +55,8 @@ def problem(path, head, base=None):
         value = record[field]
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             return f"{path}: {field} must be a non-negative integer", None
+    if record["head"] == record["base"]:
+        return f"{path}: head equals base; the sweep covered an empty diff", None
     if record["mode"] not in MODES:
         return f"{path}: mode must be agents or serial", None
     serial = record["mode"] == "serial"
@@ -60,6 +64,11 @@ def problem(path, head, base=None):
         return f"{path}: slices must be at least 1", None
     if not serial and record["sweep_agents"] < 1:
         return f"{path}: sweep_agents must be at least 1", None
+    if not serial and record["sweep_agents"] < 2 * record["slices"]:
+        return (
+            f"{path}: {record['sweep_agents']} sweep_agents for {record['slices']} slices; each slice starts two",
+            None,
+        )
     if serial and (
         record["sweep_agents"] or record["validators"] or record["validator_ids"]
     ):

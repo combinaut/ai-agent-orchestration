@@ -8,9 +8,10 @@ setup() {
   TMP=$(mktemp -d "${TMPDIR:-/tmp}/sweep-record-bats.XXXXXX")
   REPO="$TMP/repo"
   git init -q "$REPO"
-  for n in first second third; do
+  for n in zero first second third; do
     git -C "$REPO" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m "$n"
   done
+  ZERO_SHA=$(git -C "$REPO" rev-parse HEAD~3)
   FIRST_SHA=$(git -C "$REPO" rev-parse HEAD~2)
   HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
   REC="$TMP/record.json"
@@ -25,7 +26,7 @@ record() {
   local ids="" i
   for ((i = 1; i <= $2; i++)); do ids="${ids:+$ids, }\"agent-$i\""; done
   cat >"$REC" <<JSON
-{"head": "${4:-$HEAD_SHA}", "base": "${BASE:-$FIRST_SHA}", "clean": ${CLEAN:-true}, "mode": "${MODE:-agents}", "slices": ${SLICES:-3}, "sweep_agents": ${AGENTS:-6},
+{"head": "${4:-$HEAD_SHA}", "base": "${BASE:-$ZERO_SHA}", "clean": ${CLEAN:-true}, "mode": "${MODE:-agents}", "slices": ${SLICES:-3}, "sweep_agents": ${AGENTS:-6},
  "validators": $2, "validator_ids": [$ids], "findings": $1, "verdicts": $3}
 JSON
 }
@@ -211,12 +212,12 @@ check() {
   record 5 1 '{"FALSE": 5}'
   EXPECT_BASE=$HEAD_SHA check
   [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: base is $FIRST_SHA, expected $HEAD_SHA" ]
+  [ "$stderr" = "ERROR: $REC: base is $ZERO_SHA, expected $HEAD_SHA" ]
 }
 
 @test "--base equal to the record's base passes" {
   record 5 1 '{"FALSE": 5}'
-  EXPECT_BASE=$FIRST_SHA check
+  EXPECT_BASE=$ZERO_SHA check
   [ "$status" -eq 0 ]
 }
 
@@ -327,4 +328,45 @@ check() {
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: a serial record has no sweep agents, validators or validator ids" ]
+}
+
+@test "fewer than two sweep agents per slice fail" {
+  SLICES=25 AGENTS=1 record 5 1 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: 1 sweep_agents for 25 slices; each slice starts two" ]
+}
+
+@test "more sweep agents than two per slice pass" {
+  SLICES=3 AGENTS=8 record 5 1 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 0 ]
+}
+
+@test "a negative verdict count fails" {
+  record 64 1 '{"FALSE": 65, "NOT_WORTH_IT": -1}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: verdicts must map each verdict to a count" ]
+}
+
+@test "a record that is not a JSON object fails" {
+  printf '[1, 2]' >"$REC"
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: the record must be a JSON object" ]
+}
+
+@test "a record path that cannot be read says so, not bad JSON" {
+  mkdir "$REC"
+  check
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: $REC: cannot read: "* ]]
+}
+
+@test "a record whose head is its base swept nothing and fails" {
+  BASE=$FIRST_SHA record 0 0 '{}' "$FIRST_SHA"
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: head equals base; the sweep covered an empty diff" ]
 }
