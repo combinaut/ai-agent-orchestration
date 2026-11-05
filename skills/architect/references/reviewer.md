@@ -16,7 +16,7 @@ Class each finding fix (false, misleading or redundant; dead or duplicate code o
 Read the earlier sweep comments on the PR first: a finding rejected once on this PR is never raised again.
 Post the table as ONE PR comment: python3 <orch-root>/lib/github_write.py --timeout 240 api -X POST repos/<owner>/<repo>/issues/<number>/comments --input -
 The comment always names the swept head SHA in full (40 characters), also with no findings; with none it says the sweep ran, that SHA and "no findings". Use the comment for the verdict. An open kept fix finding blocks APPROVE; nits and dropped findings never block.
-After a fix push, re-sweep only the lines changed since the last swept head. After a merge or rebase of the base into the PR, sweep the whole PR diff again.
+Every new head gets the sweep again over the whole PR diff.
 Goal: when you pass the PR, a human reviewer finds nothing left to clean up.
 ```
 

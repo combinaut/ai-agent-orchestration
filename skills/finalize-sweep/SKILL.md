@@ -20,9 +20,8 @@ Run the skill again after every merge or rebase of the base into the PR branch. 
 ## 1. Scope
 
 - Record the commit the sweep runs at. Before reporting, check whether the head has moved, and say so if it has.
-- Cover the complete PR diff, never only what changed since an earlier sweep; the one exception is a review's re-sweep after a fix push, which covers the lines changed since the last swept head. Include staged, unstaged and untracked changes.
-- Resolve the merge base once, with `git merge-base HEAD <base>` and the base from Input. Use that commit for everything below unless the next bullet says otherwise.
-- A review's re-sweep after a fix push uses `<last swept head>` instead of the merge base for the path list, the counts, the slices and the base ref passed to the child sweeps; the merge base stays for the `PREEXISTING` check. After a merge or rebase of the base into the PR, use the merge base.
+- Cover the complete PR diff, never only what changed since an earlier sweep. Include staged, unstaged and untracked changes.
+- Resolve the merge base once, with `git merge-base HEAD <base>` and the base from Input. Use that commit for everything below.
 - List the changed paths with `git diff --name-status -z <merge-base>`, which covers committed, staged and unstaged changes, deleted files included. A renamed file counts once, under its new name, and keeps its old name for step 3. Add each file from `git ls-files --others --exclude-standard`.
 - Count additions plus deletions per path with `git diff --numstat -z <merge-base>`, and all lines for an untracked file. A binary file has no line count.
 
@@ -43,7 +42,7 @@ Above 25 slices, pause before starting any agent. Report the slice count and ask
 
 ## 3. Sweep
 
-Start one agent for `/finalize-code-comments` and one for `/finalize-change-footprint` per slice, passing the step 1 base (the merge base, or `<last swept head>` for a re-sweep) as the base ref, followed by the slice's paths, so no agent has to look up the PR. For a renamed file, pass both its old and new names, because a path-limited diff with only the new name shows the whole file as added. Respect the runtime's limit on concurrent agents and start the rest as others finish. A runtime that cannot start agents runs the same slices one after another, reading only one slice at a time.
+Start one agent for `/finalize-code-comments` and one for `/finalize-change-footprint` per slice, passing the merge base from step 1 as the base ref, followed by the slice's paths, so no agent has to look up the PR. For a renamed file, pass both its old and new names, because a path-limited diff with only the new name shows the whole file as added. Respect the runtime's limit on concurrent agents and start the rest as others finish. A runtime that cannot start agents runs the same slices one after another, reading only one slice at a time.
 
 Brief every agent with these rules. They override any step of the skill that edits files or asks for approval.
 
