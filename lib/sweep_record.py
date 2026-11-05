@@ -9,6 +9,7 @@ import sys
 
 SHA = re.compile(r"[0-9a-f]{40}")
 COUNTS = ("slices", "sweep_agents", "validators", "findings")
+POSITIVE = ("slices", "sweep_agents")
 FIELDS = ("head", "base", "clean", *COUNTS, "validator_ids", "verdicts")
 VERDICTS = (
     "CONFIRMED_NEW",
@@ -23,7 +24,7 @@ VERDICTS = (
 )
 
 
-def problem(path, head):
+def problem(path, head, base=None):
     """(why, record): why the record at path does not prove a sweep of head, else None."""
     try:
         with open(path, encoding="utf-8") as handle:
@@ -37,7 +38,7 @@ def problem(path, head):
     missing = [field for field in FIELDS if field not in record]
     if missing:
         return f"{path}: missing field {missing[0]}", None
-    for sha in (record["head"], head):
+    for sha in (record["head"], record["base"], head, *([base] if base else [])):
         if not isinstance(sha, str) or not SHA.fullmatch(sha):
             return f"{path}: {sha!r} is not a full 40-character SHA", None
     if record["clean"] is not True:
@@ -49,6 +50,11 @@ def problem(path, head):
         value = record[field]
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             return f"{path}: {field} must be a non-negative integer", None
+    for field in POSITIVE:
+        if record[field] < 1:
+            return f"{path}: {field} must be at least 1", None
+    if base and record["base"] != base:
+        return f"{path}: base is {record['base']}, expected {base}", None
     verdicts = record["verdicts"]
     if not isinstance(verdicts, dict) or any(
         isinstance(n, bool) or not isinstance(n, int) or n < 0
@@ -61,6 +67,8 @@ def problem(path, head):
     ids = record["validator_ids"]
     if not isinstance(ids, list) or not all(isinstance(i, str) and i for i in ids):
         return f"{path}: validator_ids must be a list of non-empty strings", None
+    if len(set(ids)) != len(ids):
+        return f"{path}: validator_ids repeat an id", None
     if len(ids) != record["validators"]:
         return (
             f"{path}: {len(ids)} validator_ids for {record['validators']} validators",
@@ -87,11 +95,13 @@ def git(*args):
     return done.stdout if done.returncode == 0 else None
 
 
-def since(path, swept, head):
+def since(path, swept, base, head):
     """Why the swept commit does not lead to head, else the commits after it."""
-    for sha in (swept, head):
+    for sha in (swept, base, head):
         if git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}") is None:
             return f"{path}: git cannot resolve {sha}", ""
+    if git("merge-base", "--is-ancestor", base, swept) is None:
+        return f"{path}: base {base} is not an ancestor of the swept {swept}", ""
     if git("merge-base", "--is-ancestor", swept, head) is None:
         return (
             f"{path}: swept {swept}, which is not an ancestor of the PR head {head}",
@@ -100,20 +110,26 @@ def since(path, swept, head):
     return None, git("log", "--oneline", f"{swept}..{head}") or ""
 
 
+def one_line(text):
+    """The text with control characters escaped, so a diagnostic stays one line."""
+    return re.sub(r"[\x00-\x1f\x7f]", lambda m: repr(m.group())[1:-1], text)
+
+
 def main(argv):
     parser = argparse.ArgumentParser(prog="sweep_record.py")
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check")
     check.add_argument("--record", required=True)
     check.add_argument("--head", required=True)
+    check.add_argument("--base")
     args = parser.parse_args(argv[1:])
-    found, record = problem(args.record, args.head)
+    found, record = problem(args.record, args.head, args.base)
     commits = ""
     if not found:
         swept = record["head"]
-        found, commits = since(args.record, swept, args.head)
+        found, commits = since(args.record, swept, record["base"], args.head)
     if found:
-        print(f"ERROR: {found}", file=sys.stderr)
+        print(f"ERROR: {one_line(found)}", file=sys.stderr)
         return 1
     if commits:
         print(f"OK: {args.record} swept {swept}; commits since:")

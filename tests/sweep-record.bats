@@ -20,19 +20,19 @@ teardown() {
   rm -rf "$TMP"
 }
 
-# record <findings> <validators> <verdicts-json> [head]: writes the record file.
+# record <findings> <validators> <verdicts-json> [head]: writes the record file; BASE, SLICES, AGENTS and CLEAN override its defaults.
 record() {
   local ids="" i
   for ((i = 1; i <= $2; i++)); do ids="${ids:+$ids, }\"agent-$i\""; done
   cat >"$REC" <<JSON
-{"head": "${4:-$HEAD_SHA}", "base": "abc123", "clean": ${CLEAN:-true}, "slices": 3, "sweep_agents": 6,
+{"head": "${4:-$HEAD_SHA}", "base": "${BASE:-$FIRST_SHA}", "clean": ${CLEAN:-true}, "slices": ${SLICES:-3}, "sweep_agents": ${AGENTS:-6},
  "validators": $2, "validator_ids": [$ids], "findings": $1, "verdicts": $3}
 JSON
 }
 
 check() {
   cd "$REPO" || return 1
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "${1:-$HEAD_SHA}"
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "${1:-$HEAD_SHA}" ${EXPECT_BASE:+--base "$EXPECT_BASE"}
 }
 
 @test "a missing record fails with one stderr line" {
@@ -171,4 +171,69 @@ check() {
   done <<<"$verdicts"
   # shellcheck disable=SC2016 # Backticks in the grep pattern are literal.
   [ "$count" -eq "$(grep -c '^| `[A-Z_]*` |' "$ROOT/skills/finalize-sweep/SKILL.md")" ]
+}
+
+@test "duplicate validator ids fail" {
+  record 5 2 '{"FALSE": 5}'
+  sed -i.bak 's/"agent-2"/"agent-1"/' "$REC"
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator_ids repeat an id" ]
+}
+
+@test "a base that is not a full SHA fails" {
+  BASE=abc123 record 5 1 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: 'abc123' is not a full 40-character SHA" ]
+}
+
+@test "a base git cannot resolve fails" {
+  BASE=fedcba9876543210fedcba9876543210fedcba98 record 5 1 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: git cannot resolve fedcba9876543210fedcba9876543210fedcba98" ]
+}
+
+@test "a base that is not an ancestor of the swept head fails" {
+  BASE=$HEAD_SHA record 5 1 '{"FALSE": 5}' "$FIRST_SHA"
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: base $HEAD_SHA is not an ancestor of the swept $FIRST_SHA" ]
+}
+
+@test "--base must equal the record's base" {
+  record 5 1 '{"FALSE": 5}'
+  EXPECT_BASE=$HEAD_SHA check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: base is $FIRST_SHA, expected $HEAD_SHA" ]
+}
+
+@test "--base equal to the record's base passes" {
+  record 5 1 '{"FALSE": 5}'
+  EXPECT_BASE=$FIRST_SHA check
+  [ "$status" -eq 0 ]
+}
+
+@test "a sweep with zero slices fails" {
+  SLICES=0 record 5 1 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: slices must be at least 1" ]
+}
+
+@test "a sweep with zero sweep agents fails" {
+  AGENTS=0 record 5 1 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: sweep_agents must be at least 1" ]
+}
+
+@test "a verdict key holding a newline still gives one stderr line" {
+  record 5 1 '{"PENDING\nSECOND": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "${#lines[@]}" -eq 0 ]
+  [ "$(printf '%s\n' "$stderr" | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: unknown verdict PENDING\\nSECOND" ]
 }
