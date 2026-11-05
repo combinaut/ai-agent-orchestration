@@ -31,7 +31,7 @@ LINK = re.compile(
     re.IGNORECASE,
 )
 REFERENCE = re.compile(
-    r"(?:(?<![\w/])(pull\s+request|pr|issue)s?\s*#?|#)(\d+(?:\s*(?:,|and|&)\s*#?\d+)*)",
+    r"(?:(?<![\w/])(pull\s+request|pr|issue)s?\s*#?|#)(\d+(?:\s*(?:,\s*(?:and|or|&)?|and|or|&)\s*#?\d+)*)",
     re.IGNORECASE,
 )
 LINK_TTL = 300
