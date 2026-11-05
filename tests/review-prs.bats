@@ -315,6 +315,8 @@ fork_head_missing_from_pull_ref() {
   grep -qF 'a finding rejected once on this PR is never raised again' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 're-sweep only the lines changed since the last swept head' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 'the one exception is a review'"'"'s re-sweep after a fix push' "$ROOT/skills/finalize-sweep/SKILL.md"
+  grep -qF 'instead of the merge base for the path list, the counts, the slices' "$ROOT/skills/finalize-sweep/SKILL.md"
+  grep -qF 'the merge base stays for the' "$ROOT/skills/finalize-sweep/SKILL.md"
 }
 
 @test "the skill closes panes only through close-pane.sh" {

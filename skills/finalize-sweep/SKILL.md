@@ -22,6 +22,7 @@ Run the skill again after every merge or rebase of the base into the PR branch. 
 - Record the commit the sweep runs at. Before reporting, check whether the head has moved, and say so if it has.
 - Cover the complete PR diff, never only what changed since an earlier sweep; the one exception is a review's re-sweep after a fix push, which covers the lines changed since the last swept head. Include staged, unstaged and untracked changes.
 - Resolve the merge base once, with `git merge-base HEAD <base>` and the base from Input. Use that commit for everything below.
+- A review's re-sweep after a fix push uses `<last swept head>` instead of the merge base for the path list, the counts, the slices and the base ref passed to the child sweeps; the merge base stays for the `PREEXISTING` check. After a merge or rebase of the base into the PR, use the merge base.
 - List the changed paths with `git diff --name-status -z <merge-base>`, which covers committed, staged and unstaged changes, deleted files included. A renamed file counts once, under its new name, and keeps its old name for step 3. Add each file from `git ls-files --others --exclude-standard`.
 - Count additions plus deletions per path with `git diff --numstat -z <merge-base>`, and all lines for an untracked file. A binary file has no line count.
 
