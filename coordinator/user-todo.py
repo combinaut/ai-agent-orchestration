@@ -27,11 +27,11 @@ import todo_answers  # noqa: E402
 NOW = "## Waits on the user"
 PLACEHOLDERS = {"none", "none yet", "nothing", "nothing yet", "n/a", "-"}
 LINK = re.compile(
-    r"(?<![\w./@-])(?:https?://)?(?:www\.)?github\.com/([\w.-]+)/([\w.-]+)/(pull|issues)/(\d+)",
+    r"(?<![\w./@-])(?:https?://)?(?:www\.)?github\.com/([\w.-]+)/([\w.-]+)/(pull|issues)/(\d+)(?![\w-])",
     re.IGNORECASE,
 )
 REFERENCE = re.compile(
-    r"(?:(?<![\w/])(?:pull\s+request|pr|issue)s?\s*#?|#)(\d+(?:\s*(?:,|and|&)\s*#?\d+)*)",
+    r"(?:(?<![\w/])(pull\s+request|pr|issue)s?\s*#?|#)(\d+(?:\s*(?:,|and|&)\s*#?\d+)*)",
     re.IGNORECASE,
 )
 LINK_TTL = 300
@@ -117,13 +117,22 @@ def item_links(text):
 
 
 def unresolved_reference(text):
-    """True when the text names a PR or issue number that no linked URL covers."""
-    covered = {match[3] for match in LINK.findall(text)}
-    return any(
-        number not in covered
-        for group in REFERENCE.findall(LINK.sub(" ", text))
-        for number in re.findall(r"\d+", group)
-    )
+    """True when the text names a PR or issue number that no linked URL of that kind covers."""
+    covered = {"pull": set(), "issues": set()}
+    for _, _, kind, number in LINK.findall(text):
+        covered[kind.lower()].add(number)
+    for word, group in REFERENCE.findall(LINK.sub(" ", text)):
+        kinds = (
+            ("issues",)
+            if word.lower() == "issue"
+            else ("pull",)
+            if word
+            else ("pull", "issues")
+        )
+        for number in re.findall(r"\d+", group):
+            if not any(number in covered[kind] for kind in kinds):
+                return True
+    return False
 
 
 def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic):

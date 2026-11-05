@@ -265,6 +265,13 @@ class TodoStaleTest(IsolatedTestCase):
                 self.assertEqual(len(shown), 1)
                 self.assertEqual(events, [])
 
+    def test_a_number_followed_by_word_characters_is_not_a_link(self):
+        for other in ("pull/7draft", "pull/7-draft", "pull/7_x"):
+            with self.subTest(other=other):
+                self.write(f"Merge https://github.com/acme/app/{other} -> Coordinator")
+                shown, events = self.cycle({PR: "merged"})
+                self.assertEqual((len(shown), events, self.calls), (1, [], []))
+
     def test_urls_on_other_hosts_are_not_links(self):
         for other in (
             "https://example.com/github.com/acme/app/pull/7",
@@ -275,6 +282,27 @@ class TodoStaleTest(IsolatedTestCase):
                 self.write(f"Merge {other} -> Coordinator")
                 shown, events = self.cycle({PR: "merged"})
                 self.assertEqual((len(shown), events, self.calls), (1, [], []))
+
+    def test_coverage_matches_kind_and_number(self):
+        keeps = (
+            f"Merge PR 7 in acme/service after {ISSUE.replace('/8', '/7')}",
+            f"Merge issue 7 after {PR}",
+            f"Merge PRs 7 and issues 8 after {PR}",
+        )
+        for text in keeps:
+            with self.subTest(text=text):
+                self.write(f"{text} -> Coordinator")
+                self.before = None
+                (self.root / "state.json").unlink(missing_ok=True)
+                shown, events = self.cycle(
+                    {PR: "merged", ISSUE.replace("/8", "/7"): "closed"}
+                )
+                self.assertEqual((len(shown), events), (1, []))
+
+    def test_a_bare_hash_number_is_covered_by_either_kind(self):
+        self.write(f"Close #8 ({ISSUE}) -> Coordinator")
+        shown, events = self.cycle({ISSUE: "closed"})
+        self.assertEqual((shown, len(events)), ([], 1))
 
     def test_a_reference_covered_by_a_url_does_not_keep_the_item(self):
         self.write(f"Merge PR 7 and #7 ({PR}) -> Coordinator")
