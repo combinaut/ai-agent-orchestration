@@ -225,6 +225,59 @@ class TodoStaleTest(IsolatedTestCase):
         self.assertEqual(sum("AUTO-CLOSED" in e for e in second), 1)
         self.assertNotIn(PR, self.shown_in_output())
 
+    def test_every_url_form_must_resolve_before_the_item_closes(self):
+        forms = (
+            "http://github.com/acme/app/issues/8",
+            "https://www.github.com/acme/app/issues/8",
+            "www.github.com/acme/app/issues/8",
+            "github.com/acme/app/issues/8",
+            "HTTPS://GitHub.com/acme/app/issues/8",
+        )
+        for form in forms:
+            with self.subTest(form=form):
+                self.write(f"Merge {PR} then close {form} -> Coordinator")
+                self.before = None
+                (self.root / "state.json").unlink(missing_ok=True)
+                shown, events = self.cycle({PR: "merged", ISSUE: "open"})
+                self.assertEqual(len(shown), 1)
+                self.assertEqual(events, [])
+
+    def test_url_forms_are_looked_up_as_one_https_url(self):
+        self.write("Merge HTTP://www.GitHub.com/Acme/App/pull/7 -> Coordinator")
+        self.cycle({PR: "merged"})
+        self.assertEqual(self.calls, [PR])
+
+    def test_an_unresolvable_reference_keeps_the_item(self):
+        for tail in (
+            "and fix #123",
+            "and PR 124",
+            "and issue 125",
+            "and Pull Request #126",
+        ):
+            with self.subTest(tail=tail):
+                self.write(f"Merge {PR} {tail} -> Coordinator")
+                self.before = None
+                (self.root / "state.json").unlink(missing_ok=True)
+                shown, events = self.cycle({PR: "merged"})
+                self.assertEqual(len(shown), 1)
+                self.assertEqual(events, [])
+
+    def test_urls_on_other_hosts_are_not_links(self):
+        for other in (
+            "https://example.com/github.com/acme/app/pull/7",
+            "https://evil.github.com/acme/app/pull/7",
+            "https://notgithub.com/acme/app/pull/7",
+        ):
+            with self.subTest(other=other):
+                self.write(f"Merge {other} -> Coordinator")
+                shown, events = self.cycle({PR: "merged"})
+                self.assertEqual((len(shown), events, self.calls), (1, [], []))
+
+    def test_a_reference_covered_by_a_url_does_not_keep_the_item(self):
+        self.write(f"Merge PR 7 and #7 ({PR}) -> Coordinator")
+        shown, events = self.cycle({PR: "merged"})
+        self.assertEqual((shown, len(events)), ([], 1))
+
     def test_github_link_state_passes_the_timeout_to_gh(self):
         seen = []
 

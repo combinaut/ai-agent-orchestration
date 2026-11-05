@@ -26,7 +26,13 @@ import todo_answers  # noqa: E402
 
 NOW = "## Waits on the user"
 PLACEHOLDERS = {"none", "none yet", "nothing", "nothing yet", "n/a", "-"}
-LINK = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/(?:pull|issues)/\d+")
+LINK = re.compile(
+    r"(?<![\w./@-])(?:https?://)?(?:www\.)?github\.com/([\w.-]+)/([\w.-]+)/(pull|issues)/(\d+)",
+    re.IGNORECASE,
+)
+REFERENCE = re.compile(
+    r"(?<![\w/])(?:#|(?:pull\s+request|pr|issue)s?\s*#?)(\d+)", re.IGNORECASE
+)
 LINK_TTL = 300
 LINK_LOOKUPS_MAX = 5
 LINK_BUDGET_SECONDS = 10
@@ -101,7 +107,20 @@ def atomic_write(path, data):
 
 
 def item_links(text):
-    return list(dict.fromkeys(LINK.findall(text)))
+    return list(
+        dict.fromkeys(
+            f"https://github.com/{owner}/{repo}/{kind}/{number}".lower()
+            for owner, repo, kind, number in LINK.findall(text)
+        )
+    )
+
+
+def unresolved_reference(text):
+    """True when the text names a PR or issue number that no linked URL covers."""
+    covered = {match[3] for match in LINK.findall(text)}
+    return any(
+        number not in covered for number in REFERENCE.findall(LINK.sub(" ", text))
+    )
 
 
 def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic):
@@ -184,6 +203,7 @@ def merge(directory, output, state_path, now=None, links=None):
             if (
                 item["id"] not in dismissed
                 and urls
+                and not unresolved_reference(item["text"])
                 and all(links.get(url, {}).get("state") in RESOLVED for url in urls)
             ):
                 auto_closed.append(
