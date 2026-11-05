@@ -7,7 +7,7 @@ orch-sweep run --pr <url> --head <sha> --base-ref <remote>/<base branch> \
   [--runtime codex|claude] [--model <model>] [--concurrency 4] \
   [--agent-timeout 900] [--timeout 3600] [--record <path>] [--no-comment]
 orch-sweep plan --base <rev> [--head <rev>]   # the slice plan as JSON
-orch-sweep tree                               # the five tree values as JSON
+orch-sweep tree                               # the five tree values and the untracked map's hash, as JSON
 ```
 
 Run it inside a clean checkout whose `HEAD` is `--head`. It stops with one `ERROR:` line and exit 1 when `HEAD` differs, the tree is dirty, or `--record` or the record cache resolves inside the checkout.
