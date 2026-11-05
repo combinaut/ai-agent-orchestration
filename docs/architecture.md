@@ -51,7 +51,7 @@ The architect confirms `tokens.owner` with `herdr workspace get <worker-id>` bef
 
 [Herdr Radar](https://github.com/combinaut/herdr-radar) reads these tags and groups workers under their architects in its Agents panel. Radar is optional; its checkout is `ORCH_RADAR_PATH`. See [`env/README.md`](../env/README.md).
 
-Workspace names stay true: `PR <n> · <job>` once a PR exists, `#<issue> · <job> (no PR yet)` before. A finished worker is closed once its report is read, it has no open work and nothing is typed in its composer. A reviewer's pane is closed with `close-pane.sh` (a workspace closes with its last pane), then its workspace with `herdr workspace close <id>` if it is still there, and its detached worktree removed (`git worktree remove <path> --force`), once its findings are dispatched. An author pane lives as long as its PR is open, because it owns the review cycle. Panes are closed with [`close-pane.sh`](../coordinator/watchers/close-pane.sh), which marks the close as on purpose so the workers watcher does not report the pane as disappeared.
+Workspace names stay true: `PR <n> · <job>` once a PR exists, `#<issue> · <job> (no PR yet)` before. A finished worker is closed once its report is read, it has no open work and `composer-state.py` finds nothing typed in its composer (a dim prompt suggestion is not typed). A reviewer's pane is closed with `close-pane.sh` (a workspace closes with its last pane), then its workspace with `herdr workspace close <id>` if it is still there, and its detached worktree removed (`git worktree remove <path> --force`), once its findings are dispatched. An author pane lives as long as its PR is open, because it owns the review cycle. Panes are closed with [`close-pane.sh`](../coordinator/watchers/close-pane.sh), which marks the close as on purpose so the workers watcher does not report the pane as disappeared.
 
 ## 💬 Messaging
 
@@ -66,7 +66,7 @@ flowchart LR
 - `herdr agent prompt` is allowed for:
   - a brand-new worker's first brief, and follow-ups to a worker pane the architect owns and nobody types into;
   - the startup of a fresh successor pane after a recycle (`date`, the `/architect` or `/coordinate` brief, startup slash commands), Claude panes only.
-  - `/remote-control` to an idle architect whose Remote Control failed while `remote_control.architects` is on, after the idle state and an empty composer are verified.
+  - `/remote-control` to an idle architect whose Remote Control failed while `remote_control.architects` is on, after the idle state is verified and `composer-state.py` prints `empty`.
 - Never type into a composer a person may be using.
 - Herdr stays available for layout and read-only inspection.
 
