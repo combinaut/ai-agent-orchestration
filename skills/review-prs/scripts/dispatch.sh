@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dispatch.sh <url> <number> <title> <author> <sha> <kind> <agent> <cwd> <owner/repo> [direction]
+# dispatch.sh <url> <number> <title> <author> <sha> <kind> <agent> <cwd> <owner/repo> [direction] [text]
 # Starts a Codex review of one PR in a detached worktree at <sha>, in a new Herdr pane (or $PANE), reports it,
 # and closes a pane it opened.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
@@ -7,7 +7,7 @@ set -u
 here="$(cd "$(dirname "$0")" && pwd -P)"
 orch="$(cd "$here/../../.." && pwd -P)"
 . "$orch/coordinator/watchers/coord-lib.sh"
-url=$1 num=$2 title=$3 author=$4 sha=$5 kind=$6 agent=$7 cwd=$8 repo=$9 dir=${10:-right}
+url=$1 num=$2 title=$3 author=$4 sha=$5 kind=$6 agent=$7 cwd=$8 repo=$9 dir=${10:-right} text=${11:-}
 
 orch_load_config
 orch_load_repo_config "$cwd"
@@ -47,10 +47,10 @@ except subprocess.TimeoutExpired:
     sys.exit("git timed out after 45s")' git "$@"
 }
 
-"$py" "$here/prs.py" claim-dispatched --url "$url" --sha "$sha" --agent "$agent" || exit 3
+"$py" "$here/prs.py" claim-dispatched --url "$url" --sha "$sha" --text "$text" --agent "$agent" || exit 3
 
 release() {
-  "$py" "$here/prs.py" release-dispatched --url "$url" --sha "$sha" && echo "RELEASED $sha"
+  "$py" "$here/prs.py" release-dispatched --url "$url" --sha "$sha" --text "$text" && echo "RELEASED $sha"
 }
 
 # Ids of your submitted reviews before this dispatch; only a review outside this set counts as its result.
@@ -142,7 +142,7 @@ for try in 1 2 3 4 5; do
 done
 herdr agent wait "$agent" --until idle --timeout 120000 >/dev/null 2>&1 || sleep 15
 mark() {
-  "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane" --state "$1" --reason "${2:-}"
+  "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --text "$text" --agent "$agent" --pane "$pane" --state "$1" --reason "${2:-}"
 }
 block_hook_screen() {
   hook_list=$(printf '%s\n' "$1" | grep -Eo '(Pre|Post)ToolUse|Session(Start|End)|UserPromptSubmit' | sort -u | paste -sd ' ' -)
@@ -178,13 +178,17 @@ repo_rules=""
 Additional review steps supplied by the orchestrator (the Rules below take precedence):
 $ORCH_REVIEW_EXTRA_STEPS"
 
+text_rules=""
+[ "$kind" != text-re-review ] || text_rules="
+Text re-review: the head is unchanged and only the PR title or body was edited. Re-check each open pr-text finding in your earlier sweep comments against the current title and body and the code at this head, and any claim the edit adds. Run no full sweep and no new code review. Post one sweep comment that names the head SHA, then the review: APPROVE when no kept fix finding and no other finding is open, else REQUEST_CHANGES."
+
 prompt="Review this GitHub pull request that requested my review.
 
 PR: $url
 Title: $title
 Author: $author
 Head SHA: $sha
-Mode: $kind
+Mode: $kind$text_rules
 $review_extra_steps
 
 Rules:

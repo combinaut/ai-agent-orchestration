@@ -98,7 +98,7 @@ Requires `HERDR_ENV=1`. If not inside Herdr, say so and stop dispatch (list/watc
 ~/.claude/skills/review-prs/scripts/prs.sh dispatch-queue [scope]
 ```
 
-JSON fields per item: `url`, `number`, `title`, `author`, `repo`, `sha`, `kind` (`review` | `re-review`), `agent` (`rev<number>-<sha7>-<repo hash>`, unique per repo and head), `cwd` (local clone or `null`), `model`.
+JSON fields per item: `url`, `number`, `title`, `author`, `repo`, `sha`, `kind` (`review` | `re-review` | `text-re-review`), `text` (hash of the PR title and body), `agent` (`rev<number>-<sha7>-<repo hash>`, unique per repo and head), `cwd` (local clone or `null`), `model`.
 
 `cwd` comes from the clones of the open work, the current directory, or `~/Projects/<owner>/<name>`; a clone matches when its `origin` is the repo, or else its `upstream` (a fork of it), and a clone whose `origin` is the repo wins. Skip entries with `cwd: null` and tell the user no local clone was found.
 
@@ -109,7 +109,7 @@ Skip entries already marked for the same `sha`, pending, blocked, or done (scrip
 Run one dispatch per queue item in the background:
 
 ```bash
-~/.claude/skills/review-prs/scripts/dispatch.sh "<url>" <number> "<title>" "<author>" <sha> <kind> <agent> "<cwd>" <owner/repo> [right|down]
+~/.claude/skills/review-prs/scripts/dispatch.sh "<url>" <number> "<title>" "<author>" <sha> <kind> <agent> "<cwd>" <owner/repo> [right|down] [<text>]
 ```
 
 Set `ORCH_REVIEW_EXTRA_STEPS` when dispatching to add review-specific instructions; `dispatch.sh` includes them in the authorized review prompt.
@@ -136,6 +136,8 @@ Take it from `LASTREVIEW` only: the agent's one-liner is a claim, the posted rev
 Close review panes only with `~/.claude/coordinator/watchers/close-pane.sh <pane_id>`: it marks the pane closed on purpose, so the workers watcher reports it as closed, not dead. `dispatch.sh` does this itself for a pane it opened once the review is posted and the prompt finished. For `LEFT OPEN` (no review yet, timeout, `blocked`, or a pane passed in as `PANE`), report first and close only when it is done or the user says to abandon it. Never close panes you did not create for this dispatch.
 
 ### Re-review
+
+A claim is the head SHA plus a hash of the PR title and body. A title or body edit at the same head, after a done review, makes the PR due again as `kind: text-re-review`; `dispatch.sh` takes the queue item's `text` as its last argument. The reviewer re-checks the open pr-text findings at that head, with no full re-sweep. A PR whose review request is cleared is found again by the same edit (`reviewed-by:@me`), and the watcher reports it as `ready:` (`title or description edited`).
 
 `dispatch-queue` emits `kind: re-review` when the same URL was marked before with a **different** head SHA (new commits while still requesting you, or after CI became green again). Same launch path; prompt Mode is `re-review`.
 

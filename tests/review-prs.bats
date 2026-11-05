@@ -93,7 +93,7 @@ EOF
     export PATH="$TMP/fetch-ok:$PATH"
   fi
   run env ORCH_CONFIG="$TMP/none.toml" bash "$ROOT/$SKILL_DIR/scripts/dispatch.sh" \
-    https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" review rev7 "$TMP/app" acme/app
+    https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" "${KIND:-review}" rev7 "$TMP/app" acme/app right "${TEXT:-}"
 }
 
 fork_head_missing_from_pull_ref() {
@@ -651,6 +651,24 @@ prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headR
 lines, retained = prs.changes(present, {}, "reviewer")
 assert lines == [], lines
 assert retained == {url: dict(present[url], misses=1) for url in urls}, retained
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a per-PR read keeps an open PR whose title or body changed since its done review" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="head", conflict=False)}
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "title": "t", "body": "edited", "headRefOid": "head", "reviewRequests": {"nodes": []}, "myReviews": {"nodes": [{"commit": {"oid": "head"}}]}}}})
+prs.read_dispatched = lambda: {url: {"heads": {"head": {"state": "done", "text": "stale"}}}}
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [], lines
+assert retained == {url: dict(present[url], misses=1)}, retained
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
@@ -1307,6 +1325,180 @@ assert not prs.dispatched_done_on_other_head(pr, dispatched)
   echo "$output"
   [ "$status" -eq 0 ]
   grep -qF 'A manual review of a moved head is re-queued once' "$ROOT/$SKILL_DIR/SKILL.md"
+}
+
+@test "a title or body edit at the same head makes a reviewed PR due again as a text re-review" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "number": 7, "title": "t", "body": "old", "isDraft": False,
+      "mergeable": "MERGEABLE", "headRefOid": "A",
+      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
+      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+      "myReviews": {"nodes": [{"commit": {"oid": "A"}}]}}
+old = prs.text_hash(pr)
+dispatched = {url: {"heads": {"A": {"state": "done", "text": old}}}}
+assert prs.needs_dispatch(pr, dispatched) == (False, None)
+assert prs.dispatched_current_head_done(pr, dispatched)
+pr["body"] = "new"
+new = prs.text_hash(pr)
+assert new != old
+assert prs.needs_dispatch(pr, dispatched) == (True, "text-re-review")
+assert not prs.dispatched_current_head_done(pr, dispatched)
+assert prs.dispatched_text_changed(pr, dispatched)
+entry = prs.dispatch_entry(pr, "text-re-review", "m")
+assert entry["text"] == new and entry["agent"].endswith("-" + new[:4]), entry
+dispatched[url]["heads"]["A#" + new] = {"state": "pending", "text": new}
+assert prs.needs_dispatch(pr, dispatched) == (False, None)
+dispatched[url]["heads"]["A#" + new]["state"] = "done"
+assert prs.dispatched_current_head_done(pr, dispatched)
+assert not prs.dispatched_text_changed(pr, dispatched)
+legacy = {url: {"heads": {"A": {"state": "done"}}}}
+assert prs.needs_dispatch(pr, legacy) == (False, None)
+pending = {url: {"heads": {"A": {"state": "pending", "text": old}}}}
+assert prs.needs_dispatch(pr, pending) == (False, None)
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a reviewed PR whose body changed at the same head is found by fetch" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "number": 7, "title": "t", "body": "fixed", "isDraft": False,
+      "mergeable": "MERGEABLE", "headRefOid": "A",
+      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
+      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+      "myReviews": {"nodes": [{"commit": {"oid": "A"}}]}}
+dispatched = {url: {"heads": {"A": {"state": "done", "text": "stale"}}}}
+prs.viewer_login = lambda: "reviewer"
+prs.search = lambda query, _login: [] if " review-requested:@me " in query else [pr]
+prs.load_dispatched = lambda: dispatched
+nodes, _login = prs.fetch("repo:acme/app")
+assert nodes == [pr], nodes
+dispatched[url]["heads"]["A"]["text"] = prs.text_hash(pr)
+nodes, _login = prs.fetch("repo:acme/app")
+assert nodes == [], nodes
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "claim, mark and release key a text re-review by head and text hash" {
+  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
+  states() {
+    # shellcheck disable=SC2016 # Python source.
+    python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+e = json.load(open(sys.argv[2]))[sys.argv[3]]
+print(" ".join(s + "=" + h["state"] for s, h in sorted(prs.heads(e).items())))
+' "$ROOT/$SKILL_DIR/scripts" "$HOME/.cache/review-prs/dispatched.json" "$pr_url"
+  }
+  pr_url=https://github.com/acme/app/pull/7
+  prs claim-dispatched --url "$pr_url" --sha a --text t1
+  prs mark-dispatched --url "$pr_url" --sha a --text t1 --state "done"
+  [ "$(states)" = 'a=done' ]
+  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t1
+  [ "$status" -eq 3 ]
+  prs claim-dispatched --url "$pr_url" --sha a --text t2
+  [ "$(states)" = 'a=done a#t2=pending' ]
+  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t2
+  [ "$status" -eq 3 ]
+  prs release-dispatched --url "$pr_url" --sha a --text t2
+  [ "$(states)" = 'a=done' ]
+  prs claim-dispatched --url "$pr_url" --sha a --text t2
+  prs mark-dispatched --url "$pr_url" --sha a --text t2 --state "done"
+  [ "$(states)" = 'a=done a#t2=done' ]
+}
+
+@test "the watcher reports a title or body edit at the same head as ready" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+base = {"title": "t", "draft": False, "author": "a", "ci": "SUCCESS", "conflict": False, "sha": "A", "text": "one"}
+before = {url: dict(base)}
+after = {url: {**base, "text": "two"}}
+lines = prs.changes(before, after)[0]
+assert len(lines) == 1 and lines[0].startswith("ready: ") and "title or description edited" in lines[0], lines
+assert prs.changes({url: dict(base)}, {url: dict(base)})[0] == []
+old = {url: {k: v for k, v in base.items() if k != "text"}}
+assert prs.changes(old, {url: dict(base)})[0] == []
+unknown = {url: {**base, "text": "two", "conflict": None}}
+prs.changes({url: dict(base)}, unknown)
+assert unknown[url].get("pending_ready") is True, unknown
+assert " body " in prs.QUERY
+assert " body " in prs.DEPARTURE_QUERY
+pr = {"url": url, "number": 7, "title": "t", "body": "b", "isDraft": False, "mergeable": "MERGEABLE",
+      "headRefOid": "A", "author": {"login": "a"},
+      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}}
+assert prs.snapshot([pr])[url]["text"] == prs.text_hash(pr)
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a text re-review prompt re-checks the pr-text findings at the same head" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  KIND=text-re-review dispatch
+  prompt=$(cat "$TMP/review.prompt")
+  contains "$prompt" 'Mode: text-re-review'
+  contains "$prompt" 'only the PR title or body was edited'
+  contains "$prompt" 'Run no full sweep and no new code review.'
+  contains "$prompt" 'APPROVE when no kept fix finding and no other finding is open, else REQUEST_CHANGES.'
+}
+
+@test "dispatch claims and completes a review with the title and body hash" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  TEXT=abc123 dispatch
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(json.dumps(d["https://github.com/acme/app/pull/7"]["heads"][sys.argv[2]].get("text")))
+' "$HOME/.cache/review-prs/dispatched.json" "$SHA"
+  [ "$output" = '"abc123"' ]
+}
+
+@test "dispatch of a text re-review claims the edited text on a head that is already done" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  mkdir -p "$HOME/.cache/review-prs"
+  printf '{"https://github.com/acme/app/pull/7":{"heads":{"%s":{"state":"done","text":"old111"}}}}' "$SHA" >"$HOME/.cache/review-prs/dispatched.json"
+  KIND=text-re-review TEXT=new222 dispatch
+  [ -e "$TMP/review.prompt" ]
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+h = json.load(open(sys.argv[1]))["https://github.com/acme/app/pull/7"]["heads"]
+print(sorted((k.split("#")[-1] if "#" in k else "-", v["state"]) for k, v in h.items()))
+' "$HOME/.cache/review-prs/dispatched.json"
+  [ "$output" = "[('-', 'done'), ('new222', 'done')]" ]
+}
+
+@test "a first review prompt has no text re-review rule" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  dispatch
+  not_contains "$(cat "$TMP/review.prompt")" 'Text re-review:'
+}
+
+@test "the skill documents the text re-review" {
+  grep -qF 'hash of the PR title and body' "$ROOT/$SKILL_DIR/SKILL.md"
+  grep -qF 'text-re-review' "$ROOT/$SKILL_DIR/SKILL.md"
 }
 
 @test "dispatch uses the configured Herdr executable for every call" {
