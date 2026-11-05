@@ -198,7 +198,7 @@ Rules:
   - Read your earlier sweep comments on this PR first. A finding rejected once on this PR is never raised again.
   - Post the kept findings, each marked fix or nit, as ONE PR comment, before the review: python3 $orch/lib/github_write.py --timeout 240 api -X POST repos/$repo/issues/$num/comments --input - with the JSON payload {\"body\":\"...\"} on stdin from a quoted heredoc. With no findings the comment says the sweep ran, the head SHA and \"no findings\". End it with *(Generated using Codex)* on its own line, and link it in the review body.
   - APPROVE only while no fix finding is open; an open fix finding makes the review REQUEST_CHANGES. Nits never block.
-  - After a fix push, the re-sweep covers only the lines changed since the last swept head (this overrides the skill's complete-diff rule). After a merge or rebase of the base into the PR, it covers the whole PR diff again, on the new head, before a new APPROVE.
+  - After a fix push, the re-sweep covers only the lines changed since the last swept head. After a merge or rebase of the base into the PR, it covers the whole PR diff again, on the new head, before a new APPROVE.
 - Search code with rg or grep.$repo_rules
 - Do not run tests unless needed. Run any test as heavy-slot take review-$agent -- <command> (escalated if the sandbox blocks it), the narrowest spec only.
 - Do NOT use Computer Use or a browser for anything in this task. Use gh and the shell only.
