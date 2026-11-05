@@ -304,7 +304,9 @@ fork_head_missing_from_pull_ref() {
   contains "$prompt" 'nit (pure style or taste'
   contains "$prompt" 'A finding rejected once on this PR is never raised again.'
   contains "$prompt" 'covers only the lines changed since the last swept head'
+  contains "$prompt" 'this overrides the skill'"'"'s complete-diff rule'
   contains "$prompt" 'covers the whole PR diff again, on the new head, before a new APPROVE'
+  contains "$prompt" 'any review finding or sweep fix finding is open'
   contains "$prompt" 'a human reviewer finds nothing left to clean up'
 }
 
@@ -313,6 +315,9 @@ fork_head_missing_from_pull_ref() {
   grep -qF 'An open fix finding fails the review; nits never do.' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 'a finding rejected once on this PR is never raised again' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 're-sweep only the lines changed since the last swept head' "$ROOT/skills/architect/references/reviewer.md"
+  grep -qF "this overrides the skill's complete-diff rule" "$ROOT/skills/architect/references/reviewer.md"
+  grep -qF "this overrides the skill's complete-diff rule" "$ROOT/$SKILL_DIR/SKILL.md"
+  grep -qF 'covers the lines changed since the last swept head' "$ROOT/skills/finalize-sweep/SKILL.md"
 }
 
 @test "the skill closes panes only through close-pane.sh" {
