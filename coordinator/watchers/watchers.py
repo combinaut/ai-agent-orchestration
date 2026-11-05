@@ -1516,7 +1516,7 @@ def todo_module():
     return _TODO_MODULE
 
 
-def github_link_state(url):
+def github_link_state(url, timeout=None):
     """merged, closed or open for a GitHub PR or issue URL."""
     owner, repo, kind, number = url.split("/")[3:7]
     row = json.loads(
@@ -1524,6 +1524,7 @@ def github_link_state(url):
             "gh",
             "api",
             f"repos/{owner}/{repo}/{'pulls' if kind == 'pull' else 'issues'}/{number}",
+            timeout=timeout,
         )
     )
     if row.get("merged") or row.get("merged_at"):

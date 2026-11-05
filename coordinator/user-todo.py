@@ -29,6 +29,7 @@ PLACEHOLDERS = {"none", "none yet", "nothing", "nothing yet", "n/a", "-"}
 LINK = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/(?:pull|issues)/\d+")
 LINK_TTL = 300
 LINK_LOOKUPS_MAX = 5
+LINK_BUDGET_SECONDS = 10
 RESOLVED = ("merged", "closed")
 
 
@@ -103,8 +104,8 @@ def item_links(text):
     return list(dict.fromkeys(LINK.findall(text)))
 
 
-def resolve_links(directory, state_path, lookup, now=None):
-    """Link states for the open items; resolved states are kept, others are looked up again after LINK_TTL."""
+def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic):
+    """Link states for the open items; resolved states are kept, others are looked up again after LINK_TTL. Lookups stop after LINK_LOOKUPS_MAX or LINK_BUDGET_SECONDS."""
     now = time.time() if now is None else now
     try:
         state = json.loads(Path(state_path).read_text())
@@ -119,6 +120,7 @@ def resolve_links(directory, state_path, lookup, now=None):
         for url in item_links(item["text"])
     ]
     links, budget = {}, LINK_LOOKUPS_MAX
+    deadline = clock() + LINK_BUDGET_SECONDS
     for url in dict.fromkeys(urls):
         entry = cached.get(url)
         if (
@@ -127,10 +129,10 @@ def resolve_links(directory, state_path, lookup, now=None):
             and (entry["state"] in RESOLVED or now - entry.get("at", 0) < LINK_TTL)
         ):
             links[url] = entry
-        elif budget > 0:
+        elif budget > 0 and clock() < deadline:
             budget -= 1
             try:
-                found = lookup(url)
+                found = lookup(url, max(0.1, deadline - clock()))
             except Exception:
                 found = "unknown"
             links[url] = {"state": found, "at": now}

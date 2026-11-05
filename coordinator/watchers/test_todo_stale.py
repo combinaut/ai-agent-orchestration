@@ -45,7 +45,7 @@ class TodoStaleTest(IsolatedTestCase):
         path.write_text(json.dumps(state))
 
     def cycle(self, states):
-        def lookup(url):
+        def lookup(url, timeout=None):
             self.calls.append(url)
             result = states[url]
             if isinstance(result, Exception):
@@ -122,6 +122,45 @@ class TodoStaleTest(IsolatedTestCase):
         self.cycle({url: "open" for url in urls})
         self.assertEqual(len(set(self.calls)), 8)
 
+    def test_lookups_stop_when_the_cycle_budget_is_spent(self):
+        urls = [f"https://github.com/acme/app/pull/{n}" for n in range(1, 4)]
+        self.write(*(f"Merge {url} -> Coordinator" for url in urls))
+        todo = w.todo_module()
+        ticks = iter([0, 0, 0, todo.LINK_BUDGET_SECONDS, todo.LINK_BUDGET_SECONDS + 1])
+        timeouts = []
+
+        def lookup(url, timeout):
+            self.calls.append(url)
+            timeouts.append(timeout)
+            return "merged"
+
+        links = todo.resolve_links(
+            self.status,
+            self.root / "state.json",
+            lookup,
+            clock=lambda: next(ticks),
+        )
+        self.assertEqual(self.calls, urls[:1])
+        self.assertEqual(timeouts, [todo.LINK_BUDGET_SECONDS])
+        self.assertEqual(list(links), urls[:1])
+        todo.merge(
+            self.status, self.root / "todo.md", self.root / "state.json", links=links
+        )
+        shown = (self.root / "todo.md").read_text()
+        self.assertNotIn(urls[0], shown)
+        self.assertIn(urls[1], shown)
+
+    def test_github_link_state_passes_the_timeout_to_gh(self):
+        seen = []
+
+        def fake(*argv, timeout=None):
+            seen.append(timeout)
+            return json.dumps({"state": "open"})
+
+        with patch.object(w, "command", fake):
+            w.github_link_state(PR, 3.5)
+        self.assertEqual(seen, [3.5])
+
     def test_github_link_state_reads_pull_and_issue_rows(self):
         rows = {
             "repos/acme/app/pulls/7": {"state": "closed", "merged": True},
@@ -129,7 +168,7 @@ class TodoStaleTest(IsolatedTestCase):
             "repos/acme/app/pulls/10": {"state": "open", "merged": False},
             "repos/acme/app/issues/8": {"state": "closed"},
         }
-        with patch.object(w, "command", lambda *argv: json.dumps(rows[argv[2]])):
+        with patch.object(w, "command", lambda *argv, **_: json.dumps(rows[argv[2]])):
             self.assertEqual(w.github_link_state(PR), "merged")
             self.assertEqual(
                 w.github_link_state("https://github.com/acme/app/pull/9"), "closed"
