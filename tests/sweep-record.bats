@@ -410,3 +410,129 @@ check() {
   [ "$status" -eq 1 ]
   [ "$stderr" = 'ERROR: unrecognized arguments: --bo\ngus' ]
 }
+
+# script_record [python statement]: a valid orch-sweep record, then the statement run on it as r.
+script_record() {
+  python3 - "$REC" "$HEAD_SHA" "$ZERO_SHA" "${1:-pass}" <<'PY'
+import json, sys
+path, head, base, change = sys.argv[1:5]
+plan = [
+    {"name": "lib", "lines": 30, "files": [{"path": "lib/a.py", "old": None, "status": "M", "lines": 20}, {"path": "tests/a.bats", "old": None, "status": "A", "lines": 10}]},
+    {"name": "binary", "lines": 0, "files": [{"path": "img/x.png", "old": None, "status": "A", "lines": None}]},
+]
+r = {"head": head, "base": base, "clean": True, "mode": "agents", "slices": 2, "sweep_agents": 5,
+     "validators": 1, "validator_ids": ["v-1"], "findings": 3,
+     "verdicts": {"CONFIRMED_NEW": 2, "FALSE": 1}, "tool": "orch-sweep", "version": 1,
+     "pr": "https://github.com/acme/app/pull/7", "runtime": "codex", "model": "gpt-test",
+     "kind": "full", "tree": {"head": head}, "plan": plan, "pr_text": 1,
+     "sweep_agent_ids": ["s-1", "s-2", "s-3", "s-4", "s-5"],
+     "items": [
+         {"id": "F1", "file": "lib/a.py", "line": 3, "category": "comment", "class": "fix", "verdict": "CONFIRMED_NEW", "summary": "x"},
+         {"id": "F2", "file": "lib/a.py", "line": 9, "category": "comment", "class": "nit", "verdict": "CONFIRMED_NEW", "summary": "y"},
+     ],
+     "open_fix": 1, "deviation": None}
+exec(change)
+json.dump(r, open(path, "w"))
+PY
+}
+
+@test "a valid orch-sweep record passes the exact check" {
+  script_record
+  check
+  [ "$status" -eq 0 ]
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --exact
+  [ "$status" -eq 0 ]
+}
+
+@test "the exact check fails a record for an ancestor of the head" {
+  script_record 'r["head"] = sys.argv[2]; r["tree"]["head"] = r["head"]'
+  sed -i.bak "s/$HEAD_SHA/$FIRST_SHA/g" "$REC"
+  cd "$REPO"
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --exact
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: swept $FIRST_SHA, not the exact head $HEAD_SHA" ]
+}
+
+@test "an orch-sweep record without a script field fails" {
+  script_record 'del r["model"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: missing field model" ]
+}
+
+@test "an orch-sweep record needs two agents per slice plus the PR-text agent" {
+  script_record 'r["sweep_agents"] = 4; r["sweep_agent_ids"] = r["sweep_agent_ids"][:4]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: 4 sweep_agents; 2 slices and pr_text 1 start 5" ]
+}
+
+@test "repeated sweep agent ids fail" {
+  script_record 'r["sweep_agent_ids"][4] = "s-1"'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: 4 distinct sweep_agent_ids for 5 sweep agents" ]
+}
+
+@test "open_fix that does not count the fix items fails" {
+  script_record 'r["open_fix"] = 0'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: open_fix is 0, the items hold 1 fix findings" ]
+}
+
+@test "items that do not match the kept verdicts fail" {
+  script_record 'r["items"].pop()'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: 1 items for 2 kept verdicts" ]
+}
+
+@test "a dropped verdict in the items fails" {
+  script_record 'r["items"][1]["verdict"] = "FALSE"'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: an item has a verdict that drops it or a class other than fix or nit" ]
+}
+
+@test "a path in two slices fails" {
+  script_record 'r["plan"][0]["files"].append(dict(r["plan"][0]["files"][0], lines=0))'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: plan: lib/a.py is in more than one slice" ]
+}
+
+@test "a slice of several files over 400 lines fails" {
+  script_record 'r["plan"][0]["files"][0]["lines"] = 395; r["plan"][0]["lines"] = 405'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: plan: slice lib: 405 lines in 2 files; only a single file may pass 400" ]
+}
+
+@test "a slice line count that differs from its files fails" {
+  script_record 'r["plan"][0]["lines"] = 29'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: plan: slice lib: lines is 29, its files add up to 30" ]
+}
+
+@test "a binary file outside the binary slice fails" {
+  script_record 'r["plan"][0]["files"].append(r["plan"][1]["files"].pop()); r["plan"].pop(); r["slices"] = 1; r["sweep_agents"] = 3; r["sweep_agent_ids"] = r["sweep_agent_ids"][:3]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: plan: slice lib: binary files go only in the binary slice" ]
+}
+
+@test "an orch-sweep record of a kind other than full fails" {
+  script_record 'r["kind"] = "incremental"'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: kind must be full" ]
+}
+
+@test "a tree taken at another head fails" {
+  script_record 'r["tree"]["head"] = sys.argv[3]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: tree must hold the five tree values taken at head" ]
+}

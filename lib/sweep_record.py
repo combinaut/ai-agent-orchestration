@@ -22,6 +22,115 @@ VERDICTS = (
     "FALSE",
     "NOT_WORTH_IT",
 )
+KEEP = ("CONFIRMED_NEW", "CONFIRMED_REGRESSED", "DISPUTED_DROP")
+SLICE_LINES = 400
+SCRIPT_FIELDS = (
+    "pr",
+    "runtime",
+    "model",
+    "kind",
+    "tree",
+    "plan",
+    "pr_text",
+    "sweep_agent_ids",
+    "items",
+    "open_fix",
+)
+ITEM_FIELDS = ("id", "file", "line", "category", "class", "verdict", "summary")
+
+
+def plan_problem(slices, paths=None):
+    """Why a slice plan breaks the slicing rules, else None; with paths, every one must appear exactly once."""
+    if not isinstance(slices, list) or not slices:
+        return "the plan has no slices"
+    seen = []
+    for chunk in slices:
+        files = chunk.get("files") if isinstance(chunk, dict) else None
+        if (
+            not isinstance(files, list)
+            or not files
+            or not all(
+                isinstance(f, dict) and isinstance(f.get("path"), str) for f in files
+            )
+        ):
+            return "a slice has no file list"
+        lines = [f.get("lines") for f in files]
+        if any(
+            n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < 0)
+            for n in lines
+        ):
+            return f"slice {chunk.get('name')}: a line count is not a non-negative integer or null"
+        binary = [n is None for n in lines]
+        if any(binary) and (not all(binary) or chunk.get("name") != "binary"):
+            return (
+                f"slice {chunk.get('name')}: binary files go only in the binary slice"
+            )
+        if chunk.get("name") == "binary" and not all(binary):
+            return "the binary slice holds a text file"
+        size = sum(n or 0 for n in lines)
+        if chunk.get("lines") != size:
+            return f"slice {chunk.get('name')}: lines is {chunk.get('lines')}, its files add up to {size}"
+        if size > SLICE_LINES and len(files) > 1:
+            return f"slice {chunk.get('name')}: {size} lines in {len(files)} files; only a single file may pass {SLICE_LINES}"
+        seen += [f["path"] for f in files]
+    twice = sorted({p for p in seen if seen.count(p) > 1})
+    if twice:
+        return f"{twice[0]} is in more than one slice"
+    if paths is not None:
+        missing = sorted(set(paths) - set(seen))
+        if missing:
+            return f"{missing[0]} is in no slice"
+        extra = sorted(set(seen) - set(paths))
+        if extra:
+            return f"{extra[0]} is not a changed file"
+    return None
+
+
+def script_problem(record):
+    """Why a record written by orch-sweep fails the checks of its own fields, else None."""
+    missing = [field for field in SCRIPT_FIELDS if field not in record]
+    if missing:
+        return f"missing field {missing[0]}"
+    if record["mode"] != "agents":
+        return "an orch-sweep record runs in agents mode"
+    if record["runtime"] not in ("codex", "claude"):
+        return "runtime must be codex or claude"
+    if not isinstance(record["model"], str) or not record["model"]:
+        return "model must name the agents' model"
+    if record["kind"] != "full":
+        return "kind must be full"
+    if record["pr_text"] not in (0, 1) or isinstance(record["pr_text"], bool):
+        return "pr_text must be 0 or 1"
+    expected = 2 * record["slices"] + record["pr_text"]
+    if record["sweep_agents"] != expected:
+        return f"{record['sweep_agents']} sweep_agents; {record['slices']} slices and pr_text {record['pr_text']} start {expected}"
+    ids = record["sweep_agent_ids"]
+    if not isinstance(ids, list) or not all(isinstance(i, str) and i for i in ids):
+        return "sweep_agent_ids must be a list of non-empty strings"
+    if len(set(ids)) != len(ids) or len(ids) != record["sweep_agents"]:
+        return f"{len(set(ids))} distinct sweep_agent_ids for {record['sweep_agents']} sweep agents"
+    tree = record["tree"]
+    if not isinstance(tree, dict) or tree.get("head") != record["head"]:
+        return "tree must hold the five tree values taken at head"
+    why = plan_problem(record["plan"])
+    if why:
+        return f"plan: {why}"
+    if len(record["plan"]) != record["slices"]:
+        return f"plan has {len(record['plan'])} slices, slices is {record['slices']}"
+    items = record["items"]
+    if not isinstance(items, list) or not all(
+        isinstance(i, dict) and all(k in i for k in ITEM_FIELDS) for i in items
+    ):
+        return f"items must be a list of kept findings with {', '.join(ITEM_FIELDS)}"
+    if any(i["verdict"] not in KEEP or i["class"] not in ("fix", "nit") for i in items):
+        return "an item has a verdict that drops it or a class other than fix or nit"
+    kept = sum(record["verdicts"].get(v, 0) for v in KEEP)
+    if len(items) != kept:
+        return f"{len(items)} items for {kept} kept verdicts"
+    fixes = sum(1 for i in items if i["class"] == "fix")
+    if record["open_fix"] != fixes:
+        return f"open_fix is {record['open_fix']}, the items hold {fixes} fix findings"
+    return None
 
 
 def problem(path, head, base=None):
@@ -104,6 +213,10 @@ def problem(path, head, base=None):
             f"{path}: verdicts add up to {sum(verdicts.values())}, findings is {record['findings']}",
             None,
         )
+    if record.get("tool") == "orch-sweep":
+        why = script_problem(record)
+        if why:
+            return f"{path}: {why}", None
     return None, record
 
 
@@ -156,9 +269,12 @@ def main(argv):
     check.add_argument("--record", required=True)
     check.add_argument("--head", required=True)
     check.add_argument("--base")
+    check.add_argument("--exact", action="store_true")
     args = parser.parse_args(argv[1:])
     found, record = problem(args.record, args.head, args.base)
     commits = ""
+    if not found and args.exact and record["head"] != args.head:
+        found = f"{args.record}: swept {record['head']}, not the exact head {args.head}"
     if not found:
         swept = record["head"]
         found, commits = since(args.record, swept, record["base"], args.head)
