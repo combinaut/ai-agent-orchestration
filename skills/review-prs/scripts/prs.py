@@ -224,7 +224,7 @@ def head_pending(known, sha):
 
 
 def claim_key(known, sha, text):
-    """The record key: the head SHA, or sha#text when the newest completed review of this head holds other text."""
+    """The record key: the newest completed review's key when it holds this text or none, sha#text when it holds other text, else the head SHA."""
     latest = latest_done_key(known, sha)
     if not text or latest is None:
         return sha
@@ -253,7 +253,7 @@ def dispatched_records(pr, dispatched):
 
 
 def dispatched_current_head_done(pr, dispatched):
-    """Whether a completed local dispatch already covers this PR head."""
+    """Whether a completed local dispatch already covers this PR head and its current title and body."""
     head = pr.get("headRefOid") or ""
     records = dispatched_records(pr, dispatched)
     return bool(head) and review_done(

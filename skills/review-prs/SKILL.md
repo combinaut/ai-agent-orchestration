@@ -102,7 +102,7 @@ JSON fields per item: `url`, `number`, `title`, `author`, `repo`, `sha`, `kind` 
 
 `cwd` comes from the clones of the open work, the current directory, or `~/Projects/<owner>/<name>`; a clone matches when its `origin` is the repo, or else its `upstream` (a fork of it), and a clone whose `origin` is the repo wins. Skip entries with `cwd: null` and tell the user no local clone was found.
 
-Skip entries already marked for the same `sha`, pending, blocked, or done (script does this). Each `dispatch-queue` result includes every blocked current head with its recorded reason; a new head or an explicit `release-dispatched` clears that condition. Concurrency: **up to 3 Codex reviews at once**. Queue the rest; when any in-flight review finishes, start the next queued item until 3 are running again (or the queue is empty).
+Skip entries whose claim (`sha`, plus `text` for a `text-re-review`) is already marked, pending, blocked, or done (script does this). Each `dispatch-queue` result includes every blocked current head with its recorded reason; a new head or an explicit `release-dispatched` clears that condition. Concurrency: **up to 3 Codex reviews at once**. Queue the rest; when any in-flight review finishes, start the next queued item until 3 are running again (or the queue is empty).
 
 ### Launch one review
 
