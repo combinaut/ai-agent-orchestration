@@ -350,3 +350,28 @@ except OSError as error:
   [[ "$output" == *"Permission denied"*"/worker-signals/pane-"* ]] || { echo "$output"; false; }
   [[ "$output" != *"escalated"* ]]
 }
+
+@test "worker signals list names a relative questions directory when its lock is unwritable" {
+  mkdir -p "$TMP/cwd/rel"
+  chmod 555 "$TMP/cwd/rel"
+  cd "$TMP/cwd"
+  run env ORCH_USER_QUESTIONS_DIR=rel "$ROOT/orch-signal" list
+  [ "$status" -eq 73 ]
+  [ "$output" = "orch-signal: cannot write rel (sandbox?); run this command escalated" ] || { echo "$output"; false; }
+}
+
+@test "worker signals list names the questions directory when two levels are missing under a denied parent" {
+  export ORCH_USER_QUESTIONS_DIR="$TMP/denied/new/questions"
+  mkdir -p "$TMP/denied"
+  chmod 555 "$TMP/denied"
+  run "$ROOT/orch-signal" list
+  assert_escalate "$TMP/denied/new/questions"
+}
+
+@test "worker signals heartbeat names the signals directory when two levels are missing under a denied parent" {
+  export ORCH_USER_QUESTIONS_DIR="$TMP/questions"
+  mkdir -p "$HOME/.claude"
+  chmod 555 "$HOME/.claude"
+  run "$ROOT/orch-signal" heartbeat --new-job
+  assert_escalate "$HOME/.claude/coordinator/worker-signals"
+}

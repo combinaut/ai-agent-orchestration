@@ -70,14 +70,15 @@ def answer_path(identifier):
 
 
 def escalation_directory(error):
-    """The questions or worker-signals directory a denied write or lock lies under; None for anything else."""
+    """The questions or worker-signals directory a denied write or lock lies under, or that a denied mkdir was creating; None for anything else."""
     if error.errno not in DENIED or not error.filename:
         return None
     if getattr(error, "read_denied", False):
         return None
     path = Path(os.path.abspath(error.filename))
     for root in (questions_directory(), directory()):
-        if path == root or root in path.parents:
+        absolute = Path(os.path.abspath(root))
+        if path == absolute or absolute in path.parents or path in absolute.parents:
             return root
     return None
 
