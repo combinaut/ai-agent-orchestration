@@ -179,6 +179,15 @@ class TodoStaleTest(IsolatedTestCase):
         self.assertEqual(shown, [])
         self.assertEqual(len(events), 1)
 
+    def test_auto_closed_events_survive_a_watcher_state_reset(self):
+        self.write(f"Merge {PR} -> Coordinator")
+        base = self.root / "watch"
+        base.mkdir()
+        (base / "todo.json").write_text("{not json")
+        with patch.object(w, "github_link_state", lambda url, timeout=None: "merged"):
+            out = json.loads(w.cycle(base, "todo", w.collect_todo))
+        self.assertTrue(any(e.startswith("TODO AUTO-CLOSED ") for e in out["events"]))
+
     def test_github_link_state_passes_the_timeout_to_gh(self):
         seen = []
 

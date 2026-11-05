@@ -2083,7 +2083,13 @@ def cycle_pass(base, mode, collector, failures, budget):
                     line
                     for line in reduced_events
                     if line.startswith(
-                        ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ", "SLOT ")
+                        (
+                            "WORKER DONE ",
+                            "WORKER QUESTION ",
+                            "TODO ANSWER ",
+                            "TODO AUTO-CLOSED ",
+                            "SLOT ",
+                        )
                     )
                 ]
             if mode == "hog":
