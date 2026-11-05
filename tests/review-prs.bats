@@ -297,9 +297,9 @@ fork_head_missing_from_pull_ref() {
   contains "$prompt" 'then its validator step'
   contains "$prompt" 'github_write.py --timeout 240 api -X POST repos/acme/app/issues/7/comments --input -'
   contains "$prompt" 'as ONE PR comment, before the review'
-  contains "$prompt" 'the head SHA and "no findings"'
-  contains "$prompt" 'APPROVE only while no fix finding is open'
-  contains "$prompt" 'Nits never block.'
+  contains "$prompt" "always names the swept head SHA in full, all 40 characters ($SHA)"
+  contains "$prompt" 'that SHA and "no findings"'
+  contains "$prompt" 'An open kept fix finding blocks APPROVE; nits and dropped findings never block.'
   contains "$prompt" 'Class every finding: fix'
   contains "$prompt" 'nit (pure style or taste'
   contains "$prompt" 'A finding rejected once on this PR is never raised again.'
@@ -311,8 +311,10 @@ fork_head_missing_from_pull_ref() {
 }
 
 @test "the review texts carry the sweep rules" {
-  grep -qF 'An open fix finding blocks APPROVE; nits never do.' "$ROOT/$SKILL_DIR/SKILL.md"
-  grep -qF 'an open fix finding fails the review; nits never do.' "$ROOT/skills/architect/references/reviewer.md"
+  grep -qF 'An open kept fix finding blocks APPROVE; nits and dropped findings never block.' "$ROOT/$SKILL_DIR/SKILL.md"
+  grep -qF 'always names the swept head SHA in full (40 characters)' "$ROOT/$SKILL_DIR/SKILL.md"
+  grep -qF 'An open kept fix finding blocks APPROVE; nits and dropped findings never block.' "$ROOT/skills/architect/references/reviewer.md"
+  grep -qF 'always names the swept head SHA in full (40 characters)' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 'a finding rejected once on this PR is never raised again' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 're-sweep only the lines changed since the last swept head' "$ROOT/skills/architect/references/reviewer.md"
   grep -qF 'report-only: skip its approval and apply steps' "$ROOT/skills/architect/references/reviewer.md"
