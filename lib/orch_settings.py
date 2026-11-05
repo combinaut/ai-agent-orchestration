@@ -1089,7 +1089,8 @@ def local_tracked(root):
 
 
 def warn(message):
-    print(f"WARNING: {message}", file=sys.stderr)
+    one_line = re.sub(r"[\x00-\x1f\x7f]", lambda m: repr(m.group())[1:-1], message)
+    print(f"WARNING: {one_line}", file=sys.stderr)
 
 
 OLD_FINALIZE = ("/finalize-change-footprint", "/finalize-code-comments")

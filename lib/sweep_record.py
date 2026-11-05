@@ -9,8 +9,8 @@ import sys
 
 SHA = re.compile(r"[0-9a-f]{40}")
 COUNTS = ("slices", "sweep_agents", "validators", "findings")
-POSITIVE = ("slices", "sweep_agents")
-FIELDS = ("head", "base", "clean", *COUNTS, "validator_ids", "verdicts")
+MODES = ("agents", "serial")
+FIELDS = ("head", "base", "clean", "mode", *COUNTS, "validator_ids", "verdicts")
 VERDICTS = (
     "CONFIRMED_NEW",
     "CONFIRMED_REGRESSED",
@@ -53,9 +53,20 @@ def problem(path, head, base=None):
         value = record[field]
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             return f"{path}: {field} must be a non-negative integer", None
-    for field in POSITIVE:
-        if record[field] < 1:
-            return f"{path}: {field} must be at least 1", None
+    if record["mode"] not in MODES:
+        return f"{path}: mode must be agents or serial", None
+    serial = record["mode"] == "serial"
+    if record["slices"] < 1:
+        return f"{path}: slices must be at least 1", None
+    if not serial and record["sweep_agents"] < 1:
+        return f"{path}: sweep_agents must be at least 1", None
+    if serial and (
+        record["sweep_agents"] or record["validators"] or record["validator_ids"]
+    ):
+        return (
+            f"{path}: a serial record has no sweep agents, validators or validator ids",
+            None,
+        )
     if base and record["base"] != base:
         return f"{path}: base is {record['base']}, expected {base}", None
     verdicts = record["verdicts"]
@@ -77,7 +88,7 @@ def problem(path, head, base=None):
             f"{path}: {len(ids)} validator_ids for {record['validators']} validators",
             None,
         )
-    if record["findings"] > 0 and record["validators"] < 1:
+    if not serial and record["findings"] > 0 and record["validators"] < 1:
         return f"{path}: {record['findings']} findings and no validator started", None
     if sum(verdicts.values()) != record["findings"]:
         return (
@@ -137,11 +148,12 @@ def main(argv):
     if found:
         print(f"ERROR: {one_line(found)}", file=sys.stderr)
         return 1
+    note = "; serial: no independent validator" if record["mode"] == "serial" else ""
     if commits:
-        print(f"OK: {args.record} swept {swept}; commits since:")
+        print(one_line(f"OK: {args.record} swept {swept}{note}; commits since:"))
         print(commits, end="")
     else:
-        print(f"OK: {args.record} covers {args.head}")
+        print(one_line(f"OK: {args.record} covers {args.head}{note}"))
     return 0
 
 

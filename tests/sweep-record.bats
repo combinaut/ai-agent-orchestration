@@ -20,12 +20,12 @@ teardown() {
   rm -rf "$TMP"
 }
 
-# record <findings> <validators> <verdicts-json> [head]: writes the record file; BASE, SLICES, AGENTS and CLEAN override its defaults.
+# record <findings> <validators> <verdicts-json> [head]: writes the record file; BASE, SLICES, AGENTS, MODE and CLEAN override its defaults.
 record() {
   local ids="" i
   for ((i = 1; i <= $2; i++)); do ids="${ids:+$ids, }\"agent-$i\""; done
   cat >"$REC" <<JSON
-{"head": "${4:-$HEAD_SHA}", "base": "${BASE:-$FIRST_SHA}", "clean": ${CLEAN:-true}, "slices": ${SLICES:-3}, "sweep_agents": ${AGENTS:-6},
+{"head": "${4:-$HEAD_SHA}", "base": "${BASE:-$FIRST_SHA}", "clean": ${CLEAN:-true}, "mode": "${MODE:-agents}", "slices": ${SLICES:-3}, "sweep_agents": ${AGENTS:-6},
  "validators": $2, "validator_ids": [$ids], "findings": $1, "verdicts": $3}
 JSON
 }
@@ -263,4 +263,69 @@ check() {
   PATH="$TMP/bin:$PATH" check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: git log $FIRST_SHA..$HEAD_SHA failed" ]
+}
+
+@test "a serial record with findings passes and says there is no independent validator" {
+  MODE=serial AGENTS=0 record 5 0 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 0 ]
+  [ "$output" = "OK: $REC covers $HEAD_SHA; serial: no independent validator" ]
+}
+
+@test "a serial record in the ancestor case says it on the first line" {
+  MODE=serial AGENTS=0 record 5 0 '{"FALSE": 5}' "$FIRST_SHA"
+  check
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "OK: $REC swept $FIRST_SHA; serial: no independent validator; commits since:" ]
+}
+
+@test "a serial record that counts sweep agents fails" {
+  MODE=serial record 5 0 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: a serial record has no sweep agents, validators or validator ids" ]
+}
+
+@test "a serial record that counts a validator fails" {
+  MODE=serial AGENTS=0 record 5 1 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: a serial record has no sweep agents, validators or validator ids" ]
+}
+
+@test "a serial record with zero slices fails" {
+  MODE=serial AGENTS=0 SLICES=0 record 5 0 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: slices must be at least 1" ]
+}
+
+@test "a mode other than agents or serial fails" {
+  MODE=parallel record 5 1 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: mode must be agents or serial" ]
+}
+
+@test "a record without the mode field fails" {
+  record 5 1 '{"FALSE": 5}'
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); del d["mode"]; json.dump(d, open(sys.argv[1], "w"))' "$REC"
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: missing field mode" ]
+}
+
+@test "an agents record with findings and no validator still fails" {
+  record 5 0 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: 5 findings and no validator started" ]
+}
+
+@test "a serial record that lists a validator id fails" {
+  MODE=serial AGENTS=0 record 5 0 '{"FALSE": 5}'
+  sed -i.bak 's/"validator_ids": \[\]/"validator_ids": ["agent-1"]/' "$REC"
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: a serial record has no sweep agents, validators or validator ids" ]
 }

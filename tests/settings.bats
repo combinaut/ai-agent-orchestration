@@ -568,3 +568,13 @@ finalize_warning() {
   [ "$stderr" = "WARNING: ORCH_REVIEW_FINALIZE_COMMANDS sets review.finalize_commands to /finalize-code-comments; /finalize-sweep replaces /finalize-change-footprint and /finalize-code-comments" ]
   printf '%s\n' "$output" | grep -qxF "ORCH_REVIEW_FINALIZE_COMMANDS=/finalize-code-comments"
 }
+
+@test "a settings path holding a newline still gives a one-line warning" {
+  local odd="$TMP/odd
+name.toml"
+  printf '[review]\nfinalize_commands = ["/finalize-code-comments"]\n' >"$odd"
+  ORCH_CONFIG=$odd run --separate-stderr "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$stderr" | wc -l | tr -d ' ')" -eq 1 ]
+  [[ "$stderr" == "WARNING: $TMP/odd\\nname.toml sets review.finalize_commands to /finalize-code-comments;"* ]]
+}
