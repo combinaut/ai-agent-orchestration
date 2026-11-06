@@ -72,7 +72,7 @@ Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- or
 `orch-sweep-record gate --pr <url> --head <sha>` runs in the PR's clone and passes (exit 0) when the PR head is `<sha>` and the newest `orch-sweep` comment by the `gh` login for that exact head holds a full record that:
 
 - passes the checks of `orch-sweep-record check`, its git checks included: the base resolves and is an ancestor of the head;
-- has the base the PR's current base branch gives: the merge base of the head and `origin/<base>` (the local `<base>` when there is no `origin/<base>`), so a PR retargeted after the sweep fails until a new sweep;
+- has the base the PR's current base branch gives: the merge base of the head and `<remote>/<base>`, the remote being the clone's `origin` or `upstream` that is the PR repo (the local `<base>` when neither is), so a PR retargeted after the sweep fails until a new sweep;
 - equals the copy in `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json`;
 - has no open kept fix finding.
 

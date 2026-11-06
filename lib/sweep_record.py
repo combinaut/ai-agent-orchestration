@@ -427,13 +427,20 @@ def record_problem(record, repo, number, head):
     return None
 
 
-def pr_merge_base(base_ref, head):
-    """The merge base of head and origin/<base_ref>, else of the local <base_ref>; None when git cannot tell."""
-    for ref in (f"refs/remotes/origin/{base_ref}", f"refs/heads/{base_ref}"):
-        if git("rev-parse", "--verify", "--quiet", ref) is not None:
-            found = git("merge-base", ref, head)
-            return found.strip() if found else None
-    return None
+def pr_merge_base(repo, base_ref, head):
+    """The merge base of head and <remote>/<base_ref>, the remote being the clone's one for repo (origin or upstream); the local <base_ref> when no remote is; None when git cannot tell."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import orch_settings
+
+    try:
+        remote = orch_settings.matching_remote(".", repo)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    ref = f"refs/remotes/{remote}/{base_ref}" if remote else f"refs/heads/{base_ref}"
+    if git("rev-parse", "--verify", "--quiet", ref) is None:
+        return None
+    found = git("merge-base", ref, head)
+    return found.strip() if found else None
 
 
 def gate(url, head):
@@ -449,7 +456,7 @@ def gate(url, head):
     if live != head:
         return f"the PR head is {live}, not {head}"
     base_ref = (pr.get("base") or {}).get("ref")
-    merge_base = pr_merge_base(base_ref, head) if base_ref else None
+    merge_base = pr_merge_base(repo, base_ref, head) if base_ref else None
     if merge_base is None:
         return f"git cannot find the merge base of the PR base {base_ref!r} and {head}; fetch the base branch"
     me = gh_json("api", "user").get("login")

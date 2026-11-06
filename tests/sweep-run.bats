@@ -1107,6 +1107,19 @@ sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow 
   [ "$stderr" = "ERROR: the PR base changed since the full sweep: it swept from $layer, and main gives $BASE_SHA; run orch-sweep run" ]
 }
 
+@test "in a fork clone the gate takes the base from the remote that is the PR repo" {
+  git -C "$REPO" remote add origin https://github.com/someone/app.git
+  git -C "$REPO" remote add upstream https://github.com/acme/app.git
+  git -C "$REPO" update-ref refs/remotes/origin/main "$HEAD_SHA"
+  git -C "$REPO" update-ref refs/remotes/upstream/main "$BASE_SHA"
+  sweep run --pr "$PR" --head "$HEAD_SHA" --base-ref upstream/main --record "$TMP/record.json"
+  [ "$status" -eq 0 ]
+  as_comment
+  gate
+  [ "$status" -eq 0 ]
+  [ "$output" = "OK: the sweep of $HEAD_SHA allows APPROVE" ]
+}
+
 @test "a title or body changed after the sweep fails the gate until a text sweep" {
   run_sweep
   as_comment
