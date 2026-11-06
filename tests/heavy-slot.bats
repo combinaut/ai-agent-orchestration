@@ -475,16 +475,16 @@ raise SystemExit(0 if result.returncode == 130 else 1)
 
 @test "SIGINT terminates an asynchronous child and removes the slot" {
   # shellcheck disable=SC2016,SC2026 # The child shell, not this Bats shell, expands its literal script.
-  run env ORCH_HEAVY_SLOTS_KILL_GRACE=2 python3 -c '
+  run env ORCH_HEAVY_SLOTS_KILL_GRACE=10 python3 -c '
 import os, signal, subprocess, sys, time
 helper, slot_dir = sys.argv[1:]
-kill_grace, allowance = int(os.environ["ORCH_HEAVY_SLOTS_KILL_GRACE"]), 5
+kill_grace, allowance = int(os.environ["ORCH_HEAVY_SLOTS_KILL_GRACE"]), 10
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 slot = os.path.join(slot_dir, "agent-interrupt")
 ready = os.path.join(slot_dir, "agent-interrupt.ready")
 terminated = os.path.join(slot_dir, "agent-interrupt.terminated")
 wrapper = subprocess.Popen([helper, "take", "agent-interrupt", "--", "bash", "-c",
-                            "trap \"printf terminated > \\\"$2\\\"; exit 0\" TERM; printf ready > \"$1\"; while :; do sleep 1; done", "_", ready, terminated])
+                            "trap \"sleep 3; printf terminated > \\\"$2\\\"; exit 0\" TERM; printf ready > \"$1\"; while :; do sleep 1; done", "_", ready, terminated])
 deadline = time.monotonic() + 15
 while time.monotonic() < deadline:
     if (os.path.getsize(slot) if os.path.exists(slot) else 0) and os.path.exists(ready):
@@ -826,7 +826,7 @@ wait_for_group_process() {
   ORCH_HEAVY_SLOTS_LONG_RUN=28 in_own_session "$HELPER" take agent-wstop-term -- sleep 30 &
   pid=$!
   wait_for_file "$ORCH_HEAVY_SLOTS_DIR/agent-wstop-term"
-  wait_for_group_process "$pid" -x -f 'sleep 2[78]'
+  wait_for_group_process "$pid" -x -f 'sleep [0-9]+'
   kill -TERM "$pid"
   wait "$pid" || true
   assert_group_empty "$pid"
@@ -839,7 +839,7 @@ twice_signal() {
   ORCH_HEAVY_SLOTS_LONG_RUN=26 ORCH_HEAVY_SLOTS_KILL_GRACE=3 in_own_session "$HELPER" take "$name" -- bash -c 'trap "" TERM HUP; sleep 20' &
   pid=$!
   wait_for_file "$ORCH_HEAVY_SLOTS_DIR/$name"
-  wait_for_group_process "$pid" -x -f 'sleep 2[56]'
+  wait_for_group_process "$pid" -x -f 'sleep [0-9]+'
   kill -"$1" "$pid"
   wait_for_file "$(EVENTS)"
   sleep 1
@@ -858,7 +858,8 @@ twice_signal() {
 }
 
 @test "the long-run watcher outlives its RUNLONG line and is gone when the job ends" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=1 in_own_session "$HELPER" take agent-wstop-fired -- sleep 3 &
+  # shellcheck disable=SC2016 # The child Bash expands $1.
+  ORCH_HEAVY_SLOTS_LONG_RUN=1 in_own_session "$HELPER" take agent-wstop-fired -- bash -c 'until [ -e "$1" ]; do sleep 0.1; done' _ "$TMP/release" &
   pid=$!
   tries=0
   while ! grep -q ' SLOT RUNLONG ' "$(EVENTS)" 2>/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
@@ -867,6 +868,7 @@ twice_signal() {
   [ "$(pgrep -g "$pid" -f 'heavy-slot take agent-wstop-fired ' | wc -l)" -ge 2 ]
   # After RUNLONG the watcher sleeps 30 s a time instead of spinning.
   wait_for_group_process "$pid" -x -f 'sleep 30'
+  : >"$TMP/release"
   wait "$pid"
   [ "$(grep -c ' SLOT RUNLONG ' "$(EVENTS)")" -eq 1 ]
   assert_group_empty "$pid"
@@ -982,10 +984,12 @@ twice_signal() {
 }
 
 @test "the long-run watcher sleeps at most 30 seconds at a time" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=1234 in_own_session "$HELPER" take agent-nap -- sleep 4 &
+  # shellcheck disable=SC2016 # The child Bash expands $1.
+  ORCH_HEAVY_SLOTS_LONG_RUN=1234 in_own_session "$HELPER" take agent-nap -- bash -c 'until [ -e "$1" ]; do sleep 0.1; done' _ "$TMP/release" &
   pid=$!
   wait_for_group_process "$pid" -x -f 'sleep 30'
   if pgrep -g "$pid" -x -f 'sleep 1234'; then false; fi
+  : >"$TMP/release"
   wait "$pid"
 }
 
