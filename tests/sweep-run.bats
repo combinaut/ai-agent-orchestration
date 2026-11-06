@@ -443,14 +443,13 @@ assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_S
   code=0
   wait "$pid" || code=$?
   elapsed=$((SECONDS - start))
-  for agent in $agents; do
-    kill -0 "$agent" 2>/dev/null && kill -9 "$agent"
+  survived=$(for agent in $agents; do if kill -0 "$agent" 2>/dev/null; then echo "$agent"; fi; done)
+  for agent in $survived; do
+    kill -9 "$agent"
   done
   [ "$code" -eq 143 ]
   [ "$elapsed" -lt 10 ]
-  for agent in $agents; do
-    ! kill -0 "$agent" 2>/dev/null
-  done
+  [ -z "$survived" ]
 }
 
 @test "the comment lists dropped findings in their own table" {
