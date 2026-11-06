@@ -104,8 +104,9 @@ gate() {
 
 # review <event> [payload]: posts a review through orch-sweep post-review.
 review() {
+  local input=${2:-'{"body": "ok", "comments": []}'}
   cd "$REPO" || return 1
-  run --separate-stderr "$ROOT/orch-sweep" post-review --pr "$PR" --head "$HEAD_SHA" --event "$1" --input - <<<"${2:-{\"body\": \"ok\", \"comments\": []\}}"
+  run --separate-stderr "$ROOT/orch-sweep" post-review --pr "$PR" --head "$HEAD_SHA" --event "$1" --input - <<<"$input"
 }
 
 cache_file() {
