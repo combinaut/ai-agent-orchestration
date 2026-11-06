@@ -440,7 +440,7 @@ assert body.count("| FALSE |") == 4, body' "$TMP/posted.json"
 @test "a record path inside the checkout stops before any agent starts" {
   sweep run --pr "$PR" --head "$HEAD_SHA" --base-ref main --no-comment --record "$REPO/lib/alpha.py"
   [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: --record $REPO/lib/alpha.py is inside the checkout"* ]]
+  [[ "$stderr" == "ERROR: --record "*"/repo/lib/alpha.py is inside the checkout"* ]]
   [ ! -e "$TMP/agent.calls" ]
   XDG_CACHE_HOME="$REPO/.cache" run_sweep --no-comment
   [ "$status" -eq 1 ]
@@ -501,6 +501,47 @@ json.dump([[{"user": {"login": "someone"}, "body": body(n, r)} for n, r in enume
       false
     fi
   done <"$TMP/child.pids"
+}
+
+@test "an agent whose background child keeps its output open finishes when the agent exits" {
+  FAKE_PIPE_CHILD=pr-text run_sweep --no-comment --agent-timeout 20
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/child.pids" ]
+  while read -r child; do
+    if kill -0 "$child" 2>/dev/null; then
+      kill -9 "$child"
+      false
+    fi
+  done <"$TMP/child.pids"
+}
+
+@test "an agent that answers after a few seconds succeeds" {
+  FAKE_SLEEP=2.5 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+}
+
+@test "a gh that closes its output and keeps running times out" {
+  printf '#!/usr/bin/env bash\nexec >&-\nsleep 1000\n' >"$TMP/bin/gh"
+  run --separate-stderr python3 -c 'import signal, sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+signal.alarm(20)
+sweep_run.GH_TIMEOUT = 2
+try:
+    sweep_run.gh("api", "x")
+except sweep_run.Failure as error:
+    print(error)' "$ROOT/lib"
+  [ "$status" -eq 0 ]
+  [ "$output" = "gh api x timed out after 2s" ]
+}
+
+@test "a relative record path is relative to the directory the sweep starts in" {
+  name=$(basename "$TMP")
+  cd "$REPO/lib"
+  run --separate-stderr "$ROOT/orch-sweep" run --pr "$PR" --head "$HEAD_SHA" --base-ref main --no-comment --record "../../$name/record.json"
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/$name/record.json" ]
+  [ ! -e "$TMP/record.json" ]
 }
 
 @test "no agent starts once the sweep deadline has passed" {

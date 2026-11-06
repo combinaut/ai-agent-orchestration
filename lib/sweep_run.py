@@ -143,9 +143,9 @@ def gh(*args):
                     f"{name} printed more than {GH_MAX_BYTES} bytes; too much to read for one sweep"
                 )
         finally:
-            timer.cancel()
             proc.stdout.close()
             proc.wait()
+            timer.cancel()
         if expired.is_set():
             raise Failure(f"{name} timed out after {GH_TIMEOUT}s")
         if proc.returncode:
@@ -411,9 +411,7 @@ class Runner:
                 self.live.add(proc)
             timeout = min(self.agent_timeout, self.deadline - time.monotonic())
             try:
-                stdout, stderr = proc.communicate(
-                    job["prompt"].encode(), timeout=max(timeout, 0)
-                )
+                stdout, stderr = self.communicate(proc, job["prompt"].encode(), timeout)
             except subprocess.TimeoutExpired:
                 raise AgentError(
                     f"{job['name']}: timed out after {int(timeout)}s"
@@ -439,6 +437,23 @@ class Runner:
                 raise AgentError(
                     f"{job['name']}: unreadable answer: {error}"
                 ) from error
+
+    @staticmethod
+    def communicate(proc, prompt, timeout):
+        """The agent's output once the agent exits; its process group is stopped then, so a child holding the pipes cannot stall it."""
+        end = time.monotonic() + max(timeout, 0)
+        while True:
+            try:
+                return proc.communicate(
+                    prompt, timeout=max(min(1, end - time.monotonic()), 0)
+                )
+            except subprocess.TimeoutExpired:
+                prompt = None
+                if proc.poll() is not None:
+                    stop(proc)
+                    return proc.communicate(timeout=10)
+                if time.monotonic() >= end:
+                    raise
 
     def parse(self, stdout, out):
         if self.runtime == "codex":
@@ -1065,6 +1080,8 @@ def main(argv):
     )
     review.add_argument("--input", required=True, choices=("-",))
     args = parser.parse_args(argv[1:])
+    if getattr(args, "record", None):
+        args.record = os.path.abspath(args.record)
     try:
         if args.command == "allow":
             return allow(args)

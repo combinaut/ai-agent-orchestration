@@ -42,6 +42,12 @@ if os.environ.get("FAKE_CHILD") == role:
     )
     with (tmp / "child.pids").open("a") as log:
         log.write(f"{child.pid}\n")
+if os.environ.get("FAKE_PIPE_CHILD") == role:
+    child = subprocess.Popen(
+        ["bash", "-c", "trap '' TERM; sleep 1000"], stdin=subprocess.DEVNULL
+    )
+    with (tmp / "child.pids").open("a") as log:
+        log.write(f"{child.pid}\n")
 if os.environ.get("FAKE_HANG") == role:
     time.sleep(1000)
 if os.environ.get("FAKE_WRITE") == role:
