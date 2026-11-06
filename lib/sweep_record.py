@@ -159,8 +159,6 @@ def transcript_problem_for(found, family, swept, committed, agent_id, record_pat
                 f"{record_path}: validator {agent_id} was written before commit {swept}",
                 mtime,
             )
-        with open(found, encoding="utf-8", errors="replace") as handle:
-            handle.read()
         brief = claude_brief(found) if family == "Claude" else codex_brief(found)
     except OSError as error:
         return (
