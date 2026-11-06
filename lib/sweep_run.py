@@ -492,9 +492,13 @@ def file_lines(files):
 def write_diff(path, base, head, files):
     """The diff of files (all with None) from base to head, written outside the checkout for the agents."""
     names = [n for f in files for n in (f["path"], f["old"]) if n] if files else []
-    Path(path).write_text(
-        git("diff", "--no-ext-diff", "--no-textconv", "-M", base, head, "--", *names)
-    )
+    Path(path).write_bytes(
+        git(
+            "--literal-pathspecs", "diff", "--no-ext-diff", "--no-textconv", "-M",
+            base, head, "--", *names,
+            raw=True,
+        )
+    )  # fmt: skip
     return path
 
 
