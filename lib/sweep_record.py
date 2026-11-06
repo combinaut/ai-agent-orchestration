@@ -98,25 +98,26 @@ def claude_transcript(session, agent_id):
     return next(iter(glob.glob(pattern)), None)
 
 
-def codex_transcript(session, agent_id):
+def codex_transcripts(session, agent_id):
     if not CODEX_PATH.fullmatch(agent_id):
-        return None
+        return []
     root = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
     pattern = os.path.join(glob.escape(root), "sessions", "**", "rollout-*.jsonl")
+    matches = []
     for path in glob.glob(pattern, recursive=True):
         try:
             with open(path, encoding="utf-8") as handle:
                 meta = json.loads(handle.readline()).get("payload", {})
             spawn = meta["source"]["subagent"]["thread_spawn"]
-            matches = (
+            matches_rollout = (
                 spawn.get("parent_thread_id") == session
                 and spawn.get("agent_path") == agent_id
             )
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             continue
-        if matches:
-            return path
-    return None
+        if matches_rollout:
+            matches.append(path)
+    return matches
 
 
 def claude_brief(path):
@@ -149,14 +150,49 @@ def codex_brief(path):
     return ""
 
 
+def transcript_problem_for(found, family, swept, committed, agent_id, record_path):
+    """(why, mtime): one candidate validator transcript's result and freshness."""
+    try:
+        mtime = os.path.getmtime(found)
+        if mtime < int(committed):
+            return (
+                f"{record_path}: validator {agent_id} was written before commit {swept}",
+                mtime,
+            )
+        with open(found, encoding="utf-8", errors="replace") as handle:
+            handle.read()
+        brief = claude_brief(found) if family == "Claude" else codex_brief(found)
+    except OSError as error:
+        return (
+            f"{record_path}: validator {agent_id} transcript cannot read: {error}",
+            float("-inf"),
+        )
+    except (ValueError, KeyError, TypeError, AttributeError):
+        brief = ""
+    if not isinstance(brief, str) or (
+        VALIDATOR_MARKER not in brief or swept not in brief
+    ):
+        return (
+            f"{record_path}: validator {agent_id} brief must include {VALIDATOR_MARKER} "
+            f"and name {swept}",
+            mtime,
+        )
+    return None, mtime
+
+
 def transcript_problem(path, swept, session, agent_id):
     """Why agent_id is no validator transcript of session for the swept head, else None."""
     if not TOKEN.fullmatch(agent_id) and not CODEX_PATH.fullmatch(agent_id):
         return f"{path}: validator id {agent_id!r} is not a plain id"
-    found = claude_transcript(session, agent_id) if TOKEN.fullmatch(agent_id) else None
-    family = "Claude" if found else "Codex"
-    found = found or codex_transcript(session, agent_id)
-    if found is None:
+    candidates = []
+    if TOKEN.fullmatch(agent_id):
+        found = claude_transcript(session, agent_id)
+        if found:
+            candidates.append(("Claude", found))
+    candidates.extend(
+        ("Codex", found) for found in codex_transcripts(session, agent_id)
+    )
+    if not candidates:
         return (
             f"{path}: validator {agent_id} is no supported Claude or Codex subagent "
             f"transcript of session {session}; Pi and Cursor validators are unsupported"
@@ -164,24 +200,16 @@ def transcript_problem(path, swept, session, agent_id):
     committed = git("show", "-s", "--format=%ct", swept)
     if committed is None:
         return f"{path}: git cannot read the commit time of {swept}"
-    try:
-        if os.path.getmtime(found) < int(committed):
-            return f"{path}: validator {agent_id} was written before commit {swept}"
-        with open(found, encoding="utf-8", errors="replace") as handle:
-            handle.read()
-        brief = claude_brief(found) if family == "Claude" else codex_brief(found)
-    except OSError as error:
-        return f"{path}: validator {agent_id} transcript cannot read: {error}"
-    except (ValueError, KeyError, TypeError, AttributeError):
-        brief = ""
-    if not isinstance(brief, str) or (
-        VALIDATOR_MARKER not in brief or swept not in brief
-    ):
-        return (
-            f"{path}: validator {agent_id} brief must include {VALIDATOR_MARKER} "
-            f"and name {swept}"
+    newest_problem, newest_mtime = None, float("-inf")
+    for family, found in candidates:
+        problem, mtime = transcript_problem_for(
+            found, family, swept, committed, agent_id, path
         )
-    return None
+        if problem is None:
+            return None
+        if mtime >= newest_mtime:
+            newest_problem, newest_mtime = problem, mtime
+    return newest_problem
 
 
 class Parser(argparse.ArgumentParser):

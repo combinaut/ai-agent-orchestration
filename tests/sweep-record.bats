@@ -39,14 +39,15 @@ claude_agent() {
   [ -z "${3:-}" ] || printf '{"type":"assistant","message":{"content":"%s"}}\n' "$3" >>"$dir/agent-$1.jsonl"
 }
 
-# codex_agent <agent-path> <parent> [task] [later]: a Codex child rollout.
+# codex_agent <agent-path> <parent> [task] [later] [thread-id]: a Codex child rollout.
 codex_agent() {
   local dir="$CODEX_HOME/sessions/2026/11/06"
+  local thread_id=${5:-child-thread-id}
   mkdir -p "$dir"
   printf '{"type":"session_meta","payload":{"id":"child-thread-id","source":{"subagent":{"thread_spawn":{"parent_thread_id":"%s","agent_path":"%s"}}}}}\n' \
-    "$2" "$1" >"$dir/rollout-2026-11-06T10-00-00-child-thread-id.jsonl"
-  printf '{"type":"event_msg","payload":{"type":"user_message","message":"%s"}}\n' "${3:-finalize-sweep validator $HEAD_SHA}" >>"$dir/rollout-2026-11-06T10-00-00-child-thread-id.jsonl"
-  [ -z "${4:-}" ] || printf '{"type":"event_msg","payload":{"type":"agent_message","message":"%s"}}\n' "$4" >>"$dir/rollout-2026-11-06T10-00-00-child-thread-id.jsonl"
+    "$2" "$1" >"$dir/rollout-2026-11-06T10-00-00-$thread_id.jsonl"
+  printf '{"type":"event_msg","payload":{"type":"user_message","message":"%s"}}\n' "${3:-finalize-sweep validator $HEAD_SHA}" >>"$dir/rollout-2026-11-06T10-00-00-$thread_id.jsonl"
+  [ -z "${4:-}" ] || printf '{"type":"event_msg","payload":{"type":"agent_message","message":"%s"}}\n' "$4" >>"$dir/rollout-2026-11-06T10-00-00-$thread_id.jsonl"
 }
 
 check() {
@@ -239,6 +240,16 @@ check() {
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: validator /root/correctness brief must include finalize-sweep validator and name $HEAD_SHA" ]
+}
+
+@test "a newer valid Codex rollout wins over an older same-path rollout" {
+  local dir="$CODEX_HOME/sessions/2026/11/06"
+  codex_agent /root/correctness "$SESSION" 'sweep slice comments' '' 0-old
+  touch -t 200001010000 "$dir/rollout-2026-11-06T10-00-00-0-old.jsonl"
+  codex_agent /root/correctness "$SESSION" '' '' z-new
+  record 2 '["/root/correctness"]'
+  check
+  [ "$status" -eq 0 ]
 }
 
 @test "a transcript written before the head commit fails" {
