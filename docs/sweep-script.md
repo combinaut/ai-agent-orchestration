@@ -41,11 +41,11 @@ Before the agents start, after the sweep agents, and after the validators, the s
 
 ## Every head
 
-Every run sweeps the whole PR diff from the merge base, also after a fix push. The validators get every finding and verdict of each earlier sweep comment, plus the latest 50 other comments and review-thread comments (each cut to 4000 characters), to judge `RESPECT_DROP`. Nothing in the script itself stops a rejected finding from being raised again.
+Every run sweeps the whole PR diff from the merge base, also after a fix push. The validators get the findings and verdicts of the earlier sweep comments, to judge `RESPECT_DROP`: each finding once, summaries cut to 300 characters, rejections first, at most 60000 characters in all (the context says how many were left out). A sweep comment with a malformed finding counts as an ordinary comment. They also get the latest 50 other comments, review-thread comments and review summaries, each cut to 4000 characters. Nothing in the script itself stops a rejected finding from being raised again.
 
 ## Record and comment
 
-The record holds the fields `/finalize-sweep` names, plus `tool`, `version`, `pr`, `runtime`, `model`, `kind` (`full`), `tree`, `plan`, `pr_text`, `sweep_agent_ids` (the Codex thread or Claude session id of each sweep agent), `items` (the kept findings, each `fix` or `nit`), `dropped` (the other findings, with their verdicts), `open_fix` (the count of kept `fix` findings) and `deviation`. `orch-sweep-record check` checks those fields when `tool` is `orch-sweep`; `--exact` also requires the record's head to be the given head.
+The record holds the fields `/finalize-sweep` names, plus `tool`, `version`, `pr`, `runtime`, `model`, `kind` (`full`), `tree`, `plan`, `pr_text`, `sweep_agent_ids` (the Codex thread or Claude session id of each sweep agent), `items` (the kept findings, each `fix` or `nit`), `dropped` (the other findings, with their verdicts), `open_fix` (the count of kept `fix` findings) and `deviation`. `orch-sweep-record check` checks those fields when `tool` is `orch-sweep` (`version` 1, `deviation` null, `pr` a pull request URL, and every finding typed, with an id used once); `--exact` also requires the record's head to be the given head.
 
 The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json` (and `--record`), and posts one comment through `lib/github_write.py`: the marker `<!-- orch-sweep v1 -->`, the full head SHA, a table of kept findings and one of dropped findings, the record in a fenced `json` block, and the runtime's attribution trailer. `--no-comment` skips the post. The comment stays within GitHub's 65536 characters: the record goes in compact when the indented one does not fit, then the dropped table and then the kept table are left out (the comment says so, and the record still holds every finding). When the record alone does not fit, the run exits 5 without posting and keeps the record file.
 
@@ -53,11 +53,11 @@ The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<numb
 
 | Bound | Value |
 |---|---|
-| Agents per sweep | `2 x slices + 1` sweep agents, then `ceil(findings / 40)` validators, at most 12; with the 25-slice cap, at most 63 |
+| Agents per sweep | `2 x slices + 1` sweep agents, then `ceil(findings / 40)` validators, at most 12; with the 25-slice cap, at most 63 agent jobs, and with retries at most 88 agent processes |
 | Agents at once | `--concurrency`, default 4, a bounded pool |
-| Per agent | `--agent-timeout`, default 900 s; on expiry the agent's process group gets SIGTERM, then SIGKILL for whatever is left |
+| Per agent | `--agent-timeout`, default 900 s, cut to what is left of the sweep; when the agent exits or times out, its process group gets SIGTERM, then SIGKILL for whatever is left |
 | Per sweep | `--timeout`, default 3600 s; no agent starts after it |
-| Retries | each agent retries at most once; the whole run allows at most `slices` retries; the first failure stops new agents and the run exits 4 |
+| Retries | a failed attempt retries once while the run has retries left, at most `slices` in total; the first agent that fails with no retry left stops new agents, and the run exits 4 |
 | GitHub reads | 45 s each |
 | Stopping | SIGINT, SIGTERM or SIGHUP stops every running agent's process group; the run exits 128 + the signal |
 

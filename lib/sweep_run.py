@@ -29,6 +29,8 @@ MAX_SLICES = sweep_record.MAX_SLICES
 PER_VALIDATOR = 40
 MAX_VALIDATORS = 12
 GH_TIMEOUT = 45
+HISTORY_LIMIT = 60000
+OUTCOME_SUMMARY = 300
 COMMENT_LIMIT = 65536
 MARKER = sweep_record.MARKER
 ROLES = {
@@ -111,7 +113,15 @@ def git(*args, raw=False):
     if done.returncode:
         error = done.stderr.decode(errors="replace").strip()
         raise Failure(f"git {' '.join(args)} failed: {error}")
-    return done.stdout if raw else done.stdout.decode()
+    if raw:
+        return done.stdout
+    try:
+        return done.stdout.decode()
+    except UnicodeDecodeError as error:
+        bad = done.stdout[max(error.start - 40, 0) : error.end + 40]
+        raise Failure(
+            f"git {args[0]} printed a path that is not UTF-8; rename it: {bad!r}"
+        ) from None
 
 
 def gh(*args, stdin=None):
@@ -308,19 +318,27 @@ def command(runtime, model, schema, out, diffs):
     ]  # fmt: skip
 
 
+def signal_group(pid, signum):
+    """False when the group is gone; macOS answers EPERM while a member is exiting."""
+    try:
+        os.killpg(pid, signum)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
+
+
 def stop(proc):
     """SIGTERM to the agent's process group, then SIGKILL to whatever of the group is left."""
+    if not signal_group(proc.pid, signal.SIGTERM):
+        proc.wait()
+        return
     try:
-        os.killpg(proc.pid, signal.SIGTERM)
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         pass
-    except ProcessLookupError:
-        return
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    signal_group(proc.pid, signal.SIGKILL)
     proc.wait()
 
 
@@ -363,6 +381,8 @@ class Runner:
                     raise AgentError(
                         f"{job['name']}: not started after an earlier failure"
                     )
+                if time.monotonic() >= self.deadline:
+                    raise AgentError(f"{job['name']}: the sweep passed its time limit")
                 try:
                     proc = subprocess.Popen(
                         argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -373,16 +393,17 @@ class Runner:
                         f"{job['name']}: cannot start {argv[0]}: {error}"
                     ) from error
                 self.live.add(proc)
+            timeout = min(self.agent_timeout, self.deadline - time.monotonic())
             try:
                 stdout, stderr = proc.communicate(
-                    job["prompt"].encode(), timeout=timeout
+                    job["prompt"].encode(), timeout=max(timeout, 0)
                 )
             except subprocess.TimeoutExpired:
-                stop(proc)
                 raise AgentError(
                     f"{job['name']}: timed out after {int(timeout)}s"
                 ) from None
             finally:
+                stop(proc)
                 with self.lock:
                     self.live.discard(proc)
             if proc.returncode:
@@ -557,6 +578,7 @@ def pr_data(repo, number):
     for path in (
         f"repos/{repo}/issues/{number}/comments",
         f"repos/{repo}/pulls/{number}/comments",
+        f"repos/{repo}/pulls/{number}/reviews",
     ):
         pages.append(
             [
@@ -565,44 +587,76 @@ def pr_data(repo, number):
                 for c in page
             ]
         )
-    return pr, pages[0], pages[1]
+    return pr, *pages
 
 
 def sweep_outcomes(body):
-    """One line per finding of the orch-sweep record in a sweep comment, else None."""
+    """The findings of the orch-sweep record in a sweep comment, else None when any is malformed."""
     record = sweep_record.comment_record(body)
     if record is None:
         return None
     items, dropped = record.get("items", []), record.get("dropped", [])
     if not isinstance(items, list) or not isinstance(dropped, list):
         return None
-    lines = []
-    for f in [*items, *dropped]:
-        if isinstance(f, dict):
-            lines.append(
-                f"- {f.get('file')}:{f.get('line')} {f.get('category')} {f.get('class')} {f.get('verdict')}: {f.get('summary')}"
-            )
-    return "\n".join(lines) or "- no findings"
+    findings = [*items, *dropped]
+    if any(sweep_record.finding_problem(f) for f in findings):
+        return None
+    return findings
 
 
-def context(pr, comments, threads):
-    """The PR text, every earlier sweep outcome, and the latest 50 other comments of each kind."""
+def history(outcomes):
+    """Earlier sweep findings, oldest first, each once, rejections before kept findings, within HISTORY_LIMIT."""
+    lines, seen = [], set()
+    for who, findings in outcomes:
+        for f in findings:
+            key = tuple(f[k] for k in ("file", "line", "category", "class", "verdict", "summary"))  # fmt: skip
+            if key not in seen:
+                seen.add(key)
+                summary = f["summary"][:OUTCOME_SUMMARY]
+                lines.append((f["verdict"] in sweep_record.KEEP, f"- {who}: {f['file']}:{f['line']} {f['category']} {f['class']} {f['verdict']}: {summary}"))  # fmt: skip
+    lines.sort(key=lambda pair: pair[0])
+    kept, size = [], 0
+    for _, line in lines:
+        if size + len(line) + 1 > HISTORY_LIMIT:
+            break
+        kept.append(line)
+        size += len(line) + 1
+    if len(kept) < len(lines):
+        kept.append(
+            f"- {len(lines) - len(kept)} earlier sweep outcomes left out to fit {HISTORY_LIMIT} characters; rejections go first"
+        )
+    return "\n".join(kept) or "- no findings"
+
+
+def context(pr, comments, threads, reviews):
+    """The PR text, earlier sweep outcomes, and the latest 50 other comments, thread comments and review summaries."""
     parts = [f"Title: {pr['title']}", f"Body:\n{pr['body'] or ''}"]
-    others = []
+    others, outcomes = [], []
     for c in comments:
-        outcomes = sweep_outcomes(c.get("body") or "")
-        if outcomes is None:
+        body = c.get("body") or ""
+        found = sweep_outcomes(body)
+        if found is None:
             others.append(c)
         else:
-            who = (c.get("user") or {}).get("login", "?")
-            parts.append(
-                f"Earlier sweep by {who}, every finding and its verdict:\n{outcomes}"
-            )
-    for label, items in (("Comment", others), ("Review thread comment", threads)):
+            outcomes.append(((c.get("user") or {}).get("login", "?"), found))
+    if outcomes:
+        parts.append(
+            "Earlier sweep outcomes and their verdicts, by comment author:\n"
+            + history(outcomes)
+        )
+    reviews = [r for r in reviews if r.get("body")]
+    for label, items in (
+        ("Comment", others),
+        ("Review thread comment", threads),
+        ("Review", reviews),
+    ):
         for c in items[-50:]:
             who = (c.get("user") or {}).get("login", "?")
             where = f" on {c['path']}:{c.get('line')}" if c.get("path") else ""
-            parts.append(f"{label} by {who}{where}:\n{(c.get('body') or '')[:4000]}")
+            state = f" ({c['state']})" if label == "Review" and c.get("state") else ""
+            parts.append(
+                f"{label} by {who}{where}{state}:\n{(c.get('body') or '')[:4000]}"
+            )
     return "\n\n".join(parts)
 
 
@@ -732,7 +786,7 @@ def run(args):
         raise Failure(f"a text sweep needs a full sweep of {args.head} first")
     model = model_for(args.runtime, args.model)
     merge_base = git("merge-base", "HEAD", args.base_ref).strip()
-    pr, comments, threads = pr_data(repo, number)
+    pr, comments, threads, reviews = pr_data(repo, number)
     files = changes(merge_base, args.head)
     if not files:
         raise Failure(f"no changes between {merge_base} and {args.head}")
@@ -798,7 +852,7 @@ def run(args):
                 found.append({"id": f"F{len(found) + 1}", **f})
     validators = min(MAX_VALIDATORS, math.ceil(len(found) / PER_VALIDATOR))
     chunks = [found[n::validators] for n in range(validators)]
-    text = context(pr, comments, threads)
+    text = context(pr, comments, threads, reviews)
     checked = runner.run(
         [
             {

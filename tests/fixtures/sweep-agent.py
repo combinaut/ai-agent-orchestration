@@ -19,7 +19,7 @@ with (tmp / "agent.calls").open("a") as log:
 prompts = tmp / "prompts"
 prompts.mkdir(exist_ok=True)
 (prompts / f"{role}.{os.getpid()}").write_text(prompt)
-diff = re.search(r" is in (\S+\.diff)[;.]", prompt)
+diff = re.search(r" is in (.+?\.diff)[;.]", prompt)
 if diff:
     (prompts / f"{role}.{os.getpid()}.diff").write_bytes(
         Path(diff.group(1)).read_bytes()
@@ -34,7 +34,12 @@ time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
 (live / str(os.getpid())).unlink()
 
 if os.environ.get("FAKE_CHILD") == role:
-    child = subprocess.Popen(["bash", "-c", "trap '' TERM; sleep 1000"])
+    child = subprocess.Popen(
+        ["bash", "-c", "trap '' TERM; sleep 1000"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     with (tmp / "child.pids").open("a") as log:
         log.write(f"{child.pid}\n")
 if os.environ.get("FAKE_HANG") == role:

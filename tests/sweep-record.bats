@@ -495,7 +495,7 @@ PY
   script_record 'r["items"][1]["verdict"] = "FALSE"'
   check
   [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: an item has a verdict that drops it or a class other than fix or nit" ]
+  [ "$stderr" = "ERROR: $REC: an item has a verdict that drops it" ]
 }
 
 @test "a path in two slices fails" {
@@ -559,6 +559,57 @@ PY
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: 2 items and 0 dropped for 3 findings" ]
+}
+
+@test "a finding with a missing or mistyped field fails" {
+  for change in 'r["dropped"][0]["file"] = None' 'r["dropped"][0]["line"] = "4"' 'r["dropped"][0]["line"] = True' \
+    'r["items"][0]["summary"] = None' 'r["dropped"][0]["class"] = "major"' 'r["items"][0]["id"] = ""' \
+    'r["dropped"][0]["category"] = 3' 'r["dropped"][0]["line"] = -1'; do
+    script_record "$change"
+    check
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == "ERROR: $REC: finding "* ]] || { echo "$change: $stderr"; false; }
+  done
+}
+
+@test "two findings with the same id fail" {
+  script_record 'r["dropped"][0]["id"] = "F1"'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: finding id F1 appears twice" ]
+}
+
+@test "an orch-sweep record without version 1 fails" {
+  script_record 'del r["version"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: missing field version" ]
+  for change in 'r["version"] = 2' 'r["version"] = True' 'r["version"] = "1"'; do
+    script_record "$change"
+    check
+    [ "$status" -eq 1 ]
+    [ "$stderr" = "ERROR: $REC: version must be 1" ]
+  done
+}
+
+@test "an orch-sweep record without a deviation field, or with a malformed deviation, fails" {
+  script_record 'del r["deviation"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: missing field deviation" ]
+  script_record 'r["deviation"] = {"ok": True}'
+  check
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: $REC: deviation must be null or name one of "* ]]
+}
+
+@test "an orch-sweep record whose pr is not a pull request URL fails" {
+  for change in 'r["pr"] = "anything"' 'r["pr"] = None' 'r["pr"] = "https://github.com/acme/app/pull/7x"'; do
+    script_record "$change"
+    check
+    [ "$status" -eq 1 ]
+    [ "$stderr" = "ERROR: $REC: pr must be a GitHub pull request URL" ]
+  done
 }
 
 @test "a dropped finding with a keep verdict fails" {
