@@ -107,8 +107,7 @@ def codex_transcript(session, agent_id):
                 meta = json.loads(handle.readline()).get("payload", {})
             spawn = meta["source"]["subagent"]["thread_spawn"]
             matches = (
-                meta.get("id") == agent_id
-                and spawn.get("parent_thread_id") == session
+                meta.get("id") == agent_id and spawn.get("parent_thread_id") == session
             )
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             continue
