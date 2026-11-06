@@ -339,6 +339,13 @@ def since(path, swept, base, head):
     return None, commits
 
 
+def text_sha(pr):
+    """Hash of a pull request's title and body."""
+    return hashlib.sha256(
+        json.dumps([pr.get("title") or "", pr.get("body") or ""]).encode()
+    ).hexdigest()
+
+
 def cache_path(repo, number, head, kind="full"):
     """Where orch-sweep keeps its copy of a record; an allow file has kind allow."""
     root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
@@ -428,7 +435,8 @@ def gate(url, head):
     if not SHA.fullmatch(head):
         return f"--head {head!r} is not a full 40-character SHA"
     repo, number = match.group(1), int(match.group(2))
-    live = (gh_json("api", f"repos/{repo}/pulls/{number}").get("head") or {}).get("sha")
+    pr = gh_json("api", f"repos/{repo}/pulls/{number}")
+    live = (pr.get("head") or {}).get("sha")
     if live != head:
         return f"the PR head is {live}, not {head}"
     me = gh_json("api", "user").get("login")
@@ -445,12 +453,17 @@ def gate(url, head):
     latest = {record["kind"]: record for record in order}
     if "full" not in latest:
         return f"no full orch-sweep comment by {me} for the exact head {head}"
-    for record in latest.values():
+    full, newest = latest["full"], order[-1]
+    for record in [full] + ([newest] if newest["kind"] == "text" else []):
         why = record_problem(record, repo, number, head)
         if why:
             return why
-    full = latest["full"]
-    if order[-1]["kind"] == "text":
+        why, _ = since(f"the {record['kind']} sweep record", head, record["base"], head)
+        if why:
+            return why
+    if newest.get("pr_text_sha256") != text_sha(pr):
+        return f"the PR title or body changed since the {newest['kind']} sweep of {head}; run orch-sweep run --kind text"
+    if newest["kind"] == "text":
         code = sum(
             1
             for i in full["items"]
@@ -458,8 +471,10 @@ def gate(url, head):
         )
         if code:
             return f"the full sweep of {head} has {code} open fix findings outside the PR text"
-        if latest["text"]["open_fix"]:
-            return f"the text sweep of {head} has {latest['text']['open_fix']} open fix findings"
+        if newest["open_fix"]:
+            return (
+                f"the text sweep of {head} has {newest['open_fix']} open fix findings"
+            )
     elif full["open_fix"]:
         return f"the full sweep of {head} has {full['open_fix']} open fix findings"
     return None

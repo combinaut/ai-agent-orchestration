@@ -986,174 +986,292 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     )
     approve_input = root / "approve-review.json"
     approve_input.write_text('{"commit_id":"x","event":"APPROVE","body":"ok"}')
+    event_file = root / "approve-event"
+    event_file.write_text("APPROVE")
+    query_file = root / "review-query"
+    mutation = 'mutation{submitPullRequestReview(input:{pullRequestReviewId:"x",event:APPROVE}){clientMutationId}}'
+    query_file.write_text(mutation)
+    read_query = root / "read-query"
+    read_query.write_text("query{viewer{login}}")
+    ep = "repos/a/b/pulls/7/reviews"
     for name, command, deny in [
         ("gh pr review approve", "gh pr review 7 --approve", True),
         ("gh pr review short approve", "gh pr review 7 -a -b ok", True),
-        ("gh pr review approve=true", "gh pr review 7 --approve=true", True),
+        ("gh pr review bundled approve", "gh pr review 7 -ab ok", True),
+        ("gh pr review bundled approve last", "gh pr review 7 -ba ok", True),
+        ("gh pr review approve=false", "gh pr review 7 --approve=false -b ok", True),
+        ("gh pr review comment", "gh pr review 7 --comment -b ok", True),
+        ("gh pr review request changes", "gh pr review 7 -r -b fix", True),
         (
-            "gh pr review request changes naming APPROVE",
-            "gh pr review 7 --request-changes -b 'no APPROVE yet'",
-            False,
+            "gh pr review under env",
+            "env GH_HOST=github.com gh pr review 7 --approve",
+            True,
         ),
+        ("gh pr review under eval", "eval 'gh pr review 7 --approve'", True),
+        ("gh pr review under sh -c", "sh -c 'gh pr review 7 --approve'", True),
         (
-            "API review event field",
-            "gh api -X POST repos/a/b/pulls/7/reviews -f event=APPROVE",
+            "gh pr review under env sh -c",
+            "env X=1 sh -c 'gh pr review 7 --approve'",
+            True,
+        ),
+        ("gh pr review in a substitution", 'echo "$(gh pr review 7 --approve)"', True),
+        ("gh pr review shell alias", "alias r='gh pr review'; r 7 --approve", True),
+        (
+            "gh pr review under xargs",
+            'printf "7\\n" | xargs gh pr review --approve',
             True,
         ),
         (
-            "API review comment naming APPROVE",
-            "gh api -X POST repos/a/b/pulls/7/reviews -f event=COMMENT -f body='APPROVE later'",
+            "gh pr review flag from xargs",
+            "printf '%s\\n' --approve | xargs gh pr review 7",
             True,
         ),
+        ("gh alias for pr review", "gh alias set pass 'pr review --approve'", True),
+        ("gh alias import", "gh alias import aliases.yml", True),
+        ("API review event field", f"gh api -X POST {ep} -f event=APPROVE", True),
+        ("API review comment", f"gh api {ep} -f event=COMMENT -f body=ok", True),
         (
-            "API review with a variable PR number",
-            "N=7; gh api repos/a/b/pulls/$N/reviews -f event=APPROVE",
+            "API review request changes",
+            f"gh api {ep} -f event=REQUEST_CHANGES -f body=fix",
             True,
         ),
+        ("API pending review", f"gh api {ep} -f body=ok", True),
+        ("API review submit", f"gh api -X POST {ep}/9/events -f event=APPROVE", True),
         (
-            "API review with a braced variable PR number",
-            'gh api "repos/a/b/pulls/${PR}/reviews" -f event=APPROVE',
-            True,
-        ),
-        (
-            "API review with a substituted PR number",
-            "gh api repos/a/b/pulls/$(cat n)/reviews -f event=APPROVE",
-            True,
-        ),
-        (
-            "API review at a path built from a variable",
+            "API review endpoint variable",
             "P=reviews; gh api repos/a/b/pulls/7/$P -f event=APPROVE",
             True,
         ),
         (
-            "API call at a variable path that names no approval",
-            "gh api repos/a/b/pulls/7/$P --jq .state",
-            False,
-        ),
-        (
-            "API review at a full URL",
-            "gh api https://api.github.com/repos/a/b/pulls/7/reviews -f event=APPROVE",
+            "API review number variable",
+            "N=7; gh api repos/a/b/pulls/$N/reviews -f event=APPROVE",
             True,
         ),
         (
-            "API review at an enterprise host",
+            "API review braced variable",
+            'gh api "repos/a/b/pulls/${PR}/reviews" -f event=APPROVE',
+            True,
+        ),
+        (
+            "API review number substitution",
+            "gh api repos/a/b/pulls/$(cat n)/reviews -f event=APPROVE",
+            True,
+        ),
+        (
+            "API review quote-split event",
+            f"E=APPR'OVE'; gh api {ep} -f event=\"$E\"",
+            True,
+        ),
+        (
+            "API review event substitution",
+            f"gh api {ep} -f event=\"$(printf '%s%s' APPR OVE)\"",
+            True,
+        ),
+        ("API review input file", f"gh api {ep} --input {approve_input}", True),
+        (
+            "API review input file variable",
+            f'P={approve_input}; gh api {ep} --input "$P"',
+            True,
+        ),
+        ("API review field file", f"gh api {ep} -F event=@{event_file}", True),
+        (
+            "API review field file variable",
+            f'P={event_file}; gh api {ep} -F event=@"$P"',
+            True,
+        ),
+        ("API review field stdin", f"cat {event_file} | gh api {ep} -F event=@-", True),
+        (
+            "API review field dev stdin",
+            f"cat {event_file} | gh api {ep} -F event=@/dev/stdin",
+            True,
+        ),
+        (
+            "API review submit field stdin",
+            f"cat {event_file} | gh api {ep}/9/events -F event=@-",
+            True,
+        ),
+        (
+            "API review piped input",
+            f"cat {approve_input} | gh api {ep} --input -",
+            True,
+        ),
+        ("API review stdin file", f"gh api {ep} --input - < {approve_input}", True),
+        (
+            "API review after an unrelated heredoc",
+            'cat <<\'JSON\' >/dev/null\n{"event":"COMMENT"}\nJSON\n'
+            + f"cat {approve_input} | gh api {ep} --input -",
+            True,
+        ),
+        (
+            "API review heredoc",
+            f'gh api -X POST {ep} --input - <<\'JSON\'\n{{"event":"COMMENT"}}\nJSON',
+            True,
+        ),
+        (
+            "API review here-string",
+            f'gh api {ep} --input - <<< \'{{"event":"COMMENT"}}\'',
+            True,
+        ),
+        (
+            "API review full URL",
+            f"gh api https://api.github.com/{ep} -f event=APPROVE",
+            True,
+        ),
+        (
+            "API review other host URL",
             "gh api https://ghe.example.com/api/v3/repos/a/b/pulls/7/reviews -f event=APPROVE",
             True,
         ),
         (
-            "API review with owner and repo placeholders",
+            "API review hostname option",
+            f"gh api --hostname ghe.example.com {ep} -f event=APPROVE",
+            True,
+        ),
+        (
+            "API review placeholders",
             "gh api 'repos/{owner}/{repo}/pulls/7/reviews' -f event=APPROVE",
             True,
         ),
         (
-            "API review heredoc with a duplicate escaped event",
-            'gh api repos/a/b/pulls/7/reviews --input - <<\'JSON\'\n{"event":"COMMENT","event":"APPR\\u004fVE"}\nJSON',
+            "API review percent-encoded",
+            "gh api repos/a/b/pulls/7/%72eviews -f event=APPROVE",
             True,
         ),
-        (
-            "API review with a variable PR number and a COMMENT event",
-            "gh api repos/a/b/pulls/$N/reviews -f event=COMMENT -f body=ok",
-            False,
-        ),
-        (
-            "API review heredoc",
-            'gh api -X POST repos/a/b/pulls/7/reviews --input - <<\'JSON\'\n{"event":"APPROVE"}\nJSON',
-            True,
-        ),
+        ("API review opaque method", f'gh api -X "$M" {ep}', True),
+        ("API review endpoint from a variable", 'gh api "$URL" -f event=APPROVE', True),
         (
             "github_write review heredoc",
-            'python3 lib/github_write.py --timeout 240 api -X POST repos/a/b/pulls/7/reviews --input - <<\'JSON\'\n{"event": "APPROVE"}\nJSON',
+            f'python3 lib/github_write.py --timeout 240 api -X POST {ep} --input - <<\'JSON\'\n{{"event": "COMMENT"}}\nJSON',
             True,
         ),
+        ("GraphQL submit review", f"gh api graphql -f query='{mutation}'", True),
         (
-            "github_write request changes heredoc",
-            'python3 lib/github_write.py --timeout 240 api -X POST repos/a/b/pulls/7/reviews --input - <<\'JSON\'\n{"event":"REQUEST_CHANGES"}\nJSON',
-            False,
-        ),
-        (
-            "API review from unseen stdin",
-            "cat r.json | gh api repos/a/b/pulls/7/reviews --input -",
-            True,
-        ),
-        (
-            "API review input file",
-            f"gh api repos/a/b/pulls/7/reviews --input {approve_input}",
-            True,
-        ),
-        (
-            "API pending review submit",
-            "gh api -X POST repos/a/b/pulls/7/reviews/9/events -f event=APPROVE",
-            True,
-        ),
-        (
-            "GraphQL review submit",
-            "gh api graphql -f query='mutation{submitPullRequestReview(input:{pullRequestReviewId:\"x\",event:APPROVE}){clientMutationId}}'",
-            True,
-        ),
-        (
-            "GraphQL review submit at a full URL",
-            "gh api https://api.github.com/graphql -f query='mutation{submitPullRequestReview(input:{pullRequestReviewId:\"x\",event:APPROVE}){clientMutationId}}'",
-            True,
-        ),
-        (
-            "GraphQL comment review",
+            "GraphQL add review",
             "gh api graphql -f query='mutation{addPullRequestReview(input:{pullRequestId:\"x\",event:COMMENT}){clientMutationId}}'",
-            False,
+            True,
         ),
         (
-            "GraphQL review from unseen stdin",
+            "GraphQL review other host",
+            f"gh api https://ghe.example.com/api/graphql -f query='{mutation}'",
+            True,
+        ),
+        ("GraphQL review query file", f"gh api graphql -F query=@{query_file}", True),
+        (
+            "GraphQL review query file variable",
+            f'P={query_file}; gh api graphql -F query=@"$P"',
+            True,
+        ),
+        (
+            "GraphQL query from a missing file",
+            "gh api graphql -F query=@missing.graphql",
+            True,
+        ),
+        ("GraphQL query from a variable", 'gh api graphql -f query="$Q"', True),
+        (
+            "GraphQL review event variable",
+            "E=APPR'OVE'; gh api graphql -f query='mutation($event:PullRequestReviewEvent!){submitPullRequestReview(input:{pullRequestReviewId:\"x\",event:$event}){clientMutationId}}' -f event=\"$E\"",
+            True,
+        ),
+        (
+            "GraphQL review from piped stdin",
             "cat q.json | gh api graphql --input -",
             True,
         ),
+        ("GraphQL review field stdin", "cat q.json | gh api graphql -F query=@-", True),
         (
             "GraphQL review from a stdin file",
             "gh api graphql --input /dev/stdin < q.json",
             True,
         ),
         (
-            "GraphQL approve heredoc",
-            'gh api graphql --input - <<\'JSON\'\n{"query":"mutation{submitPullRequestReview(input:{pullRequestReviewId:\\"x\\",event:APPROVE}){clientMutationId}}"}\nJSON',
-            True,
-        ),
-        (
-            "GraphQL comment heredoc",
+            "GraphQL review heredoc",
             'gh api graphql --input - <<\'JSON\'\n{"query":"mutation{addPullRequestReview(input:{pullRequestId:\\"x\\",event:COMMENT}){clientMutationId}}"}\nJSON',
+            True,
+        ),
+        (
+            "curl review",
+            f'curl -X POST https://api.github.com/{ep} -d \'{{"event":"APPROVE"}}\'',
+            True,
+        ),
+        (
+            "python review request",
+            f'python3 -c \'import requests; requests.post("https://api.github.com/{ep}",json={{"event":"APPROVE"}})\'',
+            True,
+        ),
+        (
+            "python review heredoc",
+            f"python3 - <<'PY'\nimport requests\nrequests.post('https://api.github.com/{ep}')\nPY",
+            True,
+        ),
+        (
+            "credential into curl review",
+            f'git credential fill </dev/null | curl -X POST https://api.github.com/{ep} -d \'{{"event":"APPROVE"}}\'',
+            True,
+        ),
+        (
+            "git alias running a review",
+            f"git -c alias.r='!curl -X POST https://api.github.com/{ep}' r",
+            True,
+        ),
+        ("API review quote-split literal", f"gh api {ep} -f event=APPR'OVE'", True),
+        (
+            "gh pr review in a commit message substitution",
+            'git commit -m "$(gh pr review 7 --approve)"',
+            True,
+        ),
+        (
+            "curl review percent-encoded",
+            "curl -X POST https://api.github.com/repos/a/b/pulls/7/%72eviews -d x",
+            True,
+        ),
+        (
+            "GraphQL query from an expanding heredoc",
+            'gh api graphql --input - <<JSON\n{"query":"$(cat q.graphql)"}\nJSON',
+            True,
+        ),
+        (
+            "GraphQL heredoc overridden by a stdin file",
+            'gh api graphql --input - <<\'JSON\' < q.json\n{"query":"query{viewer{login}}"}\nJSON',
+            True,
+        ),
+        ("GraphQL review from inherited stdin", "gh api graphql --input -", True),
+        (
+            "GraphQL read heredoc",
+            'gh api graphql --input - <<\'JSON\'\n{"query":"query{viewer{login}}"}\nJSON',
             False,
         ),
         (
-            "API review from unseen stdin with a COMMENT field",
-            "cat r.json | gh api repos/a/b/pulls/7/reviews --input - -f note=event=COMMENT",
+            "gh pr review after a heredoc opener",
+            "cat <<'X' | gh pr review 7 --approve\nhi\nX",
             True,
         ),
+        ("API review list", f"gh api {ep} --jq '.[].state'", False),
         (
-            "API review from a stdin file with a COMMENT header",
-            "gh api repos/a/b/pulls/7/reviews --input - -H 'X-Note: event=COMMENT' < r.json",
-            True,
-        ),
-        (
-            "API review heredoc expanding a file, with a COMMENT field",
-            "gh api repos/a/b/pulls/7/reviews --input - -f note=event=COMMENT <<JSON\n$(cat r.json)\nJSON",
-            True,
-        ),
-        (
-            "API review heredoc with an escaped APPROVE and a COMMENT field",
-            'gh api repos/a/b/pulls/7/reviews --input - -f note=event=COMMENT <<\'JSON\'\n{"event":"APPR\\u004fVE"}\nJSON',
-            True,
-        ),
-        (
-            "API review COMMENT heredoc that expands a second event",
-            'gh api repos/a/b/pulls/7/reviews --input - <<JSON\n{"event":"COMMENT"$(cat tail.json)\nJSON',
-            True,
-        ),
-        (
-            "API review here-string with a COMMENT event",
-            'gh api repos/a/b/pulls/7/reviews --input - <<< \'{"event":"COMMENT"}\'',
+            "API review list with GET fields",
+            f"gh api -X GET {ep} -f per_page=100",
             False,
         ),
-        ("API review list", "gh api repos/a/b/pulls/7/reviews --jq '.[].state'", False),
+        ("GraphQL read", "gh api graphql -f query='query{viewer{login}}'", False),
+        ("GraphQL read from a file", f"gh api graphql -F query=@{read_query}", False),
         (
-            "orch-sweep post-review",
+            "PR comment naming a review",
+            "gh pr comment 7 -b 'gh pr review --approve is denied'",
+            False,
+        ),
+        (
+            "commit naming a review",
+            "git commit -m 'deny gh pr review and pulls/7/reviews'",
+            False,
+        ),
+        ("search for the review endpoint", "rg -n 'pulls/[^/]+/reviews' hooks", False),
+        (
+            "orch-sweep post-review approve",
             'orch-sweep post-review --pr https://github.com/a/b/pull/7 --head x --event APPROVE --input - <<\'JSON\'\n{"body":"ok"}\nJSON',
+            False,
+        ),
+        (
+            "orch-sweep post-review comment naming APPROVE",
+            'orch-sweep post-review --pr https://github.com/a/b/pull/7 --head x --event COMMENT --input - <<\'JSON\'\n{"body":"Do not APPROVE yet"}\nJSON',
             False,
         ),
     ]:

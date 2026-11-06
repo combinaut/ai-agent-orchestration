@@ -45,12 +45,12 @@ commit() {
   git -C "$REPO" commit -qm "$1"
 }
 
-# stub_gh: a gh for acme/app#7 whose head is $TMP/pr_head, that serves $TMP/comments.json when present and saves a posted comment or review.
+# stub_gh: a gh for acme/app#7 whose head is $TMP/pr_head and body $TMP/pr_body, that serves $TMP/comments.json when present and saves a posted comment or review.
 stub_gh() {
   cat >"$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
-  'api repos/acme/app/pulls/7') printf '{"title":"Add alpha","body":"Adds alpha and its test.","base":{"ref":"main"},"head":{"sha":"%s"}}\n' "$(cat "$TMP/pr_head" 2>/dev/null)" ;;
+  'api repos/acme/app/pulls/7') printf '{"title":"Add alpha","body":"%s","base":{"ref":"main"},"head":{"sha":"%s"}}\n' "$(cat "$TMP/pr_body" 2>/dev/null || echo 'Adds alpha and its test.')" "$(cat "$TMP/pr_head" 2>/dev/null)" ;;
   'api user') echo '{"login":"me"}' ;;
   'api --paginate --slurp repos/acme/app/issues/7/comments') cat "$TMP/comments.json" 2>/dev/null || echo '[[]]' ;;
   'api --paginate --slurp repos/acme/app/pulls/7/comments') echo '[[]]' ;;
@@ -923,10 +923,12 @@ sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow 
   python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); assert (r["commit_id"], r["event"], r["body"], r["comments"]) == (sys.argv[2], "APPROVE", "ok", []), r' "$TMP/review.json" "$HEAD_SHA"
 }
 
-@test "post-review posts REQUEST_CHANGES without a sweep" {
-  review REQUEST_CHANGES
-  [ "$status" -eq 0 ]
-  grep -q '"event": "REQUEST_CHANGES"' "$TMP/review.json"
+@test "post-review posts REQUEST_CHANGES and COMMENT without a sweep" {
+  for event in REQUEST_CHANGES COMMENT; do
+    review "$event"
+    [ "$status" -eq 0 ]
+    grep -q "\"event\": \"$event\"" "$TMP/review.json"
+  done
 }
 
 @test "post-review takes only a body and comments on stdin" {
@@ -934,6 +936,49 @@ sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow 
   [ "$status" -eq 1 ]
   [[ "$stderr" == 'ERROR: the review on stdin is {"body": "...", "comments": [...]}' ]]
   [ ! -e "$TMP/review.json" ]
+}
+
+@test "the gate runs the git checks of the record check on the full record" {
+  run_sweep
+  as_comment
+  other=$(git -C "$REPO" commit-tree "$(git -C "$REPO" mktree </dev/null)" -m other)
+  for bad in "$other" ffffffffffffffffffffffffffffffffffffffff; do
+    edit_comments "r['base'] = '$bad'"
+    python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); r["base"] = sys.argv[2]; json.dump(r, open(sys.argv[1], "w"))' "$(cache_file)" "$bad"
+    gate
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == "ERROR: the full sweep record: "*"$bad"* ]]
+  done
+}
+
+@test "a newer full sweep is not blocked by an older text record" {
+  run_sweep
+  as_comment
+  run_sweep --kind text
+  as_comment
+  python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); r["model"] = "other"; json.dump(r, open(sys.argv[1], "w"))' "$(cache_file .text)"
+  run_sweep
+  [ "$status" -eq 0 ]
+  as_comment
+  gate
+  [ "$status" -eq 0 ]
+}
+
+@test "a title or body changed after the sweep fails the gate until a text sweep" {
+  run_sweep
+  as_comment
+  echo "Adds alpha, its test and more." >"$TMP/pr_body"
+  gate
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: the PR title or body changed since the full sweep of $HEAD_SHA; run orch-sweep run --kind text" ]
+  review APPROVE
+  [ "$status" -eq 1 ]
+  [ ! -e "$TMP/review.json" ]
+  run_sweep --kind text
+  [ "$status" -eq 0 ]
+  as_comment
+  gate
+  [ "$status" -eq 0 ]
 }
 
 @test "a text record that differs from its local copy fails the gate" {

@@ -39,7 +39,7 @@ case "$*" in
   'api user --jq .login') echo reviewer ;;
   'api repos/acme/app/pulls/7 --jq {title: .title, body: .body}')
     [ -z "${TEXT_READ_FAILS:-}" ] || exit 1
-    printf '{"title":"%s","body":"%s"}\n' "${PR_TITLE-}" "${PR_BODY-}"
+    printf '{"title":"%s","body":"%s"}\n' "${PR_TITLE-}" "$(cat "$TMP/pr_body" 2>/dev/null || printf %s "${PR_BODY-}")"
     ;;
   'api repos/acme/app/pulls/7 --jq .base.ref') [ -z "${BASE_READ_FAILS:-}" ] || exit 1; echo main ;;
   'api repos/acme/app/pulls/7 --jq [.head.repo.owner.login // "-", .head.repo.name // "-", .head.ref // "-"] | @tsv')
@@ -71,6 +71,7 @@ EOF
   cat >"$BIN/orch-sweep-stub" <<'EOF'
 #!/usr/bin/env bash
 printf '%s|%s\n' "$(pwd -P)" "$*" >>"$TMP/sweep.calls"
+[ -z "${SWEEP_EDITS_BODY:-}" ] || echo edited >"$TMP/pr_body"
 case " $* " in *" --kind text "*) [ -z "${SWEEP_TEXT_NEEDS_FULL:-}" ] || { echo "ERROR: a text sweep needs a full sweep of $SHA first" >&2; exit 1; } ;; esac
 [ -z "${SWEEP_FAILS:-}" ] || { echo "ERROR: validator 1: exited 1" >&2; exit 4; }
 echo "COMMENT https://github.com/acme/app/pull/7#issuecomment-9"
@@ -1670,6 +1671,18 @@ print(sorted((k.split("#")[-1] if "#" in k else "-", v["state"]) for k, v in h.i
   [ "$status" -ne 0 ]
   contains "$output" 'TEXT FAILED'
   [ "$(dispatch_state)" = 'True null' ]
+}
+
+@test "dispatch sends nothing when the title or body changes during the sweep" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  SWEEP_EDITS_BODY=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'TEXT CHANGED'
+  contains "$output" 'REMOVED '
+  contains "$output" "RELEASED $SHA"
+  [ "$(dispatch_state)" = 'True null' ]
+  [ ! -e "$TMP/review.prompt" ]
 }
 
 @test "a dispatch of any kind without the text hash exits before claiming" {

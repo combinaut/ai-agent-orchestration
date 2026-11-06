@@ -69,13 +69,15 @@ Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- or
 
 ## The gate
 
-`orch-sweep-record gate --pr <url> --head <sha>` passes (exit 0) when the PR head is `<sha>` and the newest `orch-sweep` comment by the `gh` login for that exact head holds a full record that:
+`orch-sweep-record gate --pr <url> --head <sha>` runs in the PR's clone and passes (exit 0) when the PR head is `<sha>` and the newest `orch-sweep` comment by the `gh` login for that exact head holds a full record that:
 
-- passes the checks of `orch-sweep-record check`;
-- equals the copy in `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json`, which only a run on this machine writes;
+- passes the checks of `orch-sweep-record check`, its git checks included: the base resolves and is an ancestor of the head;
+- equals the copy in `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json`;
 - has no open kept fix finding.
 
-When a text sweep of that head is newer than the full one, its record must pass the same checks against `<head>.text.json` with no open fix finding, and the full record may hold open fix findings only in the `pr-text` category. Any other result exits 1 with one `ERROR:` line.
+When the newest sweep comment for that head is a text sweep, its record must pass the same checks against `<head>.text.json` with no open fix finding, and the full record may hold open fix findings only in the `pr-text` category; an older text sweep is not checked. The newest record's `pr_text_sha256`, the hash of the title and body that sweep read, must equal the live title and body; after an edit, `orch-sweep run --kind text` sweeps the new text. Any other result exits 1 with one `ERROR:` line.
+
+The local copy shows that the comment's record is the one a run wrote; anyone who can write the cache and post as the `gh` login can fake both.
 
 `orch-sweep post-review` reads `{"body": "...", "comments": [...]}` on stdin and posts the review pinned to `--head` through `lib/github_write.py`. For APPROVE it runs the gate first and posts nothing when the gate fails.
 

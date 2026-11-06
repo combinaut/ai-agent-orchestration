@@ -932,6 +932,7 @@ def run(args):
         "tree": before,
         "plan": slices,
         "pr_text": 1,
+        "pr_text_sha256": sweep_record.text_sha(pr),
         "sweep_agent_ids": [r["id"] for r in swept],
         "items": items,
         "dropped": dropped,

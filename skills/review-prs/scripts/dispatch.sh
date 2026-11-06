@@ -54,17 +54,22 @@ release() {
   "$py" "$here/prs.py" release-dispatched --url "$url" --sha "$sha" --text "$text" && echo "RELEASED $sha"
 }
 
-# The prompt is sent only when the live title and body hash equals $text.
-if ! current=$(gh_bounded api "repos/$repo/pulls/$num" --jq '{title: .title, body: .body}' | "$py" "$here/prs.py" text-hash); then
-  echo "TEXT FAILED could not read the title and body of $url; prompt not sent"
-  release
-  exit 1
-fi
-if [ "$current" != "$text" ]; then
-  echo "TEXT CHANGED the title or body of $url changed since the queue; prompt not sent"
-  release
-  exit 1
-fi
+# text_check [cleanup]: stops the dispatch, after running cleanup, unless the live title and body hash equals $text; it runs here and right before the prompt.
+text_check() {
+  if ! current=$(gh_bounded api "repos/$repo/pulls/$num" --jq '{title: .title, body: .body}' | "$py" "$here/prs.py" text-hash); then
+    echo "TEXT FAILED could not read the title and body of $url; prompt not sent"
+    ${1:+"$1"}
+    release
+    exit 1
+  fi
+  if [ "$current" != "$text" ]; then
+    echo "TEXT CHANGED the title or body of $url changed since the queue; prompt not sent"
+    ${1:+"$1"}
+    release
+    exit 1
+  fi
+}
+text_check
 
 # Ids of your submitted reviews before this dispatch; only a review outside this set counts as its result.
 if ! me=$(gh_bounded api user --jq .login) ||
@@ -245,6 +250,11 @@ Rules:
 - When finished, reply with one line: APPROVE|COMMENT|REQUEST_CHANGES — $url
 - After posting the review, reply with that one line and end your turn. Do not poll, sleep, or wait for CI, other reviewers or replies."
 
+stop_started() {
+  close_opened
+  [ -n "$opened" ] || remove_worktree
+}
+text_check stop_started
 prompt_out=$(herdr agent prompt "$agent" "$prompt" --wait --timeout 1800000 2>&1)
 status=$?
 [ -z "$prompt_out" ] || printf '%s\n' "$prompt_out"
@@ -260,7 +270,7 @@ if ! reviews=$(gh_bounded api --paginate --slurp "repos/$repo/pulls/$num/reviews
 fi
 if [ -n "$review" ]; then
   echo "$review"
-  if [[ "$review" == "LASTREVIEW APPROVED "* ]] && ! gate_out=$("${ORCH_SWEEP_RECORD_BIN:-$orch/orch-sweep-record}" gate --pr "$url" --head "$sha" 2>&1); then
+  if [[ "$review" == "LASTREVIEW APPROVED "* ]] && ! gate_out=$(cd "$cwd" && "${ORCH_SWEEP_RECORD_BIN:-$orch/orch-sweep-record}" gate --pr "$url" --head "$sha" 2>&1); then
     gate_out=$(printf '%s' "$gate_out" | tail -1)
     echo "GATE FAILED $sha ${gate_out#ERROR: }"
     mark blocked "sweep gate failed: ${gate_out#ERROR: }"

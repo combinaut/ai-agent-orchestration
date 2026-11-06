@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 
 PUSH_REASON = "Never push to main/master; open a PR (see .ai/git-workflow.md)."
@@ -434,69 +435,124 @@ def guard_attribution(args, cwd, opts, raw):
     return None
 
 
-APPROVE_REASON = "An APPROVE review goes only through orch-sweep post-review, which checks the sweep gate for the exact head: orch-sweep post-review --pr <url> --head <sha> --event APPROVE --input - (docs/sweep-script.md)."
-REVIEW_ENDPOINT = re.compile(r"(?:^|/)pulls/[^/]+/reviews(?:[/?#]|$)")
+REVIEW_REASON = "A pull-request review goes only through orch-sweep post-review, which pins the head and checks the sweep gate before APPROVE: orch-sweep post-review --pr <url> --head <sha> --event APPROVE|REQUEST_CHANGES|COMMENT --input - (docs/sweep-script.md)."
+REVIEW_ENDPOINT = re.compile(r"pulls/[^/\s]+/reviews(?![\w-])")
+REVIEW_MUTATION = re.compile(r"\b(?:add|submit)PullRequestReview\b")
+REVIEW_CALL = re.compile(r"\bpr\s+review\b")
 GRAPHQL_ENDPOINT = re.compile(r"(?:^|/)graphql/?(?:[?#]|$)")
-APPROVE_WORD = re.compile(r"\bapprove\b", re.I)
-REVIEW_MUTATION = re.compile(r"(?:add|submit)PullRequestReview\b")
-HEREDOC = re.compile(
-    r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?:\n|$)", re.S
+EXPANDING_HEREDOC = re.compile(
+    r"<<-?[ \t]*(\w+)[^\n]*\n(.*?)\n[ \t]*\1[ \t]*(?:\n|$)", re.S
 )
-HERESTRING = re.compile(r"<<<[ \t]*('[^']*'|\"[^\"]*\"|\S+)")
 STDIN_NAMES = ("-", "/dev/stdin", "/dev/fd/0")
+REVIEW_TEXT_TOOLS = {"git", "grep", "egrep", "fgrep", "rg", "orch-sweep"}
 
 
-def stdin_document(raw):
-    """The heredoc or here-string text the command feeds on stdin, else None when stdin is opaque."""
-    heredoc = HEREDOC.search(raw)
-    if heredoc:
-        text, quoted = heredoc.group(3), bool(heredoc.group(1))
-    else:
-        string = HERESTRING.search(raw)
-        if not string:
-            return None
-        text, quoted = string.group(1), string.group(1).startswith("'")
-    if "`" in text or "$(" in text or (not quoted and "$" in text):
-        return None
-    return text
+def review_marker(text):
+    text = urllib.parse.unquote(text)
+    return bool(
+        REVIEW_ENDPOINT.search(text)
+        or REVIEW_MUTATION.search(text)
+        or REVIEW_CALL.search(text)
+    )
 
 
-def guard_approve(args, cwd, opts, raw):
-    """Denies an APPROVE review posted with gh; orch-sweep post-review posts it after the sweep gate."""
-    if len(args) >= 2 and args[:2] == ["pr", "review"]:
+def expands(masked):
+    return "$" in masked or "`" in masked
+
+
+def review_api(args, masked, where, piped, raw):
+    """Whether a gh api call can write a pull-request review; a value the shell expands counts as unknown."""
+    endpoint = api_endpoint(masked)
+    plain = urllib.parse.unquote(unmask(endpoint))
+    methods = flag_values(masked, ("-X", "--method"))
+    fields = flag_values(masked, ("-f", "-F", "--raw-field", "--field"))
+    inputs = flag_values(masked, ("--input",))
+    write = bool(inputs) or (
+        any(unmask(m).upper() != "GET" for m in methods) if methods else bool(fields)
+    )
+    if GRAPHQL_ENDPOINT.search(plain):
+        texts = [unmask(a) for a in masked]
+        sources = inputs + [
+            value[1:]
+            for key, _, value in (f.partition("=") for f in fields)
+            if value.startswith("@")
+        ]
+        for name in sources:
+            name = unmask(name)
+            if name in STDIN_NAMES:
+                if piped or "--guard-heredoc" not in args:
+                    return True
+                if any(expands(m[2]) for m in EXPANDING_HEREDOC.finditer(raw)):
+                    return True
+                continue
+            content = file_text(name, where)
+            if not content or content in (
+                FILE_TOO_LARGE_REASON,
+                FILE_NONREGULAR_REASON,
+            ):
+                return True
+            texts.append(content)
         if any(
-            a in ("-a", "--approve") or a.startswith("--approve=") for a in args[2:]
+            key == "query" and expands(value)
+            for key, _, value in (f.partition("=") for f in fields)
         ):
-            return APPROVE_REASON
-        return None
-    if not args or args[0] != "api":
-        return None
-    endpoint = api_endpoint(args[1:]) or ""
-    graphql = bool(GRAPHQL_ENDPOINT.search(endpoint))
-    opaque = "$" in endpoint or "`" in endpoint
-    if not graphql and not REVIEW_ENDPOINT.search(endpoint) and not opaque:
-        return None
-    texts = [raw]
-    for name in flag_values(args, ("--input",)):
-        if name in STDIN_NAMES:
-            document = stdin_document(raw)
-            if document is None:
-                return APPROVE_REASON
-            texts.append(document)
+            return True
+        return bool(REVIEW_MUTATION.search(urllib.parse.unquote("\n".join(texts))))
+    if endpoint.endswith("$"):
+        return True
+    return write and (expands(endpoint) or bool(REVIEW_ENDPOINT.search(plain)))
+
+
+def review_segment(segment, where, piped, raw):
+    """Whether one simple command can write a pull-request review other than through orch-sweep post-review."""
+    cleaned, stdin = split_redirections(segment)
+    plain = [unmask(word) for word in cleaned]
+    words, _ = unwrap(plain)
+    if not words:
+        return False
+    masked = cleaned[len(plain) - len(words) :]
+    for index, word in enumerate(words):
+        if os.path.basename(word) != "gh":
             continue
-        content = file_text(name, cwd)
-        if content in (FILE_TOO_LARGE_REASON, FILE_NONREGULAR_REASON):
-            return content
-        texts.append(content)
-    for field in flag_values(args, ("-f", "-F", "--raw-field", "--field")):
-        _, _, value = field.partition("=")
-        if value.startswith("@"):
-            texts.append(file_text(value[1:], cwd))
-    text = "\n".join(texts)
-    if graphql and not REVIEW_MUTATION.search(text):
-        return None
-    if APPROVE_WORD.search(text) or "\\u" in text:
-        return APPROVE_REASON
+        args = unwrap_gh(words[index + 1 :])
+        args_masked = masked[len(words) - len(args) :]
+        if args[:2] == ["pr", "review"] or args[:2] == ["alias", "import"]:
+            return True
+        if args[:2] == ["alias", "set"] and (
+            review_marker(" ".join(args)) or any(a.startswith("!") for a in args[2:])
+        ):
+            return True
+        if args[:1] == ["api"] and review_api(
+            args[1:], args_masked[1:], where, piped or stdin, raw
+        ):
+            return True
+    name = os.path.basename(words[0])
+    if name == "gh" or (
+        name in REVIEW_TEXT_TOOLS and not any(w.startswith("alias.") for w in words)
+    ):
+        return False
+    return review_marker(" ".join(unmask(word) for word in segment))
+
+
+def guard_approve(text, where, depth=0):
+    """Denies every pull-request review write except orch-sweep post-review, in nested shells and substitutions too."""
+    if depth >= 3:
+        return REVIEW_REASON if review_marker(text) else None
+    try:
+        units = [unit for _, unit, _ in flow_units(text)]
+    except ValueError:
+        return REVIEW_REASON if review_marker(text) else None
+    for unit in units:
+        for position, segment in enumerate(unit):
+            if review_segment(segment, where, position > 0, text):
+                return REVIEW_REASON
+            words, _ = unwrap(without_redirections(segment))
+            for nested in [
+                body for word in segment for body in word_substitutions(word)
+            ] + shell_programs(words):
+                reason = guard_approve(nested, where, depth + 1)
+                if reason:
+                    return reason
     return None
 
 
@@ -1545,18 +1601,18 @@ def guard_big_repo_reads(args, cwd, opts, raw, pipeline=()):
 def expand_heredocs(command):
     # Handle common direct heredocs and $(cat <<EOF ... EOF) message forms.
     pattern = re.compile(
-        r"<<(-?)[ \t]*(['\"]?)([A-Za-z_][\w]*)\2[^\n]*\n(.*?)\n[\t]*\3(?=\s|$)", re.S
+        r"<<(-?)[ \t]*(['\"]?)([A-Za-z_][\w]*)\2([^\n]*)\n(.*?)\n[\t]*\3(?=\s|$)", re.S
     )
 
     def replace(m):
-        body = m[4]
+        body = m[5]
         if m[1]:
             body = "\n".join(line.lstrip("\t") for line in body.splitlines())
-        return "--guard-heredoc " + shlex.quote(body)
+        return "--guard-heredoc " + shlex.quote(body) + m[4]
 
     # Preserve quoted substitution as a single -m/--body value.
     sub = re.compile(r'"?\$\(cat[ \t]+' + pattern.pattern + r'[ \t\n]*\)"?', re.S)
-    command = sub.sub(lambda m: shlex.quote(m[4]), command)
+    command = sub.sub(lambda m: shlex.quote(m[5]), command)
     return pattern.sub(replace, command)
 
 
@@ -2233,14 +2289,14 @@ def evaluate_words(words, where, command, disabled, pipeline):
         guards = (guard_push, guard_attribution, guard_memory, guard_big_repo_reads)
     elif executable == "gh":
         args = unwrap_gh(args)
-        guards = (guard_attribution, guard_approve)
+        guards = (guard_attribution,)
     elif (wrapped_args := github_write_gh_args(words)) is GITHUB_WRITE_INVALID:
         return GITHUB_WRITE_OPTION_REASON
     elif wrapped_args:
         if (wrapped_args := unwrap_github_write(wrapped_args)) is None:
             return GITHUB_WRITE_OPTION_REASON
         args = unwrap_gh(wrapped_args)
-        guards = (guard_attribution, guard_approve)
+        guards = (guard_attribution,)
     elif executable in ("herdr", "pi", "cursor", "cursor-agent", "agent"):
         return (
             None
@@ -2271,6 +2327,10 @@ def evaluate(command, cwd, disabled=()):
             reason = guard_broad_kill(normalized_command) or guard_script_kill(
                 normalized_command, cwd, disabled
             )
+            if reason:
+                return reason
+        if "guard_approve" not in disabled:
+            reason = guard_approve(normalized_command, cwd)
             if reason:
                 return reason
         lookup_ok = quiet_lookup(command)
