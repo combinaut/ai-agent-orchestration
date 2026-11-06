@@ -6,7 +6,7 @@
   prs.py dispatch-queue [scope]                   JSON: Ready PRs needing (re)review
   prs.py mark-dispatched --url U --sha S [--text T] [--state pending|blocked|done] [--reason R] [--agent N] [--pane P]
   prs.py claim-dispatched --url U --sha S [--text T] [--agent N]   marks S pending; exit 3 when a review of S is pending, S is blocked, or S's newest completed review holds the same text
-  prs.py release-dispatched --url U --sha S [--text T]   drops S while it is pending, and every blocked record of its head
+  prs.py release-dispatched --url U --sha S [--text T --exact]   drops every pending and blocked record of S, never a done one; exit 1 when none; --exact drops only the pending record of S with text T
   prs.py text-hash                                the hash of the PR title and body given as {"title","body"} JSON on stdin
   prs.py remote --cwd C --repo R                  the remote of clone C (origin or upstream) that is the GitHub repo R
   prs.py review-ids --login L                     stdin: gh api --paginate --slurp .../reviews; ids of L's submitted reviews
@@ -20,6 +20,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -192,9 +193,17 @@ def my_review_sha(pr):
     return ((nodes[-1].get("commit") or {}).get("oid")) if nodes else None
 
 
+TASK_BOX = re.compile(r"(?m)^([ \t]*(?:[-*+]|\d+[.)])[ \t]+)\[[ xX]\]")
+
+
+def normalized(text):
+    """The text with task-list boxes unticked and every run of whitespace as one space."""
+    return " ".join(TASK_BOX.sub(r"\1[ ]", text or "").split())
+
+
 def text_hash(pr):
-    """Hash of the PR title and body."""
-    raw = f"{pr.get('title') or ''}\0{pr.get('body') or ''}"
+    """Hash of the PR title and body, ignoring whitespace and task-list ticks."""
+    raw = f"{normalized(pr.get('title'))}\0{normalized(pr.get('body'))}"
     return hashlib.sha1(raw.encode()).hexdigest()[:12]
 
 
@@ -217,10 +226,56 @@ def latest_done_key(known, sha):
     return max(done)[1] if done else None
 
 
-def head_pending(known, sha):
-    """Whether a review of this head is running."""
+PENDING_STUCK = 1800
+PENDING_EXPIRES = 3600
+TEXT_REVIEWS_MAX = 3
+
+
+def record_age(record, now=None):
+    """Seconds since the record was written; 0 when it has no valid time."""
+    try:
+        then = datetime.fromisoformat(record.get("at") or "")
+    except ValueError:
+        return 0
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    return ((now or datetime.now(timezone.utc)) - then).total_seconds()
+
+
+def head_pending(known, sha, key=None, now=None):
+    """Whether a review of this head is running: a pending record younger than PENDING_EXPIRES, or the pending record of key itself."""
     return any(
-        record.get("state") == "pending" for record in head_records(known, sha).values()
+        record.get("state") == "pending"
+        and (k == key or record_age(record, now) < PENDING_EXPIRES)
+        for k, record in head_records(known, sha).items()
+    )
+
+
+def stuck_records(known, sha, now=None):
+    """The pending records of this head that have run longer than PENDING_STUCK, as {key, agent, pane, age, expired}."""
+    return [
+        {
+            "key": k,
+            "agent": record.get("agent"),
+            "pane": record.get("pane"),
+            "age": int(record_age(record, now)),
+            "expired": record_age(record, now) >= PENDING_EXPIRES,
+        }
+        for k, record in head_records(known, sha).items()
+        if record.get("state") == "pending" and record_age(record, now) >= PENDING_STUCK
+    ]
+
+
+def text_capped(known, sha, key):
+    """Whether key is a title or body re-review of this head and TEXT_REVIEWS_MAX of them are already done or pending."""
+    return (
+        key != sha
+        and sum(
+            1
+            for k, record in head_records(known, sha).items()
+            if k != sha and record.get("state") in ("done", "pending")
+        )
+        >= TEXT_REVIEWS_MAX
     )
 
 
@@ -240,15 +295,17 @@ def claim_key(known, sha, text):
     return latest if known[latest].get("text") in (None, text) else f"{sha}#{text}"
 
 
-def review_taken(known, sha, key):
-    """Whether key needs no new review: a review of this head is running or blocked, key has a record that is not done, or key holds the newest completed one."""
+def review_taken(known, sha, key, now=None):
+    """Whether key needs no new review: a review of this head is running or blocked, key holds the newest completed one, or the head's text re-reviews are capped."""
     record = known.get(key)
     return (
-        head_pending(known, sha)
+        head_pending(known, sha, key, now)
         or blocked_record(known, sha) is not None
+        or text_capped(known, sha, key)
         or bool(
             record
-            and (record.get("state") != "done" or key == latest_done_key(known, sha))
+            and record.get("state") == "done"
+            and key == latest_done_key(known, sha)
         )
     )
 
@@ -848,13 +905,28 @@ def cmd_dispatch_queue(args, scope, label):
     dispatched = load_dispatched()
     queue = []
     blocked = []
+    stuck = []
+    capped = []
     for pr in nodes:
+        records = dispatched_records(pr, dispatched)
+        head = pr.get("headRefOid") or ""
+        stuck.extend(
+            {"url": pr["url"], "sha": head, **entry}
+            for entry in stuck_records(records, head)
+        )
         ok, kind = needs_dispatch(pr, dispatched)
         if ok:
             queue.append(dispatch_entry(pr, kind, model))
         else:
-            records = dispatched_records(pr, dispatched)
-            head = pr.get("headRefOid") or ""
+            key = claim_key(records, head, text_hash(pr))
+            if (
+                bucket(pr) == "ready"
+                and text_capped(records, head, key)
+                and key != latest_done_key(records, head)
+                and not head_pending(records, head, key)
+                and blocked_record(records, head) is None
+            ):
+                capped.append({"url": pr["url"], "sha": head, "max": TEXT_REVIEWS_MAX})
             record = blocked_record(records, head)
             if record:
                 blocked.append(
@@ -871,6 +943,8 @@ def cmd_dispatch_queue(args, scope, label):
                 "model": model,
                 "queue": queue,
                 "blocked": blocked,
+                "stuck": stuck,
+                "capped": capped,
                 "skipped": sum(1 for p in nodes if bucket(p) == "ready") - len(queue),
             },
             indent=2,
@@ -968,19 +1042,19 @@ def cmd_mark_dispatched(args, _scope, _label):
 def cmd_release_dispatched(args, _scope, _label):
     if not args.url or not args.sha:
         sys.exit("release-dispatched needs --url and --sha")
+    dropped = []
 
     def release(data):
         known = dict(heads(data.get(args.url) or {}))
-        key = claim_key(known, args.sha, args.text)
-        drop = {
-            k
-            for k, r in head_records(known, args.sha).items()
-            if r.get("state") == "blocked"
-        }
-        if (known.get(key) or {}).get("state") == "pending":
-            drop.add(key)
+        records = head_records(known, args.sha)
+        if args.exact:
+            key = claim_key(known, args.sha, args.text)
+            drop = {key} if (known.get(key) or {}).get("state") == "pending" else set()
+        else:
+            drop = {k for k, r in records.items() if r.get("state") != "done"}
         if not drop:
             return
+        dropped.extend(drop)
         for k in drop:
             del known[k]
         if known:
@@ -989,6 +1063,8 @@ def cmd_release_dispatched(args, _scope, _label):
             data.pop(args.url, None)
 
     update_dispatched(release)
+    if not dropped:
+        sys.exit(f"nothing to release for {args.sha}")
 
 
 def submitted_reviews(login):
@@ -1071,6 +1147,11 @@ def main():
     )
     parser.add_argument(
         "--text", help="claim/mark/release-dispatched: hash of the PR title and body"
+    )
+    parser.add_argument(
+        "--exact",
+        action="store_true",
+        help="release-dispatched: drop only the pending claim for --sha and --text",
     )
     parser.add_argument("--agent", help="mark-dispatched: herdr agent name")
     parser.add_argument("--pane", help="mark-dispatched: herdr pane id")
