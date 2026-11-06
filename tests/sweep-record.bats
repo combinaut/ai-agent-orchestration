@@ -211,6 +211,15 @@ check() {
   [ "$stderr" = "ERROR: $REC: validator a1b2c3 was written before commit $HEAD_SHA" ]
 }
 
+@test "an unreadable transcript fails with one ERROR line" {
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/-some-project/$SESSION/subagents/agent-a1b2c3.jsonl"
+  record 2 '["a1b2c3"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "${stderr#ERROR: $REC: validator a1b2c3 transcript cannot read: }" != "$stderr" ]
+  [ "$(printf '%s\n' "$stderr" | wc -l | tr -d ' ')" -eq 1 ]
+}
+
 @test "a transcript that does not name the head fails" {
   claude_agent a1b2c3 "validate some other commit"
   record 2 '["a1b2c3"]'

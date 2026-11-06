@@ -126,11 +126,14 @@ def transcript_problem(path, swept, session, agent_id):
     committed = git("show", "-s", "--format=%ct", swept)
     if committed is None:
         return f"{path}: git cannot read the commit time of {swept}"
-    if os.path.getmtime(found) < int(committed):
-        return f"{path}: validator {agent_id} was written before commit {swept}"
-    with open(found, encoding="utf-8", errors="replace") as handle:
-        if swept not in handle.read():
-            return f"{path}: validator {agent_id} never names {swept}"
+    try:
+        if os.path.getmtime(found) < int(committed):
+            return f"{path}: validator {agent_id} was written before commit {swept}"
+        with open(found, encoding="utf-8", errors="replace") as handle:
+            if swept not in handle.read():
+                return f"{path}: validator {agent_id} never names {swept}"
+    except OSError as error:
+        return f"{path}: validator {agent_id} transcript cannot read: {error}"
     return None
 
 
