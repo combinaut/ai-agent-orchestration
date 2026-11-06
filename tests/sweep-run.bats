@@ -409,6 +409,18 @@ assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_S
   [ -z "$survived" ]
 }
 
+@test "codex agents load no user or project config from the checkout" {
+  run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys
+calls = [json.loads(line) for line in open(sys.argv[1])]
+codex = [c["argv"] for c in calls if c["kind"] == "codex"]
+assert codex, calls
+for argv in codex:
+    assert "--ignore-user-config" in argv, argv
+    assert argv[argv.index("-c") + 1] == "project_doc_max_bytes=0", argv' "$TMP/agent.calls"
+}
+
 @test "the comment lists dropped findings in their own table" {
   FAKE_FINDINGS=1 FAKE_VERDICT=FALSE run_sweep
   [ "$status" -eq 0 ]
