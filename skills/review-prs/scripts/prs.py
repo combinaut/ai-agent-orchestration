@@ -575,7 +575,8 @@ def changes(before, after, login=None):
         if was.get("sha") and now.get("sha") and was["sha"] != now["sha"]:
             parts.append(f"new commits ({now['sha'][:7]})")
         if not was.get("requested") and now.get("requested"):
-            parts.append("review requested again")
+            lines.append(f"ready: {url} — {now['title']}: review requested again")
+            continue
         if was["ci"] != now["ci"]:
             label = {
                 "SUCCESS": "CI green",

@@ -1461,7 +1461,7 @@ assert again != first and again.startswith(first[:10]) and len(again) <= 32
 before = prs.snapshot([pr])
 pr["reviewRequests"] = {"nodes": []}
 after = prs.snapshot([pr])
-assert prs.changes(after, before)[0] == ["changed: %s — t: review requested again" % url]
+assert prs.changes(after, before)[0] == ["ready: %s — t: review requested again" % url]
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
