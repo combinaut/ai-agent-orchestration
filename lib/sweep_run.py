@@ -926,12 +926,26 @@ def run(args):
     paths = [cache_path(repo, number, args.head)] + (
         [Path(args.record)] if args.record else []
     )
-    for path in paths:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(record, indent=1) + "\n")
-    why, _ = sweep_record.problem(str(paths[0]), args.head)
-    if why:
-        raise Failure(f"the record fails its own check: {why}")
+    data = json.dumps(record, indent=1) + "\n"
+    staged = []
+    try:
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle, temp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+            staged.append(temp)
+            with os.fdopen(handle, "w") as out:
+                out.write(data)
+        why, _ = sweep_record.problem(staged[0], args.head)
+        if why:
+            raise Failure(
+                f"the record fails its own check: {why.replace(staged[0], str(paths[0]))}"
+            )
+        for temp, path in zip(staged, paths):
+            os.replace(temp, path)
+        staged = []
+    finally:
+        for temp in staged:
+            Path(temp).unlink(missing_ok=True)
     print(f"RECORD {paths[-1]}")
     if not args.no_comment:
         body = fitting_body(record)

@@ -561,6 +561,25 @@ print(sweep_run.gh("api", "x").strip())' "$ROOT/lib"
   fi
 }
 
+@test "a record that fails its own check writes no file and keeps the older record" {
+  run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  cache="$XDG_CACHE_HOME/review-prs/sweeps/acme/app/7"
+  cp "$cache/$HEAD_SHA.json" "$TMP/older.json"
+  cd "$REPO"
+  run --separate-stderr python3 -c 'import sys
+sys.path.insert(0, sys.argv[1])
+import sweep_record, sweep_run
+sweep_record.FIELDS += ("required_by_this_test",)
+sys.exit(sweep_run.main(["orch-sweep", *sys.argv[2:]]))' "$ROOT/lib" run --pr "$PR" --head "$HEAD_SHA" --base-ref main --record "$TMP/new.json" --no-comment
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"the record fails its own check"*"missing field required_by_this_test"* ]]
+  cmp "$cache/$HEAD_SHA.json" "$TMP/older.json"
+  [ ! -e "$TMP/new.json" ]
+  [ "$(ls -A "$cache")" = "$HEAD_SHA.json" ]
+  [ "$(ls -A "$TMP" | grep -c '^\.')" -eq 0 ]
+}
+
 @test "a relative record path is relative to the directory the sweep starts in" {
   name=$(basename "$TMP")
   cd "$REPO/lib"
