@@ -338,6 +338,7 @@ def snapshot(nodes):
             if p["mergeable"] == "UNKNOWN"
             else p["mergeable"] == "CONFLICTING",
             "sha": p.get("headRefOid") or "",
+            "requested": bool((p.get("reviewRequests") or {}).get("nodes")),
         }
         for p in nodes
     }
@@ -573,6 +574,8 @@ def changes(before, after, login=None):
             parts.append("back to draft")
         if was.get("sha") and now.get("sha") and was["sha"] != now["sha"]:
             parts.append(f"new commits ({now['sha'][:7]})")
+        if not was.get("requested") and now.get("requested"):
+            parts.append("review requested again")
         if was["ci"] != now["ci"]:
             label = {
                 "SUCCESS": "CI green",

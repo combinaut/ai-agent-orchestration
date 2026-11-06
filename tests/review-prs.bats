@@ -1458,6 +1458,10 @@ assert prs.needs_dispatch(pr, {url: {"heads": {"A": {"state": "blocked"}}}}, "me
 first = prs.agent_name("acme/app", 7, "A" * 40)
 again = prs.agent_name("acme/app", 7, "A" * 40, "2026-01-01T00:00:00+00:00")
 assert again != first and again.startswith(first[:10]) and len(again) <= 32
+before = prs.snapshot([pr])
+pr["reviewRequests"] = {"nodes": []}
+after = prs.snapshot([pr])
+assert prs.changes(after, before)[0] == ["changed: %s — t: review requested again" % url]
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
@@ -1562,6 +1566,8 @@ assert r["stuck"] == [{"url": old["url"], "sha": "A", "agent": "rev1", "pane": "
   contains "$prompt" 'Run finalize-sweep (~/.claude/skills/finalize-sweep/SKILL.md) in report-only mode'
   contains "$prompt" "report-only pr=https://github.com/acme/app/pull/7 max-slices=25 and base ref origin/main"
   contains "$prompt" 'on your first review of this PR, and on a head you would APPROVE'
+  contains "$prompt" 'one of your earlier submitted reviews already holds a marker'
+  not_contains "$prompt" 'a review or comment on the PR already holds a marker'
   contains "$prompt" 'Put the findings table in the review body, one post per head'
   contains "$prompt" '<!-- finalize-sweep {"head":"'"$SHA"'","dropped":'
   contains "$prompt" 'redundant but not misleading'
