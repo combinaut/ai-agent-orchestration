@@ -89,3 +89,68 @@ The only deviation is a sweep over 25 slices. The user allows it for one head wi
 ## Exit codes
 
 `0` record written (and the comment posted, unless `--no-comment`); `1` usage, checkout or GitHub error; `2` the tree changed; `3` over 25 slices; `4` an agent failed after its retry; `5` the record does not fit in one comment; `128 + n` stopped by signal `n`.
+
+## GitHub sweep-record status
+
+Two workflows publish one commit status context, `sweep-record`. The read-only
+`Sweep record refresh` workflow runs for PR opened, synchronize, reopened, edited
+and ready_for_review events, including drafts. Its completion triggers the
+`Sweep record` workflow on the default branch. That trusted workflow also runs
+on PR issue-comment creation, edits and deletion, and on the same five PR
+metadata events through `pull_request_target`. This trusted metadata handler
+keeps refreshing even when a PR removes or changes its refresh workflow. Both workflow files must be
+on the default branch before this works; an unmerged workflow cannot validate
+itself through `workflow_run`.
+
+The publisher checks out the base repository's default branch, with credentials
+removed after checkout, and fetches PR and base objects only as data. It never
+runs PR code or downloads artifacts from the triggering run. The job has
+`contents: read`, `pull-requests: read`, and `statuses: write`; the PR trigger has
+no permissions. This separates fork PR events from the token that writes the
+status. The `pull_request_target` jobs execute only default-branch code; PR
+fields are read through the event JSON and API as data, never interpolated
+into a shell command.
+
+CI calls the same `comments_problem` function as the local gate. It accepts
+only comments whose GitHub `author_association` is `OWNER`, `MEMBER` or
+`COLLABORATOR` **and** whose login is the PR author or an exact login in
+`allowed_authors` in the trusted default branch's `.github/sweep-record.json`.
+Missing or other associations are ignored even for an allowlisted login. An
+outside fork author cannot self-attest merely by opening the PR. This
+association requirement applies to CI; the local gate retains its authenticated
+reviewer-login and local-cache checks.
+
+Trust uses login strings. After an account rename or deletion, another account
+may claim an allowlisted login; review the configuration after such changes.
+The repository-association requirement still applies to that login.
+Comments remain in creation order, as in the local gate: editing a comment
+does not make it newer. The newest full record for the exact head, and a newer
+text record when present, must satisfy the gate's shape, counts, verdicts,
+git ancestry, current merge base, open-fix and title/body hash checks.
+
+CI has no local cache or user's allow file. It skips both the canonical cache
+comparison and the allow-file hash comparison; a deviation must still have a
+valid record shape. An allowed author can fabricate a record. This is an
+attestation by trusted authors, not proof that agents actually ran. The local
+gate retains its stricter cache and allow-file checks.
+
+The status is refreshed from live PR metadata, not event text. Immediately
+before publication, CI re-reads metadata and comments and compares head/base,
+title/body, and each comment's ID, updated time, body, author login and
+association with the validated snapshot. Any detected change fails that
+evaluation. GitHub status writes
+and PR edits are not atomic; a later event refreshes the result. A base-branch
+push alone does not trigger these workflows; comment on the PR to refresh its
+merge-base check. Required-check configuration is a separate repository-admin
+step. The publisher serializes runs per PR, and each run reads live state. No
+workflow can report when Actions itself is disabled.
+Statuses are attached to commits, so two PRs sharing one head SHA also share
+its status context. The workflow event trust boundary follows
+[GitHub's workflow_run documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run).
+
+The workflow-shape test parses both workflows. It restricts run expressions to
+`matrix.`, `needs.`, `steps.` and `github.token`, rejects Git/gh checkouts,
+worktrees, PR ref fetches and artifact downloads, and verifies dictionary
+permissions with status writes only in `jobs.validate`. The refresh workflow
+must have empty permissions and no action steps. These assertions test the
+checked-in shape; they are not a general shell sandbox.

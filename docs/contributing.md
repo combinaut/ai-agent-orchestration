@@ -8,7 +8,7 @@ tests/run.sh
 
 The script runs the Bats suites, the guard tests, the watcher tests and the Chrome extension tests. They run in a sandbox that blocks `launchctl`, `systemctl` and `herdr`, so nothing touches your services.
 
-You need `bats`, `python3` and `node`. Linux also needs `bubblewrap`. Individual test targets are not supported. Details: [`tests/README.md`](../tests/README.md).
+You need `bats`, `python3`, `ruby` (standard-library YAML parser) and `node`. Linux also needs `bubblewrap`. Individual test targets are not supported. Details: [`tests/README.md`](../tests/README.md).
 
 ## 🐍 Python style
 
