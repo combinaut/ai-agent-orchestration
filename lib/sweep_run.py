@@ -645,7 +645,7 @@ def context(pr, comments, threads, reviews):
             outcomes.append(((c.get("user") or {}).get("login", "?"), found))
     if outcomes:
         parts.append(
-            "Earlier sweep outcomes, every finding and its verdict, by comment author:\n"
+            "Earlier sweep outcomes and their verdicts, by comment author:\n"
             + history(outcomes)
         )
     reviews = [r for r in reviews if r.get("body")]

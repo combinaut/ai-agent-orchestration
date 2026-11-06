@@ -19,7 +19,7 @@ with (tmp / "agent.calls").open("a") as log:
 prompts = tmp / "prompts"
 prompts.mkdir(exist_ok=True)
 (prompts / f"{role}.{os.getpid()}").write_text(prompt)
-diff = re.search(r" is in (\S+\.diff)[;.]", prompt)
+diff = re.search(r" is in (.+?\.diff)[;.]", prompt)
 if diff:
     (prompts / f"{role}.{os.getpid()}.diff").write_bytes(
         Path(diff.group(1)).read_bytes()
