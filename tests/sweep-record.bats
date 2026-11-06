@@ -526,11 +526,11 @@ PY
   [ "$stderr" = "ERROR: $REC: plan: slice lib: binary files go only in the binary slice" ]
 }
 
-@test "an orch-sweep record of a kind other than full fails" {
+@test "an orch-sweep record of a kind other than full or text fails" {
   script_record 'r["kind"] = "incremental"'
   check
   [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: kind must be full" ]
+  [ "$stderr" = "ERROR: $REC: kind must be full or text" ]
 }
 
 @test "a tree taken at another head fails" {
