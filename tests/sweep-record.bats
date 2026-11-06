@@ -202,6 +202,16 @@ check() {
   [ "$status" -eq 1 ]
 }
 
+@test "a malformed Codex rollout is skipped" {
+  local id=01a1b0a2-073c-7e70
+  mkdir -p "$CODEX_HOME/sessions/2026/11/06"
+  printf '%s\n' '{"type":"session_meta","payload":{"id":"01a1b0a2-073c-7e70","source":{"subagent":{"thread_spawn":[]}}}}' >"$CODEX_HOME/sessions/2026/11/06/rollout-2026-11-06T10-00-00-$id.jsonl"
+  record 2 "[\"$id\"]"
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator $id is no supported Claude or Codex subagent transcript of session $SESSION; Pi and Cursor validators are unsupported" ]
+}
+
 @test "a transcript written before the head commit fails" {
   claude_agent a1b2c3
   touch -t 200001010000 "$CLAUDE_CONFIG_DIR/projects/-some-project/$SESSION/subagents/agent-a1b2c3.jsonl"
