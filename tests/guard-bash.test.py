@@ -1332,6 +1332,28 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "curl -X POST $'https://api.github.com/repos/a/b/pulls/7/revi\\x65ws'",
             True,
         ),
+        ("gh pr review in locale quotes", 'gh pr $"review" 7 --approve', True),
+        (
+            "curl review in locale quotes",
+            'curl -X POST $"https://api.github.com/repos/a/b/pulls/7/reviews"',
+            True,
+        ),
+        (
+            "gh pr review in locale quotes in sh -c",
+            "sh -c 'gh pr $\"review\" 7 --approve'",
+            True,
+        ),
+        (
+            "gh pr review in locale quotes in a substitution",
+            'echo "$(gh pr $"review" 7 --approve)"',
+            True,
+        ),
+        (
+            "gh pr review in locale quotes in eval",
+            'eval \'gh pr $"rev""iew" 7 --approve\'',
+            True,
+        ),
+        ("locale quotes without gh or curl", 'echo $"review"', False),
         (
             "API review with a heredoc between gh and api",
             f"gh <<'JSON' api {ep} --input -\n{{}}\nJSON",

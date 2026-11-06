@@ -446,7 +446,7 @@ EXPANDING_HEREDOC = re.compile(
 STDIN_NAMES = ("-", "/dev/stdin", "/dev/fd/0")
 REVIEW_TEXT_TOOLS = {"git", "grep", "egrep", "fgrep", "rg", "orch-sweep"}
 GH_API_WORD = re.compile(r"(?:^|\s)api(?:\s|$)")
-ANSI_C_QUOTE = re.compile(r"\$'")
+DOLLAR_QUOTE = re.compile(r"\$['\"]")
 GH_OR_CURL = re.compile(r"\b(?:gh|curl)\b")
 
 
@@ -567,7 +567,7 @@ def guard_approve(text, where, depth=0, moved=False):
     """Denies every pull-request review write except orch-sweep post-review, in nested shells and substitutions too."""
     if depth >= 3:
         return REVIEW_REASON if review_marker(text) else None
-    if ANSI_C_QUOTE.search(text) and GH_OR_CURL.search(text):
+    if DOLLAR_QUOTE.search(text) and GH_OR_CURL.search(text):
         return REVIEW_REASON
     try:
         units = [unit for _, unit, _ in flow_units(text)]
