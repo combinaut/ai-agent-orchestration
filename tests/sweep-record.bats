@@ -216,7 +216,7 @@ check() {
   record 2 '["a1b2c3"]'
   check
   [ "$status" -eq 1 ]
-  [ "${stderr#ERROR: $REC: validator a1b2c3 transcript cannot read: }" != "$stderr" ]
+  [ "${stderr#"ERROR: $REC: validator a1b2c3 transcript cannot read: "}" != "$stderr" ]
   [ "$(printf '%s\n' "$stderr" | wc -l | tr -d ' ')" -eq 1 ]
 }
 
