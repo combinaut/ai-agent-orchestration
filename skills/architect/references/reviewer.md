@@ -10,14 +10,6 @@ For every claim the PR makes, and every risk you find, open the code at that hea
 Write <report path> as this table and nothing else before it:
 
 | claim | file:line opened | verdict | evidence | rung | fix the author can apply |
-
-Then run the repo's review.finalize_commands (default /finalize-sweep; with [] skip this step) over the whole PR diff, report-only: skip its approval and apply steps. Add its kept findings table below the claims table.
-Class each finding fix (false, misleading or redundant; dead or duplicate code or specs; a message that blames the wrong cause) or nit (pure style or taste).
-Read the earlier sweep comments on the PR first: a finding dropped earlier for a reason that still holds in the code (RESPECT_DROP) is not raised again.
-Post the table as ONE PR comment: python3 <orch-root>/lib/github_write.py --timeout 240 api -X POST repos/<owner>/<repo>/issues/<number>/comments --input -
-The comment always names the swept head SHA in full (40 characters), also with no findings; with none it says the sweep ran, that SHA and "no findings". Use the comment for the verdict. An open kept fix finding blocks APPROVE; nits and dropped findings never block.
-Every new head gets the sweep again over the whole PR diff.
-Goal: when you pass the PR, a human reviewer finds nothing left to clean up.
 ```
 
 - **claim**: one sentence, from the PR body, a commit message, a comment or your own reading.
