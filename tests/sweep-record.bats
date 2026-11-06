@@ -516,6 +516,13 @@ PY
   [ "$stderr" = "ERROR: $REC: plan: slice lib: lines is 29, its files add up to 30" ]
 }
 
+@test "a slice line count that is not an integer fails" {
+  script_record 'r["plan"][0]["lines"] = 30.0'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: plan: slice lib: lines is 30.0, its files add up to 30" ]
+}
+
 @test "a binary file outside the binary slice fails" {
   script_record 'r["plan"][0]["files"].append(r["plan"][1]["files"].pop()); r["plan"].pop(); r["slices"] = 1; r["sweep_agents"] = 3; r["sweep_agent_ids"] = r["sweep_agent_ids"][:3]'
   check

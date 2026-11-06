@@ -80,7 +80,8 @@ def plan_problem(slices, paths=None):
         if chunk.get("name") == "binary" and not all(binary):
             return "the binary slice holds a text file"
         size = sum(n or 0 for n in lines)
-        if chunk.get("lines") != size:
+        total = chunk.get("lines")
+        if isinstance(total, bool) or not isinstance(total, int) or total != size:
             return f"slice {chunk.get('name')}: lines is {chunk.get('lines')}, its files add up to {size}"
         if size > SLICE_LINES and len(files) > 1:
             return f"slice {chunk.get('name')}: {size} lines in {len(files)} files; only a single file may pass {SLICE_LINES}"
