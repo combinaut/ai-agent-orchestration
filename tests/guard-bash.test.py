@@ -1253,6 +1253,28 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "cat <<'X' | gh pr review 7 --approve\nhi\nX",
             True,
         ),
+        ("gh pr --repo review", "gh pr --repo a/b review 7 --approve", True),
+        ("gh pr -R review", "gh pr -R a/b review 7 --approve", True),
+        (
+            "gh pr -R review under sh -c",
+            "sh -c 'gh pr -R a/b review 7 --approve'",
+            True,
+        ),
+        (
+            "gh pr review after a heredoc opener in a substitution",
+            "x=$(cat <<'EOF' | gh pr review 7 --approve -F -\nbody\nEOF\n)",
+            True,
+        ),
+        (
+            "API review after a heredoc opener in a quoted substitution",
+            "x=\"$(cat <<'EOF' | gh api repos/a/b/pulls/7/reviews -f event=APPROVE\nbody\nEOF\n)\"",
+            True,
+        ),
+        (
+            "GraphQL query file in a cd and a nested shell",
+            f"cd {root}/sub && sh -c 'gh api graphql -F query=@q.graphql'",
+            True,
+        ),
         (
             "API review comment naming APPROVE",
             f"gh api {ep} -f event=COMMENT -f body='Do not APPROVE yet'",
@@ -1517,6 +1539,106 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         (
             "orch-sweep post-review comment naming APPROVE",
             'orch-sweep post-review --pr https://github.com/a/b/pull/7 --head x --event COMMENT --input - <<\'JSON\'\n{"body":"Do not APPROVE yet"}\nJSON',
+            False,
+        ),
+        (
+            "github_write comment naming gh pr review",
+            'python3 lib/github_write.py --timeout 240 api -X POST repos/a/b/issues/7/comments --input - <<\'JSON\'\n{"body":"use orch-sweep instead of gh pr review"}\nJSON',
+            False,
+        ),
+        (
+            "github_write body edit naming pr review",
+            "python3 lib/github_write.py --timeout 240 gh pr edit 7 --body-file - <<'EOF'\nThis PR changes how pr review works.\nEOF",
+            False,
+        ),
+        (
+            "herdr agent prompt naming gh pr review",
+            'herdr agent prompt w1 "Do not use gh pr review; use orch-sweep post-review"',
+            False,
+        ),
+        (
+            "orch-signal done naming pr review",
+            'orch-signal done --outcome succeeded --report /tmp/x --summary "R1 of PR 172: pr review done"',
+            False,
+        ),
+        (
+            "heavy-slot note naming pr review",
+            'heavy-slot take a-b --note "pr review test" -- pytest x',
+            False,
+        ),
+        (
+            "heredoc notes naming pr review",
+            "cat > notes.md <<'EOF'\nnext: pr review of 172\nEOF",
+            False,
+        ),
+        (
+            "echo naming pr review",
+            "echo 'starting pr review now'",
+            False,
+        ),
+        (
+            "ls a folder named pr review",
+            'ls "pr review"',
+            False,
+        ),
+        (
+            "github_write api review endpoint",
+            "python3 lib/github_write.py api -X POST repos/a/b/pulls/7/reviews -f event=APPROVE",
+            True,
+        ),
+        (
+            "github_write gh pr review",
+            "python3 lib/github_write.py gh pr review 7 --approve",
+            True,
+        ),
+        (
+            "regex anchor before gh",
+            "rg -n 'foo$' lib && gh pr view 7",
+            False,
+        ),
+        (
+            "jq regex anchor in gh",
+            "gh pr list --json title --jq '.[]|select(.title|test(\"v1$\"))'",
+            False,
+        ),
+        (
+            "gh issue body with a dollar before a quote",
+            "gh issue create --title \"Fix review bug\" --body 'costs 5$'",
+            False,
+        ),
+        (
+            "grep a file named gh-notes",
+            "grep -c 'end$' gh-notes.md",
+            False,
+        ),
+        (
+            "dollar anchor before curl",
+            "echo 'x$' ; curl -s https://example.com",
+            False,
+        ),
+        (
+            "dollar in double quotes before gh",
+            'echo "costs 5$" && gh pr view 7',
+            False,
+        ),
+        (
+            "ANSI-C word after a quoted dollar",
+            "echo 'x$' ; gh pr $'revi\\x65w' 7 --approve",
+            True,
+        ),
+        (
+            "orch-signal summary naming gh pr review",
+            'orch-signal done --outcome succeeded --report /tmp/x --summary "told the worker not to use gh pr review"',
+            False,
+        ),
+        (
+            "ANSI-C word with gh only in a file name",
+            "printf $'a\\n' > gh-notes.md",
+            False,
+        ),
+        (
+            "dollar anchor after a substitution inside double quotes",
+            'echo "$(date) costs 5$" && gh pr view 7',
             False,
         ),
     ]:

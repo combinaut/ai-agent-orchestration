@@ -439,24 +439,61 @@ REVIEW_REASON = "A pull-request review goes only through orch-sweep post-review,
 REVIEW_ENDPOINT = re.compile(r"pulls/[^/\s]+/reviews(?![\w-])")
 REVIEW_MUTATION = re.compile(r"\b(?:add|submit)PullRequestReview\b")
 REVIEW_CALL = re.compile(r"\bpr\s+review\b")
+GH_REVIEW_CALL = re.compile(
+    r"\bgh\s+pr\s+(?:(?:-R|--repo|--hostname)\s+\S+\s+)*review\b"
+)
 GRAPHQL_ENDPOINT = re.compile(r"(?:^|/)graphql/?(?:[?#]|$)")
 EXPANDING_HEREDOC = re.compile(
     r"<<-?[ \t]*(\w+)[^\n]*\n(.*?)\n[ \t]*\1[ \t]*(?:\n|$)", re.S
 )
 STDIN_NAMES = ("-", "/dev/stdin", "/dev/fd/0")
-REVIEW_TEXT_TOOLS = {"git", "grep", "egrep", "fgrep", "rg", "orch-sweep"}
+REVIEW_TEXT_TOOLS = {"git", "grep", "egrep", "fgrep", "rg", "orch-sweep", "orch-signal"}
 GH_API_WORD = re.compile(r"(?:^|\s)api(?:\s|$)")
 DOLLAR_QUOTE = re.compile(r"\$['\"]")
-GH_OR_CURL = re.compile(r"\b(?:gh|curl)\b")
+GH_OR_CURL = re.compile(r"(?:^|[\s;&|(`])(?:\S*/)?(?:gh|curl)(?=[\s;&|)`]|$)")
 
 
-def review_marker(text):
+def review_marker(text, call=REVIEW_CALL):
     text = urllib.parse.unquote(text)
     return bool(
         REVIEW_ENDPOINT.search(text)
         or REVIEW_MUTATION.search(text)
-        or REVIEW_CALL.search(text)
+        or call.search(text)
     )
+
+
+def dollar_quote_word(text):
+    """Whether a $' or $" opens a word outside single and double quotes; a heredoc body counts when it holds one."""
+    rest, last = [], 0
+    for match in EXPANDING_HEREDOC.finditer(text):
+        if DOLLAR_QUOTE.search(match[2]):
+            return True
+        rest.append(text[last : match.start(2)])
+        last = match.end(2)
+    text = "".join(rest) + text[last:]
+    stack, quote, index = [], None, 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and quote != "'":
+            index += 2
+            continue
+        if quote != "'" and text[index : index + 2] == "$(":
+            stack.append(quote)
+            quote = None
+            index += 2
+            continue
+        if quote is None and stack and char == ")":
+            quote = stack.pop()
+        elif (
+            quote is None and char == "$" and text[index + 1 : index + 2] in ("'", '"')
+        ):
+            return True
+        elif quote is None and char in "'\"":
+            quote = char
+        elif char == quote:
+            quote = None
+        index += 1
+    return False
 
 
 def expands(masked):
@@ -525,16 +562,28 @@ def review_segment(segment, where, piped, moved, raw):
     if not words:
         return False
     if words != plain[len(plain) - len(words) :]:
-        return review_marker(" ".join(plain + bodies)) or "gh" in map(
+        return review_marker(" ".join(plain + bodies), GH_REVIEW_CALL) or "gh" in map(
             os.path.basename, plain + words
         )
     masked = kept[len(plain) - len(words) :]
+    wrapped = github_write_gh_args(words)
+    if isinstance(wrapped, list):
+        while (
+            wrapped[:1]
+            and wrapped[0].startswith("--t")
+            and "--timeout".startswith(wrapped[0].partition("=")[0])
+        ):
+            wrapped = wrapped[1 if "=" in wrapped[0] else 2 :]
+        words = ["gh"] + wrapped
+        masked = ["gh"] + masked[len(masked) - len(wrapped) :]
     for index, word in enumerate(words):
         if os.path.basename(word) != "gh":
             continue
         args = unwrap_gh(words[index + 1 :])
         args_masked = masked[len(words) - len(args) :]
-        if args[:2] == ["pr", "review"] or args[:2] == ["alias", "import"]:
+        if (args[:1] == ["pr"] and unwrap_gh(args[1:])[:1] == ["review"]) or args[
+            :2
+        ] == ["alias", "import"]:
             return True
         if args[:2] == ["alias", "set"] and (
             review_marker(" ".join(args))
@@ -547,11 +596,15 @@ def review_segment(segment, where, piped, moved, raw):
         ):
             return True
     name = os.path.basename(words[0])
-    if name == "gh" or (
-        name in REVIEW_TEXT_TOOLS and not any(w.startswith("alias.") for w in words)
+    if (
+        name == "gh"
+        or words[:3] == ["herdr", "agent", "prompt"]
+        or (
+            name in REVIEW_TEXT_TOOLS and not any(w.startswith("alias.") for w in words)
+        )
     ):
         return False
-    return review_marker(" ".join(unmask(word) for word in segment))
+    return review_marker(" ".join(unmask(word) for word in segment), GH_REVIEW_CALL)
 
 
 def moves_directory(units):
@@ -609,7 +662,7 @@ def guard_approve(text, where, depth=0, moved=False):
     if depth >= 3:
         return REVIEW_REASON if review_marker(text) else None
     scan = without_literal_heredocs(text)
-    if DOLLAR_QUOTE.search(scan) and GH_OR_CURL.search(scan):
+    if GH_OR_CURL.search(scan) and dollar_quote_word(scan):
         return REVIEW_REASON
     try:
         units = [unit for _, unit, _ in flow_units(text)]
@@ -1686,7 +1739,7 @@ def expand_heredocs(command):
 
     # Preserve quoted substitution as a single -m/--body value.
     sub = re.compile(r'"?\$\(cat[ \t]+' + pattern.pattern + r'[ \t\n]*\)"?', re.S)
-    command = sub.sub(lambda m: shlex.quote(m[5]), command)
+    command = sub.sub(lambda m: shlex.quote(m[5]) + m[4], command)
     return pattern.sub(replace, command)
 
 

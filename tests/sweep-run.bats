@@ -49,6 +49,7 @@ commit() {
 stub_gh() {
   cat >"$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
+[ -z "${GH_DOWN:-}" ] || { echo "gh down" >&2; exit 1; }
 case "$*" in
   'api repos/acme/app/pulls/7') printf '{"title":"Add alpha","body":"%s","base":{"ref":"%s"},"head":{"sha":"%s"}}\n' "$(cat "$TMP/pr_body" 2>/dev/null || echo 'Adds alpha and its test.')" "$(cat "$TMP/pr_base" 2>/dev/null || echo main)" "$(cat "$TMP/pr_head" 2>/dev/null)" ;;
   'api user') echo '{"login":"me"}' ;;
@@ -566,9 +567,9 @@ sweep_run.GH_TIMEOUT = 2
 try:
     sweep_run.gh("api", "x")
 except sweep_run.Failure as error:
-    print(error)' "$ROOT/lib"
+    print(error, error.code)' "$ROOT/lib"
   [ "$status" -eq 0 ]
-  [ "$output" = "gh api x timed out after 2s" ]
+  [ "$output" = "gh api x timed out after 2s 6" ]
 }
 
 @test "a gh whose child keeps its output open times out and the child is stopped" {
@@ -878,8 +879,42 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
   as_comment
   rm "$(cache_file)"
   gate
-  [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: no readable local copy of the full sweep record at "* ]]
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == "ERROR: cannot check the gate: no readable local copy of the full sweep record at "* ]]
+}
+
+@test "the gate exits 2 when GitHub cannot be read, and 1 for a finding" {
+  run_sweep
+  as_comment
+  GH_DOWN=1 gate
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == "ERROR: cannot check the gate: gh api repos/acme/app/pulls/7 failed: gh down" ]]
+  gate
+  [ "$status" -eq 0 ]
+}
+
+@test "the gate exits 2 when git cannot find the merge base" {
+  run_sweep
+  as_comment
+  echo nobase >"$TMP/pr_base"
+  gate
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == "ERROR: cannot check the gate: git cannot find the merge base of the PR base 'nobase'"* ]]
+}
+
+@test "post-review exits 2 and posts nothing when the gate cannot be checked" {
+  run_sweep
+  as_comment
+  GH_DOWN=1 review APPROVE
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == "ERROR: APPROVE refused: cannot check the gate: "* ]]
+  [ ! -e "$TMP/review.json" ]
+}
+
+@test "a run exits 6 when GitHub cannot be read" {
+  GH_DOWN=1 run_sweep --no-comment
+  [ "$status" -eq 6 ]
+  [[ "$stderr" == "ERROR: gh api"*"failed: gh down" ]]
 }
 
 @test "the gate runs the record checks on the comment's record" {

@@ -73,6 +73,7 @@ EOF
 printf '%s|%s\n' "$(pwd -P)" "$*" >>"$TMP/sweep.calls"
 [ -z "${SWEEP_EDITS_BODY:-}" ] || echo edited >"$TMP/pr_body"
 case " $* " in *" --kind text "*) [ -z "${SWEEP_TEXT_NEEDS_FULL:-}" ] || { echo "ERROR: a text sweep needs a full sweep of $SHA first" >&2; exit 1; } ;; esac
+[ -z "${SWEEP_EXIT:-}" ] || { echo "ERROR: sweep exit $SWEEP_EXIT" >&2; exit "$SWEEP_EXIT"; }
 [ -z "${SWEEP_FAILS:-}" ] || { echo "ERROR: validator 1: exited 1" >&2; exit 4; }
 echo "COMMENT https://github.com/acme/app/pull/7#issuecomment-9"
 echo "OK open_fix=${SWEEP_OPEN_FIX:-0} kept=0 findings=0"
@@ -80,6 +81,7 @@ EOF
   cat >"$BIN/orch-sweep-record-stub" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$TMP/gate.calls"
+[ -z "${GATE_UNAVAILABLE:-}" ] || { echo "ERROR: cannot check the gate: gh timed out" >&2; exit 2; }
 [ -z "${GATE_FAILS:-}" ] || { echo "ERROR: the full sweep of $SHA has 1 open fix findings" >&2; exit 1; }
 echo "OK: the sweep of $SHA allows APPROVE"
 EOF
@@ -308,7 +310,7 @@ fork_head_missing_from_pull_ref() {
   contains "$prompt" "$BIN/orch-sweep-stub post-review --pr https://github.com/acme/app/pull/7 --head $SHA --event APPROVE|REQUEST_CHANGES|COMMENT --input -"
   contains "$prompt" '{"body":"...","comments":[{"path":"...","line":123,"side":"RIGHT","body":"..."}]}'
   not_contains "$prompt" 'repos/acme/app/pulls/7/reviews'
-  contains "$prompt" 'When post-review refuses APPROVE, post REQUEST_CHANGES that quotes its ERROR line.'
+  contains "$prompt" 'When post-review refuses APPROVE with exit 1, post REQUEST_CHANGES that quotes its ERROR line. Exit 2 means the gate could not read GitHub, git or the local record: post no review at all and reply NOT POSTED'
   contains "$prompt" 'quoted heredoc'
   not_contains "$prompt" 'mktemp'
   not_contains "$prompt" 'review_dir'
@@ -342,6 +344,34 @@ fork_head_missing_from_pull_ref() {
   [ ! -e "$TMP/review.prompt" ]
   [ ! -e "$HOME/.cache/review-prs/worktrees/rev7" ]
   [ "$(dispatch_state)" = 'False "blocked"' ]
+}
+
+@test "a sweep that fails for a transient cause releases the head, and a lasting one blocks it" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  SWEEP_EXIT=75 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'SWEEP FAILED exit 75'
+  contains "$output" "RELEASED $SHA"
+  [ ! -e "$TMP/review.prompt" ]
+  [ "$(dispatch_state)" = 'True null' ]
+  rm -f "$HOME/.cache/review-prs/dispatched.json"
+  SWEEP_EXIT=6 dispatch
+  contains "$output" "RELEASED $SHA"
+  [ "$(dispatch_state)" = 'True null' ]
+  rm -f "$HOME/.cache/review-prs/dispatched.json"
+  SWEEP_EXIT=3 dispatch
+  [ "$(dispatch_state)" = 'False "blocked"' ]
+}
+
+@test "an APPROVE whose gate cannot be checked releases the head instead of blocking it" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GATE_UNAVAILABLE=1 dispatch
+  [ "$status" -eq 0 ]
+  contains "$output" "GATE UNAVAILABLE $SHA cannot check the gate: gh timed out"
+  contains "$output" "RELEASED $SHA"
+  [ "$(dispatch_state)" = 'True null' ]
 }
 
 @test "an APPROVE that fails the sweep gate after the turn blocks the head" {

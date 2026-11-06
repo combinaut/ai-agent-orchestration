@@ -376,7 +376,7 @@ def comment_record(body):
 
 
 class GateError(Exception):
-    """A gate that cannot read what it checks."""
+    """A gate that cannot read what it checks: GitHub, git or the local record copy."""
 
 
 def gh_json(*args):
@@ -410,7 +410,9 @@ def record_problem(record, repo, number, head):
     try:
         cached = json.loads(copy.read_text())
     except (OSError, ValueError):
-        return f"no readable local copy of the {kind} sweep record at {copy}; orch-sweep run writes it"
+        raise GateError(
+            f"no readable local copy of the {kind} sweep record at {copy}; orch-sweep run writes it"
+        )
     if canonical(cached) != canonical(record):
         return f"the {kind} sweep record in the comment differs from the local copy at {copy}"
     deviation = record["deviation"]
@@ -458,7 +460,9 @@ def gate(url, head):
     base_ref = (pr.get("base") or {}).get("ref")
     merge_base = pr_merge_base(repo, base_ref, head) if base_ref else None
     if merge_base is None:
-        return f"git cannot find the merge base of the PR base {base_ref!r} and {head}; fetch the base branch"
+        raise GateError(
+            f"git cannot find the merge base of the PR base {base_ref!r} and {head}; fetch the base branch"
+        )
     me = gh_json("api", "user").get("login")
     pages = gh_json(
         "api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"
@@ -531,7 +535,10 @@ def main(argv):
         try:
             found = gate(args.pr, args.head)
         except GateError as error:
-            found = f"cannot check the gate: {error}"
+            print(
+                f"ERROR: cannot check the gate: {one_line(str(error))}", file=sys.stderr
+            )
+            return 2
         if found:
             print(f"ERROR: {one_line(found)}", file=sys.stderr)
             return 1

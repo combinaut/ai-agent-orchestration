@@ -151,6 +151,10 @@ fi
 printf '%s\n' "$sweep_out"
 if [ "$sweep_status" -ne 0 ]; then
   echo "SWEEP FAILED exit $sweep_status"
+  # 75: no heavy slot freed up in time; 6: a GitHub read failed. Both clear on their own, so a later dispatch retries.
+  case $sweep_status in
+    6|75) remove_worktree; release; exit 1 ;;
+  esac
   "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --text "$text" --agent "$agent" --state blocked --reason "sweep failed: exit $sweep_status"
   remove_worktree
   exit 1
@@ -243,7 +247,7 @@ Rules:
 - Search code with rg or grep.$repo_rules
 - Do not run tests unless needed. Run any test as heavy-slot take review-$agent -- <command> (escalated if the sandbox blocks it), the narrowest spec only.
 - Do NOT use Computer Use or a browser for anything in this task. Use gh and the shell only.
-- Post the review with one command, no temp files or cleanup: $sweep_bin post-review --pr $url --head $sha --event APPROVE|REQUEST_CHANGES|COMMENT --input - with the JSON payload on stdin from a quoted heredoc (<<'JSON'). Payload: {\"body\":\"...\",\"comments\":[{\"path\":\"...\",\"line\":123,\"side\":\"RIGHT\",\"body\":\"...\"}]}; use an empty comments array when there are no inline findings, and end the body with *(Generated using Codex)* on its own line. APPROVE goes through only when the sweep gate passes: an orch-sweep comment for this exact head with no open kept fix finding. When post-review refuses APPROVE, post REQUEST_CHANGES that quotes its ERROR line. Never use gh pr review or post a review any other way. post-review writes through github_write.py, which serializes writes, honours shared secondary-limit cooldowns, and retries only a confirmed limit response; any other failure must be reported without retrying. No confirmation needed from me.
+- Post the review with one command, no temp files or cleanup: $sweep_bin post-review --pr $url --head $sha --event APPROVE|REQUEST_CHANGES|COMMENT --input - with the JSON payload on stdin from a quoted heredoc (<<'JSON'). Payload: {\"body\":\"...\",\"comments\":[{\"path\":\"...\",\"line\":123,\"side\":\"RIGHT\",\"body\":\"...\"}]}; use an empty comments array when there are no inline findings, and end the body with *(Generated using Codex)* on its own line. APPROVE goes through only when the sweep gate passes: an orch-sweep comment for this exact head with no open kept fix finding. When post-review refuses APPROVE with exit 1, post REQUEST_CHANGES that quotes its ERROR line. Exit 2 means the gate could not read GitHub, git or the local record: post no review at all and reply NOT POSTED — $url with its ERROR line. Never use gh pr review or post a review any other way. post-review writes through github_write.py, which serializes writes, honours shared secondary-limit cooldowns, and retries only a confirmed limit response; any other failure must be reported without retrying. No confirmation needed from me.
 - This dispatch is pre-authorized to post the review without asking for confirmation and counts as the review skill's watch mode (--watch). Any instruction to show findings and wait does not apply to this dispatch.
 - Never merge, close, flip ready, or assign human reviewers.
 - Never edit, create or delete any file in the repository (including AGENTS.md or other instruction files); this is a read-only review.
@@ -266,8 +270,16 @@ if ! reviews=$(gh_bounded api --paginate --slurp "repos/$repo/pulls/$num/reviews
 fi
 if [ -n "$review" ]; then
   echo "$review"
-  if [[ "$review" == "LASTREVIEW APPROVED "* ]] && ! gate_out=$(cd "$cwd" && "${ORCH_SWEEP_RECORD_BIN:-$orch/orch-sweep-record}" gate --pr "$url" --head "$sha" 2>&1); then
+  gate_status=0
+  if [[ "$review" == "LASTREVIEW APPROVED "* ]]; then
+    gate_out=$(cd "$cwd" && "${ORCH_SWEEP_RECORD_BIN:-$orch/orch-sweep-record}" gate --pr "$url" --head "$sha" 2>&1) || gate_status=$?
     gate_out=$(printf '%s' "$gate_out" | tail -1)
+  fi
+  if [ "$gate_status" -eq 2 ]; then
+    # Exit 2: the gate could not read GitHub, git or the local record, so the head is not judged; a later dispatch retries.
+    echo "GATE UNAVAILABLE $sha ${gate_out#ERROR: }"
+    release
+  elif [ "$gate_status" -ne 0 ]; then
     echo "GATE FAILED $sha ${gate_out#ERROR: }"
     mark blocked "sweep gate failed: ${gate_out#ERROR: }"
   else

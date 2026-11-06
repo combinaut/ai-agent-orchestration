@@ -167,11 +167,11 @@ def gh(*args):
             if proc.poll() is None:
                 threading.Thread(target=proc.wait, daemon=True).start()
         if expired:
-            raise Failure(f"{name} timed out after {GH_TIMEOUT}s")
+            raise Failure(f"{name} timed out after {GH_TIMEOUT}s", 6)
         if proc.returncode:
             err.seek(0)
             raise Failure(
-                f"{name} failed: {err.read().decode(errors='replace').strip()}"
+                f"{name} failed: {err.read().decode(errors='replace').strip()}", 6
             )
     return out.decode()
 
@@ -1065,7 +1065,9 @@ def post_review(args):
         try:
             why = sweep_record.gate(args.pr, args.head)
         except sweep_record.GateError as error:
-            why = f"cannot check the gate: {error}"
+            raise Failure(
+                f"APPROVE refused: cannot check the gate: {error}", 2
+            ) from error
         if why:
             raise Failure(f"APPROVE refused: {why}")
     review = {

@@ -76,7 +76,7 @@ Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- or
 - equals the copy in `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json`;
 - has no open kept fix finding.
 
-When the newest sweep comment for that head is a text sweep, its record must pass the same checks against `<head>.text.json` with no open fix finding, and the full record may hold open fix findings only in the `pr-text` category; an older text sweep is not checked. The newest record's `pr_text_sha256`, the hash of the title and body that sweep read, must equal the live title and body; after an edit, `orch-sweep run --kind text` sweeps the new text. Any other result exits 1 with one `ERROR:` line.
+When the newest sweep comment for that head is a text sweep, its record must pass the same checks against `<head>.text.json` with no open fix finding, and the full record may hold open fix findings only in the `pr-text` category; an older text sweep is not checked. The newest record's `pr_text_sha256`, the hash of the title and body that sweep read, must equal the live title and body; after an edit, `orch-sweep run --kind text` sweeps the new text. A finding exits 1 with one `ERROR:` line; a gate that cannot read GitHub, git or the local record copy exits 2 with `ERROR: cannot check the gate: ...`, and `post-review` exits 2 the same way and posts nothing.
 
 The local copy shows that the comment's record is the one a run wrote; anyone who can write the cache and post as the `gh` login can fake both.
 
@@ -88,4 +88,4 @@ The only deviation is a sweep over 25 slices. The user allows it for one head wi
 
 ## Exit codes
 
-`0` record written (and the comment posted, unless `--no-comment`); `1` usage, checkout or GitHub error; `2` the tree changed; `3` over 25 slices; `4` an agent failed after its retry; `5` the record does not fit in one comment; `128 + n` stopped by signal `n`.
+`0` record written (and the comment posted, unless `--no-comment`); `1` usage, checkout or GitHub error; `2` the tree changed; `3` over 25 slices; `4` an agent failed after its retry; `5` the record does not fit in one comment; `6` a GitHub read failed or timed out (a later run can succeed); `128 + n` stopped by signal `n`.

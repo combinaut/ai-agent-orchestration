@@ -11,7 +11,8 @@ Write <report path> as this table and nothing else before it:
 
 | claim | file:line opened | verdict | evidence | rung | fix the author can apply |
 
-Then run the finalize sweep as a script in this worktree, as one heavy job: heavy-slot take review-<name>-sweep --note "orch sweep" -- orch-sweep run --pr <PR url> --head <sha> --base-ref origin/<base branch> --runtime claude
+Then run the finalize sweep as a script in this worktree, as one heavy job: heavy-slot take review-<name>-sweep --note "orch sweep" -- orch-sweep run --pr <PR url> --head <sha> --base-ref <remote>/<base branch> --runtime claude
+<remote> is the clone's `origin` or `upstream` that is the PR repo (docs/sweep-script.md).
 It posts ONE PR comment with the findings, each fix or nit, the full head SHA and the sweep record. Do not run /finalize-sweep by hand and do not post another sweep comment. Add its kept findings below the claims table.
 Use the comment for the verdict. An open kept fix finding blocks APPROVE; nits and dropped findings never block.
 Post any review only through: orch-sweep post-review --pr <PR url> --head <sha> --event APPROVE|REQUEST_CHANGES|COMMENT --input - (JSON {"body": ..., "comments": [...]} on stdin). It refuses APPROVE unless the sweep gate passes for that exact head.
