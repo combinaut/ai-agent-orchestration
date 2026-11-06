@@ -397,7 +397,7 @@ def gh_json(*args):
         raise GateError(f"gh {' '.join(args)}: not JSON: {error}") from error
 
 
-def record_problem(record, repo, number, head):
+def record_problem(record, repo, number, head, *, local=True):
     """Why a comment's record fails the gate's checks of its own, else None."""
     with tempfile.TemporaryDirectory(prefix="orch-gate-") as scratch:
         path = Path(scratch, "record.json")
@@ -406,6 +406,8 @@ def record_problem(record, repo, number, head):
     kind = record.get("kind")
     if why:
         return f"the {kind} sweep record of {head}: {why.split(': ', 1)[1]}"
+    if not local:
+        return None
     copy = cache_path(repo, number, head, kind)
     try:
         cached = json.loads(copy.read_text())
@@ -463,19 +465,31 @@ def gate(url, head):
     pages = gh_json(
         "api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"
     )
+    return comments_problem(
+        pr, [c for page in pages for c in page], repo, number, head, merge_base, {me}
+    )
+
+
+def comments_problem(
+    pr, comments, repo, number, head, merge_base, authors, *, local=True
+):
+    """Shared gate rules; CI supplies trusted authors and omits local cache checks."""
+    if (pr.get("head") or {}).get("sha") != head:
+        return f"the PR head is not {head}"
+    base_ref = (pr.get("base") or {}).get("ref")
     order = []
-    for comment in (c for page in pages for c in page):
-        if (comment.get("user") or {}).get("login") != me:
+    for comment in comments:
+        if (comment.get("user") or {}).get("login") not in authors:
             continue
         record = comment_record(comment.get("body") or "")
         if record and record.get("head") == head and record.get("kind") in KINDS:
             order.append(record)
     latest = {record["kind"]: record for record in order}
     if "full" not in latest:
-        return f"no full orch-sweep comment by {me} for the exact head {head}"
+        return f"no full orch-sweep comment by {', '.join(sorted(authors))} for the exact head {head}"
     full, newest = latest["full"], order[-1]
     for record in [full] + ([newest] if newest["kind"] == "text" else []):
-        why = record_problem(record, repo, number, head)
+        why = record_problem(record, repo, number, head, local=local)
         if why:
             return why
         why, _ = since(f"the {record['kind']} sweep record", head, record["base"], head)
