@@ -776,79 +776,58 @@ EVENTS() { printf '%s' "$ORCH_HEAVY_SLOTS_DIR/.events"; }
   [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
 }
 
-# A leftover watcher shows as a process of this test's group with the job name in its command line,
-# or as its sleep $2. The job runs in its own group, so other processes on the machine do not match.
-left_behind() {
-  pgrep -g 0 -f "heavy-slot take $1 " || pgrep -g 0 -x -f "sleep $2"
-}
-
-assert_nothing_left_behind() {
-  local tries=0
-  while left_behind "$1" "$2" >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
-  ! left_behind "$1" "$2"
-}
-
-# Bats runs tests in parallel inside one process group, so the group of a single take is the only
-# one that holds nothing but its own watcher and sleep.
-run_in_own_session() {
+# Bats runs tests in parallel inside one process group. A take started through in_own_session leads
+# its own group, so $! is that group's id and pgrep -g "$!" sees only that take and its watcher.
+in_own_session() {
   # shellcheck disable=SC2016 # Python receives this program literally.
-  run python3 -c '
-import subprocess
-import sys
-
-process = subprocess.Popen(sys.argv[2:], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-with open(sys.argv[1], "w") as group:
-    group.write(str(process.pid))
-try:
-    raise SystemExit(process.wait(timeout=15))
-except subprocess.TimeoutExpired:
-    print("command timed out after 15 seconds", file=sys.stderr)
-    raise SystemExit(124)
-' "$@"
+  exec python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@"
 }
 
-assert_session_empty() {
-  local group tries=0
-  group=$(cat "$1")
-  while pgrep -g "$group" >/dev/null && [ "$tries" -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done
-  ! pgrep -g "$group"
+assert_group_empty() {
+  local tries=0
+  while pgrep -g "$1" >/dev/null && [ "$tries" -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done
+  ! pgrep -g "$1"
+}
+
+wait_for_group_process() {
+  local group=$1 tries=0
+  shift
+  while ! pgrep -g "$group" "$@" >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
+  pgrep -g "$group" "$@" >/dev/null
 }
 
 @test "a short job leaves no long-run watcher or its sleep behind" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=29 run_in_own_session "$TMP/session" "$HELPER" take agent-wstop-ok -- sleep 1
-  [ "$status" -eq 0 ]
-  assert_session_empty "$TMP/session"
+  ORCH_HEAVY_SLOTS_LONG_RUN=29 in_own_session "$HELPER" take agent-wstop-ok -- sleep 1 &
+  pid=$!
+  wait "$pid"
+  assert_group_empty "$pid"
 }
 
 @test "stopping heavy-slot with TERM leaves no long-run watcher or its sleep behind" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=28 "$HELPER" take agent-wstop-term -- sleep 30 &
+  ORCH_HEAVY_SLOTS_LONG_RUN=28 in_own_session "$HELPER" take agent-wstop-term -- sleep 30 &
   pid=$!
   wait_for_file "$ORCH_HEAVY_SLOTS_DIR/agent-wstop-term"
-  tries=0
-  while ! pgrep -g 0 -x -f 'sleep 2[78]' >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
-  pgrep -g 0 -x -f 'sleep 2[78]' >/dev/null
+  wait_for_group_process "$pid" -x -f 'sleep 2[78]'
   kill -TERM "$pid"
   wait "$pid" || true
-  assert_nothing_left_behind agent-wstop-term '2[78]'
+  assert_group_empty "$pid"
 }
 
 # twice_signal <TERM|HUP>: send the signal twice to a take whose job ignores both; the second must not skip cleanup (Bash 3.2 runs it after the first exit).
 twice_signal() {
   local name=agent-twice-$1
   # shellcheck disable=SC2016 # The child Bash expands nothing here.
-  ORCH_HEAVY_SLOTS_LONG_RUN=26 ORCH_HEAVY_SLOTS_KILL_GRACE=3 "$HELPER" take "$name" -- bash -c 'trap "" TERM HUP; sleep 20' &
+  ORCH_HEAVY_SLOTS_LONG_RUN=26 ORCH_HEAVY_SLOTS_KILL_GRACE=3 in_own_session "$HELPER" take "$name" -- bash -c 'trap "" TERM HUP; sleep 20' &
   pid=$!
   wait_for_file "$ORCH_HEAVY_SLOTS_DIR/$name"
-  tries=0
-  while ! pgrep -g 0 -x -f 'sleep 2[56]' >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
-  pgrep -g 0 -x -f 'sleep 2[56]' >/dev/null
+  wait_for_group_process "$pid" -x -f 'sleep 2[56]'
   kill -"$1" "$pid"
   wait_for_file "$(EVENTS)"
   sleep 1
   kill -"$1" "$pid"
   wait "$pid" || true
   [ ! -e "$ORCH_HEAVY_SLOTS_DIR/$name" ]
-  assert_nothing_left_behind "$name" '2[56]'
+  assert_group_empty "$pid"
 }
 
 @test "a second identical TERM while the job is stopping still cleans up the slot and the watcher" {
@@ -860,20 +839,18 @@ twice_signal() {
 }
 
 @test "the long-run watcher outlives its RUNLONG line and is gone when the job ends" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=1 "$HELPER" take agent-wstop-fired -- sleep 3 &
+  ORCH_HEAVY_SLOTS_LONG_RUN=1 in_own_session "$HELPER" take agent-wstop-fired -- sleep 3 &
   pid=$!
   tries=0
   while ! grep -q ' SLOT RUNLONG ' "$(EVENTS)" 2>/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
   grep -q ' SLOT RUNLONG ' "$(EVENTS)"
   # heavy-slot itself and its watcher both carry the job name.
-  [ "$(pgrep -g 0 -f 'heavy-slot take agent-wstop-fired ' | wc -l)" -ge 2 ]
+  [ "$(pgrep -g "$pid" -f 'heavy-slot take agent-wstop-fired ' | wc -l)" -ge 2 ]
   # After RUNLONG the watcher sleeps 30 s a time instead of spinning.
-  tries=0
-  while ! pgrep -g 0 -x -f 'sleep 30' >/dev/null && [ "$tries" -lt 20 ]; do sleep 0.1; tries=$((tries + 1)); done
-  pgrep -g 0 -x -f 'sleep 30' >/dev/null
+  wait_for_group_process "$pid" -x -f 'sleep 30'
   wait "$pid"
   [ "$(grep -c ' SLOT RUNLONG ' "$(EVENTS)")" -eq 1 ]
-  assert_nothing_left_behind agent-wstop-fired 30
+  assert_group_empty "$pid"
 }
 
 @test "stopping the long-run watcher prints nothing of its own" {
@@ -986,12 +963,10 @@ twice_signal() {
 }
 
 @test "the long-run watcher sleeps at most 30 seconds at a time" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=1234 "$HELPER" take agent-nap -- sleep 4 &
+  ORCH_HEAVY_SLOTS_LONG_RUN=1234 in_own_session "$HELPER" take agent-nap -- sleep 4 &
   pid=$!
-  tries=0
-  while ! pgrep -g 0 -x -f 'sleep 30' >/dev/null && [ "$tries" -lt 20 ]; do sleep 0.1; tries=$((tries + 1)); done
-  pgrep -g 0 -x -f 'sleep 30' >/dev/null
-  if pgrep -g 0 -x -f 'sleep 1234'; then false; fi
+  wait_for_group_process "$pid" -x -f 'sleep 30'
+  if pgrep -g "$pid" -x -f 'sleep 1234'; then false; fi
   wait "$pid"
 }
 
