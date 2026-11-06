@@ -149,7 +149,10 @@ class ReviewTests(IsolatedTestCase):
 
     def test_entire_admission_and_final_state_write_obey_caller_deadline(self):
         self.real_clock()
-        for phase in ("admission", "result"):
+        # g.run rejects admission with Busy when under 2 s remain, so "result" needs a budget
+        # well above that; "admission" is cut off by the alarm long before its write returns.
+        budgets = {"admission": (0.2, 2.0), "result": (4, 7)}
+        for phase, (timeout, ceiling) in budgets.items():
             with self.subTest(phase=phase):
                 invoked = False
                 original_write = g.write_state
@@ -158,7 +161,7 @@ class ReviewTests(IsolatedTestCase):
                     if (phase == "admission" and not invoked) or (
                         phase == "result" and invoked
                     ):
-                        time.sleep(3)
+                        time.sleep(ceiling + 2)
                     original_write(path, state)
 
                 def invoke(env, fds):
@@ -169,10 +172,8 @@ class ReviewTests(IsolatedTestCase):
                 started = time.monotonic()
                 with patch.object(g, "write_state", side_effect=slow):
                     with self.assertRaises(g.Deadline):
-                        g.run(["gh"], invoke, timeout=2.1 if phase == "result" else 0.2)
-                self.assertLess(
-                    time.monotonic() - started, 2.6 if phase == "result" else 0.6
-                )
+                        g.run(["gh"], invoke, timeout=timeout)
+                self.assertLess(time.monotonic() - started, ceiling)
 
     def test_parent_deadline_preserves_earlier_and_later_watcher_alarms(self):
         self.real_clock()

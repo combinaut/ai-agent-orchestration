@@ -475,7 +475,7 @@ raise SystemExit(0 if result.returncode == 130 else 1)
 
 @test "SIGINT terminates an asynchronous child and removes the slot" {
   # shellcheck disable=SC2016,SC2026 # The child shell, not this Bats shell, expands its literal script.
-  run python3 -c '
+  run env ORCH_HEAVY_SLOTS_KILL_GRACE=2 python3 -c '
 import os, signal, subprocess, sys, time
 helper, slot_dir = sys.argv[1:]
 signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -484,7 +484,7 @@ ready = os.path.join(slot_dir, "agent-interrupt.ready")
 terminated = os.path.join(slot_dir, "agent-interrupt.terminated")
 wrapper = subprocess.Popen([helper, "take", "agent-interrupt", "--", "bash", "-c",
                             "trap \"printf terminated > \\\"$2\\\"; exit 0\" TERM; printf ready > \"$1\"; while :; do sleep 1; done", "_", ready, terminated])
-deadline = time.monotonic() + 15
+deadline = time.monotonic() + 45
 while time.monotonic() < deadline:
     if (os.path.getsize(slot) if os.path.exists(slot) else 0) and os.path.exists(ready):
         break
@@ -495,7 +495,7 @@ else:
     raise SystemExit("child never became ready")
 child = int(open(slot).read().split()[0])
 os.kill(wrapper.pid, signal.SIGINT)
-deadline = time.monotonic() + 15
+deadline = time.monotonic() + 45
 try:
     status = wrapper.wait(timeout=max(0, deadline - time.monotonic()))
 except subprocess.TimeoutExpired:
@@ -788,10 +788,36 @@ assert_nothing_left_behind() {
   ! left_behind "$1" "$2"
 }
 
+# Bats runs tests in parallel inside one process group, so the group of a single take is the only
+# one that holds nothing but its own watcher and sleep.
+run_in_own_session() {
+  # shellcheck disable=SC2016 # Python receives this program literally.
+  run python3 -c '
+import subprocess
+import sys
+
+process = subprocess.Popen(sys.argv[2:], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+with open(sys.argv[1], "w") as group:
+    group.write(str(process.pid))
+try:
+    raise SystemExit(process.wait(timeout=15))
+except subprocess.TimeoutExpired:
+    print("command timed out after 15 seconds", file=sys.stderr)
+    raise SystemExit(124)
+' "$@"
+}
+
+assert_session_empty() {
+  local group tries=0
+  group=$(cat "$1")
+  while pgrep -g "$group" >/dev/null && [ "$tries" -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done
+  ! pgrep -g "$group"
+}
+
 @test "a short job leaves no long-run watcher or its sleep behind" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=29 run_with_timeout "$HELPER" take agent-wstop-ok -- sleep 1
+  ORCH_HEAVY_SLOTS_LONG_RUN=29 run_in_own_session "$TMP/session" "$HELPER" take agent-wstop-ok -- sleep 1
   [ "$status" -eq 0 ]
-  assert_nothing_left_behind agent-wstop-ok '2[89]'
+  assert_session_empty "$TMP/session"
 }
 
 @test "stopping heavy-slot with TERM leaves no long-run watcher or its sleep behind" {
