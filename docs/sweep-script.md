@@ -96,7 +96,9 @@ Two workflows publish one commit status context, `sweep-record`. The read-only
 `Sweep record refresh` workflow runs for PR opened, synchronize, reopened, edited
 and ready_for_review events, including drafts. Its completion triggers the
 `Sweep record` workflow on the default branch. That trusted workflow also runs
-on PR issue-comment creation, edits and deletion. Both workflow files must be
+on PR issue-comment creation, edits and deletion, and on the same five PR
+metadata events through `pull_request_target`. This trusted metadata handler
+keeps refreshing even when a PR removes or changes its refresh workflow. Both workflow files must be
 on the default branch before this works; an unmerged workflow cannot validate
 itself through `workflow_run`.
 
@@ -105,7 +107,9 @@ removed after checkout, and fetches PR and base objects only as data. It never
 runs PR code or downloads artifacts from the triggering run. The job has
 `contents: read`, `pull-requests: read`, and `statuses: write`; the PR trigger has
 no permissions. This separates fork PR events from the token that writes the
-status, without `pull_request_target`.
+status. The `pull_request_target` jobs execute only default-branch code; PR
+fields are read through the event JSON and API as data, never interpolated
+into a shell command.
 
 CI calls the same `comments_problem` function as the local gate. It accepts
 comments by the PR author or exact logins in `allowed_authors` in the trusted
@@ -126,8 +130,8 @@ change detected during evaluation fails that evaluation. GitHub status writes
 and PR edits are not atomic; a later event refreshes the result. A base-branch
 push alone does not trigger these workflows; comment on the PR to refresh its
 merge-base check. Required-check configuration is a separate repository-admin
-step. The publisher serializes runs per PR, and each run reads live state. No workflow can report when Actions itself is disabled or
-awaiting permission to run a fork workflow.
+step. The publisher serializes runs per PR, and each run reads live state. No
+workflow can report when Actions itself is disabled.
 Statuses are attached to commits, so two PRs sharing one head SHA also share
 its status context. The workflow event trust boundary follows
 [GitHub's workflow_run documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run).

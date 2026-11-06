@@ -1,8 +1,12 @@
 """Server gate tests; no GitHub writes or local record cache."""
 
+import contextlib
 import copy
+import io
 import json
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -223,6 +227,35 @@ class PublisherTests(unittest.TestCase):
         status, _, _ = self.evaluate(live=live)
         self.assertEqual("failure", status.call_args.args[2])
 
+    def test_unrelated_repository_metadata_keeps_success(self):
+        self.pr["head"]["repo"] = {"pushed_at": "before"}
+        self.pr["base"]["repo"] = {"pushed_at": "before"}
+        live = copy.deepcopy(self.pr)
+        live["head"]["repo"]["pushed_at"] = "after"
+        live["base"]["repo"]["pushed_at"] = "after"
+        status, _, _ = self.evaluate(live=live)
+        self.assertEqual("success", status.call_args.args[2])
+
+    def test_trusted_pr_event_discovers_without_pr_workflow(self):
+        # A PR may delete its refresh workflow; trusted metadata events still work.
+        event = {"number": 1, "pull_request": {"number": 1}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, "event.json")
+            path.write_text(json.dumps(event))
+            output = io.StringIO()
+            with (
+                patch.dict(
+                    ci.os.environ,
+                    {"GITHUB_EVENT_PATH": str(path), "GITHUB_REPOSITORY": REPO},
+                ),
+                patch.object(sys, "argv", ["sweep_ci.py", "--discover"]),
+                patch.object(gate, "gh_json") as api,
+                contextlib.redirect_stdout(output),
+            ):
+                ci.main()
+            self.assertEqual([1], json.loads(output.getvalue()))
+            api.assert_not_called()
+
     def test_fetch_failure_reports_error(self):
         with (
             patch.object(gate, "gh_json", return_value=self.pr),
@@ -232,6 +265,74 @@ class PublisherTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 ci.evaluate(REPO, 1, [])
         self.assertEqual("error", status.call_args.args[2])
+
+
+class WorkflowTrustTests(unittest.TestCase):
+    def setUp(self):
+        path = (
+            Path(__file__).resolve().parents[1] / ".github/workflows/sweep-record.yml"
+        )
+        parsed = subprocess.check_output(
+            [
+                "ruby",
+                "--disable-gems",
+                "-r",
+                "yaml",
+                "-r",
+                "json",
+                "-e",
+                "puts JSON.generate(YAML.safe_load(File.read(ARGV[0])))",
+                str(path),
+            ],
+            text=True,
+        )
+        self.workflow = json.loads(parsed)
+
+    def assert_trusted(self, workflow):
+        events = workflow.get("on", workflow.get("true"))
+        self.assertEqual(
+            ["opened", "synchronize", "reopened", "edited", "ready_for_review"],
+            events["pull_request_target"]["types"],
+        )
+        allowed = {"contents": "read", "pull-requests": "read", "statuses": "write"}
+        for job in workflow["jobs"].values():
+            permissions = job.get("permissions", workflow["permissions"])
+            self.assertLessEqual(permissions.items(), allowed.items())
+            for step in job["steps"]:
+                if step.get("uses", "").startswith("actions/checkout@"):
+                    self.assertEqual(
+                        "${{ github.repository }}", step["with"]["repository"]
+                    )
+                    self.assertEqual(
+                        "${{ github.event.repository.default_branch }}",
+                        step["with"]["ref"],
+                    )
+                    self.assertIs(False, step["with"]["persist-credentials"])
+                self.assertNotRegex(
+                    step.get("run", ""), r"\$\{\{\s*github\.event\.pull_request"
+                )
+                self.assertNotIn("download-artifact", step.get("uses", ""))
+
+    def test_trusted_workflow(self):
+        self.assert_trusted(self.workflow)
+
+    def test_security_guards_reject_workflow_mutations(self):
+        for guard in ("head-checkout", "pr-field-run", "extra-permission"):
+            with self.subTest(guard=guard):
+                workflow = copy.deepcopy(self.workflow)
+                job = workflow["jobs"]["validate"]
+                if guard == "head-checkout":
+                    job["steps"][0]["with"]["ref"] = (
+                        "${{ github.event.pull_request.head.sha }}"
+                    )
+                elif guard == "pr-field-run":
+                    job["steps"][-1]["run"] += (
+                        "\necho '${{ github.event.pull_request.title }}'"
+                    )
+                else:
+                    job["permissions"]["contents"] = "write"
+                with self.assertRaises(AssertionError):
+                    self.assert_trusted(workflow)
 
 
 if __name__ == "__main__":

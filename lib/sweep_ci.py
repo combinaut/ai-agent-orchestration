@@ -32,6 +32,16 @@ def write_status(repo, head, state, description):
     )
 
 
+def metadata_key(pr):
+    return (
+        pr["head"]["sha"],
+        pr["base"]["ref"],
+        pr["base"].get("sha"),
+        pr["title"],
+        pr["body"],
+    )
+
+
 def evaluate(repo, number, allowed):
     pr = gate.gh_json("api", f"repos/{repo}/pulls/{number}")
     if pr["state"] != "open":
@@ -73,7 +83,7 @@ def evaluate(repo, number, allowed):
             local=False,
         )
         live = gate.gh_json("api", f"repos/{repo}/pulls/{number}")
-        if any(live[k] != pr[k] for k in ("head", "base", "title", "body")):
+        if metadata_key(live) != metadata_key(pr):
             why = "PR changed during validation; waiting for the next refresh"
         write_status(
             repo,
@@ -91,6 +101,8 @@ def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     if len(sys.argv) == 2 and sys.argv[1] != "--discover":
         numbers = [int(sys.argv[1])]
+    elif "pull_request" in event:
+        numbers = [event["number"]]
     elif "issue" in event:
         numbers = [event["issue"]["number"]] if "pull_request" in event["issue"] else []
     else:
