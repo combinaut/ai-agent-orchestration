@@ -474,11 +474,7 @@ def guard_approve(args, cwd, opts, raw):
     endpoint = api_endpoint(args[1:]) or ""
     graphql = bool(GRAPHQL_ENDPOINT.search(endpoint))
     opaque = "$" in endpoint or "`" in endpoint
-    if (
-        not graphql
-        and not REVIEW_ENDPOINT.search(endpoint)
-        and not (opaque and "/reviews" in raw)
-    ):
+    if not graphql and not REVIEW_ENDPOINT.search(endpoint) and not opaque:
         return None
     texts = [raw]
     for name in flag_values(args, ("--input",)):

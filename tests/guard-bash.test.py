@@ -1021,6 +1021,16 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             True,
         ),
         (
+            "API review at a path built from a variable",
+            "P=reviews; gh api repos/a/b/pulls/7/$P -f event=APPROVE",
+            True,
+        ),
+        (
+            "API call at a variable path that names no approval",
+            "gh api repos/a/b/pulls/7/$P --jq .state",
+            False,
+        ),
+        (
             "API review at a full URL",
             "gh api https://api.github.com/repos/a/b/pulls/7/reviews -f event=APPROVE",
             True,
