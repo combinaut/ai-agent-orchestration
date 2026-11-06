@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.3.0](https://github.com/combinaut/ai-agent-orchestration/compare/v1.2.1...v1.3.0) (2026-11-06)
+
+
+### Features
+
+* **skills:** check the PR text in the finalize sweep ([#162](https://github.com/combinaut/ai-agent-orchestration/issues/162)) ([f26db9e](https://github.com/combinaut/ai-agent-orchestration/commit/f26db9ee023f9ca0427f5b851c0c652f63ef8420))
+* **skills:** require a unique kill per test and fix stale comments ([#161](https://github.com/combinaut/ai-agent-orchestration/issues/161)) ([abf2d85](https://github.com/combinaut/ai-agent-orchestration/commit/abf2d8567141614672ee4248bd67044b868c34a9))
+* **skills:** slice and validate the finalize sweep ([#160](https://github.com/combinaut/ai-agent-orchestration/issues/160)) ([9ddfd34](https://github.com/combinaut/ai-agent-orchestration/commit/9ddfd346a6a0c00da24b57112c6d36cca7597488))
+* **todo:** close items whose linked PRs and issues are resolved ([#167](https://github.com/combinaut/ai-agent-orchestration/issues/167)) ([02f00ef](https://github.com/combinaut/ai-agent-orchestration/commit/02f00ef57084d313b17002da521352dd3369d870))
+
+
+### Bug Fixes
+
+* allow wiki pushes with compact git directory option ([#150](https://github.com/combinaut/ai-agent-orchestration/issues/150)) ([4993a35](https://github.com/combinaut/ai-agent-orchestration/commit/4993a352a392587cb22598cb0f09b32e2f672b2a))
+* block singular hook review screen ([#154](https://github.com/combinaut/ai-agent-orchestration/issues/154)) ([2c1a370](https://github.com/combinaut/ai-agent-orchestration/commit/2c1a37001ae1be374afa370723e440acc674c460))
+* move the To-do pane to a recycled Coordinator tab ([#159](https://github.com/combinaut/ai-agent-orchestration/issues/159)) ([079a624](https://github.com/combinaut/ai-agent-orchestration/commit/079a624a48d5738c2f5009d2df4234aaf81151b1))
+* **orch-signal:** fail fast when the sandbox blocks a write ([#164](https://github.com/combinaut/ai-agent-orchestration/issues/164)) ([b671098](https://github.com/combinaut/ai-agent-orchestration/commit/b671098228d511fb4440f2543e3815e4362a8961))
+* pre-authorize dispatched review posts ([#153](https://github.com/combinaut/ai-agent-orchestration/issues/153)) ([5ab9dd9](https://github.com/combinaut/ai-agent-orchestration/commit/5ab9dd96e4884d1996bc11d5523fceed3762c895))
+* retry GitHub writes after secondary limits ([#156](https://github.com/combinaut/ai-agent-orchestration/issues/156)) ([a26bb97](https://github.com/combinaut/ai-agent-orchestration/commit/a26bb97bc24b68cf0c421ccf883482a7926b8eaf))
+
 ## [1.2.1](https://github.com/combinaut/ai-agent-orchestration/compare/v1.2.0...v1.2.1) (2026-10-31)
 
 
