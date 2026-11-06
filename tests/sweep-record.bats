@@ -224,6 +224,15 @@ check() {
   [ "$stderr" = "ERROR: $REC: validator a1b2c3 brief must include finalize-sweep validator and name $HEAD_SHA" ]
 }
 
+@test "a Claude validator brief may use text blocks" {
+  local dir="$CLAUDE_CONFIG_DIR/projects/-some-project/$SESSION/subagents"
+  mkdir -p "$dir"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"finalize-sweep validator "},{"type":"text","text":"%s"}]}}\n' "$HEAD_SHA" >"$dir/agent-a1b2c3.jsonl"
+  record 2 '["a1b2c3"]'
+  check
+  [ "$status" -eq 0 ]
+}
+
 @test "a Codex validator task must include the marker and head" {
   codex_agent /root/correctness "$SESSION" 'sweep slice comments' "$HEAD_SHA"
   record 2 '["/root/correctness"]'

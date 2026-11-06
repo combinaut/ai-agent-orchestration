@@ -125,7 +125,14 @@ def claude_brief(path):
             item = json.loads(line)
             message = item.get("message", {})
             if item.get("type") == "user" and message.get("role") == "user":
-                return message.get("content", "")
+                content = message.get("content", "")
+                if isinstance(content, list):
+                    return "".join(
+                        block.get("text", "")
+                        for block in content
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    )
+                return content
     return ""
 
 
