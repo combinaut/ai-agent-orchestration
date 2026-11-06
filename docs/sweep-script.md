@@ -22,7 +22,9 @@ Each slice starts one `finalize-code-comments` agent and one `finalize-change-fo
 | Runtime | Command |
 |---|---|
 | `codex` (default) | `codex exec -m <model> -C <checkout> -s read-only --ephemeral --ignore-user-config -c project_doc_max_bytes=0 --json --output-schema <file> -o <file> -` |
-| `claude` | `claude -p --model <model> --output-format json --json-schema <schema> --permission-mode dontAsk --setting-sources user --strict-mcp-config --no-session-persistence --allowedTools Read Grep Glob "Bash(git diff:*)" "Bash(git show:*)" "Bash(git ls-files:*)" "Bash(git merge-base:*)" "Bash(rg:*)" --disallowedTools Edit Write NotebookEdit` |
+| `claude` | `claude -p --model <model> --output-format json --json-schema <schema> --permission-mode dontAsk --setting-sources user --strict-mcp-config --no-session-persistence --tools Read,Grep,Glob --add-dir <diff folder> --allowedTools Read Grep Glob --disallowedTools Edit Write NotebookEdit` |
+
+The script writes the PR diff and each slice's diff (`git diff --no-ext-diff --no-textconv`) to a temporary folder outside the checkout and names the file in each prompt; the folder is removed when the run ends. Claude agents have no shell. Codex agents have one inside the read-only sandbox: a command can run a program from the checkout (`rg --pre`), but it cannot write files or reach the network.
 
 The model comes from the settings: `models.codex_worker`, else `models.codex_smart`, for Codex; `sonnet` when `providers.claude` lists it, else the first listed tier, for Claude. `--model` overrides it. The record names it.
 

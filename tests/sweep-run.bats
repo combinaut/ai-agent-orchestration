@@ -245,8 +245,26 @@ for line in open(sys.argv[1]):
     assert argv[:3] == ["-p", "--model", "sonnet"], argv
     assert argv[argv.index("--permission-mode") + 1] == "dontAsk", argv
     assert argv[argv.index("--setting-sources") + 1] == "user", argv
+    assert argv[argv.index("--tools") + 1] == "Read,Grep,Glob", argv
+    assert not any("Bash" in a for a in argv), argv
+    assert not argv[argv.index("--add-dir") + 1].startswith(sys.argv[2]), argv
     assert argv[-4:] == ["--disallowedTools", "Edit", "Write", "NotebookEdit"], argv
-    assert not any(a.startswith(("Edit", "Write")) for a in argv[argv.index("--allowedTools"):-4]), argv' "$TMP/agent.calls"
+    assert not any(a.startswith(("Edit", "Write")) for a in argv[argv.index("--allowedTools"):-4]), argv' "$TMP/agent.calls" "$REPO"
+}
+
+@test "every agent reads its diff from a file outside the checkout, removed after the run" {
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  for role in sweep-comments sweep-footprint pr-text validator; do
+    ls "$TMP"/prompts/"$role".*.diff >/dev/null
+  done
+  grep -l '^+lib/alpha.py line 20$' "$TMP"/prompts/sweep-comments.*.diff >/dev/null
+  grep -l '^+tests/alpha.bats line 5$' "$TMP"/prompts/pr-text.*.diff >/dev/null
+  folder=$(sed -n 's/.* is in \(.*\)\/pr\.diff[;.].*/\1/p' "$TMP"/prompts/pr-text.* | head -1)
+  [ -n "$folder" ]
+  [[ "$folder" != "$REPO"* ]]
+  [ ! -e "$folder" ]
+  run ! grep -q 'with git diff' "$TMP"/prompts/sweep-comments.[0-9]*[0-9]
 }
 
 @test "the codex model falls back to the smart model" {
