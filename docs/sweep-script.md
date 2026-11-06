@@ -62,4 +62,4 @@ Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- or
 
 ## Exit codes
 
-`0` record written (and comment posted); `1` usage, checkout or GitHub error; `2` the tree changed; `3` over 25 slices; `4` an agent failed after its retry; `5` the record does not fit in one comment; `128 + n` stopped by signal `n`.
+`0` record written (and the comment posted, unless `--no-comment`); `1` usage, checkout or GitHub error; `2` the tree changed; `3` over 25 slices; `4` an agent failed after its retry; `5` the record does not fit in one comment; `128 + n` stopped by signal `n`.
