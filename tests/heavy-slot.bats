@@ -783,10 +783,27 @@ in_own_session() {
   exec python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@"
 }
 
+group_live() {
+  local member
+  for member in $(pgrep -g "$1"); do
+    case $(ps -o stat= -p "$member" 2>/dev/null) in
+      '' | Z*) ;;
+      *) return 0 ;;
+    esac
+  done
+  return 1
+}
+
 assert_group_empty() {
   local tries=0
-  while pgrep -g "$1" >/dev/null && [ "$tries" -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done
-  ! pgrep -g "$1"
+  while group_live "$1" && [ "$tries" -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done
+  ! group_live "$1"
+}
+
+wait_for_exit() {
+  local tries=0
+  while kill -0 "$1" 2>/dev/null && [ "$tries" -lt 150 ]; do sleep 0.1; tries=$((tries + 1)); done
+  ! kill -0 "$1" 2>/dev/null
 }
 
 wait_for_group_process() {
@@ -799,6 +816,7 @@ wait_for_group_process() {
 @test "a short job leaves no long-run watcher or its sleep behind" {
   ORCH_HEAVY_SLOTS_LONG_RUN=29 in_own_session "$HELPER" take agent-wstop-ok -- sleep 1 &
   pid=$!
+  wait_for_exit "$pid"
   wait "$pid"
   assert_group_empty "$pid"
 }
