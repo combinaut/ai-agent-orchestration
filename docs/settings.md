@@ -5,7 +5,7 @@ Settings come from three places. Each setting has one scope and lives in only on
 - **Global** settings (machine-wide: watchers, heavy slots, models, paths, Herdr) live in `~/.claude/orchestration.toml`. `ORCH_CONFIG=/path` selects another file; a selected path that is not a regular file is an error. The installer copies [`config/orchestration.toml.example`](../config/orchestration.toml.example) there on the first run.
 - **Repo** settings (big-repo guard, legacy scan, focus report, merge gate checks) live at the root of each repo: `.orchestration.toml` is committed and shared, `.orchestration.local.toml` is personal. [`config/repo.orchestration.toml.example`](../config/repo.orchestration.toml.example) lists them.
 - `review.finalize_commands` and `review.finalize_comment` are repo settings the global file also accepts. The global value is the default for every repo, a repo file overrides it, and `finalize_commands = []` opts a repo out.
-- When the resolved `review.finalize_commands` names `/finalize-change-footprint` or `/finalize-code-comments` and not `/finalize-sweep`, `orch-settings` and the repo loader print one `WARNING:` line on stderr naming the file (or the `ORCH_REVIEW_FINALIZE_COMMANDS` variable) that set it. `/finalize-sweep` replaces those commands. The exit code and the stdout lines are unchanged.
+- When the resolved `review.finalize_commands` names `/finalize-change-footprint` or `/finalize-code-comments` and not `/finalize-sweep`, `orch-settings` and the repo loader print one `WARNING:` line on stderr naming the file (or the `ORCH_REVIEW_FINALIZE_COMMANDS` variable) that set it. `/finalize-sweep` replaces those commands. The warning goes to stderr only; it does not affect the exit code or stdout.
 - An **exported** `ORCH_*` variable wins over both files, for every setting.
 
 A repo key in the global file (except the two `review.*` keys above), a global key in a repo file, an unknown key, a value of the wrong type, a list entry that is empty or contains its separator (whitespace, `,`, `|` or `:`) and invalid TOML are errors that name the file and the key. A script that lacks a setting or a command prints `ERROR: …` and exits with status 2. Reading TOML needs Python 3.11 or newer: the loader takes `ORCH_PYTHON3` from the environment, then `python3` on `PATH`, then the Homebrew paths.
@@ -119,7 +119,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `pr_tabs.open_all` | `ORCH_PR_TABS_OPEN_ALL` | empty | GitHub search behind the Open all button; empty turns it off |
 | `pr_tabs.terminal_app` | `ORCH_PR_TABS_TERMINAL_APP` | empty | macOS app the popup's go to pane button brings to the front after focusing the Herdr pane; empty leaves the windows as they are |
 | `review.finalize_commands` | `ORCH_REVIEW_FINALIZE_COMMANDS` | `["/finalize-sweep"]` | Slash commands workers run before calling a PR done or ready, and again after every merge or rebase of the base; empty skips this step. The global file sets it for every repo; a repo file overrides it |
-| `review.finalize_comment` | `ORCH_REVIEW_FINALIZE_COMMENT` | `true` | After the approved findings are applied and pushed, the worker posts one PR comment with every finding. The global file sets it for every repo; a repo file overrides it |
+| `review.finalize_comment` | `ORCH_REVIEW_FINALIZE_COMMENT` | `true` | With a PR, after the approved findings are applied and pushed, the worker posts one PR comment with every finding. The global file sets it for every repo; a repo file overrides it |
 
 ## Repo settings
 
@@ -128,7 +128,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `guard.big_repo` | `ORCH_BIG_REPO` | `false` | Broad Git reads (git grep, cat-file over all objects) are blocked in this repo |
 | `audit.merge_gate_checks` | `ORCH_MERGE_GATE_CHECKS` | empty | Check names that only run on a full CI run; an approved PR on a non-default base reports "full CI ran" or "full CI not run" |
 | `review.finalize_commands` | `ORCH_REVIEW_FINALIZE_COMMANDS` | `["/finalize-sweep"]` | Slash commands workers run before calling a PR done or ready, and again after every merge or rebase of the base; empty skips this step. The global file sets it for every repo; a repo file overrides it |
-| `review.finalize_comment` | `ORCH_REVIEW_FINALIZE_COMMENT` | `true` | After the approved findings are applied and pushed, the worker posts one PR comment with every finding. The global file sets it for every repo; a repo file overrides it |
+| `review.finalize_comment` | `ORCH_REVIEW_FINALIZE_COMMENT` | `true` | With a PR, after the approved findings are applied and pushed, the worker posts one PR comment with every finding. The global file sets it for every repo; a repo file overrides it |
 | `legacy.scan` | `ORCH_LEGACY_SCAN` | `false` | Open PRs of this repo are scanned for added lines that legacy.rules count (LEGACY line) |
 | `legacy.rules` | `ORCH_LEGACY_RULES` | empty | Legacy rules ([[legacy.rules]]: kind, paths, optional pattern and exclude); the first rule that counts a line names its kind. No rules: nothing is scanned or mapped |
 | `legacy.exempt` | `ORCH_LEGACY_EXEMPT` | empty | Path globs no legacy rule counts |
