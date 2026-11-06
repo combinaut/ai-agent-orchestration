@@ -43,7 +43,7 @@ case "$*" in
     printf '%s\t%s\t%s\n' "${HEAD_OWNER:-alexsavio}" "${HEAD_REPO:-ai-agent-orchestration}" "${HEAD_REF:-feat/usage-ledger}"
     ;;
   *'/reviews'*)
-    r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "$2" "$1"; }
+    r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"%s","body":"%s","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "${REVIEW_STATE:-APPROVED}" "${REVIEW_BODY-}" "$2" "$1"; }
     old=""
     [ -z "${GH_OLD_REVIEW:-}" ] || old=$(r 1 "${OLD_AT:-2020-01-01T00:00:00Z}")
     if [ ! -e "$TMP/review.prompt" ]; then
@@ -93,7 +93,7 @@ EOF
     export PATH="$TMP/fetch-ok:$PATH"
   fi
   run env ORCH_CONFIG="$TMP/none.toml" bash "$ROOT/$SKILL_DIR/scripts/dispatch.sh" \
-    https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" review rev7 "$TMP/app" acme/app
+    https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" "${KIND:-review}" rev7 "$TMP/app" acme/app
 }
 
 fork_head_missing_from_pull_ref() {
@@ -1434,6 +1434,201 @@ assert len(lines) == 1 and lines[0].startswith("ready:"), lines
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["queue"], "codex is off" in d["note"])')" = "[] True" ]
   [ ! -e "$TMP/gh.called" ]
+}
+
+@test "a head with a done review is due again as a re-request only when you are personally asked" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "number": 7, "title": "t", "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": "A",
+      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
+      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+      "reviewRequests": {"nodes": []}}
+done = {url: {"heads": {"A": {"state": "done", "at": "2026-01-01T00:00:00+00:00"}}}}
+assert prs.needs_dispatch(pr, done, "me") == (False, None)
+pr["reviewRequests"] = {"nodes": [{"requestedReviewer": {"slug": "team"}}]}
+assert prs.needs_dispatch(pr, done, "me") == (False, None)
+pr["reviewRequests"] = {"nodes": [{"requestedReviewer": {"login": "Me"}}]}
+pr["timelineItems"] = {"nodes": [{"requestedReviewer": {"login": "Me"}, "createdAt": "2026-01-02T00:00:00+00:00"}]}
+assert prs.needs_dispatch(pr, done, "me") == (True, "re-request")
+assert prs.needs_dispatch(pr, {url: {"heads": {"A": {"state": "pending"}}}}, "me") == (False, None)
+assert prs.needs_dispatch(pr, {url: {"heads": {"A": {"state": "blocked"}}}}, "me") == (False, None)
+first = prs.agent_name("acme/app", 7, "A" * 40)
+again = prs.agent_name("acme/app", 7, "A" * 40, "2026-01-01T00:00:00+00:00")
+assert again != first and again.startswith(first[:10]) and len(again) <= 32
+before = prs.snapshot([pr], "me")
+pr["reviewRequests"] = {"nodes": []}
+after = prs.snapshot([pr], "me")
+assert prs.changes(after, before)[0] == ["ready: %s — t: review requested again" % url]
+# A stale queue snapshot can still show the request after its re-review completed.
+pr["timelineItems"] = {"nodes": [{"requestedReviewer": {"login": "Me"}, "createdAt": "2026-01-01T00:00:00+00:00"}]}
+completed = {url: {"heads": {"A": {"state": "done", "at": "2026-01-01T01:00:00+00:00"}}}}
+assert prs.needs_dispatch(pr, completed, "me") == (False, None)
+# The newest personal request controls a re-request, not the original request.
+pr["reviewRequests"] = {"nodes": [{"requestedReviewer": {"login": "Me"}}]}
+pr["timelineItems"] = {"nodes": [
+    {"requestedReviewer": {"login": "Me"}, "createdAt": "2026-01-01T00:00:00+00:00"},
+    {"requestedReviewer": {"login": "Me"}, "createdAt": "2026-01-01T02:00:00+00:00"},
+]}
+assert prs.needs_dispatch(pr, completed, "me") == (True, "re-request")
+# A historical event is not an active request after the author cancels it.
+pr["reviewRequests"] = {"nodes": []}
+assert prs.needs_dispatch(pr, completed, "me") == (False, None)
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "watch request changes are personal and retain simultaneous changes" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+def pr(requests):
+    return {"url": url, "title": "t", "isDraft": False, "mergeable": "MERGEABLE",
+            "headRefOid": "A", "author": {"login": "author"},
+            "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+            "reviewRequests": {"nodes": requests}}
+assert prs.snapshot([pr([{"requestedReviewer": {"login": "copilot"}}])], "me")[url]["requested"] is False
+assert prs.snapshot([pr([{"requestedReviewer": {"login": "teammate"}}])], "me")[url]["requested"] is False
+before = {url: {"title": "t", "draft": False, "author": "author", "ci": "SUCCESS", "conflict": False, "sha": "A", "requested": False}}
+commits = {url: {**before[url], "sha": "B", "requested": True}}
+assert prs.changes(before, commits)[0] == ["ready: %s — t: new commits (B), review requested again" % url]
+failing = {url: {**before[url], "ci": "FAILURE", "requested": True}}
+assert prs.changes(before, failing)[0] == ["changed: %s — t: review requested again, CI failing" % url]
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "claim --retake takes a done head again and never a pending or blocked one" {
+  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@"; }
+  retake_url=https://github.com/acme/app/pull/7
+  prs claim-dispatched --url "$retake_url" --sha a >/dev/null
+  prs mark-dispatched --url "$retake_url" --sha a --state "done" >/dev/null
+  run prs claim-dispatched --url "$retake_url" --sha a
+  [ "$status" -eq 3 ]
+  run prs claim-dispatched --url "$retake_url" --sha a --retake
+  [ "$status" -eq 0 ]
+  prs release-dispatched --url "$retake_url" --sha a
+  run python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]]["heads"]["a"]["state"])' "$HOME/.cache/review-prs/dispatched.json" "$retake_url"
+  [ "$output" = "done" ]
+  run prs claim-dispatched --url "$retake_url" --sha a --retake
+  [ "$status" -eq 0 ]
+  prs mark-dispatched --url "$retake_url" --sha a --state blocked --reason hooks >/dev/null
+  run prs claim-dispatched --url "$retake_url" --sha a --retake
+  [ "$status" -eq 3 ]
+}
+
+@test "a dispatch of a re-request claims the done head again and completes it" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  mkdir -p "$HOME/.cache/review-prs"
+  printf '{"https://github.com/acme/app/pull/7":{"heads":{"%s":{"state":"done","at":"2026-01-01T00:00:00+00:00"}}}}' "$SHA" >"$HOME/.cache/review-prs/dispatched.json"
+  KIND=re-request dispatch
+  [ "$status" -eq 0 ]
+  contains "$output" 'LASTREVIEW'
+  prompt=$(cat "$TMP/review.prompt")
+  contains "$prompt" 'Mode: re-request'
+  contains "$prompt" 'asked for your review again'
+  [ "$(dispatch_state)" = 'False "done"' ]
+  KIND=review dispatch
+  [ "$status" -eq 3 ]
+}
+
+@test "dispatch-queue lists a review pending for 30 minutes as stuck and expires nothing" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import io, json, sys
+from contextlib import redirect_stdout
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+sys.path.insert(0, sys.argv[1])
+import prs
+def pr(n, sha):
+    return {"url": "https://github.com/acme/app/pull/%d" % n, "number": n, "title": "Fix", "author": {"login": "author"},
+            "repository": {"nameWithOwner": "acme/app"}, "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": sha,
+            "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}}
+def ago(minutes):
+    return (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+old, young = pr(1, "A"), pr(2, "B")
+ledger = {old["url"]: {"heads": {"A": {"state": "pending", "agent": "rev1", "pane": "p1", "at": ago(31)}}},
+          young["url"]: {"heads": {"B": {"state": "pending", "agent": "rev2", "pane": "p2", "at": ago(29)}}}}
+prs.codex_enabled = lambda: True
+prs.worker_model = lambda: "model"
+prs.fetch = lambda scope: ([old, young], "reviewer")
+prs.load_dispatched = lambda: ledger
+out = io.StringIO()
+with redirect_stdout(out): prs.cmd_dispatch_queue(SimpleNamespace(), "repo:acme/app", "acme/app")
+r = json.loads(out.getvalue())
+assert r["queue"] == [], r
+assert r["stuck"] == [{"url": old["url"], "sha": "A", "agent": "rev1", "pane": "p1", "minutes": 31}], r
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "last-review marks a review whose body carries the sweep marker of the head" {
+  marker='<!-- finalize-sweep {\"head\":\"'"$SHA"'\",\"dropped\":[]} -->'
+  swept() {
+    printf '[[{"id":2,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","body":"%s","submitted_at":"2099-01-01T00:00:00Z","html_url":"u"}]]' "$SHA" "$1" |
+      python3 "$ROOT/$SKILL_DIR/scripts/prs.py" last-review --login reviewer --sha "$SHA" --seen ""
+  }
+  [ "$(swept "$marker")" = 'LASTREVIEW APPROVED 2099-01-01T00:00:00Z u SWEPT' ]
+  [ "$(swept 'no marker')" = 'LASTREVIEW APPROVED 2099-01-01T00:00:00Z u' ]
+  [ "$(swept '<!-- finalize-sweep {\"head\":\"other\"} -->')" = 'LASTREVIEW APPROVED 2099-01-01T00:00:00Z u' ]
+}
+
+@test "dispatch prints SWEEP MISSING for an APPROVE or a first review without the marker, and not for a repo without a sweep" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  dispatch
+  contains "$output" 'SWEEP MISSING'
+  rm -f "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
+  REVIEW_BODY='<!-- finalize-sweep {\"head\":\"'"$SHA"'\",\"dropped\":[]} -->' dispatch
+  not_contains "$output" 'SWEEP MISSING'
+  rm -f "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
+  ORCH_REVIEW_FINALIZE_COMMANDS='' dispatch
+  not_contains "$output" 'SWEEP MISSING'
+  rm -f "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
+  KIND=re-review REVIEW_STATE=CHANGES_REQUESTED dispatch
+  not_contains "$output" 'SWEEP MISSING'
+}
+
+@test "the review prompt sweeps once, puts the table and marker in the review body and follows review.finalize_commands" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  dispatch
+  prompt=$(cat "$TMP/review.prompt")
+  contains "$prompt" 'Run finalize-sweep (~/.claude/skills/finalize-sweep/SKILL.md) in report-only mode'
+  contains "$prompt" "report-only pr=https://github.com/acme/app/pull/7 max-slices=25 and base ref origin/main"
+  contains "$prompt" 'on your first review of this PR, and on a head you would APPROVE'
+  contains "$prompt" 'one of your earlier submitted reviews already holds a marker'
+  not_contains "$prompt" 'a review or comment on the PR already holds a marker'
+  contains "$prompt" 'Put the findings table in the review body, one post per head'
+  contains "$prompt" '<!-- finalize-sweep {"head":"'"$SHA"'","dropped":'
+  contains "$prompt" 'redundant but not misleading'
+  not_contains "$prompt" 'issues/7/comments'
+  rm -f "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
+  ORCH_REVIEW_FINALIZE_COMMANDS='/finalize-code-comments|/lint-prs' dispatch
+  prompt=$(cat "$TMP/review.prompt")
+  contains "$prompt" '/finalize-code-comments, /lint-prs'
+  not_contains "$prompt" 'Run finalize-sweep'
+  rm -f "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
+  ORCH_REVIEW_FINALIZE_COMMANDS='' dispatch
+  prompt=$(cat "$TMP/review.prompt")
+  not_contains "$prompt" 'finalize'
+  contains "$prompt" 'Search code with rg or grep.'
+}
+
+@test "finalize-sweep has a report-only mode" {
+  grep -qF '## Report-only mode' "$ROOT/skills/finalize-sweep/SKILL.md"
+  grep -qF 'max-slices=<n>' "$ROOT/skills/finalize-sweep/SKILL.md"
 }
 
 @test "the architect skill keeps /goal out of the default worker brief" {
