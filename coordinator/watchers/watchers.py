@@ -1516,20 +1516,55 @@ def todo_module():
     return _TODO_MODULE
 
 
+def github_link_state(url, timeout=None):
+    """merged, closed or open for a GitHub PR or issue URL."""
+    owner, repo, kind, number = url.split("/")[3:7]
+    row = json.loads(
+        command(
+            "gh",
+            "api",
+            f"repos/{owner}/{repo}/{'pulls' if kind == 'pull' else 'issues'}/{number}",
+            timeout=timeout,
+        )
+    )
+    if row.get("merged") or row.get("merged_at"):
+        return "merged"
+    return "closed" if row["state"] == "closed" else "open"
+
+
+def todo_paths():
+    coordinator = Path.home() / ".claude/coordinator"
+    return (
+        Path(
+            os.environ.get("ORCH_USER_TODO_STATUS_DIR")
+            or Path.home() / ".claude/coordinator/status"
+        ),
+        Path(os.environ.get("ORCH_USER_TODO_OUTPUT") or coordinator / "user-todo.md"),
+        Path(
+            os.environ.get("ORCH_USER_TODO_STATE")
+            or coordinator / "user-todo.state.json"
+        ),
+    )
+
+
+def commit_todo_closures(raw):
+    """Dismisses the auto-closed items after their events are published; a failure repeats the events next cycle."""
+    _, output, state = todo_paths()
+    try:
+        todo_module().commit_auto_closed(raw.get("auto_closed", []), state, output)
+    except OSError:
+        pass
+
+
 def collect_todo(before):
     module = todo_module()
-    directory = Path(
-        os.environ.get("ORCH_USER_TODO_STATUS_DIR")
-        or Path.home() / ".claude/coordinator/status"
-    )
-    coordinator = Path.home() / ".claude/coordinator"
-    output = Path(
-        os.environ.get("ORCH_USER_TODO_OUTPUT") or coordinator / "user-todo.md"
-    )
-    state = Path(
-        os.environ.get("ORCH_USER_TODO_STATE") or coordinator / "user-todo.state.json"
-    )
-    raw = module.merge(directory, output, state)
+    directory, output, state = todo_paths()
+    try:
+        with short_commands():
+            links = module.resolve_links(directory, state, github_link_state)
+    except Exception:
+        links = {}
+    raw = module.merge(directory, output, state, links=links)
     records, failed = todo_answers.collect(command)
     if todo_answers.directory().exists():
         raw["todo_answers"] = records
@@ -1609,6 +1644,10 @@ def reduce_todo(before, raw):
     after, events = reduce_todo_status(before, raw)
     events += [
         "TODO READFAIL " + notice for notice in raw.get("todo_answer_notices", [])
+    ]
+    events += [
+        f"TODO AUTO-CLOSED {'_'.join(item['source'].removesuffix('.md').split())}: {item['text']} ({item['url']} {item['resolution']})"
+        for item in raw.get("auto_closed", [])
     ]
     records = raw.get("todo_answers", [])
     previous = set((before or {}).get("todo_answer_ids", []))
@@ -2058,7 +2097,13 @@ def cycle_pass(base, mode, collector, failures, budget):
                     line
                     for line in reduced_events
                     if line.startswith(
-                        ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ", "SLOT ")
+                        (
+                            "WORKER DONE ",
+                            "WORKER QUESTION ",
+                            "TODO ANSWER ",
+                            "TODO AUTO-CLOSED ",
+                            "SLOT ",
+                        )
                     )
                 ]
             if mode == "hog":
@@ -2087,6 +2132,8 @@ def cycle_pass(base, mode, collector, failures, budget):
         ) as error:
             events += failed_read(state, mode, failures, type(error).__name__)
         line = publish_events(base, mode, state, events)
+        if mode == "todo" and reduced:
+            commit_todo_closures(raw)
         if mode == "answers" and reduced:
             notices = acknowledge_answers(raw)
             if notices:

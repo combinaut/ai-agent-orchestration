@@ -4,3 +4,4 @@
 ^[^ ]+ audit: (RED|THREADS|COPILOT|COMMENTED|CHANGES|APPROVED[A-Z-]*) .*\(start\)$
 ^[^ ]+ watchers: Watcher digest, .*\(digest\)$
 ^[^ ]+ balance: SLOT (WAIT|FAIL) .*\(start\)$
+^[^ ]+ todo: TODO AUTO-CLOSED .*\(start\)$
