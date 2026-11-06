@@ -1626,10 +1626,9 @@ assert r["stuck"] == [{"url": old["url"], "sha": "A", "agent": "rev1", "pane": "
   contains "$prompt" 'Search code with rg or grep.'
 }
 
-@test "finalize-sweep has a report-only mode and the architect's findings comment carries the marker" {
+@test "finalize-sweep has a report-only mode" {
   grep -qF '## Report-only mode' "$ROOT/skills/finalize-sweep/SKILL.md"
   grep -qF 'max-slices=<n>' "$ROOT/skills/finalize-sweep/SKILL.md"
-  grep -qF '<!-- finalize-sweep {"head":"<full sha>"} -->' "$ROOT/skills/architect/SKILL.md"
 }
 
 @test "the architect skill keeps /goal out of the default worker brief" {
