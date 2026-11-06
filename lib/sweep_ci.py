@@ -32,13 +32,25 @@ def write_status(repo, head, state, description):
     )
 
 
-def metadata_key(pr):
+def metadata_key(pr, comments):
     return (
         pr["head"]["sha"],
         pr["base"]["ref"],
         pr["base"].get("sha"),
         pr["title"],
         pr["body"],
+        gate.canonical(
+            [
+                {
+                    "id": c.get("id"),
+                    "updated_at": c.get("updated_at"),
+                    "body": c.get("body"),
+                    "login": (c.get("user") or {}).get("login"),
+                    "author_association": c.get("author_association"),
+                }
+                for c in comments
+            ]
+        ),
     )
 
 
@@ -72,9 +84,10 @@ def evaluate(repo, number, allowed):
         pages = gate.gh_json(
             "api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"
         )
+        comments = [c for page in pages for c in page]
         why = gate.comments_problem(
             pr,
-            [c for page in pages for c in page],
+            comments,
             repo,
             number,
             head,
@@ -83,8 +96,14 @@ def evaluate(repo, number, allowed):
             local=False,
         )
         live = gate.gh_json("api", f"repos/{repo}/pulls/{number}")
-        if metadata_key(live) != metadata_key(pr):
-            why = "PR changed during validation; waiting for the next refresh"
+        live_pages = gate.gh_json(
+            "api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"
+        )
+        live_comments = [c for page in live_pages for c in page]
+        if metadata_key(live, live_comments) != metadata_key(pr, comments):
+            why = (
+                "PR or comments changed during validation; waiting for the next refresh"
+            )
         write_status(
             repo,
             head,

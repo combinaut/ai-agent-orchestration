@@ -63,6 +63,7 @@ class SharedGateTests(unittest.TestCase):
     def comment(self, record=None, author="author"):
         return {
             "user": {"login": author},
+            "author_association": "MEMBER",
             "body": gate.MARKER
             + "\n```json\n"
             + json.dumps(self.record if record is None else record)
@@ -114,6 +115,25 @@ class SharedGateTests(unittest.TestCase):
             gate, "cache_path", side_effect=AssertionError("local cache read")
         ):
             self.assertIsNone(self.check())
+
+    def test_outside_fork_author_cannot_self_attest(self):
+        for login in ("author", "review-bot"):
+            for association in (
+                None,
+                "NONE",
+                "CONTRIBUTOR",
+                "FIRST_TIMER",
+                "FIRST_TIME_CONTRIBUTOR",
+                "MANNEQUIN",
+            ):
+                comment = self.comment(author=login)
+                comment["author_association"] = association
+                with self.subTest(login=login, association=association):
+                    self.assertIn("no full", self.check([comment]) or "")
+        for association in ("OWNER", "MEMBER", "COLLABORATOR"):
+            comment = self.comment()
+            comment["author_association"] = association
+            self.assertIsNone(self.check([comment]))
 
     def test_configured_author(self):
         self.assertIsNone(self.check([self.comment(author="review-bot")]))
@@ -197,11 +217,17 @@ class PublisherTests(unittest.TestCase):
             "user": {"login": "author"},
         }
 
-    def evaluate(self, live=None, why=None):
+    def evaluate(self, live=None, why=None, comments=None, live_comments=None):
+        comments = [] if comments is None else comments
+        live_comments = comments if live_comments is None else live_comments
         with (
             patch.object(ci, "write_status") as status,
             patch.object(ci.subprocess, "run") as run,
-            patch.object(gate, "gh_json", side_effect=[self.pr, [[]], live or self.pr]),
+            patch.object(
+                gate,
+                "gh_json",
+                side_effect=[self.pr, [comments], live or self.pr, [live_comments]],
+            ),
             patch.object(gate, "git", return_value=BASE),
             patch.object(gate, "comments_problem", return_value=why) as shared,
         ):
@@ -256,6 +282,24 @@ class PublisherTests(unittest.TestCase):
             self.assertEqual([1], json.loads(output.getvalue()))
             api.assert_not_called()
 
+    def test_comment_change_during_validation_fails_status(self):
+        comment = {
+            "id": 1,
+            "updated_at": "before",
+            "body": "record",
+            "user": {"login": "author"},
+            "author_association": "MEMBER",
+        }
+        for live in (
+            [],
+            [{**comment, "body": "edited"}],
+            [{**comment, "updated_at": "after"}],
+            [{**comment, "author_association": "NONE"}],
+        ):
+            with self.subTest(live=live):
+                status, _, _ = self.evaluate(comments=[comment], live_comments=live)
+                self.assertEqual("failure", status.call_args.args[2])
+
     def test_fetch_failure_reports_error(self):
         with (
             patch.object(gate, "gh_json", return_value=self.pr),
@@ -281,12 +325,13 @@ class WorkflowTrustTests(unittest.TestCase):
                 "-r",
                 "json",
                 "-e",
-                "puts JSON.generate(YAML.safe_load(File.read(ARGV[0])))",
+                "puts JSON.generate(ARGV.map { |p| YAML.safe_load(File.read(p)) })",
                 str(path),
+                str(path.with_name("sweep-record-refresh.yml")),
             ],
             text=True,
         )
-        self.workflow = json.loads(parsed)
+        self.workflow, self.refresh = json.loads(parsed)
 
     def assert_trusted(self, workflow):
         events = workflow.get("on", workflow.get("true"))
@@ -295,8 +340,13 @@ class WorkflowTrustTests(unittest.TestCase):
             events["pull_request_target"]["types"],
         )
         allowed = {"contents": "read", "pull-requests": "read", "statuses": "write"}
-        for job in workflow["jobs"].values():
+        self.assertIsInstance(workflow["permissions"], dict)
+        self.assertNotIn("statuses", workflow["permissions"])
+        for name, job in workflow["jobs"].items():
             permissions = job.get("permissions", workflow["permissions"])
+            self.assertIsInstance(permissions, dict)
+            if name != "validate":
+                self.assertNotIn("statuses", permissions)
             self.assertLessEqual(permissions.items(), allowed.items())
             for step in job["steps"]:
                 if step.get("uses", "").startswith("actions/checkout@"):
@@ -308,31 +358,102 @@ class WorkflowTrustTests(unittest.TestCase):
                         step["with"]["ref"],
                     )
                     self.assertIs(False, step["with"]["persist-credentials"])
+                run = step.get("run", "")
+                for tail in run.split("${{")[1:]:
+                    expression, end, _ = tail.partition("}}")
+                    self.assertTrue(end)
+                    self.assertRegex(
+                        expression.strip(),
+                        r"^(?:(?:matrix|needs|steps)\.[\w.]+|github\.token)$",
+                    )
                 self.assertNotRegex(
-                    step.get("run", ""), r"\$\{\{\s*github\.event\.pull_request"
+                    run,
+                    r"\bgit\b[^\n;|&]*\b(?:checkout|switch|worktree)\b|\bgh\b[^\n;|&]*\b(?:pr\s+checkout|run\s+download)\b|refs/pull/",
                 )
                 self.assertNotIn("download-artifact", step.get("uses", ""))
 
+    def assert_refresh(self, refresh):
+        self.assertEqual({}, refresh["permissions"])
+        for job in refresh["jobs"].values():
+            self.assertEqual({}, job.get("permissions", {}))
+            for step in job["steps"]:
+                self.assertNotIn("uses", step)
+
     def test_trusted_workflow(self):
         self.assert_trusted(self.workflow)
+        self.assert_refresh(self.refresh)
 
-    def test_security_guards_reject_workflow_mutations(self):
-        for guard in ("head-checkout", "pr-field-run", "extra-permission"):
-            with self.subTest(guard=guard):
-                workflow = copy.deepcopy(self.workflow)
-                job = workflow["jobs"]["validate"]
-                if guard == "head-checkout":
-                    job["steps"][0]["with"]["ref"] = (
-                        "${{ github.event.pull_request.head.sha }}"
-                    )
-                elif guard == "pr-field-run":
-                    job["steps"][-1]["run"] += (
-                        "\necho '${{ github.event.pull_request.title }}'"
-                    )
-                else:
-                    job["permissions"]["contents"] = "write"
-                with self.assertRaises(AssertionError):
-                    self.assert_trusted(workflow)
+    def test_workflow_shape_blocks_public_event_escape_routes(self):
+        runs = [
+            "echo '${{ github.event.comment.body }}'",
+            "echo '${{ github.event.issue.title }}'",
+            "echo '${{ github.head_ref }}'",
+            "echo '${{ github.event.workflow_run.head_branch }}'",
+            "echo '${{ github.event.pull_request.title }}'",
+            "echo '${{ github.repository }}'",
+            "git checkout FETCH_HEAD",
+            "git -C /tmp/pr checkout FETCH_HEAD",
+            "git switch other",
+            "git worktree add /tmp/pr",
+            'gh pr checkout "$PR_NUMBER"',
+            'gh --repo owner/repo pr checkout "$PR_NUMBER"',
+            "git fetch origin refs/pull/1/head",
+            'gh run download "$RUN_ID"',
+        ]
+        for run in runs:
+            workflow = copy.deepcopy(self.workflow)
+            workflow["jobs"]["validate"]["steps"][-1]["run"] = run
+            with self.subTest(run=run), self.assertRaises(AssertionError):
+                self.assert_trusted(workflow)
+        for guard in (
+            "head-checkout",
+            "extra-permission",
+            "root-string",
+            "job-string",
+            "discovery-status",
+            "root-status",
+            "artifact",
+        ):
+            workflow = copy.deepcopy(self.workflow)
+            job = workflow["jobs"]["validate"]
+            if guard == "head-checkout":
+                job["steps"][0]["with"]["ref"] = (
+                    "${{ github.event.pull_request.head.sha }}"
+                )
+            elif guard == "extra-permission":
+                job["permissions"]["contents"] = "write"
+            elif guard == "root-string":
+                workflow["permissions"] = "write-all"
+            elif guard == "job-string":
+                job["permissions"] = "write-all"
+            elif guard == "discovery-status":
+                workflow["jobs"]["discover"]["permissions"] = {"statuses": "write"}
+            elif guard == "root-status":
+                workflow["permissions"]["statuses"] = "write"
+            else:
+                job["steps"].append({"uses": "actions/download-artifact@v6"})
+            with self.subTest(guard=guard), self.assertRaises(AssertionError):
+                self.assert_trusted(workflow)
+        for permissions in ({"contents": "read"}, "write-all"):
+            refresh = copy.deepcopy(self.refresh)
+            refresh["permissions"] = permissions
+            with self.assertRaises(AssertionError):
+                self.assert_refresh(refresh)
+        refresh = copy.deepcopy(self.refresh)
+        refresh["jobs"]["refresh"]["permissions"] = {"statuses": "write"}
+        with self.assertRaises(AssertionError):
+            self.assert_refresh(refresh)
+        for expression in (
+            "matrix.number",
+            "needs.discover.outputs.numbers",
+            "steps.prs.outputs.numbers",
+            "github.token",
+        ):
+            workflow = copy.deepcopy(self.workflow)
+            workflow["jobs"]["validate"]["steps"][-1]["run"] = (
+                "echo '${{ " + expression + " }}'"
+            )
+            self.assert_trusted(workflow)
 
 
 if __name__ == "__main__":

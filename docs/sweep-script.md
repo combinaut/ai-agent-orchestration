@@ -112,8 +112,17 @@ fields are read through the event JSON and API as data, never interpolated
 into a shell command.
 
 CI calls the same `comments_problem` function as the local gate. It accepts
-comments by the PR author or exact logins in `allowed_authors` in the trusted
-default branch's `.github/sweep-record.json`; all other authors are ignored.
+only comments whose GitHub `author_association` is `OWNER`, `MEMBER` or
+`COLLABORATOR` **and** whose login is the PR author or an exact login in
+`allowed_authors` in the trusted default branch's `.github/sweep-record.json`.
+Missing or other associations are ignored even for an allowlisted login. An
+outside fork author cannot self-attest merely by opening the PR. This
+association requirement applies to CI; the local gate retains its authenticated
+reviewer-login and local-cache checks.
+
+Trust uses login strings. After an account rename or deletion, another account
+may claim an allowlisted login; review the configuration after such changes.
+The repository-association requirement still applies to that login.
 Comments remain in creation order, as in the local gate: editing a comment
 does not make it newer. The newest full record for the exact head, and a newer
 text record when present, must satisfy the gate's shape, counts, verdicts,
@@ -125,8 +134,11 @@ valid record shape. An allowed author can fabricate a record. This is an
 attestation by trusted authors, not proof that agents actually ran. The local
 gate retains its stricter cache and allow-file checks.
 
-The status is refreshed from live PR metadata, not event text. A metadata
-change detected during evaluation fails that evaluation. GitHub status writes
+The status is refreshed from live PR metadata, not event text. Immediately
+before publication, CI re-reads metadata and comments and compares head/base,
+title/body, and each comment's ID, updated time, body, author login and
+association with the validated snapshot. Any detected change fails that
+evaluation. GitHub status writes
 and PR edits are not atomic; a later event refreshes the result. A base-branch
 push alone does not trigger these workflows; comment on the PR to refresh its
 merge-base check. Required-check configuration is a separate repository-admin
@@ -135,3 +147,10 @@ workflow can report when Actions itself is disabled.
 Statuses are attached to commits, so two PRs sharing one head SHA also share
 its status context. The workflow event trust boundary follows
 [GitHub's workflow_run documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run).
+
+The workflow-shape test parses both workflows. It restricts run expressions to
+`matrix.`, `needs.`, `steps.` and `github.token`, rejects Git/gh checkouts,
+worktrees, PR ref fetches and artifact downloads, and verifies dictionary
+permissions with status writes only in `jobs.validate`. The refresh workflow
+must have empty permissions and no action steps. These assertions test the
+checked-in shape; they are not a general shell sandbox.

@@ -479,6 +479,12 @@ def comments_problem(
     base_ref = (pr.get("base") or {}).get("ref")
     order = []
     for comment in comments:
+        if not local and comment.get("author_association") not in (
+            "OWNER",
+            "MEMBER",
+            "COLLABORATOR",
+        ):
+            continue
         if (comment.get("user") or {}).get("login") not in authors:
             continue
         record = comment_record(comment.get("body") or "")
