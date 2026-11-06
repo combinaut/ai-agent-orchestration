@@ -443,6 +443,26 @@ REVIEW_ENDPOINT = re.compile(
     r"/?repos/[^/]+/[^/]+/pulls/\d+/reviews(?:/\d+/events)?/?(?:\?[^#]*)?"
 )
 REVIEW_MUTATION = re.compile(r"(?:add|submit)PullRequestReview\b")
+HEREDOC = re.compile(
+    r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?:\n|$)", re.S
+)
+HERESTRING = re.compile(r"<<<[ \t]*('[^']*'|\"[^\"]*\"|\S+)")
+STDIN_NAMES = ("-", "/dev/stdin", "/dev/fd/0")
+
+
+def stdin_document(raw):
+    """The heredoc or here-string text the command feeds on stdin, else None when stdin is opaque."""
+    heredoc = HEREDOC.search(raw)
+    if heredoc:
+        text, quoted = heredoc.group(3), bool(heredoc.group(1))
+    else:
+        string = HERESTRING.search(raw)
+        if not string:
+            return None
+        text, quoted = string.group(1), string.group(1).startswith("'")
+    if "`" in text or "$(" in text or (not quoted and "$" in text):
+        return None
+    return text
 
 
 def guard_approve(args, cwd, opts, raw):
@@ -461,12 +481,12 @@ def guard_approve(args, cwd, opts, raw):
         return None
     texts = [raw]
     for name in flag_values(args, ("--input",)):
-        if (
-            not graphql
-            and name in ("-", "/dev/stdin", "/dev/fd/0")
-            and not OTHER_EVENT.search(raw)
-        ):
-            return APPROVE_REASON
+        if name in STDIN_NAMES:
+            document = stdin_document(raw)
+            if document is None or (not graphql and not OTHER_EVENT.search(document)):
+                return APPROVE_REASON
+            texts.append(document)
+            continue
         content = file_text(name, cwd)
         if content in (FILE_TOO_LARGE_REASON, FILE_NONREGULAR_REASON):
             return content

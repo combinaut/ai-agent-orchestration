@@ -1045,6 +1045,56 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "gh api graphql -f query='mutation{addPullRequestReview(input:{pullRequestId:\"x\",event:COMMENT}){clientMutationId}}'",
             False,
         ),
+        (
+            "GraphQL review from unseen stdin",
+            "cat q.json | gh api graphql --input -",
+            True,
+        ),
+        (
+            "GraphQL review from a stdin file",
+            "gh api graphql --input /dev/stdin < q.json",
+            True,
+        ),
+        (
+            "GraphQL approve heredoc",
+            'gh api graphql --input - <<\'JSON\'\n{"query":"mutation{submitPullRequestReview(input:{pullRequestReviewId:\\"x\\",event:APPROVE}){clientMutationId}}"}\nJSON',
+            True,
+        ),
+        (
+            "GraphQL comment heredoc",
+            'gh api graphql --input - <<\'JSON\'\n{"query":"mutation{addPullRequestReview(input:{pullRequestId:\\"x\\",event:COMMENT}){clientMutationId}}"}\nJSON',
+            False,
+        ),
+        (
+            "API review from unseen stdin with a COMMENT field",
+            "cat r.json | gh api repos/a/b/pulls/7/reviews --input - -f note=event=COMMENT",
+            True,
+        ),
+        (
+            "API review from a stdin file with a COMMENT header",
+            "gh api repos/a/b/pulls/7/reviews --input - -H 'X-Note: event=COMMENT' < r.json",
+            True,
+        ),
+        (
+            "API review heredoc expanding a file, with a COMMENT field",
+            "gh api repos/a/b/pulls/7/reviews --input - -f note=event=COMMENT <<JSON\n$(cat r.json)\nJSON",
+            True,
+        ),
+        (
+            "API review heredoc with an escaped APPROVE and a COMMENT field",
+            'gh api repos/a/b/pulls/7/reviews --input - -f note=event=COMMENT <<\'JSON\'\n{"event":"APPR\\u004fVE"}\nJSON',
+            True,
+        ),
+        (
+            "API review COMMENT heredoc that expands a second event",
+            'gh api repos/a/b/pulls/7/reviews --input - <<JSON\n{"event":"COMMENT"$(cat tail.json)\nJSON',
+            True,
+        ),
+        (
+            "API review here-string with a COMMENT event",
+            'gh api repos/a/b/pulls/7/reviews --input - <<< \'{"event":"COMMENT"}\'',
+            False,
+        ),
         ("API review list", "gh api repos/a/b/pulls/7/reviews --jq '.[].state'", False),
         (
             "orch-sweep post-review",
