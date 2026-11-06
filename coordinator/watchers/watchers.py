@@ -976,7 +976,10 @@ def reduce_workers(before, raw):
     return result, events + idle_events
 
 
-def pull_owners(command, prs, failed=None, work=None):
+PR_LABEL = re.compile(r"\bPR (\d+)\b")
+
+
+def pull_owners(command, prs, failed=None, work=None, ambiguous=None):
     """Owner tag of the open workspace whose checkout has each PR's head branch, by <repo>#<n>.
     work is the open work already read (discovery.open_work), or the Unavailable it raised.
     Each root is identified by its `origin` remote and its `upstream` remote, the base repo of a fork; only roots with
@@ -984,7 +987,9 @@ def pull_owners(command, prs, failed=None, work=None):
     head repository's owner is the owner of the root's origin, so a same-named branch of another fork has none.
     A root that fails is skipped and listed in `failed` by the `owner/name` of its origin and upstream, or as `*/<name>`
     when its origin could not be read. An unreadable upstream does not skip the root: its origin is still handled, and
-    `*` is listed, since the base repo it names is unknown."""
+    `*` is listed, since the base repo it names is unknown.
+    A PR without a checkout match takes the owner of the one open workspace whose label names `PR <n>`; with several,
+    `ambiguous` maps the PR to their ids and the PR has no owner."""
     work = discovery.open_work(command) if work is None else work
     if isinstance(work, discovery.Unavailable):
         raise work
@@ -1042,8 +1047,20 @@ def pull_owners(command, prs, failed=None, work=None):
         owner = (
             by_path.get(branches.get((repo.lower(), head, pr.get("headRefName")))) or {}
         ).get("owner")
+        key = f"{repo}#{pr['number']}"
+        if not owner:
+            named = [
+                row
+                for row in rows
+                if row.get("owner")
+                and str(pr["number"]) in PR_LABEL.findall(row.get("label") or "")
+            ]
+            if len(named) == 1:
+                owner = named[0]["owner"]
+            elif named and ambiguous is not None:
+                ambiguous[key] = sorted(row["id"] for row in named)
         if owner:
-            owners[f"{repo}#{pr['number']}"] = owner
+            owners[key] = owner
     return owners
 
 
@@ -1131,9 +1148,9 @@ def collect_pulls(command, before, clock=time.monotonic):
                 for key in waiting
             }
         )
-    unreadable, roots = [], []
+    unreadable, roots, ambiguous = [], [], {}
     try:
-        owners = pull_owners(command, prs, roots, work)
+        owners = pull_owners(command, prs, roots, work, ambiguous)
     except (*audit.READ_ERRORS, discovery.Unavailable) as error:
         owners, unreadable = {}, ["owners"]
         if audit.github_busy(error):
@@ -1305,6 +1322,8 @@ def collect_pulls(command, before, clock=time.monotonic):
             base=base,
             gate_checks=gate_checks,
         )
+        if key in ambiguous:
+            current[key]["owner_candidates"] = ambiguous[key]
     return dict(
         prs=current,
         departed=departed,
@@ -1368,10 +1387,12 @@ def pull_saved_identities(pr):
     return identities
 
 
-def pull_line(line, key, owner):
-    """`<kind> <repo>#<n> owner=<workspace or ?> <rest>`: the owner sits before any PR text."""
+def pull_line(line, key, owner, candidates=None):
+    """`<kind> <repo>#<n> owner=<workspace or ?> <rest>`: the owner sits before any PR text.
+    Several candidate workspaces add `ambiguous=<ids>` after it."""
     kind, _, rest = line.partition(" ")
-    return f"{kind} {key} owner={owner or '?'}" + rest[len(key) :]
+    tag = f" ambiguous={','.join(candidates)}" if candidates and not owner else ""
+    return f"{kind} {key} owner={owner or '?'}{tag}" + rest[len(key) :]
 
 
 def reduce_pulls(before, raw):
@@ -1454,7 +1475,9 @@ def reduce_pulls(before, raw):
                 # End the previous identity before starting its replacement, including in the feed policy.
                 if kind in old and changed:
                     events.append(f"{kind} {key} cleared")
-                events.append(pull_line(line, key, pr["owner"]))
+                events.append(
+                    pull_line(line, key, pr["owner"], pr.get("owner_candidates"))
+                )
         seen.update(visible_reviews or [])
         if legacy_reviews and visible_reviews is None:
             pr.pop(

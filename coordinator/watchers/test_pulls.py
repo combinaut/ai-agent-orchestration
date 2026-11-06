@@ -113,6 +113,53 @@ class PullsTest(IsolatedTestCase):
         owners = w.pull_owners(self.command([]), [pr(7), pr(8, branch="nobody")])
         self.assertEqual(owners, {PR["repository"]["nameWithOwner"] + "#7": "wArch"})
 
+    def labelled(self, *labels):
+        """Workspaces named by label whose checkouts match no PR branch."""
+        rows = [
+            {
+                "workspace_id": f"wL{index}",
+                "label": label,
+                "tokens": {"owner": f"wOwner{index}"},
+                "worktree": {
+                    "checkout_path": f"/wt/product/other{index}",
+                    "repo_root": "/repo/product",
+                },
+            }
+            for index, label in enumerate(labels)
+        ]
+        return patch.dict(
+            WORKSPACES,
+            {"result": {"workspaces": WORKSPACES["result"]["workspaces"] + rows}},
+        )
+
+    def test_a_pr_without_a_checkout_takes_the_owner_of_the_workspace_labelled_with_it(
+        self,
+    ):
+        with self.labelled("PR 171 + PR 8 · gate", "PR 80 · other"):
+            owners = w.pull_owners(self.command([]), [pr(8, branch="nobody")])
+        self.assertEqual(owners, {PR["repository"]["nameWithOwner"] + "#8": "wOwner0"})
+
+    def test_several_workspaces_labelled_with_the_pr_leave_it_unowned_and_name_them(
+        self,
+    ):
+        ambiguous = {}
+        with self.labelled("PR 8 · a", "PR 8 · b"):
+            owners = w.pull_owners(
+                self.command([]), [pr(8, branch="nobody")], ambiguous=ambiguous
+            )
+        key = PR["repository"]["nameWithOwner"] + "#8"
+        self.assertEqual((owners, ambiguous), ({}, {key: ["wL0", "wL1"]}))
+
+    def test_an_ambiguous_pr_line_lists_the_candidate_workspaces(self):
+        self.assertEqual(
+            w.pull_line("CHANGES o/r#8 t", "o/r#8", None, ["wL0", "wL1"]),
+            "CHANGES o/r#8 owner=? ambiguous=wL0,wL1 t",
+        )
+        self.assertEqual(
+            w.pull_line("CHANGES o/r#8 t", "o/r#8", "wA", ["wL0"]),
+            "CHANGES o/r#8 owner=wA t",
+        )
+
     def fork_clone(self, upstream="git@github.com:owner/product.git\n"):
         """The architect's clone is the fork me/product of owner/product; PRs are opened on owner/product."""
         remotes = {**REMOTES, "/repo/product": "git@github.com:me/product.git\n"}
