@@ -149,17 +149,25 @@ class ReviewTests(IsolatedTestCase):
 
     def test_entire_admission_and_final_state_write_obey_caller_deadline(self):
         self.real_clock()
-        for phase in ("admission", "result"):
+        # g.run rejects admission with Busy when under 2 s remain, so "result" needs a budget well above that.
+        for phase, timeout in (("admission", 0.2), ("result", 6)):
             with self.subTest(phase=phase):
                 invoked = False
+                armed = []
                 original_write = g.write_state
+                original_setitimer = signal.setitimer
 
                 def slow(path, state):
                     if (phase == "admission" and not invoked) or (
                         phase == "result" and invoked
                     ):
-                        time.sleep(3)
+                        time.sleep(timeout + 5)
                     original_write(path, state)
+
+                def record(which, seconds, *rest):
+                    if which == signal.ITIMER_REAL:
+                        armed.append(seconds)
+                    return original_setitimer(which, seconds, *rest)
 
                 def invoke(env, fds):
                     nonlocal invoked
@@ -167,12 +175,14 @@ class ReviewTests(IsolatedTestCase):
                     return subprocess.CompletedProcess(["gh"], 0, "ok", "")
 
                 started = time.monotonic()
-                with patch.object(g, "write_state", side_effect=slow):
+                with (
+                    patch.object(g, "write_state", side_effect=slow),
+                    patch.object(g.signal, "setitimer", side_effect=record),
+                ):
                     with self.assertRaises(g.Deadline):
-                        g.run(["gh"], invoke, timeout=2.1 if phase == "result" else 0.2)
-                self.assertLess(
-                    time.monotonic() - started, 2.6 if phase == "result" else 0.6
-                )
+                        g.run(["gh"], invoke, timeout=timeout)
+                self.assertAlmostEqual(armed[0], timeout, delta=0.05)
+                self.assertLess(time.monotonic() - started, timeout + 3)
 
     def test_parent_deadline_preserves_earlier_and_later_watcher_alarms(self):
         self.real_clock()
