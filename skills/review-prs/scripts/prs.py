@@ -471,6 +471,9 @@ def requested_of(pr, login):
 
 def requested_after(pr, login, completed_at):
     """Whether login was personally requested after the completed local review."""
+    if not requested_of(pr, login):
+        return False
+    latest = None
     for node in (pr.get("timelineItems") or {}).get("nodes") or []:
         reviewer = node.get("requestedReviewer") or {}
         if (reviewer.get("login") or "").lower() != (login or "").lower():
@@ -484,8 +487,8 @@ def requested_after(pr, login, completed_at):
             )
         except ValueError:
             return True
-        return requested > completed
-    return False
+        latest = max(latest, requested) if latest else requested
+    return bool(latest and latest > completed)
 
 
 def needs_dispatch(pr, dispatched, me=None):
