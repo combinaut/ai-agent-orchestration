@@ -445,6 +445,9 @@ EXPANDING_HEREDOC = re.compile(
 )
 STDIN_NAMES = ("-", "/dev/stdin", "/dev/fd/0")
 REVIEW_TEXT_TOOLS = {"git", "grep", "egrep", "fgrep", "rg", "orch-sweep"}
+GH_API_WORD = re.compile(r"(?:^|\s)api(?:\s|$)")
+ANSI_C_QUOTE = re.compile(r"\$'")
+GH_OR_CURL = re.compile(r"\b(?:gh|curl)\b")
 
 
 def review_marker(text):
@@ -460,7 +463,7 @@ def expands(masked):
     return "$" in masked or "`" in masked
 
 
-def review_api(args, masked, where, piped, raw):
+def review_api(masked, bodies, where, piped, moved, raw):
     """Whether a gh api call can write a pull-request review; a value the shell expands counts as unknown."""
     endpoint = api_endpoint(masked)
     plain = urllib.parse.unquote(unmask(endpoint))
@@ -471,7 +474,7 @@ def review_api(args, masked, where, piped, raw):
         any(unmask(m).upper() != "GET" for m in methods) if methods else bool(fields)
     )
     if GRAPHQL_ENDPOINT.search(plain):
-        texts = [unmask(a) for a in masked]
+        texts = [unmask(a) for a in masked] + bodies
         sources = inputs + [
             value[1:]
             for key, _, value in (f.partition("=") for f in fields)
@@ -480,11 +483,13 @@ def review_api(args, masked, where, piped, raw):
         for name in sources:
             name = unmask(name)
             if name in STDIN_NAMES:
-                if piped or "--guard-heredoc" not in args:
+                if piped or not bodies:
                     return True
                 if any(expands(m[2]) for m in EXPANDING_HEREDOC.finditer(raw)):
                     return True
                 continue
+            if moved and not name.startswith(("/", "~")):
+                return True
             content = file_text(name, where)
             if not content or content in (
                 FILE_TOO_LARGE_REASON,
@@ -497,20 +502,33 @@ def review_api(args, masked, where, piped, raw):
             for key, _, value in (f.partition("=") for f in fields)
         ):
             return True
-        return bool(REVIEW_MUTATION.search(urllib.parse.unquote("\n".join(texts))))
+        text = "\n".join(texts)
+        return "\\u" in text or bool(REVIEW_MUTATION.search(urllib.parse.unquote(text)))
     if endpoint.endswith("$"):
         return True
     return write and (expands(endpoint) or bool(REVIEW_ENDPOINT.search(plain)))
 
 
-def review_segment(segment, where, piped, raw):
+def review_segment(segment, where, piped, moved, raw):
     """Whether one simple command can write a pull-request review other than through orch-sweep post-review."""
     cleaned, stdin = split_redirections(segment)
-    plain = [unmask(word) for word in cleaned]
-    words, _ = unwrap(plain)
+    bodies, kept, index = [], [], 0
+    while index < len(cleaned):
+        if unmask(cleaned[index]) == "--guard-heredoc" and index + 1 < len(cleaned):
+            bodies.append(unmask(cleaned[index + 1]))
+            index += 2
+            continue
+        kept.append(cleaned[index])
+        index += 1
+    plain = [unmask(word) for word in kept]
+    words, _ = unwrap(plain[:])
     if not words:
         return False
-    masked = cleaned[len(plain) - len(words) :]
+    if words != plain[len(plain) - len(words) :]:
+        return review_marker(" ".join(plain + bodies)) or "gh" in map(
+            os.path.basename, plain
+        )
+    masked = kept[len(plain) - len(words) :]
     for index, word in enumerate(words):
         if os.path.basename(word) != "gh":
             continue
@@ -519,11 +537,13 @@ def review_segment(segment, where, piped, raw):
         if args[:2] == ["pr", "review"] or args[:2] == ["alias", "import"]:
             return True
         if args[:2] == ["alias", "set"] and (
-            review_marker(" ".join(args)) or any(a.startswith("!") for a in args[2:])
+            review_marker(" ".join(args))
+            or GH_API_WORD.search(" ".join(args[2:]))
+            or any(a in ("--shell", "-s") or a.startswith("!") for a in args[2:])
         ):
             return True
         if args[:1] == ["api"] and review_api(
-            args[1:], args_masked[1:], where, piped or stdin, raw
+            args_masked[1:], bodies, where, piped or stdin, moved, raw
         ):
             return True
     name = os.path.basename(words[0])
@@ -534,23 +554,35 @@ def review_segment(segment, where, piped, raw):
     return review_marker(" ".join(unmask(word) for word in segment))
 
 
-def guard_approve(text, where, depth=0):
+def moves_directory(units):
+    """Whether any command of these units changes the directory relative paths resolve against."""
+    return any(
+        unwrap(without_redirections(segment))[0][:1] in (["cd"], ["pushd"], ["popd"])
+        for unit in units
+        for segment in unit
+    )
+
+
+def guard_approve(text, where, depth=0, moved=False):
     """Denies every pull-request review write except orch-sweep post-review, in nested shells and substitutions too."""
     if depth >= 3:
         return REVIEW_REASON if review_marker(text) else None
+    if ANSI_C_QUOTE.search(text) and GH_OR_CURL.search(text):
+        return REVIEW_REASON
     try:
         units = [unit for _, unit, _ in flow_units(text)]
     except ValueError:
         return REVIEW_REASON if review_marker(text) else None
+    moved = moved or moves_directory(units)
     for unit in units:
         for position, segment in enumerate(unit):
-            if review_segment(segment, where, position > 0, text):
+            if review_segment(segment, where, position > 0, moved, text):
                 return REVIEW_REASON
             words, _ = unwrap(without_redirections(segment))
             for nested in [
                 body for word in segment for body in word_substitutions(word)
             ] + shell_programs(words):
-                reason = guard_approve(nested, where, depth + 1)
+                reason = guard_approve(nested, where, depth + 1, moved)
                 if reason:
                     return reason
     return None

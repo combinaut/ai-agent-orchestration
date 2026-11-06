@@ -994,6 +994,14 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     read_query = root / "read-query"
     read_query.write_text("query{viewer{login}}")
     ep = "repos/a/b/pulls/7/reviews"
+    escaped_query = root / "escaped-query.json"
+    escaped_query.write_text(
+        '{"query":"mutation{submitPullRequest\\u0052eview(input:{pullRequestReviewId:\\"x\\",event:APPROVE}){clientMutationId}}"}'
+    )
+    (root / "sub").mkdir(exist_ok=True)
+    (root / "sub" / "q.graphql").write_text(mutation)
+    (root / "read-query.graphql").write_text("query{viewer{login}}")
+    (root / "q.graphql").write_text("query{viewer{login}}")
     for name, command, deny in [
         ("gh pr review approve", "gh pr review 7 --approve", True),
         ("gh pr review short approve", "gh pr review 7 -a -b ok", True),
@@ -1271,6 +1279,143 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             True,
         ),
         ("API review unset event variable", f'gh api {ep} -f event="$E"', True),
+        (
+            "GraphQL escaped mutation in an input file",
+            f"gh api graphql --input {escaped_query}",
+            True,
+        ),
+        (
+            "GraphQL escaped mutation in a heredoc",
+            'gh api graphql --input - <<\'JSON\'\n{"query":"mutation{addPullRequest\\u0052eview(input:{pullRequestId:\\"x\\",event:COMMENT}){clientMutationId}}"}\nJSON',
+            True,
+        ),
+        ("API review under env", f"env X=1 gh api {ep} -f event=APPROVE", True),
+        ("API review under command", f"command gh api {ep} -f event=APPROVE", True),
+        (
+            "API review under xargs",
+            f"echo 7 | xargs -n1 gh api {ep} -f event=APPROVE",
+            True,
+        ),
+        ("API review under timeout", f"timeout 30 gh api {ep} -f event=APPROVE", True),
+        ("API review under nice", f"nice gh api {ep} -f event=APPROVE", True),
+        (
+            "GraphQL review under env",
+            f"env X=1 gh api graphql -f query='{mutation}'",
+            True,
+        ),
+        ("gh shell alias", "gh alias set --shell pass 'curl -X POST \"$U\"'", True),
+        ("gh short shell alias", "gh alias set -s pass 'curl -X POST \"$U\"'", True),
+        ("gh alias for api", "gh alias set pass 'api \"$EP\" -f event=APPROVE'", True),
+        (
+            "gh alias for an issue list",
+            "gh alias set mine 'issue list --assignee @me'",
+            False,
+        ),
+        (
+            "GraphQL query file after cd",
+            f"cd {root}/sub && gh api graphql -F query=@q.graphql",
+            True,
+        ),
+        (
+            "GraphQL query file after pushd",
+            f"pushd {root}/sub && gh api graphql -F query=@q.graphql",
+            True,
+        ),
+        (
+            "GraphQL query file in a cd subshell",
+            f"(cd {root}/sub; gh api graphql --input q.graphql)",
+            True,
+        ),
+        ("gh pr review in ANSI-C quotes", "gh pr $'revi\\x65w' 7 --approve", True),
+        (
+            "curl review in ANSI-C quotes",
+            "curl -X POST $'https://api.github.com/repos/a/b/pulls/7/revi\\x65ws'",
+            True,
+        ),
+        (
+            "API review with a heredoc between gh and api",
+            f"gh <<'JSON' api {ep} --input -\n{{}}\nJSON",
+            True,
+        ),
+        (
+            "API review with a heredoc first",
+            f"<<'JSON' gh api {ep} --input -\n{{}}\nJSON",
+            True,
+        ),
+        (
+            "API review with a here-string first",
+            f"<<< '{{}}' gh api {ep} --input -",
+            True,
+        ),
+        (
+            "gh pr review with quote-split words",
+            "g'h' pr re'v'iew 7 --comment -b ok",
+            True,
+        ),
+        (
+            "gh pr review with an escaped letter",
+            "gh pr rev\\iew 7 --comment -b ok",
+            True,
+        ),
+        ("gh pr review under exec", "exec gh pr review 7 --comment -b ok", True),
+        (
+            "gh pr review under bash -c",
+            "bash -c 'gh pr review 7 --comment -b ok'",
+            True,
+        ),
+        ("gh pr review under zsh -c", "zsh -c 'gh pr review 7 --comment -b ok'", True),
+        ("API review input at-file", f"gh api {ep} --input @/tmp/r.json", True),
+        (
+            "API review with GH_HOST",
+            f"GH_HOST=ghe.example.com gh api {ep} -f event=COMMENT",
+            True,
+        ),
+        (
+            "node review request",
+            f'node -e \'fetch("https://api.github.com/{ep}",{{method:"POST"}})\'',
+            True,
+        ),
+        (
+            "ruby review request",
+            f'ruby -rnet/http -e \'Net::HTTP.post(URI("https://api.github.com/{ep}"), "{{}}")\'',
+            True,
+        ),
+        (
+            "wget review request",
+            f"wget --post-data={{}} https://api.github.com/{ep}",
+            True,
+        ),
+        (
+            "curl review with a quote-split path",
+            "curl -X POST https://api.github.com/repos/a/b/pulls/7/re'v'iews -d '{}'",
+            True,
+        ),
+        ("gh alias then call", "gh alias set r 'pr review'; gh r 7 --approve", True),
+        (
+            "gh shell alias then call",
+            "gh alias set --shell r 'gh pr review 7 --approve'; gh r",
+            True,
+        ),
+        (
+            "GraphQL review with an input variable",
+            "gh api graphql -f query='mutation($input:SubmitPullRequestReviewInput!){submitPullRequestReview(input:$input){clientMutationId}}' -F input=@/tmp/r.json",
+            True,
+        ),
+        (
+            "post-review then a review write",
+            f"orch-sweep post-review; gh api {ep} -f event=APPROVE",
+            True,
+        ),
+        (
+            "orch-sweep alias",
+            "alias orch-sweep='gh pr review 7 --approve'; orch-sweep post-review",
+            True,
+        ),
+        (
+            "orch-sweep function",
+            "orch-sweep() { gh pr review 7 --approve; }; orch-sweep post-review",
+            True,
+        ),
         ("API review list", f"gh api {ep} --jq '.[].state'", False),
         (
             "API review list with GET fields",
@@ -1302,6 +1447,18 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ),
     ]:
         case(name, command, deny)
+    case(
+        "GraphQL read from a relative file",
+        "gh api graphql -F query=@read-query.graphql",
+        False,
+        root,
+    )
+    case(
+        "GraphQL query file after cd, readable before it",
+        f"cd {root}/sub && gh api graphql -F query=@q.graphql",
+        True,
+        root,
+    )
     case("shared fetch", "git fetch --depth=2 origin", True)
     case("worktree pull", "git pull --unshallow", True, wt)
     case("shared deepen fetch", "git fetch --deepen 50 origin", True, wt)
