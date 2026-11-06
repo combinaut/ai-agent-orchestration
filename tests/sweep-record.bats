@@ -499,7 +499,7 @@ PY
 }
 
 @test "a path in two slices fails" {
-  script_record 'r["plan"][0]["files"].append(dict(r["plan"][0]["files"][0], lines=0))'
+  script_record 'r["plan"].append({"name": "docs", "lines": 0, "files": [dict(r["plan"][0]["files"][0], lines=0)]})'
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: plan: lib/a.py is in more than one slice" ]

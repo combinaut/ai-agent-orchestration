@@ -264,7 +264,7 @@ def plan(files):
 
 
 def tree():
-    """The five tree-state values; untracked files hashed by path, mode and content."""
+    """The five tree-state values and a hash of the untracked map; untracked files hashed by path, mode and content."""
     untracked = {}
     listing = git("ls-files", "-z", "--others", "--exclude-standard").split("\0")
     for path in sorted(p for p in listing if p):
