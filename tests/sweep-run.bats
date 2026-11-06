@@ -52,6 +52,7 @@ case "$*" in
   'api repos/acme/app/pulls/7') echo '{"title":"Add alpha","body":"Adds alpha and its test.","base":{"ref":"main"}}' ;;
   'api --paginate --slurp repos/acme/app/issues/7/comments') cat "$TMP/comments.json" 2>/dev/null || echo '[[]]' ;;
   'api --paginate --slurp repos/acme/app/pulls/7/comments') echo '[[]]' ;;
+  'api --paginate --slurp repos/acme/app/pulls/7/reviews') cat "$TMP/reviews.json" 2>/dev/null || echo '[[]]' ;;
   'api -X POST repos/acme/app/issues/7/comments --input -')
     cat >"$TMP/posted.json"
     echo '{"html_url":"https://github.com/acme/app/pull/7#issuecomment-1"}' ;;
@@ -445,6 +446,97 @@ json.dump([[{"user": {"login": "someone"}, "body": body(n, r)} for n, r in enume
   [ "$status" -eq 0 ]
   grep -q "MALFORMED-MARK-0" "$TMP"/prompts/validator.*
   grep -q "MALFORMED-MARK-1" "$TMP"/prompts/validator.*
+}
+
+@test "an agent's background child is stopped when the agent succeeds" {
+  FAKE_CHILD=pr-text run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/child.pids" ]
+  while read -r child; do
+    if kill -0 "$child" 2>/dev/null; then
+      kill -9 "$child"
+      false
+    fi
+  done <"$TMP/child.pids"
+}
+
+@test "no agent starts once the sweep deadline has passed" {
+  cd "$REPO"
+  run python3 -c 'import sys, time
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+plain = sweep_run.command
+def slow(*args):
+    time.sleep(0.3)
+    return plain(*args)
+sweep_run.command = slow
+runner = sweep_run.Runner("codex", "gpt-test", 1, 900, time.monotonic() + 0.1, 0, sys.argv[2])
+try:
+    runner.once({"name": "j", "schema": {}, "prompt": "ROLE: pr-text\n", "check": lambda a: a})
+    print("STARTED")
+except sweep_run.AgentError as error:
+    print(error)' "$ROOT/lib" "$TMP"
+  [ "$output" = "j: the sweep passed its time limit" ]
+  [ ! -e "$TMP/agent.calls" ]
+}
+
+@test "a sweep comment with a malformed finding counts as an ordinary comment" {
+  cd "$REPO"
+  python3 -c 'import json,sys
+def body(n, record):
+    return f"<!-- orch-sweep v1 -->\nMALFORMED-MARK-{n}\n```json\n{json.dumps(record)}\n```\n"
+good = {"id": "F1", "file": "lib/a.py", "line": 3, "category": "comment", "class": "fix", "verdict": "FALSE", "summary": "s"}
+records = [{"tool": "orch-sweep", "items": [7], "dropped": []}, {"tool": "orch-sweep", "items": [None], "dropped": []},
+           {"tool": "orch-sweep", "items": ["bad"], "dropped": []}, {"tool": "orch-sweep", "items": [], "dropped": [{"id": "F2", "summary": "FABRICATED"}]},
+           {"tool": "orch-sweep", "items": [], "dropped": [dict(good, verdict="MADE_UP")]}, {"tool": "orch-sweep", "items": [], "dropped": [dict(good, line="3")]}]
+json.dump([[{"user": {"login": "someone"}, "body": body(n, r)} for n, r in enumerate(records)]], open(sys.argv[1], "w"))' "$TMP/comments.json"
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  for n in 0 1 2 3 4 5; do
+    grep -q "MALFORMED-MARK-$n" "$TMP"/prompts/validator.*
+  done
+  run ! grep -q "Earlier sweep outcomes" "$TMP"/prompts/validator.*
+}
+
+@test "earlier sweep outcomes stay within one budget, each finding once, rejections first" {
+  cd "$REPO"
+  python3 -c 'import json,sys
+def finding(n, verdict, cls="fix"):
+    return {"id": f"F{n}", "file": "lib/a.py", "line": n, "category": "c", "class": cls, "verdict": verdict, "summary": f"S{n:04d}-" + "y" * 400}
+comments = []
+for round in range(10):
+    kept = [finding(round * 100 + n, "CONFIRMED_NEW") for n in range(50)]
+    rejected = [finding(5000 + round * 100 + n, "FALSE") for n in range(50)]
+    record = {"tool": "orch-sweep", "items": kept, "dropped": rejected + [finding(9999, "RESPECT_DROP", "nit")]}
+    comments.append({"user": {"login": "reviewer"}, "body": "<!-- orch-sweep v1 -->\n```json\n" + json.dumps(record) + "\n```\n"})
+json.dump([comments], open(sys.argv[1], "w"))' "$TMP/comments.json"
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  prompt=$(printf '%s\n' "$TMP"/prompts/validator.[0-9]*[0-9] | head -1)
+  [ "$(wc -c <"$prompt")" -lt 120000 ]
+  [ "$(grep -c 'S9999-' "$prompt")" -eq 1 ]
+  grep -q 'S5000-' "$prompt"
+  grep -q 'earlier sweep outcomes left out' "$prompt"
+}
+
+@test "review summaries reach the validators" {
+  cd "$REPO"
+  echo '[[{"user": {"login": "copilot"}, "state": "COMMENTED", "body": "REVIEW-SUMMARY-REJECT: we rejected this"}, {"user": {"login": "x"}, "state": "APPROVED", "body": ""}]]' >"$TMP/reviews.json"
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  grep -q "Review by copilot (COMMENTED):" "$TMP"/prompts/validator.*
+  grep -q "REVIEW-SUMMARY-REJECT" "$TMP"/prompts/validator.*
+}
+
+@test "a changed path that is not UTF-8 stops with one error" {
+  blob=$(echo x | git -C "$REPO" hash-object -w --stdin)
+  tree=$( (git -C "$REPO" ls-tree -z HEAD; printf '100644 blob %s\t\377.txt\0' "$blob") | git -C "$REPO" mktree -z)
+  HEAD_SHA=$(git -C "$REPO" commit-tree "$tree" -p HEAD -m bad)
+  plan_run() { sweep plan --base "$BASE_SHA" --head "$HEAD_SHA"; }
+  plan_run
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: git diff printed a path that is not UTF-8"* ]]
+  [[ "$stderr" != *Traceback* ]]
 }
 
 @test "a large sweep still posts one comment under the size limit that carries the whole record" {

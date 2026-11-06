@@ -26,6 +26,7 @@ VERDICTS = (
 KEEP = ("CONFIRMED_NEW", "CONFIRMED_REGRESSED", "DISPUTED_DROP")
 SLICE_LINES = 400
 SCRIPT_FIELDS = (
+    "version",
     "pr",
     "runtime",
     "model",
@@ -37,8 +38,9 @@ SCRIPT_FIELDS = (
     "items",
     "dropped",
     "open_fix",
+    "deviation",
 )
-ITEM_FIELDS = ("id", "file", "line", "category", "class", "verdict", "summary")
+PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 EMPTY_HASH = hashlib.sha256(b"").hexdigest()
 CLEAN_TREE = {
     "status": EMPTY_HASH,
@@ -96,11 +98,35 @@ def plan_problem(slices, paths=None):
     return None
 
 
+def finding_problem(finding):
+    """Why one kept or dropped finding has a missing or mistyped field, else None."""
+    if not isinstance(finding, dict):
+        return "a finding is not an object"
+    name = finding.get("id")
+    for field in ("id", "file", "category", "summary"):
+        if not isinstance(finding.get(field), str) or not finding[field]:
+            return f"finding {name}: {field} must be a non-empty string"
+    line = finding.get("line")
+    if isinstance(line, bool) or not isinstance(line, int) or line < 0:
+        return f"finding {name}: line must be a non-negative integer"
+    if finding.get("class") not in ("fix", "nit"):
+        return f"finding {name}: class must be fix or nit"
+    if finding.get("verdict") not in VERDICTS:
+        return f"finding {name}: verdict {finding.get('verdict')!r} is not a validator verdict"
+    return None
+
+
 def script_problem(record):
     """Why a record written by orch-sweep fails the checks of its own fields, else None."""
     missing = [field for field in SCRIPT_FIELDS if field not in record]
     if missing:
         return f"missing field {missing[0]}"
+    if record["version"] != 1 or isinstance(record["version"], bool):
+        return "version must be 1"
+    if record["deviation"] is not None:
+        return "deviation must be null"
+    if not isinstance(record["pr"], str) or not PR_URL.fullmatch(record["pr"]):
+        return "pr must be a GitHub pull request URL"
     if record["mode"] != "agents":
         return "an orch-sweep record runs in agents mode"
     if record["runtime"] not in ("codex", "claude"):
@@ -131,24 +157,23 @@ def script_problem(record):
         return f"plan: {why}"
     if len(record["plan"]) != record["slices"]:
         return f"plan has {len(record['plan'])} slices, slices is {record['slices']}"
-    items = record["items"]
-    if not isinstance(items, list) or not all(
-        isinstance(i, dict) and all(k in i for k in ITEM_FIELDS) for i in items
-    ):
-        return f"items must be a list of kept findings with {', '.join(ITEM_FIELDS)}"
-    if any(i["verdict"] not in KEEP or i["class"] not in ("fix", "nit") for i in items):
-        return "an item has a verdict that drops it or a class other than fix or nit"
+    items, dropped = record["items"], record["dropped"]
+    if not isinstance(items, list) or not isinstance(dropped, list):
+        return "items and dropped must be lists of findings"
+    seen = set()
+    for finding in items + dropped:
+        why = finding_problem(finding)
+        if why:
+            return why
+        if finding["id"] in seen:
+            return f"finding id {finding['id']} appears twice"
+        seen.add(finding["id"])
+    if any(i["verdict"] not in KEEP for i in items):
+        return "an item has a verdict that drops it"
     kept = sum(record["verdicts"].get(v, 0) for v in KEEP)
     if len(items) != kept:
         return f"{len(items)} items for {kept} kept verdicts"
-    dropped = record["dropped"]
-    if not isinstance(dropped, list) or not all(
-        isinstance(i, dict) and all(k in i for k in ITEM_FIELDS) for i in dropped
-    ):
-        return (
-            f"dropped must be a list of dropped findings with {', '.join(ITEM_FIELDS)}"
-        )
-    if any(i["verdict"] in KEEP or i["verdict"] not in VERDICTS for i in dropped):
+    if any(i["verdict"] in KEEP for i in dropped):
         return "a dropped finding has a verdict that keeps it"
     if len(items) + len(dropped) != record["findings"]:
         return f"{len(items)} items and {len(dropped)} dropped for {record['findings']} findings"
