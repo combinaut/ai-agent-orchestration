@@ -45,12 +45,12 @@ commit() {
   git -C "$REPO" commit -qm "$1"
 }
 
-# stub_gh: a gh for acme/app#7 whose head is $TMP/pr_head and body $TMP/pr_body, that serves $TMP/comments.json when present and saves a posted comment or review.
+# stub_gh: a gh for acme/app#7 whose head is $TMP/pr_head, body $TMP/pr_body and base $TMP/pr_base (default main), that serves $TMP/comments.json when present and saves a posted comment or review.
 stub_gh() {
   cat >"$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
-  'api repos/acme/app/pulls/7') printf '{"title":"Add alpha","body":"%s","base":{"ref":"main"},"head":{"sha":"%s"}}\n' "$(cat "$TMP/pr_body" 2>/dev/null || echo 'Adds alpha and its test.')" "$(cat "$TMP/pr_head" 2>/dev/null)" ;;
+  'api repos/acme/app/pulls/7') printf '{"title":"Add alpha","body":"%s","base":{"ref":"%s"},"head":{"sha":"%s"}}\n' "$(cat "$TMP/pr_body" 2>/dev/null || echo 'Adds alpha and its test.')" "$(cat "$TMP/pr_base" 2>/dev/null || echo main)" "$(cat "$TMP/pr_head" 2>/dev/null)" ;;
   'api user') echo '{"login":"me"}' ;;
   'api --paginate --slurp repos/acme/app/issues/7/comments') cat "$TMP/comments.json" 2>/dev/null || echo '[[]]' ;;
   'api --paginate --slurp repos/acme/app/pulls/7/comments') echo '[[]]' ;;
@@ -1074,6 +1074,25 @@ sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow 
   as_comment
   gate
   [ "$status" -eq 0 ]
+}
+
+@test "a PR retargeted to another base after the sweep fails the gate" {
+  layer=$HEAD_SHA
+  git -C "$REPO" branch layer "$layer"
+  write lib/alpha.py 30
+  commit top
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  printf %s "$HEAD_SHA" >"$TMP/pr_head"
+  printf layer >"$TMP/pr_base"
+  sweep run --pr "$PR" --head "$HEAD_SHA" --base-ref layer --record "$TMP/record.json"
+  [ "$status" -eq 0 ]
+  as_comment
+  gate
+  [ "$status" -eq 0 ]
+  printf main >"$TMP/pr_base"
+  gate
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: the PR base changed since the full sweep: it swept from $layer, and main gives $BASE_SHA; run orch-sweep run" ]
 }
 
 @test "a title or body changed after the sweep fails the gate until a text sweep" {

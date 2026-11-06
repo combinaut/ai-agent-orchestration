@@ -427,6 +427,15 @@ def record_problem(record, repo, number, head):
     return None
 
 
+def pr_merge_base(base_ref, head):
+    """The merge base of head and origin/<base_ref>, else of the local <base_ref>; None when git cannot tell."""
+    for ref in (f"refs/remotes/origin/{base_ref}", f"refs/heads/{base_ref}"):
+        if git("rev-parse", "--verify", "--quiet", ref) is not None:
+            found = git("merge-base", ref, head)
+            return found.strip() if found else None
+    return None
+
+
 def gate(url, head):
     """Why the PR at url may not be approved at head, else None; raises GateError when GitHub cannot be read."""
     match = PR_URL.fullmatch(url)
@@ -439,6 +448,10 @@ def gate(url, head):
     live = (pr.get("head") or {}).get("sha")
     if live != head:
         return f"the PR head is {live}, not {head}"
+    base_ref = (pr.get("base") or {}).get("ref")
+    merge_base = pr_merge_base(base_ref, head) if base_ref else None
+    if merge_base is None:
+        return f"git cannot find the merge base of the PR base {base_ref!r} and {head}; fetch the base branch"
     me = gh_json("api", "user").get("login")
     pages = gh_json(
         "api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"
@@ -461,6 +474,8 @@ def gate(url, head):
         why, _ = since(f"the {record['kind']} sweep record", head, record["base"], head)
         if why:
             return why
+        if record["base"] != merge_base:
+            return f"the PR base changed since the {record['kind']} sweep: it swept from {record['base']}, and {base_ref} gives {merge_base}; run orch-sweep run"
     if newest.get("pr_text_sha256") != text_sha(pr):
         return f"the PR title or body changed since the {newest['kind']} sweep of {head}; run orch-sweep run --kind text"
     if newest["kind"] == "text":
