@@ -11,6 +11,8 @@ import sys
 
 SHA = re.compile(r"[0-9a-f]{40}")
 TOKEN = re.compile(r"[A-Za-z0-9_-]+")
+CODEX_PATH = re.compile(r"/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*")
+VALIDATOR_MARKER = "finalize-sweep validator"
 FIELDS = ("head", "base", "findings", "validator_ids")
 
 
@@ -97,17 +99,18 @@ def claude_transcript(session, agent_id):
 
 
 def codex_transcript(session, agent_id):
+    if not CODEX_PATH.fullmatch(agent_id):
+        return None
     root = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
-    pattern = os.path.join(
-        glob.escape(root), "sessions", "**", f"rollout-*{agent_id}.jsonl"
-    )
+    pattern = os.path.join(glob.escape(root), "sessions", "**", "rollout-*.jsonl")
     for path in glob.glob(pattern, recursive=True):
         try:
             with open(path, encoding="utf-8") as handle:
                 meta = json.loads(handle.readline()).get("payload", {})
             spawn = meta["source"]["subagent"]["thread_spawn"]
             matches = (
-                meta.get("id") == agent_id and spawn.get("parent_thread_id") == session
+                spawn.get("parent_thread_id") == session
+                and spawn.get("agent_path") == agent_id
             )
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             continue
@@ -116,11 +119,36 @@ def codex_transcript(session, agent_id):
     return None
 
 
+def claude_brief(path):
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            item = json.loads(line)
+            message = item.get("message", {})
+            if item.get("type") == "user" and message.get("role") == "user":
+                return message.get("content", "")
+    return ""
+
+
+def codex_brief(path):
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            item = json.loads(line)
+            payload = item.get("payload", {})
+            if (
+                item.get("type") == "event_msg"
+                and payload.get("type") == "user_message"
+            ):
+                return payload.get("message", "")
+    return ""
+
+
 def transcript_problem(path, swept, session, agent_id):
     """Why agent_id is no validator transcript of session for the swept head, else None."""
-    if not TOKEN.fullmatch(agent_id):
+    if not TOKEN.fullmatch(agent_id) and not CODEX_PATH.fullmatch(agent_id):
         return f"{path}: validator id {agent_id!r} is not a plain id"
-    found = claude_transcript(session, agent_id) or codex_transcript(session, agent_id)
+    found = claude_transcript(session, agent_id) if TOKEN.fullmatch(agent_id) else None
+    family = "Claude" if found else "Codex"
+    found = found or codex_transcript(session, agent_id)
     if found is None:
         return (
             f"{path}: validator {agent_id} is no supported Claude or Codex subagent "
@@ -133,10 +161,19 @@ def transcript_problem(path, swept, session, agent_id):
         if os.path.getmtime(found) < int(committed):
             return f"{path}: validator {agent_id} was written before commit {swept}"
         with open(found, encoding="utf-8", errors="replace") as handle:
-            if swept not in handle.read():
-                return f"{path}: validator {agent_id} never names {swept}"
+            handle.read()
+        brief = claude_brief(found) if family == "Claude" else codex_brief(found)
     except OSError as error:
         return f"{path}: validator {agent_id} transcript cannot read: {error}"
+    except (ValueError, KeyError, TypeError, AttributeError):
+        brief = ""
+    if not isinstance(brief, str) or (
+        VALIDATOR_MARKER not in brief or swept not in brief
+    ):
+        return (
+            f"{path}: validator {agent_id} brief must include {VALIDATOR_MARKER} "
+            f"and name {swept}"
+        )
     return None
 
 

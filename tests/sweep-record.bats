@@ -30,19 +30,23 @@ record() {
 JSON
 }
 
-# claude_agent <id> [text]: a Claude subagent transcript of SESSION; the text defaults to a brief naming the head.
+# claude_agent <id> [brief] [later]: a Claude subagent transcript of SESSION.
 claude_agent() {
   local dir="$CLAUDE_CONFIG_DIR/projects/-some-project/$SESSION/subagents"
   mkdir -p "$dir"
-  printf '%s\n' "${2:-validate the sweep of $HEAD_SHA}" >"$dir/agent-$1.jsonl"
+  printf '{"type":"user","message":{"role":"user","content":"%s"' "${2:-finalize-sweep validator $HEAD_SHA}" >"$dir/agent-$1.jsonl"
+  printf '%s\n' '}}' >>"$dir/agent-$1.jsonl"
+  [ -z "${3:-}" ] || printf '{"type":"assistant","message":{"content":"%s"}}\n' "$3" >>"$dir/agent-$1.jsonl"
 }
 
-# codex_agent <id> <parent> [text]: a Codex rollout of a spawned agent.
+# codex_agent <agent-path> <parent> [task] [later]: a Codex child rollout.
 codex_agent() {
   local dir="$CODEX_HOME/sessions/2026/11/06"
   mkdir -p "$dir"
-  printf '{"type":"session_meta","payload":{"id":"%s","source":{"subagent":{"thread_spawn":{"parent_thread_id":"%s"}}}}}\n%s\n' \
-    "$1" "$2" "${3:-validate the sweep of $HEAD_SHA}" >"$dir/rollout-2026-11-06T10-00-00-$1.jsonl"
+  printf '{"type":"session_meta","payload":{"id":"child-thread-id","source":{"subagent":{"thread_spawn":{"parent_thread_id":"%s","agent_path":"%s"}}}}}\n' \
+    "$2" "$1" >"$dir/rollout-2026-11-06T10-00-00-child-thread-id.jsonl"
+  printf '{"type":"event_msg","payload":{"type":"user_message","message":"%s"}}\n' "${3:-finalize-sweep validator $HEAD_SHA}" >>"$dir/rollout-2026-11-06T10-00-00-child-thread-id.jsonl"
+  [ -z "${4:-}" ] || printf '{"type":"event_msg","payload":{"type":"agent_message","message":"%s"}}\n' "$4" >>"$dir/rollout-2026-11-06T10-00-00-child-thread-id.jsonl"
 }
 
 check() {
@@ -174,8 +178,8 @@ check() {
 }
 
 @test "a Codex subagent rollout spawned by the session that names the head passes" {
-  codex_agent 01a1b0a2-073c-7e70 "$SESSION"
-  record 2 '["01a1b0a2-073c-7e70"]'
+  codex_agent /root/correctness "$SESSION"
+  record 2 '["/root/correctness"]'
   check
   [ "$status" -eq 0 ]
 }
@@ -196,20 +200,36 @@ check() {
 }
 
 @test "a Codex rollout spawned by another thread fails" {
-  codex_agent 01a1b0a2-073c-7e70 some-other-thread
-  record 2 '["01a1b0a2-073c-7e70"]'
+  codex_agent /root/correctness some-other-thread
+  record 2 '["/root/correctness"]'
   check
   [ "$status" -eq 1 ]
 }
 
 @test "a malformed Codex rollout is skipped" {
-  local id=01a1b0a2-073c-7e70
+  local id=/root/correctness
   mkdir -p "$CODEX_HOME/sessions/2026/11/06"
-  printf '%s\n' '{"type":"session_meta","payload":{"id":"01a1b0a2-073c-7e70","source":{"subagent":{"thread_spawn":[]}}}}' >"$CODEX_HOME/sessions/2026/11/06/rollout-2026-11-06T10-00-00-$id.jsonl"
+  printf '%s\n' '{"type":"session_meta","payload":{"id":"child-thread-id","source":{"subagent":{"thread_spawn":[]}}}}' >"$CODEX_HOME/sessions/2026/11/06/rollout-2026-11-06T10-00-00-child-thread-id.jsonl"
   record 2 "[\"$id\"]"
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: validator $id is no supported Claude or Codex subagent transcript of session $SESSION; Pi and Cursor validators are unsupported" ]
+}
+
+@test "a Claude SHA outside the validator brief fails" {
+  claude_agent a1b2c3 'sweep slice comments' "finalize-sweep validator $HEAD_SHA"
+  record 2 '["a1b2c3"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator a1b2c3 brief must include finalize-sweep validator and name $HEAD_SHA" ]
+}
+
+@test "a Codex validator task must include the marker and head" {
+  codex_agent /root/correctness "$SESSION" 'sweep slice comments' "$HEAD_SHA"
+  record 2 '["/root/correctness"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator /root/correctness brief must include finalize-sweep validator and name $HEAD_SHA" ]
 }
 
 @test "a transcript written before the head commit fails" {
@@ -231,11 +251,11 @@ check() {
 }
 
 @test "a transcript that does not name the head fails" {
-  claude_agent a1b2c3 "validate some other commit"
+  claude_agent a1b2c3 'finalize-sweep validator some other commit'
   record 2 '["a1b2c3"]'
   check
   [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: validator a1b2c3 never names $HEAD_SHA" ]
+  [ "$stderr" = "ERROR: $REC: validator a1b2c3 brief must include finalize-sweep validator and name $HEAD_SHA" ]
 }
 
 @test "an id with a path separator fails" {
