@@ -185,6 +185,17 @@ check() {
   [ "$status" -eq 0 ]
 }
 
+@test "a Codex child reads its live response-item task blocks" {
+  local dir="$CODEX_HOME/sessions/2026/11/07"
+  local rollout="$dir/rollout-2026-11-07T00-03-57-child-thread-id.jsonl"
+  mkdir -p "$dir"
+  printf '%s\n' '{"type":"session_meta","payload":{"id":"child-thread-id","source":{"subagent":{"thread_spawn":{"parent_thread_id":"11111111-2222-3333-4444-555555555555","agent_path":"/root/correctness"}}}}}' >"$rollout"
+  printf '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"finalize-sweep validator "},{"type":"input_text","text":"%s"}]}}\n' "$HEAD_SHA" >>"$rollout"
+  record 2 '["/root/correctness"]'
+  check
+  [ "$status" -eq 0 ]
+}
+
 @test "an id with no transcript fails" {
   record 2 '["ghost"]'
   check

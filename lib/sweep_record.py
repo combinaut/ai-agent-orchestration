@@ -143,6 +143,18 @@ def codex_brief(path):
             item = json.loads(line)
             payload = item.get("payload", {})
             if (
+                item.get("type") == "response_item"
+                and payload.get("type") == "message"
+                and payload.get("role") == "user"
+            ):
+                content = payload.get("content", [])
+                if isinstance(content, list):
+                    return "".join(
+                        block.get("text", "")
+                        for block in content
+                        if isinstance(block, dict) and block.get("type") == "input_text"
+                    )
+            if (
                 item.get("type") == "event_msg"
                 and payload.get("type") == "user_message"
             ):
