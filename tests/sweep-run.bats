@@ -562,6 +562,63 @@ json.dump([comments], open(sys.argv[1], "w"))' "$TMP/comments.json"
   grep -q 'earlier sweep outcomes left out' "$prompt"
 }
 
+@test "the earlier outcomes stay within the history limit, the left-out notice included" {
+  cd "$REPO"
+  run python3 -c 'import sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+f = {"id": "F1", "file": "a.py", "line": 1, "category": "c", "class": "fix", "verdict": "FALSE", "summary": "s"}
+one = len(sweep_run.history([("r", [f])])) + 1
+full = sweep_run.history([("r", [dict(f, line=n) for n in range(sweep_run.HISTORY_LIMIT // one + 10)])])
+assert len(full) <= sweep_run.HISTORY_LIMIT, len(full)
+assert "left out" in full.splitlines()[-1], full.splitlines()[-1]
+print("ok")' "$ROOT/lib"
+  [ "$output" = ok ]
+}
+
+@test "one oversized earlier finding neither pushes out the findings after it nor passes its field limits" {
+  cd "$REPO"
+  run python3 -c 'import sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+f = {"id": "F1", "file": "a.py", "line": 1, "category": "c", "class": "fix", "verdict": "FALSE", "summary": "s"}
+h = sweep_run.history([("attacker", [dict(f, file="a" * 61000, category="c" * 61000)]), ("reviewer", [dict(f, id="F2", summary="IMPORTANT-REJECTION")])])
+assert "IMPORTANT-REJECTION" in h, h[:300]
+assert any(line.startswith("- attacker: aaa") for line in h.splitlines()), h[:300]
+assert max(map(len, h.splitlines())) < 1000, max(map(len, h.splitlines()))
+print("ok")' "$ROOT/lib"
+  [ "$output" = ok ]
+}
+
+@test "an earlier finding that does not fit is skipped and a later one that fits is kept" {
+  cd "$REPO"
+  run python3 -c 'import sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+f = {"id": "F1", "file": "a.py", "line": 1, "category": "c", "class": "fix", "verdict": "FALSE", "summary": "s"}
+one = len(sweep_run.history([("r", [dict(f, line=10000)])])) + 1
+fill = [dict(f, line=10000 + n) for n in range((sweep_run.HISTORY_LIMIT - 300) // one)]
+h = sweep_run.history([("r", fill + [dict(f, line=99999, summary="L" * 299), dict(f, line=99998, summary="SHORT-ONE")])])
+lines = h.splitlines()
+assert len(h) <= sweep_run.HISTORY_LIMIT, len(h)
+assert "SHORT-ONE" in h, lines[-2:]
+assert "LLLL" not in h
+assert lines[-1].startswith("- 1 earlier sweep outcomes left out"), lines[-1]
+print("ok")' "$ROOT/lib"
+  [ "$output" = ok ]
+}
+
+@test "a GitHub read larger than the download limit stops with one error" {
+  cd "$REPO"
+  python3 -c 'import json,sys
+big = [{"user": {"login": "someone"}, "body": "x" * 60000} for _ in range(600)]
+json.dump([big], open(sys.argv[1], "w"))' "$TMP/comments.json"
+  run_sweep --no-comment
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: gh api --paginate --slurp repos/acme/app/issues/7/comments printed more than 33554432 bytes"* ]]
+  [ ! -e "$TMP/agent.calls" ]
+}
+
 @test "review summaries reach the validators" {
   cd "$REPO"
   echo '[[{"user": {"login": "copilot"}, "state": "COMMENTED", "body": "REVIEW-SUMMARY-REJECT: we rejected this"}, {"user": {"login": "x"}, "state": "APPROVED", "body": ""}]]' >"$TMP/reviews.json"

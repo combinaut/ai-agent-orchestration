@@ -499,7 +499,7 @@ PY
 }
 
 @test "a path in two slices fails" {
-  script_record 'r["plan"][0]["files"].append(dict(r["plan"][0]["files"][0], lines=0))'
+  script_record 'r["plan"].append({"name": "docs", "lines": 0, "files": [dict(r["plan"][0]["files"][0], lines=0)]})'
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: plan: lib/a.py is in more than one slice" ]
@@ -609,6 +609,22 @@ PY
     check
     [ "$status" -eq 1 ]
     [ "$stderr" = "ERROR: $REC: pr must be a GitHub pull request URL" ]
+  done
+}
+
+@test "a validator id that is also a sweep agent id fails" {
+  script_record 'r["validator_ids"] = ["s-3"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator id s-3 is also a sweep agent id" ]
+}
+
+@test "an open_fix that is not an integer fails" {
+  for change in 'r["open_fix"] = True' 'r["open_fix"] = "1"' 'r["open_fix"] = 1.0'; do
+    script_record "$change"
+    check
+    [ "$status" -eq 1 ]
+    [ "$stderr" = "ERROR: $REC: open_fix must be a non-negative integer" ] || { echo "$change: $stderr"; false; }
   done
 }
 

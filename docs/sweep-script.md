@@ -26,7 +26,7 @@ Each slice starts one `finalize-code-comments` agent and one `finalize-change-fo
 
 The script writes the PR diff and each slice's diff (`git diff --no-ext-diff --no-textconv`) to a temporary folder outside the checkout and names the file in each prompt; the folder is removed when the run ends. Claude agents have no shell. Codex agents have one inside the read-only sandbox: a command can run a program from the checkout (`rg --pre`), but it cannot write files or reach the network.
 
-The model comes from the settings: `models.codex_worker`, else `models.codex_smart`, for Codex; `sonnet` when `providers.claude` lists it, else the first listed tier, for Claude. `--model` overrides it. The record names it.
+The model comes from the settings: `models.codex_worker`, else `models.codex_smart`, for Codex; `sonnet` when `providers.claude` lists it or lists no tier, else the first listed tier, for Claude. `--model` overrides it. The record names it.
 
 ## Slices
 
@@ -41,11 +41,11 @@ Before the agents start, after the sweep agents, and after the validators, the s
 
 ## Every head
 
-Every run sweeps the whole PR diff from the merge base, also after a fix push. The validators get the findings and verdicts of the earlier sweep comments, to judge `RESPECT_DROP`: each finding once, summaries cut to 300 characters, rejections first, at most 60000 characters in all (the context says how many were left out). A sweep comment with a malformed finding counts as an ordinary comment. They also get the latest 50 other comments, review-thread comments and review summaries, each cut to 4000 characters. Nothing in the script itself stops a rejected finding from being raised again.
+Every run sweeps the whole PR diff from the merge base, also after a fix push. The validators get the findings and verdicts of the earlier sweep comments, to judge `RESPECT_DROP`: each distinct finding and verdict once, its author, file, category and summary cut to 40, 200, 60 and 300 characters, rejections first, at most 60000 characters in all with the notice of how many were left out; a finding that does not fit is skipped and later ones that fit are kept. The 60000 bound is for this history only. A sweep comment with a malformed finding counts as an ordinary comment. They also get the latest 50 other comments, review-thread comments and review summaries, each cut to 4000 characters. Nothing in the script itself stops a rejected finding from being raised again.
 
 ## Record and comment
 
-The record holds the fields `/finalize-sweep` names, plus `tool`, `version`, `pr`, `runtime`, `model`, `kind` (`full`), `tree`, `plan`, `pr_text`, `sweep_agent_ids` (the Codex thread or Claude session id of each sweep agent), `items` (the kept findings, each `fix` or `nit`), `dropped` (the other findings, with their verdicts), `open_fix` (the count of kept `fix` findings) and `deviation`. `orch-sweep-record check` checks those fields when `tool` is `orch-sweep` (`version` 1, `deviation` null, `pr` a pull request URL, and every finding typed, with an id used once); `--exact` also requires the record's head to be the given head.
+The record holds the fields `/finalize-sweep` names, plus `tool`, `version`, `pr`, `runtime`, `model`, `kind` (`full`), `tree`, `plan`, `pr_text`, `sweep_agent_ids` (the Codex thread or Claude session id of each sweep agent), `items` (the kept findings, each `fix` or `nit`), `dropped` (the other findings, with their verdicts), `open_fix` (the count of kept `fix` findings) and `deviation`. `orch-sweep-record check` checks those fields when `tool` is `orch-sweep` (`version` 1, `deviation` null, `pr` a pull request URL, every finding typed, with an id used once, no validator id equal to a sweep agent id, and `open_fix` an integer); `--exact` also requires the record's head to be the given head.
 
 The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json` (and `--record`), and posts one comment through `lib/github_write.py`: the marker `<!-- orch-sweep v1 -->`, the full head SHA, a table of kept findings and one of dropped findings, the record in a fenced `json` block, and the runtime's attribution trailer. `--no-comment` skips the post. The comment stays within GitHub's 65536 characters: the record goes in compact when the indented one does not fit, then the dropped table and then the kept table are left out (the comment says so, and the record still holds every finding). When the record alone does not fit, the run exits 5 without posting and keeps the record file.
 
@@ -57,8 +57,8 @@ The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<numb
 | Agents at once | `--concurrency`, default 4, a bounded pool |
 | Per agent | `--agent-timeout`, default 900 s, cut to what is left of the sweep; when the agent exits or times out, its process group gets SIGTERM, then SIGKILL for whatever is left |
 | Per sweep | `--timeout`, default 3600 s; no agent starts after it |
-| Retries | a failed attempt retries once while the run has retries left, at most `slices` in total; the first agent that fails with no retry left stops new agents, and the run exits 4 |
-| GitHub reads | 45 s each |
+| Retries | a failed first attempt retries once when the shared budget of `slices` retries has one left; the first job that fails for good (its retry failed, or no retry was left) stops new jobs, and the run exits 4 |
+| GitHub reads | 45 s and 32 MiB each; a larger read stops the run with exit 1 |
 | Stopping | SIGINT, SIGTERM or SIGHUP stops every running agent's process group; the run exits 128 + the signal |
 
 Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- orch-sweep run ...`.

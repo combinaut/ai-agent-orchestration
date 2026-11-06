@@ -151,6 +151,9 @@ def script_problem(record):
         return "sweep_agent_ids must be a list of non-empty strings"
     if len(set(ids)) != len(ids) or len(ids) != record["sweep_agents"]:
         return f"{len(set(ids))} distinct sweep_agent_ids for {record['sweep_agents']} sweep agents"
+    shared = sorted(set(ids) & set(record["validator_ids"]))
+    if shared:
+        return f"validator id {shared[0]} is also a sweep agent id"
     tree = record["tree"]
     if (
         not isinstance(tree, dict)
@@ -210,7 +213,10 @@ def script_problem(record):
         if held != said:
             return f"the findings hold {verdict} {held}, verdicts says {said}"
     fixes = sum(1 for i in items if i["class"] == "fix")
-    if record["open_fix"] != fixes:
+    open_fix = record["open_fix"]
+    if isinstance(open_fix, bool) or not isinstance(open_fix, int) or open_fix < 0:
+        return "open_fix must be a non-negative integer"
+    if open_fix != fixes:
         return f"open_fix is {record['open_fix']}, the items hold {fixes} fix findings"
     return None
 
