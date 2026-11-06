@@ -724,3 +724,14 @@ sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow 
   [[ "$stderr" == 'ERROR: the review on stdin is {"body": "...", "comments": [...]}' ]]
   [ ! -e "$TMP/review.json" ]
 }
+
+@test "a text record that differs from its local copy fails the gate" {
+  run_sweep
+  as_comment
+  run_sweep --kind text
+  as_comment
+  edit_comments 'r["model"] = "other" if r["kind"] == "text" else r["model"]'
+  gate
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: the text sweep record in the comment differs from the local copy at "*".text.json" ]]
+}
