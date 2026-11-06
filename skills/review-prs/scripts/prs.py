@@ -51,8 +51,11 @@ query($q: String!, $me: String, $endCursor: String) {
       mergeable mergeStateStatus reviewDecision
       reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-      reviewRequests(first: 20) { nodes { createdAt requestedReviewer {
+      reviewRequests(first: 20) { nodes { requestedReviewer {
         __typename ... on User { login } ... on Team { slug } ... on Bot { login } } } }
+      timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) { nodes {
+        ... on ReviewRequestedEvent { createdAt requestedReviewer { ... on User { login } } }
+      } }
       myReviews: reviews(last: 1, author: $me, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) {
         nodes { commit { oid } } }
     } }
@@ -64,7 +67,7 @@ query($url: URI!, $me: String) {
   resource(url: $url) {
     ... on PullRequest {
       state headRefOid
-      reviewRequests(first: 20) { nodes { createdAt requestedReviewer {
+      reviewRequests(first: 20) { nodes { requestedReviewer {
         __typename ... on User { login } ... on Team { slug } ... on Bot { login } } } }
       myReviews: reviews(last: 1, author: $me, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) {
         nodes { commit { oid } } }
@@ -468,7 +471,7 @@ def requested_of(pr, login):
 
 def requested_after(pr, login, completed_at):
     """Whether login was personally requested after the completed local review."""
-    for node in (pr.get("reviewRequests") or {}).get("nodes") or []:
+    for node in (pr.get("timelineItems") or {}).get("nodes") or []:
         reviewer = node.get("requestedReviewer") or {}
         if (reviewer.get("login") or "").lower() != (login or "").lower():
             continue
