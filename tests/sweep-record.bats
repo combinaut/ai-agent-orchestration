@@ -184,7 +184,7 @@ check() {
   record 2 '["ghost"]'
   check
   [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: validator ghost is no subagent transcript of session $SESSION" ]
+  [ "$stderr" = "ERROR: $REC: validator ghost is no supported Claude or Codex subagent transcript of session $SESSION; Pi and Cursor validators are unsupported" ]
 }
 
 @test "a transcript of another session fails" {
@@ -192,7 +192,7 @@ check() {
   record 2 '["a1b2c3"]'
   SESSION_ARG=other-session check
   [ "$status" -eq 1 ]
-  [[ "$stderr" == *"no subagent transcript of session other-session" ]]
+  [ "$stderr" = "ERROR: $REC: validator a1b2c3 is no supported Claude or Codex subagent transcript of session other-session; Pi and Cursor validators are unsupported" ]
 }
 
 @test "a Codex rollout spawned by another thread fails" {

@@ -119,7 +119,10 @@ def transcript_problem(path, swept, session, agent_id):
         return f"{path}: validator id {agent_id!r} is not a plain id"
     found = claude_transcript(session, agent_id) or codex_transcript(session, agent_id)
     if found is None:
-        return f"{path}: validator {agent_id} is no subagent transcript of session {session}"
+        return (
+            f"{path}: validator {agent_id} is no supported Claude or Codex subagent "
+            f"transcript of session {session}; Pi and Cursor validators are unsupported"
+        )
     committed = git("show", "-s", "--format=%ct", swept)
     if committed is None:
         return f"{path}: git cannot read the commit time of {swept}"
