@@ -219,6 +219,17 @@ for line in open(sys.argv[1]):
   LC_ALL=C grep -q "^+caf$(printf '\351') latin-1$" "$TMP"/prompts/pr-text.*.diff
 }
 
+@test "a file named like a pathspec puts only itself in its slice diff" {
+  write '*.py' 2
+  commit glob
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  diff=$(grep -l '^+\*\.py line 1$' "$TMP"/prompts/sweep-comments.*.diff)
+  [ -n "$diff" ]
+  run ! grep -q 'lib/alpha.py' "$diff"
+}
+
 @test "every agent reads its diff from a file outside the checkout, removed after the run" {
   FAKE_FINDINGS=1 run_sweep --no-comment
   [ "$status" -eq 0 ]

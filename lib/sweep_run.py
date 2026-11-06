@@ -494,7 +494,8 @@ def write_diff(path, base, head, files):
     names = [n for f in files for n in (f["path"], f["old"]) if n] if files else []
     Path(path).write_bytes(
         git(
-            "diff", "--no-ext-diff", "--no-textconv", "-M", base, head, "--", *names,
+            "--literal-pathspecs", "diff", "--no-ext-diff", "--no-textconv", "-M",
+            base, head, "--", *names,
             raw=True,
         )
     )  # fmt: skip
