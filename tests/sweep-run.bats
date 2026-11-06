@@ -535,6 +535,41 @@ except sweep_run.Failure as error:
   [ "$output" = "gh api x timed out after 2s" ]
 }
 
+@test "a gh whose child keeps its output open times out and the child is stopped" {
+  printf '#!/usr/bin/env bash\nsleep 1000 &\necho $! >"%s/gh-child.pid"\nsleep 1000\n' "$TMP" >"$TMP/bin/gh"
+  run --separate-stderr python3 -c 'import signal, sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+signal.alarm(20)
+sweep_run.GH_TIMEOUT = 2
+try:
+    sweep_run.gh("api", "x")
+except sweep_run.Failure as error:
+    print(error)' "$ROOT/lib"
+  [ "$status" -eq 0 ]
+  [ "$output" = "gh api x timed out after 2s" ]
+  child=$(cat "$TMP/gh-child.pid")
+  if kill -0 "$child" 2>/dev/null; then
+    kill -9 "$child"
+    false
+  fi
+}
+
+@test "a gh that exits leaves no child behind" {
+  printf '#!/usr/bin/env bash\nsleep 1000 >/dev/null 2>&1 &\necho $! >"%s/gh-child.pid"\necho ok\n' "$TMP" >"$TMP/bin/gh"
+  run --separate-stderr python3 -c 'import sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+print(sweep_run.gh("api", "x").strip())' "$ROOT/lib"
+  [ "$status" -eq 0 ]
+  [ "$output" = ok ]
+  child=$(cat "$TMP/gh-child.pid")
+  if kill -0 "$child" 2>/dev/null; then
+    kill -9 "$child"
+    false
+  fi
+}
+
 @test "a relative record path is relative to the directory the sweep starts in" {
   name=$(basename "$TMP")
   cd "$REPO/lib"

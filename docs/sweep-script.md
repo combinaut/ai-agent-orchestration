@@ -58,7 +58,7 @@ The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<numb
 | Per agent | `--agent-timeout`, default 900 s, cut to what is left of the sweep; when the agent exits or times out, its process group gets SIGTERM, then SIGKILL for whatever is left |
 | Per sweep | `--timeout`, default 3600 s; no agent starts after it |
 | Retries | a failed first attempt retries once when the shared budget of `slices` retries (at least 1, so a text sweep has 1) has one left; the first job that fails for good (its retry failed, or no retry was left) stops new jobs, and the run exits 4 |
-| GitHub reads | 45 s and 32 MiB each; a larger read stops the run with exit 1 |
+| GitHub reads | 45 s and 32 MiB each; `gh` runs in its own process group, which is killed at the time limit and after the read; a larger or slower read stops the run with exit 1 |
 | Stopping | SIGINT, SIGTERM or SIGHUP stops every running agent's process group; the run exits 128 + the signal |
 
 Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- orch-sweep run ...`.
