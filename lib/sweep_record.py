@@ -1,110 +1,17 @@
 #!/usr/bin/env python3
-"""Checks the record /finalize-sweep writes at the end of its validate step."""
+"""Checks the record /finalize-sweep writes: head, base, findings and the validator ids."""
 
 import argparse
+import glob
 import json
+import os
 import re
 import subprocess
 import sys
 
 SHA = re.compile(r"[0-9a-f]{40}")
-COUNTS = ("slices", "sweep_agents", "validators", "findings")
-MODES = ("agents", "serial")
-FIELDS = ("head", "base", "clean", "mode", *COUNTS, "validator_ids", "verdicts")
-VERDICTS = (
-    "CONFIRMED_NEW",
-    "CONFIRMED_REGRESSED",
-    "DISPUTED_DROP",
-    "RESPECT_DROP",
-    "ALREADY_FIXED",
-    "ALLOWED_PLANNED",
-    "PREEXISTING",
-    "FALSE",
-    "NOT_WORTH_IT",
-)
-
-
-def problem(path, head, base=None):
-    """(why, record): why the record fails the checks that need no git, else (None, record)."""
-    try:
-        with open(path, encoding="utf-8") as handle:
-            record = json.load(handle)
-    except FileNotFoundError:
-        return f"{path}: no sweep record", None
-    except OSError as error:
-        return f"{path}: cannot read: {error}", None
-    except ValueError as error:
-        return f"{path}: not valid JSON: {error}", None
-    if not isinstance(record, dict):
-        return f"{path}: the record must be a JSON object", None
-    missing = [field for field in FIELDS if field not in record]
-    if missing:
-        return f"{path}: missing field {missing[0]}", None
-    for name, sha in (("head", record["head"]), ("base", record["base"])):
-        if not isinstance(sha, str) or not SHA.fullmatch(sha):
-            return f"{path}: {name} {sha!r} is not a full 40-character SHA", None
-    for name, sha in (("--head", head), ("--base", base)):
-        if sha is not None and not SHA.fullmatch(sha):
-            return f"{name} {sha!r} is not a full 40-character SHA", None
-    if record["clean"] is not True:
-        return (
-            f"{path}: clean must be true; the sweep needs a committed head and a clean tree",
-            None,
-        )
-    for field in COUNTS:
-        value = record[field]
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            return f"{path}: {field} must be a non-negative integer", None
-    if record["head"] == record["base"]:
-        return f"{path}: head equals base; the sweep covered an empty diff", None
-    if record["mode"] not in MODES:
-        return f"{path}: mode must be agents or serial", None
-    serial = record["mode"] == "serial"
-    if record["slices"] < 1:
-        return f"{path}: slices must be at least 1", None
-    if not serial and record["sweep_agents"] < 1:
-        return f"{path}: sweep_agents must be at least 1", None
-    if not serial and record["sweep_agents"] < 2 * record["slices"]:
-        return (
-            f"{path}: {record['sweep_agents']} sweep_agents for {record['slices']} slices; each slice starts two",
-            None,
-        )
-    if serial and (
-        record["sweep_agents"] or record["validators"] or record["validator_ids"]
-    ):
-        return (
-            f"{path}: a serial record has no sweep agents, validators or validator ids",
-            None,
-        )
-    if base and record["base"] != base:
-        return f"{path}: base is {record['base']}, expected {base}", None
-    verdicts = record["verdicts"]
-    if not isinstance(verdicts, dict) or any(
-        isinstance(n, bool) or not isinstance(n, int) or n < 0
-        for n in verdicts.values()
-    ):
-        return f"{path}: verdicts must map each verdict to a count", None
-    unknown = [key for key in verdicts if key not in VERDICTS]
-    if unknown:
-        return f"{path}: unknown verdict {unknown[0]}", None
-    ids = record["validator_ids"]
-    if not isinstance(ids, list) or not all(isinstance(i, str) and i for i in ids):
-        return f"{path}: validator_ids must be a list of non-empty strings", None
-    if len(set(ids)) != len(ids):
-        return f"{path}: validator_ids repeat an id", None
-    if len(ids) != record["validators"]:
-        return (
-            f"{path}: {len(ids)} validator_ids for {record['validators']} validators",
-            None,
-        )
-    if not serial and record["findings"] > 0 and record["validators"] < 1:
-        return f"{path}: {record['findings']} findings and no validator started", None
-    if sum(verdicts.values()) != record["findings"]:
-        return (
-            f"{path}: verdicts add up to {sum(verdicts.values())}, findings is {record['findings']}",
-            None,
-        )
-    return None, record
+TOKEN = re.compile(r"[A-Za-z0-9_-]+")
+FIELDS = ("head", "base", "findings", "validator_ids")
 
 
 def git(*args):
@@ -118,13 +25,53 @@ def git(*args):
     return done.stdout if done.returncode == 0 else None
 
 
-def since(path, swept, base, head):
-    """(why, commits): why the record's commits do not fit head, else the log of the commits after the swept one."""
-    for sha in (swept, base, head):
+def one_line(text):
+    """The text with control characters escaped, so a diagnostic stays one line."""
+    return re.sub(r"[\x00-\x1f\x7f]", lambda m: repr(m.group())[1:-1], text)
+
+
+def load(path):
+    """(why, record): the record at path, or why it cannot be used."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            record = json.load(handle)
+    except FileNotFoundError:
+        return f"{path}: no sweep record", None
+    except OSError as error:
+        return f"{path}: cannot read: {error}", None
+    except ValueError as error:
+        return f"{path}: not valid JSON: {error}", None
+    if not isinstance(record, dict):
+        return f"{path}: the record must be a JSON object", None
+    for field in FIELDS:
+        if field not in record:
+            return f"{path}: missing field {field}", None
+    for name in ("head", "base"):
+        sha = record[name]
+        if not isinstance(sha, str) or not SHA.fullmatch(sha):
+            return f"{path}: {name} {sha!r} is not a full 40-character SHA", None
+    findings, ids = record["findings"], record["validator_ids"]
+    if isinstance(findings, bool) or not isinstance(findings, int) or findings < 0:
+        return f"{path}: findings must be a non-negative integer", None
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        return f"{path}: validator_ids must be a list of strings", None
+    if findings > 0 and not ids:
+        return f"{path}: {findings} findings and no validator id", None
+    return None, record
+
+
+def since(path, record, head, base):
+    """(why, commits): why the record does not fit the PR head, else the log after the swept commit."""
+    swept = record["head"]
+    for sha in (swept, record["base"], head):
         if git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}") is None:
             return f"{path}: git cannot resolve {sha}", ""
-    if git("merge-base", "--is-ancestor", base, swept) is None:
-        return f"{path}: base {base} is not an ancestor of the swept {swept}", ""
+    if swept == record["base"]:
+        return f"{path}: head equals base; the sweep covered an empty diff", ""
+    if base is not None and base != record["base"]:
+        return f"{path}: base {record['base']}, expected {base}", ""
+    if git("merge-base", "--is-ancestor", record["base"], swept) is None:
+        return f"{path}: base {record['base']} is not an ancestor of {swept}", ""
     if git("merge-base", "--is-ancestor", swept, head) is None:
         return (
             f"{path}: swept {swept}, which is not an ancestor of the PR head {head}",
@@ -136,9 +83,52 @@ def since(path, swept, base, head):
     return None, commits
 
 
-def one_line(text):
-    """The text with control characters escaped, so a diagnostic stays one line."""
-    return re.sub(r"[\x00-\x1f\x7f]", lambda m: repr(m.group())[1:-1], text)
+def claude_transcript(session, agent_id):
+    root = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    pattern = os.path.join(
+        glob.escape(root),
+        "projects",
+        "*",
+        session,
+        "subagents",
+        f"agent-{agent_id}.jsonl",
+    )
+    return next(iter(glob.glob(pattern)), None)
+
+
+def codex_transcript(session, agent_id):
+    root = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+    pattern = os.path.join(
+        glob.escape(root), "sessions", "**", f"rollout-*{agent_id}.jsonl"
+    )
+    for path in glob.glob(pattern, recursive=True):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                meta = json.loads(handle.readline()).get("payload", {})
+            spawn = meta["source"]["subagent"]["thread_spawn"]
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue
+        if meta.get("id") == agent_id and spawn.get("parent_thread_id") == session:
+            return path
+    return None
+
+
+def transcript_problem(path, swept, session, agent_id):
+    """Why agent_id is no validator transcript of session for the swept head, else None."""
+    if not TOKEN.fullmatch(agent_id):
+        return f"{path}: validator id {agent_id!r} is not a plain id"
+    found = claude_transcript(session, agent_id) or codex_transcript(session, agent_id)
+    if found is None:
+        return f"{path}: validator {agent_id} is no subagent transcript of session {session}"
+    committed = git("show", "-s", "--format=%ct", swept)
+    if committed is None:
+        return f"{path}: git cannot read the commit time of {swept}"
+    if os.path.getmtime(found) < int(committed):
+        return f"{path}: validator {agent_id} was written before commit {swept}"
+    with open(found, encoding="utf-8", errors="replace") as handle:
+        if swept not in handle.read():
+            return f"{path}: validator {agent_id} never names {swept}"
+    return None
 
 
 class Parser(argparse.ArgumentParser):
@@ -156,18 +146,32 @@ def main(argv):
     check.add_argument("--record", required=True)
     check.add_argument("--head", required=True)
     check.add_argument("--base")
+    check.add_argument("--session")
+    check.add_argument("--no-transcripts", action="store_true")
     args = parser.parse_args(argv[1:])
-    found, record = problem(args.record, args.head, args.base)
+    for name, sha in (("--head", args.head), ("--base", args.base)):
+        if sha is not None and not SHA.fullmatch(sha):
+            parser.error(f"{name} {sha!r} is not a full 40-character SHA")
+    found, record = load(args.record)
     commits = ""
     if not found:
-        swept = record["head"]
-        found, commits = since(args.record, swept, record["base"], args.head)
+        found, commits = since(args.record, record, args.head, args.base)
+    attestation = args.no_transcripts or not record or record["findings"] == 0
+    if not found and not attestation:
+        if not args.session or not TOKEN.fullmatch(args.session):
+            found = f"{args.record}: --session <worker session id> is required"
+        for agent_id in record["validator_ids"]:
+            found = found or transcript_problem(
+                args.record, record["head"], args.session, agent_id
+            )
     if found:
         print(f"ERROR: {one_line(found)}", file=sys.stderr)
         return 1
-    note = "; serial: no independent validator" if record["mode"] == "serial" else ""
+    note = "; attestation only" if args.no_transcripts and record["findings"] else ""
     if commits:
-        print(one_line(f"OK: {args.record} swept {swept}{note}; commits since:"))
+        print(
+            one_line(f"OK: {args.record} swept {record['head']}{note}; commits since:")
+        )
         print(commits, end="")
     else:
         print(one_line(f"OK: {args.record} covers {args.head}{note}"))
