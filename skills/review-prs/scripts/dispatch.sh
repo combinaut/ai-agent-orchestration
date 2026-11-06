@@ -195,8 +195,17 @@ Additional review steps supplied by the orchestrator (the Rules below take prece
 $ORCH_REVIEW_EXTRA_STEPS"
 
 text_rules=""
-[ "$kind" != text-re-review ] || text_rules="
-Text re-review: the head is unchanged and only the PR title or body was edited. Re-check each open pr-text finding in your earlier sweep comments against the current title and body and the code at this head, and any claim the edit adds. Run no full sweep and no new code review. When your earlier review of this head did not finish its sweep (a COMMENT that names a slice count, or no sweep comment that names $sha), do not APPROVE: say in the sweep comment and the review that the full sweep is still outstanding, and post the review as COMMENT. Post one sweep comment before the review that names the swept head SHA in full, all 40 characters ($sha), through python3 $orch/lib/github_write.py --timeout 240 api -X POST repos/$repo/issues/$num/comments --input - with the JSON payload {\"body\":\"...\"} on stdin from a quoted heredoc, ending with *(Generated using Codex)* on its own line, and link it in the review body. Then the review: APPROVE when the earlier sweep finished and no kept fix finding and no other finding is open, else REQUEST_CHANGES (COMMENT when the sweep is outstanding)."
+if [ "$kind" = text-re-review ]; then
+  if [ -n "$finalize" ]; then
+    text_sweep=" When your earlier review of this head did not finish its sweep (a COMMENT that names a slice count, or no sweep comment that names $sha), do not APPROVE: say in the sweep comment and the review that the full sweep is still outstanding, and post the review as COMMENT. Post one sweep comment before the review that names the swept head SHA in full, all 40 characters ($sha), through python3 $orch/lib/github_write.py --timeout 240 api -X POST repos/$repo/issues/$num/comments --input - with the JSON payload {\"body\":\"...\"} on stdin from a quoted heredoc, ending with *(Generated using Codex)* on its own line, and link it in the review body."
+    text_verdict="APPROVE when the earlier sweep finished and no kept fix finding and no other finding is open, else REQUEST_CHANGES (COMMENT when the sweep is outstanding)."
+  else
+    text_sweep=" This repo has no sweep: post no sweep comment."
+    text_verdict="APPROVE when no finding of your earlier reviews is still open, else REQUEST_CHANGES."
+  fi
+  text_rules="
+Text re-review: the head is unchanged and only the PR title or body was edited. Re-check each open pr-text finding in your earlier sweep comments against the current title and body and the code at this head, and any claim the edit adds. Run no full sweep and no new code review.$text_sweep Then the review: $text_verdict"
+fi
 
 sweep_where="at the head SHA over the whole PR diff, big or small: base ref $remote/$base, and the PR is $url (use these wherever the skill looks up the current PR or its base; gh pr view cannot find the PR in this detached worktree)"
 sweep_tail="The sweep reports only; where it says to wait for approval or apply changes, post the findings and change nothing. If its plan needs more than 25 slices, do not pause to ask: post the review as COMMENT, naming the slice count and the head SHA in full, and stop."

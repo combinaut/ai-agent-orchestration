@@ -331,6 +331,23 @@ fork_head_missing_from_pull_ref() {
   not_contains "$prompt" 'Sweep:'
   not_contains "$prompt" 'Class every finding'
   contains "$prompt" 'Search code with rg or grep.'
+  rm -f "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
+  ORCH_REVIEW_FINALIZE_COMMANDS='' KIND=text-re-review PR_BODY=edited TEXT=787a81271575 dispatch
+  prompt=$(cat "$TMP/review.prompt")
+  contains "$prompt" 'This repo has no sweep: post no sweep comment.'
+  contains "$prompt" 'APPROVE when no finding of your earlier reviews is still open, else REQUEST_CHANGES.'
+  not_contains "$prompt" 'did not finish its sweep'
+  not_contains "$prompt" 'issues/7/comments'
+}
+
+@test "releasing an expired first review for its own text leaves the replacement claim for other text" {
+  release_url=https://github.com/acme/app/pull/7
+  ledger '{"https://github.com/acme/app/pull/7":{"heads":{"a":{"state":"pending","text":"t1","at":-100}}}}'
+  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" release-dispatched --url "$release_url" --sha a --text t0 --exact
+  [ "$status" -eq 1 ]
+  [ "$(ledger_states)" = 'a=pending' ]
+  python3 "$ROOT/$SKILL_DIR/scripts/prs.py" release-dispatched --url "$release_url" --sha a --text t1 --exact
+  [ "$(ledger_states)" = '' ]
 }
 
 @test "the review texts carry the sweep rules" {
@@ -1609,9 +1626,6 @@ print(len(r["queue"]), [(s["key"], s["agent"], s["pane"], s["age"] >= 1800, s["e
   [ "$(stuck)" = "1 [('a#t1', 'rev7', 'p1', True, True)]" ]
   python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t2
   [ "$(ledger_states)" = 'a=done a#t1=pending a#t2=pending' ]
-  ledger '{"https://github.com/acme/app/pull/7":{"heads":{"a":{"state":"pending","text":"t0","at":-4000}}}}'
-  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t0
-  [ "$status" -eq 3 ]
 }
 
 @test "text re-reviews of one head stop after three and the queue lists the head as capped" {

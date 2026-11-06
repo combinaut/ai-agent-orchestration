@@ -5,7 +5,7 @@
   prs.py watch         [scope] [--interval S]     one line per change, forever
   prs.py dispatch-queue [scope]                   JSON: Ready PRs needing (re)review
   prs.py mark-dispatched --url U --sha S [--text T] [--state pending|blocked|done] [--reason R] [--agent N] [--pane P]
-  prs.py claim-dispatched --url U --sha S [--text T] [--agent N]   marks S pending; exit 3 when a review of S is pending, S is blocked, or S's newest completed review holds the same text
+  prs.py claim-dispatched --url U --sha S [--text T] [--agent N]   marks S pending; exit 3 when a review of S is pending, S is blocked, or S's newest completed review holds the same text, or the head already has 3 title and body re-reviews
   prs.py release-dispatched --url U --sha S [--text T --exact]   drops every pending and blocked record of S, never a done one; exit 1 when none; --exact drops only the pending record of S with text T
   prs.py text-hash                                the hash of the PR title and body given as {"title","body"} JSON on stdin
   prs.py remote --cwd C --repo R                  the remote of clone C (origin or upstream) that is the GitHub repo R
@@ -1054,7 +1054,13 @@ def cmd_release_dispatched(args, _scope, _label):
         records = head_records(known, args.sha)
         if args.exact:
             key = claim_key(known, args.sha, args.text)
-            drop = {key} if (known.get(key) or {}).get("state") == "pending" else set()
+            record = known.get(key) or {}
+            drop = (
+                {key}
+                if record.get("state") == "pending"
+                and record.get("text") in (None, args.text)
+                else set()
+            )
         else:
             drop = {k for k, r in records.items() if r.get("state") != "done"}
         if not drop:
