@@ -1355,6 +1355,58 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ),
         ("locale quotes without gh or curl", 'echo $"review"', False),
         (
+            "API review with bundled short options",
+            f"gh api -iX POST {ep} -f event=APPROVE",
+            True,
+        ),
+        ("API review with a bundled attached method", f"gh api -iXPOST {ep}", True),
+        (
+            "GraphQL review with bundled short options",
+            "gh api -iX POST graphql -f query='mutation{submitPullRequestReview(input:{}){clientMutationId}}'",
+            True,
+        ),
+        ("API review read with bundled short options", f"gh api -iX GET {ep}", False),
+        (
+            "post-review body quoting ANSI-C and locale words",
+            'orch-sweep post-review --pr https://github.com/a/b/pull/7 --head x --event COMMENT --input - <<\'JSON\'\n{"body":"gh pr $\'review\' and curl $\\"x\\" are denied"}\nJSON',
+            False,
+        ),
+        (
+            "post-review heredoc then an ANSI-C review",
+            "orch-sweep post-review --pr https://github.com/a/b/pull/7 --head x --event COMMENT --input - <<'JSON'\n{\"body\":\"ok\"}\nJSON\ngh pr $'revi\\x65w' 7 --approve",
+            True,
+        ),
+        (
+            "quoted heredoc piped to a shell with an ANSI-C review",
+            "cat <<'X' | sh\ngh pr $'revi\\x65w' 7 --approve\nX",
+            True,
+        ),
+        (
+            "grep heredoc piped to a shell with an ANSI-C review",
+            "grep -v z <<'X' | sh\ngh pr $'revi\\x65w' 7 --approve\nX",
+            True,
+        ),
+        (
+            "ANSI-C quote before a git heredoc keeps its body scanned",
+            "git log $'\\' <<'X'\ngh pr $'revi\\x65w' 7 --approve\nX",
+            True,
+        ),
+        (
+            "commented heredoc opener before an ANSI-C review",
+            "git log # <<'X'\ngh pr $'revi\\x65w' 7 --approve\nX",
+            True,
+        ),
+        (
+            "git heredoc opener inside quotes before an ANSI-C review",
+            "git log \"<<'X'\"\ngh pr $'revi\\x65w' 7 --approve\nX",
+            True,
+        ),
+        (
+            "heredoc opener inside quotes before an ANSI-C review",
+            ": \"<<'X'\"\ngh pr $'revi\\x65w' 7 --approve\nX",
+            True,
+        ),
+        (
             "API review with a heredoc between gh and api",
             f"gh <<'JSON' api {ep} --input -\n{{}}\nJSON",
             True,
@@ -1480,6 +1532,18 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         f"cd {root}/sub && gh api graphql -F query=@q.graphql",
         True,
         root,
+    )
+    case(
+        "GraphQL query file under env -S",
+        "env -S 'gh api graphql -F query=@q.graphql'",
+        True,
+        root / "sub",
+    )
+    case(
+        "GraphQL input file under env -S",
+        "env -S 'gh api graphql --input q.graphql'",
+        True,
+        root / "sub",
     )
     case("shared fetch", "git fetch --depth=2 origin", True)
     case("worktree pull", "git pull --unshallow", True, wt)

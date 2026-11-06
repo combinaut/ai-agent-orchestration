@@ -526,7 +526,7 @@ def review_segment(segment, where, piped, moved, raw):
         return False
     if words != plain[len(plain) - len(words) :]:
         return review_marker(" ".join(plain + bodies)) or "gh" in map(
-            os.path.basename, plain
+            os.path.basename, plain + words
         )
     masked = kept[len(plain) - len(words) :]
     for index, word in enumerate(words):
@@ -563,11 +563,53 @@ def moves_directory(units):
     )
 
 
+QUOTED_HEREDOC = re.compile(
+    r"<<-?[ \t]*(['\"])([A-Za-z_]\w*)\1([^\n]*)\n.*?\n[\t]*\2(?=\s|$)", re.S
+)
+
+
+def unquoted_at(text, end):
+    """Whether position end of the command is outside quotes."""
+    quote, index = None, 0
+    while index < end:
+        char = text[index]
+        if char == "\\" and quote != "'":
+            index += 2
+            continue
+        if quote is None and char in "'\"":
+            quote = char
+        elif char == quote:
+            quote = None
+        index += 1
+    return quote is None
+
+
+def without_literal_heredocs(text):
+    """The command without the bodies of quoted heredocs fed to git, grep, rg or orch-sweep, with no pipe, comment or ANSI-C quote before them."""
+    out, last = [], 0
+    for match in QUOTED_HEREDOC.finditer(text):
+        line = text[text.rfind("\n", 0, match.start()) + 1 : match.start()]
+        owner = re.split(r"&&|\|\||[;|&(]", line)[-1].split()
+        if (
+            not owner
+            or os.path.basename(owner[0]) not in REVIEW_TEXT_TOOLS
+            or "|" in match[3]
+            or "#" in line
+            or "$'" in text[: match.start()]
+            or not unquoted_at(text, match.start())
+        ):
+            continue
+        out.append(text[last : match.start()] + match[3] + "\n")
+        last = match.end()
+    return "".join(out) + text[last:]
+
+
 def guard_approve(text, where, depth=0, moved=False):
     """Denies every pull-request review write except orch-sweep post-review, in nested shells and substitutions too."""
     if depth >= 3:
         return REVIEW_REASON if review_marker(text) else None
-    if DOLLAR_QUOTE.search(text) and GH_OR_CURL.search(text):
+    scan = without_literal_heredocs(text)
+    if DOLLAR_QUOTE.search(scan) and GH_OR_CURL.search(scan):
         return REVIEW_REASON
     try:
         units = [unit for _, unit, _ in flow_units(text)]
@@ -2075,12 +2117,23 @@ GH_API_VALUE_OPTIONS = {
 def api_endpoint(args):
     index = 0
     while index < len(args):
-        if args[index] in GH_API_VALUE_OPTIONS:
+        arg = args[index]
+        if arg in GH_API_VALUE_OPTIONS:
             index += 2
-        elif args[index].startswith("-"):
+        elif re.fullmatch(r"-[A-Za-z]{2,}.*", arg):
+            letter = next(
+                (
+                    n
+                    for n, c in enumerate(arg[1:], 1)
+                    if f"-{c}" in GH_API_VALUE_OPTIONS
+                ),
+                None,
+            )
+            index += 2 if letter == len(arg) - 1 else 1
+        elif arg.startswith("-"):
             index += 1
         else:
-            return args[index]
+            return arg
     return ""
 
 
