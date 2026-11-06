@@ -38,7 +38,7 @@ Before the agents start, after the sweep agents, and after the validators, the s
 
 ## Every head
 
-Every run sweeps the whole PR diff from the merge base, also after a fix push. The validators get the findings and verdicts of the earlier sweep comments, to judge `RESPECT_DROP`: each finding once, summaries cut to 300 characters, rejections first, at most 60000 characters in all (the context says how many were left out). A sweep comment with a malformed finding counts as an ordinary comment. They also get the latest 50 other comments, review-thread comments and review summaries, each cut to 4000 characters. Nothing in the script itself stops a rejected finding from being raised again.
+Every run sweeps the whole PR diff from the merge base, also after a fix push. The validators get the findings and verdicts of the earlier sweep comments, to judge `RESPECT_DROP`: each finding once, its author, file, category and summary cut to 40, 200, 60 and 300 characters, rejections first, at most 60000 characters in all with the notice of how many were left out; a finding that does not fit is skipped and later ones that fit are kept. The 60000 bound is for this history only. A sweep comment with a malformed finding counts as an ordinary comment. They also get the latest 50 other comments, review-thread comments and review summaries, each cut to 4000 characters. Nothing in the script itself stops a rejected finding from being raised again.
 
 ## Record and comment
 
@@ -54,8 +54,8 @@ The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<numb
 | Agents at once | `--concurrency`, default 4, a bounded pool |
 | Per agent | `--agent-timeout`, default 900 s, cut to what is left of the sweep; when the agent exits or times out, its process group gets SIGTERM, then SIGKILL for whatever is left |
 | Per sweep | `--timeout`, default 3600 s; no agent starts after it |
-| Retries | a failed attempt retries once while the run has retries left, at most `slices` in total; the first agent that fails with no retry left stops new agents, and the run exits 4 |
-| GitHub reads | 45 s each |
+| Retries | a failed first attempt retries once when the shared budget of `slices` retries has one left; the first job that fails for good (its retry failed, or no retry was left) stops new jobs, and the run exits 4 |
+| GitHub reads | 45 s and 32 MiB each; a larger read stops the run with exit 1 |
 | Stopping | SIGINT, SIGTERM or SIGHUP stops every running agent's process group; the run exits 128 + the signal |
 
 Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- orch-sweep run ...`.

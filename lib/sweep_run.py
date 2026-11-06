@@ -29,8 +29,9 @@ MAX_SLICES = 25
 PER_VALIDATOR = 40
 MAX_VALIDATORS = 12
 GH_TIMEOUT = 45
+GH_MAX_BYTES = 32 * 1024 * 1024
 HISTORY_LIMIT = 60000
-OUTCOME_SUMMARY = 300
+OUTCOME_FIELDS = {"who": 40, "file": 200, "category": 60, "summary": 300}
 COMMENT_LIMIT = 65536
 MARKER = "<!-- orch-sweep v1 -->"
 ROLES = {
@@ -124,20 +125,35 @@ def git(*args, raw=False):
         ) from None
 
 
-def gh(*args, stdin=None):
-    try:
-        done = subprocess.run(
-            ["gh", *args],
-            input=stdin,
-            capture_output=True,
-            text=True,
-            timeout=GH_TIMEOUT,
+def gh(*args):
+    """gh's stdout, at most GH_MAX_BYTES within GH_TIMEOUT."""
+    name = f"gh {' '.join(args)}"
+    expired = threading.Event()
+    with tempfile.TemporaryFile() as err:
+        proc = subprocess.Popen(
+            ["gh", *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=err
         )
-    except subprocess.TimeoutExpired as error:
-        raise Failure(f"gh {' '.join(args)} timed out after {GH_TIMEOUT}s") from error
-    if done.returncode:
-        raise Failure(f"gh {' '.join(args)} failed: {done.stderr.strip()}")
-    return done.stdout
+        timer = threading.Timer(GH_TIMEOUT, lambda: (expired.set(), proc.kill()))
+        timer.start()
+        try:
+            out = proc.stdout.read(GH_MAX_BYTES + 1)
+            if len(out) > GH_MAX_BYTES:
+                proc.kill()
+                raise Failure(
+                    f"{name} printed more than {GH_MAX_BYTES} bytes; too much to read for one sweep"
+                )
+        finally:
+            timer.cancel()
+            proc.stdout.close()
+            proc.wait()
+        if expired.is_set():
+            raise Failure(f"{name} timed out after {GH_TIMEOUT}s")
+        if proc.returncode:
+            err.seek(0)
+            raise Failure(
+                f"{name} failed: {err.read().decode(errors='replace').strip()}"
+            )
+    return out.decode()
 
 
 def changes(base, head):
@@ -616,19 +632,22 @@ def history(outcomes):
             key = tuple(f[k] for k in ("file", "line", "category", "class", "verdict", "summary"))  # fmt: skip
             if key not in seen:
                 seen.add(key)
-                summary = f["summary"][:OUTCOME_SUMMARY]
-                lines.append((f["verdict"] in sweep_record.KEEP, f"- {who}: {f['file']}:{f['line']} {f['category']} {f['class']} {f['verdict']}: {summary}"))  # fmt: skip
+                cut = {
+                    k: str(dict(f, who=who)[k])[:n] for k, n in OUTCOME_FIELDS.items()
+                }
+                lines.append((f["verdict"] in sweep_record.KEEP, f"- {cut['who']}: {cut['file']}:{f['line']} {cut['category']} {f['class']} {f['verdict']}: {cut['summary']}"))  # fmt: skip
     lines.sort(key=lambda pair: pair[0])
+    notice = (
+        "- {} earlier sweep outcomes left out to fit {} characters; rejections go first"
+    )
+    room = HISTORY_LIMIT - len(notice.format(len(lines), HISTORY_LIMIT)) - 1
     kept, size = [], 0
     for _, line in lines:
-        if size + len(line) + 1 > HISTORY_LIMIT:
-            break
-        kept.append(line)
-        size += len(line) + 1
+        if size + len(line) + 1 <= room:
+            kept.append(line)
+            size += len(line) + 1
     if len(kept) < len(lines):
-        kept.append(
-            f"- {len(lines) - len(kept)} earlier sweep outcomes left out to fit {HISTORY_LIMIT} characters; rejections go first"
-        )
+        kept.append(notice.format(len(lines) - len(kept), HISTORY_LIMIT))
     return "\n".join(kept) or "- no findings"
 
 
