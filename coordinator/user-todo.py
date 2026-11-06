@@ -34,6 +34,7 @@ LINK_TTL = 300
 LINK_LOOKUPS_MAX = 5
 LINK_BUDGET_SECONDS = 10
 RESOLVED = ("merged", "closed")
+CHOICE_MARKER = re.compile(r"\[\d+:")
 
 
 def normalized(text):
@@ -104,8 +105,8 @@ def atomic_write(path, data):
 
 
 def item_link(text):
-    """The normalised URL when the item's target is one GitHub PR or issue and the item has no answer choices."""
-    if todo_answers.choices(text):
+    """The normalised URL when the item's target is one GitHub PR or issue and the item has no `[<n>:` answer marker."""
+    if CHOICE_MARKER.search(text.rsplit(" -> ", 1)[0]):
         return None
     match = LINK.fullmatch(target(text))
     if not match:
@@ -115,19 +116,27 @@ def item_link(text):
 
 
 def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic):
-    """Link states for the open items; only merged is kept, other states are looked up again after LINK_TTL. Lookups stop after LINK_LOOKUPS_MAX or LINK_BUDGET_SECONDS."""
+    """Link states for the open items; merged is kept for good; open, failed and the closed state of an already auto-closed item are looked up again after LINK_TTL; other closed states every cycle. Lookups stop after LINK_LOOKUPS_MAX or LINK_BUDGET_SECONDS."""
     now = time.time() if now is None else now
     try:
         state = json.loads(Path(state_path).read_text())
         dismissed = set(state.get("dismissed", []))
         cached = state.get("links", {})
+        closed_links = state.get("closed_links", {})
     except (OSError, ValueError, AttributeError):
-        dismissed, cached = set(), {}
+        dismissed, cached, closed_links = set(), {}, {}
+    items = status_items(directory)[0]
     urls = [
         url
-        for item in status_items(directory)[0]
+        for item in items
         if item["id"] not in dismissed and (url := item_link(item["text"]))
     ]
+    rechecks = {
+        closed_links[item["id"]]
+        for item in items
+        if item["id"] in dismissed and item["id"] in closed_links
+    } - set(urls)
+    urls += sorted(rechecks)
     links, budget = {}, LINK_LOOKUPS_MAX
     deadline = clock() + LINK_BUDGET_SECONDS
 
@@ -140,7 +149,13 @@ def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic)
         if (
             isinstance(entry, dict)
             and entry.get("state") in RESOLVED + ("open", "unknown")
-            and (entry["state"] == "merged" or now - entry.get("at", 0) < LINK_TTL)
+            and (
+                entry["state"] == "merged"
+                or (
+                    (entry["state"] != "closed" or url in rechecks)
+                    and now - entry.get("at", 0) < LINK_TTL
+                )
+            )
         ):
             links[url] = entry
         elif budget > 0 and clock() < deadline:
@@ -185,6 +200,20 @@ def merge(directory, output, state_path, now=None, links=None):
         present = {item["id"] for item in current}
         dismissed.update(todo_answers.pending_item_ids(seen) & present)
         dismissed &= present
+        closed_links = {
+            key: url
+            for key, url in state.get("closed_links", {}).items()
+            if key in dismissed
+        }
+        reopened = {
+            key
+            for key, url in closed_links.items()
+            if links.get(url, {}).get("state") == "open"
+        }
+        dismissed -= reopened
+        state["closed_links"] = {
+            key: url for key, url in closed_links.items() if key not in reopened
+        }
         auto_closed = []
         for item in current:
             url = item_link(item["text"])
@@ -227,7 +256,8 @@ def merge(directory, output, state_path, now=None, links=None):
 def commit_auto_closed(items, state_path, output):
     """Dismisses the auto-closed items once their feed events are handed off."""
     for item in items:
-        dismiss_item(item, state_path, output)
+        reopenable = item["url"] if item["resolution"] == "closed" else None
+        dismiss_item(item, state_path, output, url=reopenable)
 
 
 AGE_PREFIX = re.compile(r"\[(now|\d+[mhd])\] (.*)")
@@ -455,7 +485,7 @@ def dismiss_locked(item, state_path, output, state):
         )
 
 
-def dismiss_item(item, state_path, output=None):
+def dismiss_item(item, state_path, output=None, url=None):
     state_path = Path(state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     with state_path.with_suffix(state_path.suffix + ".lock").open("a") as lock:
@@ -464,6 +494,8 @@ def dismiss_item(item, state_path, output=None):
             state = json.loads(state_path.read_text())
         except (OSError, ValueError):
             state = {"first_seen": {}, "items": {}}
+        if url:
+            state.setdefault("closed_links", {})[item["id"]] = url
         dismiss_locked(item, state_path, output, state)
     return True
 

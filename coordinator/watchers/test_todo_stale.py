@@ -124,10 +124,32 @@ class TodoStaleTest(IsolatedTestCase):
                 self.assertEqual((len(shown), events, self.calls), (1, [], []))
 
     def test_an_item_with_answer_choices_stays_when_its_target_resolves(self):
-        text = f"Deploy now that it merged? [1: deploy now] [2: wait] -> {PR}"
-        self.write(text)
-        shown, events = self.cycle({PR: "merged"})
-        self.assertEqual((shown, events, self.calls), ([text], [], []))
+        for text in (
+            f"Deploy now that it merged? [1: deploy now] [2: wait] -> {PR}",
+            f"Deploy? [1: now] [3: wait] -> {PR}",
+            f"Deploy? [2: now] -> {PR}",
+        ):
+            with self.subTest(text=text):
+                self.write(text)
+                self.before = None
+                (self.root / "state.json").unlink(missing_ok=True)
+                shown, events = self.cycle({PR: "merged"})
+                self.assertEqual((shown, events, self.calls), ([text], [], []))
+
+    def test_a_pr_target_closes_the_item_whatever_its_text_says(self):
+        for text in (
+            f"Smoke-test staging now that it merged -> {PR}",
+            f"Post-merge review wanted -> {PR}",
+            f"Deploy now or tomorrow? -> {PR}",
+            f"Deploy? (1) now (2) wait -> {PR}",
+            f"Merge PR 7 and PR 9 -> {PR}",
+        ):
+            with self.subTest(text=text):
+                self.write(text)
+                self.before = None
+                (self.root / "state.json").unlink(missing_ok=True)
+                shown, events = self.cycle({PR: "merged"})
+                self.assertEqual((shown, len(events)), ([], 1))
 
     def test_a_pr_target_closes_when_the_pr_merges(self):
         self.write(f"Merge PR 7 -> {PR}")
@@ -305,13 +327,88 @@ class TodoStaleTest(IsolatedTestCase):
         self.cycle({})
         self.assertEqual(self.calls, [PR, PR])
 
-    def test_a_dismissed_item_causes_no_lookup(self):
+    def test_a_merged_state_is_kept_for_a_rewritten_item_past_the_ttl(self):
         self.write(f"Merge it -> {PR}")
-        self.cycle({PR: "closed"})
+        self.cycle({PR: "merged"})
         self.age_links()
         self.calls.clear()
+        self.write(f"Merge it again -> {PR}")
+        shown, events = self.cycle({})
+        self.assertEqual((shown, len(events), self.calls), ([], 1, []))
+
+    def test_a_closed_dismissed_item_is_looked_up_again_after_the_ttl(self):
+        self.write(f"Review it -> {PR}")
+        self.cycle({PR: "closed"})
+        self.age_links()
+        self.cycle({PR: "open"})
+        self.assertEqual(self.calls, [PR, PR])
+
+    def test_a_closed_dismissed_item_is_not_looked_up_within_the_ttl(self):
+        self.write(f"Review it -> {PR}")
+        self.cycle({PR: "closed"})
         self.cycle({})
-        self.assertEqual(self.calls, [])
+        self.assertEqual(self.calls, [PR])
+
+    def test_a_closed_state_is_not_served_to_a_changed_or_new_item_within_the_ttl(self):
+        self.write(f"Review it -> {PR}", f"Review that -> {PR}")
+        self.cycle({PR: "closed"})
+        self.write(
+            f"Review it -> {PR}",
+            f"PR reopened, review that again -> {PR}",
+            f"Also review -> {PR}",
+        )
+        shown, events = self.cycle({PR: "open"})
+        self.assertIn(f"PR reopened, review that again -> {PR}", shown)
+        self.assertIn(f"Also review -> {PR}", shown)
+        self.assertEqual((events, self.calls), ([], [PR, PR]))
+
+    def test_a_closed_link_record_is_dropped_with_its_item(self):
+        self.write(f"Review it -> {PR}")
+        self.cycle({PR: "closed"})
+        self.write(f"Other -> {ISSUE}")
+        self.cycle({ISSUE: "open"})
+        state = json.loads((self.root / "state.json").read_text())
+        self.assertEqual(state["closed_links"], {})
+
+    def test_a_merged_auto_close_leaves_no_closed_link_record(self):
+        self.write(f"Merge it -> {PR}")
+        self.cycle({PR: "merged"})
+        state = json.loads((self.root / "state.json").read_text())
+        self.assertNotIn(PR, state.get("closed_links", {}).values())
+
+    def test_a_user_dismissal_leaves_no_closed_link_record(self):
+        todo = w.todo_module()
+        self.write(f"Review it -> {PR}")
+        raw = todo.merge(self.status, self.root / "todo.md", self.root / "state.json")
+        for item in raw["now"]:
+            todo.dismiss_item(item, self.root / "state.json", self.root / "todo.md")
+        state = json.loads((self.root / "state.json").read_text())
+        self.assertEqual(state.get("closed_links", {}), {})
+
+    def test_an_unchanged_item_returns_when_its_closed_target_is_open(self):
+        todo = w.todo_module()
+        text = f"Review it -> {PR}"
+        self.write(text)
+        self.cycle({PR: "closed"})
+        todo.merge(
+            self.status,
+            self.root / "todo.md",
+            self.root / "state.json",
+            links={PR: {"state": "open", "at": 0}},
+        )
+        self.assertIn(text, self.shown_in_output())
+
+    def test_an_unchanged_item_stays_closed_when_its_target_lookup_fails(self):
+        todo = w.todo_module()
+        self.write(f"Review it -> {PR}")
+        self.cycle({PR: "closed"})
+        todo.merge(
+            self.status,
+            self.root / "todo.md",
+            self.root / "state.json",
+            links={PR: {"state": "unknown", "at": 0}},
+        )
+        self.assertNotIn(PR, self.shown_in_output())
 
     def test_a_dismissed_item_sharing_a_resolved_url_emits_no_event(self):
         todo = w.todo_module()
