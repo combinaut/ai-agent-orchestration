@@ -169,7 +169,7 @@ test("the repo dropdown shows only while the input is a bare PR number", async (
     ["", false],
     ["76", true],
     ["https://github.com/acme/webapp/pull/76", false],
-    ["sparkle#76", false],
+    ["webapp#76", false],
     ["#76", false],
     ["76a", false],
     [" 76 ", true],

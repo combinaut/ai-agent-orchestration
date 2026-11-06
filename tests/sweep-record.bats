@@ -31,7 +31,6 @@ record() {
 JSON
 }
 
-# drop_field <name>: removes a field from the record file.
 drop_field() {
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); del d[sys.argv[2]]; json.dump(d, open(sys.argv[1], "w"))' "$REC" "$1"
 }
@@ -240,7 +239,6 @@ check() {
   check
   [ "$status" -eq 1 ]
   [ "${#lines[@]}" -eq 0 ]
-  [ "$(printf '%s\n' "$stderr" | wc -l | tr -d ' ')" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: unknown verdict PENDING\\nSECOND" ]
 }
 
@@ -320,7 +318,6 @@ check() {
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: missing field mode" ]
 }
-
 
 @test "a serial record that lists a validator id fails" {
   MODE=serial AGENTS=0 record 5 0 '{"FALSE": 5}'

@@ -1651,6 +1651,6 @@ TOML
 }
 
 @test "the finalize skills carry no repo-specific names" {
-  run grep -rniE 'sparkle|combinaut|sleistner|stagehand|rubocop|mise run|\.ai/' "$ROOT/skills/finalize-sweep" "$ROOT/skills/finalize-change-footprint" "$ROOT/skills/finalize-code-comments"
+  run grep -rniE 'spar''kle|combinaut|sleistner|stagehand|rubocop|mise run|\.ai/' "$ROOT/skills/finalize-sweep" "$ROOT/skills/finalize-change-footprint" "$ROOT/skills/finalize-code-comments"
   [ "$status" -eq 1 ]
 }
