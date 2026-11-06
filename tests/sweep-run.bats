@@ -385,6 +385,31 @@ assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_S
   done
 }
 
+@test "a stopped run stops agents that ignore SIGTERM within the heavy-slot grace" {
+  cd "$REPO"
+  FAKE_IGNORE_TERM=1 FAKE_SLEEP=60 "$ROOT/orch-sweep" run --pr "$PR" --head "$HEAD_SHA" --base-ref main --no-comment >/dev/null 2>&1 &
+  pid=$!
+  for _ in $(seq 100); do
+    [ "$(find "$TMP/live" -type f 2>/dev/null | wc -l)" -ge 2 ] && break
+    sleep 0.1
+  done
+  agents=$(ls "$TMP/live")
+  [ "$(echo "$agents" | wc -l)" -ge 2 ]
+  start=$SECONDS
+  kill -TERM "$pid"
+  code=0
+  wait "$pid" || code=$?
+  elapsed=$((SECONDS - start))
+  for agent in $agents; do
+    kill -0 "$agent" 2>/dev/null && kill -9 "$agent"
+  done
+  [ "$code" -eq 143 ]
+  [ "$elapsed" -lt 10 ]
+  for agent in $agents; do
+    ! kill -0 "$agent" 2>/dev/null
+  done
+}
+
 @test "the comment lists dropped findings in their own table" {
   FAKE_FINDINGS=1 FAKE_VERDICT=FALSE run_sweep
   [ "$status" -eq 0 ]

@@ -31,6 +31,7 @@ PER_VALIDATOR = 40
 MAX_VALIDATORS = 12
 GH_TIMEOUT = 45
 GH_MAX_BYTES = 32 * 1024 * 1024
+STOP_GRACE = 5
 HISTORY_LIMIT = 60000
 OUTCOME_FIELDS = {"who": 40, "file": 200, "category": 60, "summary": 300}
 COMMENT_LIMIT = 65536
@@ -364,17 +365,20 @@ def signal_group(pid, signum):
     return True
 
 
-def stop(proc):
-    """SIGTERM to the agent's process group, then SIGKILL to whatever of the group is left."""
-    if not signal_group(proc.pid, signal.SIGTERM):
+def stop(*procs):
+    """SIGTERM to each agent's process group at once, then SIGKILL to what is left, all within one STOP_GRACE."""
+    deadline = time.monotonic() + STOP_GRACE
+    for proc in procs:
+        signal_group(proc.pid, signal.SIGTERM)
+    for proc in procs:
+        try:
+            proc.wait(timeout=max(deadline - time.monotonic(), 0))
+        except subprocess.TimeoutExpired:
+            pass
+    for proc in procs:
+        signal_group(proc.pid, signal.SIGKILL)
+    for proc in procs:
         proc.wait()
-        return
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        pass
-    signal_group(proc.pid, signal.SIGKILL)
-    proc.wait()
 
 
 class Runner:
@@ -399,8 +403,7 @@ class Runner:
         with self.lock:
             self.failed.set()
             procs = list(self.live)
-        for proc in procs:
-            stop(proc)
+        stop(*procs)
         sys.exit(128 + signum)
 
     def once(self, job):
