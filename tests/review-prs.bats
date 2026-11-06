@@ -1447,31 +1447,21 @@ assert nodes == [], nodes
 
 @test "claim, mark and release key a text re-review by head and text hash" {
   prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
-  states() {
-    # shellcheck disable=SC2016 # Python source.
-    python3 -c '
-import json, sys
-sys.path.insert(0, sys.argv[1])
-import prs
-e = json.load(open(sys.argv[2]))[sys.argv[3]]
-print(" ".join(s + "=" + h["state"] for s, h in sorted(prs.heads(e).items())))
-' "$ROOT/$SKILL_DIR/scripts" "$HOME/.cache/review-prs/dispatched.json" "$pr_url"
-  }
   pr_url=https://github.com/acme/app/pull/7
   prs claim-dispatched --url "$pr_url" --sha a --text t1
   prs mark-dispatched --url "$pr_url" --sha a --text t1 --state "done"
-  [ "$(states)" = 'a=done' ]
+  [ "$(ledger_states)" = 'a=done' ]
   run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t1
   [ "$status" -eq 3 ]
   prs claim-dispatched --url "$pr_url" --sha a --text t2
-  [ "$(states)" = 'a=done a#t2=pending' ]
+  [ "$(ledger_states)" = 'a=done a#t2=pending' ]
   run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t2
   [ "$status" -eq 3 ]
   prs release-dispatched --url "$pr_url" --sha a --text t2
-  [ "$(states)" = 'a=done' ]
+  [ "$(ledger_states)" = 'a=done' ]
   prs claim-dispatched --url "$pr_url" --sha a --text t2
   prs mark-dispatched --url "$pr_url" --sha a --text t2 --state "done"
-  [ "$(states)" = 'a=done a#t2=done' ]
+  [ "$(ledger_states)" = 'a=done a#t2=done' ]
 }
 
 @test "restoring an earlier reviewed title or body at the same head is due against the newest completed review" {
@@ -1663,6 +1653,35 @@ assert prs.needs_dispatch(pr, data) == (True, "text-re-review")
   [ "$status" -eq 0 ]
 }
 
+@test "alternating between two reviewed texts consumes the text re-review cap" {
+  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@"; }
+  alt_url=https://github.com/acme/app/pull/7
+  prs claim-dispatched --url "$alt_url" --sha a --text t0 >/dev/null
+  prs mark-dispatched --url "$alt_url" --sha a --text t0 --state "done" >/dev/null
+  for text in t1 t2 t1; do
+    prs claim-dispatched --url "$alt_url" --sha a --text "$text" >/dev/null
+    prs mark-dispatched --url "$alt_url" --sha a --text "$text" --state "done" >/dev/null
+  done
+  [ "$(ledger_states)" = 'a=done a#t1=done a#t2=done' ]
+  run prs claim-dispatched --url "$alt_url" --sha a --text t2
+  [ "$status" -eq 3 ]
+}
+
+@test "an expired first review is replaced by a claim for other text and still blocks a retry of its own text" {
+  expired_url=https://github.com/acme/app/pull/7
+  ledger '{"https://github.com/acme/app/pull/7":{"heads":{"a":{"state":"pending","text":"t0","agent":"rev7","at":-4000}}}}'
+  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$expired_url" --sha a --text t0
+  [ "$status" -eq 3 ]
+  python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$expired_url" --sha a --text t1 >/dev/null
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+h = json.load(open(sys.argv[1]))["https://github.com/acme/app/pull/7"]["heads"]
+print(sorted((k, v["state"], v["text"]) for k, v in h.items()))
+' "$HOME/.cache/review-prs/dispatched.json"
+  [ "$output" = "[('a', 'pending', 't1')]" ]
+}
+
 @test "ticking a task-list box and whitespace changes do not change the title and body hash" {
   # shellcheck disable=SC2016 # Python source.
   run python3 -c '
@@ -1722,7 +1741,6 @@ x = prs.text_hash(pr)
 heads = {"A": {"state": "done", "text": "t1", "at": "1"},
          "A#t2": {"state": "done", "text": "t2", "at": "2"},
          "A#t3": {"state": "done", "text": "t3", "at": "3"}}
-pr["body"] = "x"
 heads["A#" + x] = {"state": "done", "text": x, "at": "2.5"}
 assert not prs.review_done(heads, "A", "A#" + x)
 assert prs.review_done(heads, "A", "A#t3")
@@ -1780,11 +1798,12 @@ assert prs.snapshot([pr])[url]["text"] == prs.text_hash(pr)
   contains "$prompt" 'Mode: text-re-review'
   contains "$prompt" 'only the PR title or body was edited'
   contains "$prompt" 'Run no full sweep and no new code review.'
-  contains "$prompt" 'APPROVE when no kept fix finding and no other finding is open, else REQUEST_CHANGES.'
+  contains "$prompt" 'APPROVE when the earlier sweep finished and no kept fix finding and no other finding is open, else REQUEST_CHANGES (COMMENT when the sweep is outstanding).'
   rule=$(grep '^Text re-review:' <<<"$prompt")
   contains "$rule" "names the swept head SHA in full, all 40 characters ($SHA)"
   contains "$rule" 'github_write.py --timeout 240 api -X POST repos/acme/app/issues/7/comments --input -'
   contains "$rule" '*(Generated using Codex)* on its own line'
+  contains "$rule" 'did not finish its sweep (a COMMENT that names a slice count, or no sweep comment that names '"$SHA"'), do not APPROVE'
 }
 
 @test "dispatch claims and completes a review with the title and body hash" {

@@ -242,11 +242,14 @@ def record_age(record, now=None):
     return ((now or datetime.now(timezone.utc)) - then).total_seconds()
 
 
-def head_pending(known, sha, key=None, now=None):
-    """Whether a review of this head is running: a pending record younger than PENDING_EXPIRES, or the pending record of key itself."""
+def head_pending(known, sha, key=None, now=None, text=None):
+    """Whether a review of this head is running: a pending record younger than PENDING_EXPIRES, or an older one that is key's own claim for the same text."""
     return any(
         record.get("state") == "pending"
-        and (k == key or record_age(record, now) < PENDING_EXPIRES)
+        and (
+            record_age(record, now) < PENDING_EXPIRES
+            or (k == key and (text is None or record.get("text") in (None, text)))
+        )
         for k, record in head_records(known, sha).items()
     )
 
@@ -266,17 +269,19 @@ def stuck_records(known, sha, now=None):
     ]
 
 
+def text_runs(known, sha):
+    """How many title and body re-reviews of this head were claimed: the highest run number stored, or the done and pending sha#text records when larger."""
+    texts = [
+        record
+        for k, record in head_records(known, sha).items()
+        if k != sha and record.get("state") in ("done", "pending")
+    ]
+    return max([len(texts)] + [record.get("runs") or 0 for record in texts])
+
+
 def text_capped(known, sha, key):
-    """Whether key is a title or body re-review of this head and TEXT_REVIEWS_MAX of them are already done or pending."""
-    return (
-        key != sha
-        and sum(
-            1
-            for k, record in head_records(known, sha).items()
-            if k != sha and record.get("state") in ("done", "pending")
-        )
-        >= TEXT_REVIEWS_MAX
-    )
+    """Whether key is a title or body re-review of this head and TEXT_REVIEWS_MAX of them were already claimed."""
+    return key != sha and text_runs(known, sha) >= TEXT_REVIEWS_MAX
 
 
 def blocked_record(known, sha):
@@ -295,18 +300,13 @@ def claim_key(known, sha, text):
     return latest if known[latest].get("text") in (None, text) else f"{sha}#{text}"
 
 
-def review_taken(known, sha, key, now=None):
+def review_taken(known, sha, key, now=None, text=None):
     """Whether key needs no new review: a review of this head is running or blocked, key holds the newest completed one, or the head's text re-reviews are capped."""
-    record = known.get(key)
     return (
-        head_pending(known, sha, key, now)
+        head_pending(known, sha, key, now, text)
         or blocked_record(known, sha) is not None
         or text_capped(known, sha, key)
-        or bool(
-            record
-            and record.get("state") == "done"
-            and key == latest_done_key(known, sha)
-        )
+        or review_done(known, sha, key)
     )
 
 
@@ -596,7 +596,7 @@ def needs_dispatch(pr, dispatched):
     entry = dispatched.get(pr["url"]) if isinstance(dispatched, dict) else None
     known = heads(entry)
     key = claim_key(known, sha, text_hash(pr))
-    if sha and review_taken(known, sha, key):
+    if sha and review_taken(known, sha, key, text=text_hash(pr)):
         return False, None
     if key != sha:
         return True, "text-re-review"
@@ -923,7 +923,7 @@ def cmd_dispatch_queue(args, scope, label):
                 bucket(pr) == "ready"
                 and text_capped(records, head, key)
                 and key != latest_done_key(records, head)
-                and not head_pending(records, head, key)
+                and not head_pending(records, head, key, text=text_hash(pr))
                 and blocked_record(records, head) is None
             ):
                 capped.append({"url": pr["url"], "sha": head, "max": TEXT_REVIEWS_MAX})
@@ -1013,10 +1013,13 @@ def cmd_claim_dispatched(args, _scope, _label):
     def claim(data):
         known = heads(data.get(args.url) or {})
         key = claim_key(known, args.sha, args.text)
-        if review_taken(known, args.sha, key):
+        if review_taken(known, args.sha, key, text=args.text):
             taken.append(True)
             return
-        set_head(data, args.url, key, head_record(args, "pending"))
+        record = head_record(args, "pending")
+        if key != args.sha:
+            record["runs"] = text_runs(known, args.sha) + 1
+        set_head(data, args.url, key, record)
 
     update_dispatched(claim)
     print(f"{'TAKEN' if taken else 'CLAIMED'} {args.sha}")
@@ -1028,14 +1031,16 @@ def cmd_mark_dispatched(args, _scope, _label):
     if not args.url or not args.sha:
         sys.exit("mark-dispatched needs --url and --sha")
     record = head_record(args, args.state)
-    update_dispatched(
-        lambda data: set_head(
-            data,
-            args.url,
-            claim_key(heads(data.get(args.url) or {}), args.sha, args.text),
-            record,
-        )
-    )
+
+    def mark(data):
+        known = heads(data.get(args.url) or {})
+        key = claim_key(known, args.sha, args.text)
+        runs = (known.get(key) or {}).get("runs")
+        if runs:
+            record["runs"] = runs
+        set_head(data, args.url, key, record)
+
+    update_dispatched(mark)
     print(json.dumps(record))
 
 
