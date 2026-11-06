@@ -116,7 +116,7 @@ def item_link(text):
 
 
 def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic):
-    """Link states for the open items; merged is kept for good; open, failed and the closed state of an already auto-closed item are looked up again after LINK_TTL; other closed states every cycle. Lookups stop after LINK_LOOKUPS_MAX or LINK_BUDGET_SECONDS."""
+    """Link states for the open items; lookups stop after LINK_LOOKUPS_MAX or LINK_BUDGET_SECONDS."""
     now = time.time() if now is None else now
     try:
         state = json.loads(Path(state_path).read_text())
