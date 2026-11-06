@@ -149,8 +149,7 @@ class ReviewTests(IsolatedTestCase):
 
     def test_entire_admission_and_final_state_write_obey_caller_deadline(self):
         self.real_clock()
-        # g.run rejects admission with Busy when under 2 s remain, so "result" needs a budget
-        # well above that; the alarm must be armed for the caller's deadline and cut the write off.
+        # g.run rejects admission with Busy when under 2 s remain, so "result" needs a budget well above that.
         for phase, timeout in (("admission", 0.2), ("result", 6)):
             with self.subTest(phase=phase):
                 invoked = False
