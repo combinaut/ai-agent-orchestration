@@ -334,6 +334,13 @@ check() {
   [ "$stderr" = "ERROR: $REC: 1 sweep_agents for 25 slices; each slice starts two" ]
 }
 
+@test "five sweep agents for three slices fail" {
+  SLICES=3 AGENTS=5 record 5 1 '{"FALSE": 5}'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: 5 sweep_agents for 3 slices; each slice starts two" ]
+}
+
 @test "more sweep agents than two per slice pass" {
   SLICES=3 AGENTS=8 record 5 1 '{"FALSE": 5}'
   check
