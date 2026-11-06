@@ -435,13 +435,9 @@ def guard_attribution(args, cwd, opts, raw):
 
 
 APPROVE_REASON = "An APPROVE review goes only through orch-sweep post-review, which checks the sweep gate for the exact head: orch-sweep post-review --pr <url> --head <sha> --event APPROVE --input - (docs/sweep-script.md)."
-APPROVE_EVENT = re.compile(r"""["']?event["']?\s*[:=]\s*["']?APPROVE\b""")
-OTHER_EVENT = re.compile(
-    r"""["']?event["']?\s*[:=]\s*["']?(?:REQUEST_CHANGES|COMMENT)\b"""
-)
-REVIEW_ENDPOINT = re.compile(
-    r"/?repos/[^/]+/[^/]+/pulls/\d+/reviews(?:/\d+/events)?/?(?:\?[^#]*)?"
-)
+REVIEW_ENDPOINT = re.compile(r"(?:^|/)pulls/[^/]+/reviews(?:[/?#]|$)")
+GRAPHQL_ENDPOINT = re.compile(r"(?:^|/)graphql/?(?:[?#]|$)")
+APPROVE_WORD = re.compile(r"\bapprove\b", re.I)
 REVIEW_MUTATION = re.compile(r"(?:add|submit)PullRequestReview\b")
 HEREDOC = re.compile(
     r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?:\n|$)", re.S
@@ -475,15 +471,20 @@ def guard_approve(args, cwd, opts, raw):
         return None
     if not args or args[0] != "api":
         return None
-    endpoint = api_endpoint(args[1:])
-    graphql = endpoint == "graphql"
-    if not graphql and not REVIEW_ENDPOINT.fullmatch(endpoint):
+    endpoint = api_endpoint(args[1:]) or ""
+    graphql = bool(GRAPHQL_ENDPOINT.search(endpoint))
+    opaque = "$" in endpoint or "`" in endpoint
+    if (
+        not graphql
+        and not REVIEW_ENDPOINT.search(endpoint)
+        and not (opaque and "/reviews" in raw)
+    ):
         return None
     texts = [raw]
     for name in flag_values(args, ("--input",)):
         if name in STDIN_NAMES:
             document = stdin_document(raw)
-            if document is None or (not graphql and not OTHER_EVENT.search(document)):
+            if document is None:
                 return APPROVE_REASON
             texts.append(document)
             continue
@@ -492,16 +493,14 @@ def guard_approve(args, cwd, opts, raw):
             return content
         texts.append(content)
     for field in flag_values(args, ("-f", "-F", "--raw-field", "--field")):
-        key, _, value = field.partition("=")
+        _, _, value = field.partition("=")
         if value.startswith("@"):
             texts.append(file_text(value[1:], cwd))
-        if not graphql and key == "event" and value.upper() == "APPROVE":
-            return APPROVE_REASON
-    for text in texts:
-        if graphql and REVIEW_MUTATION.search(text) and "APPROVE" in text:
-            return APPROVE_REASON
-        if not graphql and APPROVE_EVENT.search(text):
-            return APPROVE_REASON
+    text = "\n".join(texts)
+    if graphql and not REVIEW_MUTATION.search(text):
+        return None
+    if APPROVE_WORD.search(text) or "\\u" in text:
+        return APPROVE_REASON
     return None
 
 

@@ -1003,6 +1003,46 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         (
             "API review comment naming APPROVE",
             "gh api -X POST repos/a/b/pulls/7/reviews -f event=COMMENT -f body='APPROVE later'",
+            True,
+        ),
+        (
+            "API review with a variable PR number",
+            "N=7; gh api repos/a/b/pulls/$N/reviews -f event=APPROVE",
+            True,
+        ),
+        (
+            "API review with a braced variable PR number",
+            'gh api "repos/a/b/pulls/${PR}/reviews" -f event=APPROVE',
+            True,
+        ),
+        (
+            "API review with a substituted PR number",
+            "gh api repos/a/b/pulls/$(cat n)/reviews -f event=APPROVE",
+            True,
+        ),
+        (
+            "API review at a full URL",
+            "gh api https://api.github.com/repos/a/b/pulls/7/reviews -f event=APPROVE",
+            True,
+        ),
+        (
+            "API review at an enterprise host",
+            "gh api https://ghe.example.com/api/v3/repos/a/b/pulls/7/reviews -f event=APPROVE",
+            True,
+        ),
+        (
+            "API review with owner and repo placeholders",
+            "gh api 'repos/{owner}/{repo}/pulls/7/reviews' -f event=APPROVE",
+            True,
+        ),
+        (
+            "API review heredoc with a duplicate escaped event",
+            'gh api repos/a/b/pulls/7/reviews --input - <<\'JSON\'\n{"event":"COMMENT","event":"APPR\\u004fVE"}\nJSON',
+            True,
+        ),
+        (
+            "API review with a variable PR number and a COMMENT event",
+            "gh api repos/a/b/pulls/$N/reviews -f event=COMMENT -f body=ok",
             False,
         ),
         (
@@ -1038,6 +1078,11 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         (
             "GraphQL review submit",
             "gh api graphql -f query='mutation{submitPullRequestReview(input:{pullRequestReviewId:\"x\",event:APPROVE}){clientMutationId}}'",
+            True,
+        ),
+        (
+            "GraphQL review submit at a full URL",
+            "gh api https://api.github.com/graphql -f query='mutation{submitPullRequestReview(input:{pullRequestReviewId:\"x\",event:APPROVE}){clientMutationId}}'",
             True,
         ),
         (
