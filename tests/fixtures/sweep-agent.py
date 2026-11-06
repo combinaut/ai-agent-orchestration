@@ -4,12 +4,15 @@
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
 import uuid
 from pathlib import Path
 
+if os.environ.get("FAKE_IGNORE_TERM"):
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
 tmp = Path(os.environ["TMP"])
 kind = Path(sys.argv[0]).name
 prompt = sys.stdin.read()

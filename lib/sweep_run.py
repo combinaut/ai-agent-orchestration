@@ -31,6 +31,7 @@ PER_VALIDATOR = 40
 MAX_VALIDATORS = 12
 GH_TIMEOUT = 45
 GH_MAX_BYTES = 32 * 1024 * 1024
+STOP_GRACE = 5
 HISTORY_LIMIT = 60000
 OUTCOME_FIELDS = {"who": 40, "file": 200, "category": 60, "summary": 300}
 COMMENT_LIMIT = 65536
@@ -364,17 +365,20 @@ def signal_group(pid, signum):
     return True
 
 
-def stop(proc):
-    """SIGTERM to the agent's process group, then SIGKILL to whatever of the group is left."""
-    if not signal_group(proc.pid, signal.SIGTERM):
+def stop(*procs):
+    """SIGTERM to each agent's process group at once, then SIGKILL to what is left, all within one STOP_GRACE."""
+    deadline = time.monotonic() + STOP_GRACE
+    for proc in procs:
+        signal_group(proc.pid, signal.SIGTERM)
+    for proc in procs:
+        try:
+            proc.wait(timeout=max(deadline - time.monotonic(), 0))
+        except subprocess.TimeoutExpired:
+            pass
+    for proc in procs:
+        signal_group(proc.pid, signal.SIGKILL)
+    for proc in procs:
         proc.wait()
-        return
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        pass
-    signal_group(proc.pid, signal.SIGKILL)
-    proc.wait()
 
 
 class Runner:
@@ -399,8 +403,7 @@ class Runner:
         with self.lock:
             self.failed.set()
             procs = list(self.live)
-        for proc in procs:
-            stop(proc)
+        stop(*procs)
         sys.exit(128 + signum)
 
     def once(self, job):
@@ -961,12 +964,26 @@ def run(args):
     paths = [sweep_record.cache_path(repo, number, args.head, args.kind)] + (
         [Path(args.record)] if args.record else []
     )
-    for path in paths:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(record, indent=1) + "\n")
-    why, _ = sweep_record.problem(str(paths[0]), args.head)
-    if why:
-        raise Failure(f"the record fails its own check: {why}")
+    data = json.dumps(record, indent=1) + "\n"
+    staged = []
+    try:
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle, temp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+            staged.append(temp)
+            with os.fdopen(handle, "w") as out:
+                out.write(data)
+        why, _ = sweep_record.problem(staged[0], args.head)
+        if why:
+            raise Failure(
+                f"the record fails its own check: {why.replace(staged[0], str(paths[0]))}"
+            )
+        for temp, path in zip(staged, paths):
+            os.replace(temp, path)
+        staged = []
+    finally:
+        for temp in staged:
+            Path(temp).unlink(missing_ok=True)
     print(f"RECORD {paths[-1]}")
     if not args.no_comment:
         body = fitting_body(record)
