@@ -1245,6 +1245,32 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "cat <<'X' | gh pr review 7 --approve\nhi\nX",
             True,
         ),
+        (
+            "API review comment naming APPROVE",
+            f"gh api {ep} -f event=COMMENT -f body='Do not APPROVE yet'",
+            True,
+        ),
+        (
+            "API review request changes naming APPROVE",
+            f"gh api {ep} -f event=REQUEST_CHANGES -f body='Do not APPROVE yet'",
+            True,
+        ),
+        (
+            "gh pr review comment naming APPROVE",
+            "gh pr review 7 --comment -b 'Do not APPROVE yet'",
+            True,
+        ),
+        (
+            "API review heredoc with an escaped event",
+            f'gh api {ep} --input - <<\'JSON\'\n{{"event":"APPR\\u004fVE"}}\nJSON',
+            True,
+        ),
+        (
+            "API review here-string request changes",
+            f'gh api {ep} --input - <<< \'{{"event":"REQUEST_CHANGES"}}\'',
+            True,
+        ),
+        ("API review unset event variable", f'gh api {ep} -f event="$E"', True),
         ("API review list", f"gh api {ep} --jq '.[].state'", False),
         (
             "API review list with GET fields",

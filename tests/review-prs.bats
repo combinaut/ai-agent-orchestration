@@ -1683,6 +1683,12 @@ print(sorted((k.split("#")[-1] if "#" in k else "-", v["state"]) for k, v in h.i
   contains "$output" "RELEASED $SHA"
   [ "$(dispatch_state)" = 'True null' ]
   [ ! -e "$TMP/review.prompt" ]
+  rm "$TMP/pr_body"
+  PANE=w9-p5 SWEEP_EDITS_BODY=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'LEFT OPEN w9-p5'
+  [[ "$output" != *'REMOVED '* ]]
+  [ ! -e "$TMP/review.prompt" ]
 }
 
 @test "a dispatch of any kind without the text hash exits before claiming" {

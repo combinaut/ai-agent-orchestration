@@ -250,11 +250,7 @@ Rules:
 - When finished, reply with one line: APPROVE|COMMENT|REQUEST_CHANGES — $url
 - After posting the review, reply with that one line and end your turn. Do not poll, sleep, or wait for CI, other reviewers or replies."
 
-stop_started() {
-  close_opened
-  [ -n "$opened" ] || remove_worktree
-}
-text_check stop_started
+text_check close_opened
 prompt_out=$(herdr agent prompt "$agent" "$prompt" --wait --timeout 1800000 2>&1)
 status=$?
 [ -z "$prompt_out" ] || printf '%s\n' "$prompt_out"
