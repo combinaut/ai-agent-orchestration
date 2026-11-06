@@ -453,7 +453,7 @@ PY
   [ "$stderr" = "ERROR: $REC: swept $FIRST_SHA, not the exact head $HEAD_SHA" ]
 }
 
-@test "an orch-sweep record without a script field fails" {
+@test "an orch-sweep record without a model field fails" {
   script_record 'del r["model"]'
   check
   [ "$status" -eq 1 ]
