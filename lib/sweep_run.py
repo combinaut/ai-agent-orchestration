@@ -131,14 +131,20 @@ def gh(*args):
     expired = threading.Event()
     with tempfile.TemporaryFile() as err:
         proc = subprocess.Popen(
-            ["gh", *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=err
+            ["gh", *args],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=err,
+            start_new_session=True,
         )
-        timer = threading.Timer(GH_TIMEOUT, lambda: (expired.set(), proc.kill()))
+        timer = threading.Timer(
+            GH_TIMEOUT, lambda: (expired.set(), signal_group(proc.pid, signal.SIGKILL))
+        )
         timer.start()
         try:
             out = proc.stdout.read(GH_MAX_BYTES + 1)
             if len(out) > GH_MAX_BYTES:
-                proc.kill()
+                signal_group(proc.pid, signal.SIGKILL)
                 raise Failure(
                     f"{name} printed more than {GH_MAX_BYTES} bytes; too much to read for one sweep"
                 )
@@ -146,6 +152,7 @@ def gh(*args):
             proc.stdout.close()
             proc.wait()
             timer.cancel()
+            signal_group(proc.pid, signal.SIGKILL)
         if expired.is_set():
             raise Failure(f"{name} timed out after {GH_TIMEOUT}s")
         if proc.returncode:
