@@ -644,8 +644,8 @@ sys.exit(sweep_run.main(["orch-sweep", *sys.argv[2:]]))' "$ROOT/lib" run --pr "$
   [[ "$stderr" == *"the record fails its own check"*"missing field required_by_this_test"* ]]
   cmp "$cache/$HEAD_SHA.json" "$TMP/older.json"
   [ ! -e "$TMP/new.json" ]
-  [ "$(ls -A "$cache")" = "$HEAD_SHA.json" ]
-  [ "$(ls -A "$TMP" | grep -c '^\.')" -eq 0 ]
+  [ "$(find "$cache" -mindepth 1 -maxdepth 1 -exec basename {} \;)" = "$HEAD_SHA.json" ]
+  [ -z "$(find "$TMP" -mindepth 1 -maxdepth 1 -name '.*')" ]
 }
 
 @test "a relative record path is relative to the directory the sweep starts in" {
