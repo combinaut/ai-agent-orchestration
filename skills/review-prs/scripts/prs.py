@@ -51,7 +51,7 @@ query($q: String!, $me: String, $endCursor: String) {
       mergeable mergeStateStatus reviewDecision
       reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-      reviewRequests(first: 20) { nodes { requestedReviewer {
+      reviewRequests(first: 20) { nodes { createdAt requestedReviewer {
         __typename ... on User { login } ... on Team { slug } ... on Bot { login } } } }
       myReviews: reviews(last: 1, author: $me, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) {
         nodes { commit { oid } } }
@@ -64,7 +64,7 @@ query($url: URI!, $me: String) {
   resource(url: $url) {
     ... on PullRequest {
       state headRefOid
-      reviewRequests(first: 20) { nodes { requestedReviewer {
+      reviewRequests(first: 20) { nodes { createdAt requestedReviewer {
         __typename ... on User { login } ... on Team { slug } ... on Bot { login } } } }
       myReviews: reviews(last: 1, author: $me, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) {
         nodes { commit { oid } } }
@@ -466,6 +466,25 @@ def requested_of(pr, login):
     )
 
 
+def requested_after(pr, login, completed_at):
+    """Whether login was personally requested after the completed local review."""
+    for node in (pr.get("reviewRequests") or {}).get("nodes") or []:
+        reviewer = node.get("requestedReviewer") or {}
+        if (reviewer.get("login") or "").lower() != (login or "").lower():
+            continue
+        try:
+            requested = datetime.fromisoformat(
+                (node.get("createdAt") or "").replace("Z", "+00:00")
+            )
+            completed = datetime.fromisoformat(
+                (completed_at or "").replace("Z", "+00:00")
+            )
+        except ValueError:
+            return True
+        return requested > completed
+    return False
+
+
 def needs_dispatch(pr, dispatched, me=None):
     if bucket(pr) != "ready":
         return False, None
@@ -473,7 +492,9 @@ def needs_dispatch(pr, dispatched, me=None):
     entry = dispatched.get(pr["url"]) if isinstance(dispatched, dict) else None
     known = heads(entry)
     if sha and sha in known:
-        if known[sha].get("state") == "done" and requested_of(pr, me):
+        if known[sha].get("state") == "done" and requested_after(
+            pr, me, known[sha].get("at")
+        ):
             return True, "re-request"
         return False, None
     kind = "re-review" if known or my_review_sha(pr) else "review"

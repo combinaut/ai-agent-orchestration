@@ -1462,6 +1462,10 @@ before = prs.snapshot([pr])
 pr["reviewRequests"] = {"nodes": []}
 after = prs.snapshot([pr])
 assert prs.changes(after, before)[0] == ["ready: %s — t: review requested again" % url]
+# A stale queue snapshot can still show the request after its re-review completed.
+pr["reviewRequests"] = {"nodes": [{"requestedReviewer": {"login": "Me"}, "createdAt": "2026-01-01T00:00:00+00:00"}]}
+completed = {url: {"heads": {"A": {"state": "done", "at": "2026-01-01T01:00:00+00:00"}}}}
+assert prs.needs_dispatch(pr, completed, "me") == (False, None)
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
