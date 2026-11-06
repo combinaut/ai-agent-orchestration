@@ -1089,7 +1089,23 @@ def local_tracked(root):
 
 
 def warn(message):
-    print(f"WARNING: {message}", file=sys.stderr)
+    one_line = re.sub(r"[\x00-\x1f\x7f]", lambda m: repr(m.group())[1:-1], message)
+    print(f"WARNING: {one_line}", file=sys.stderr)
+
+
+OLD_FINALIZE = ("/finalize-change-footprint", "/finalize-code-comments")
+FINALIZE_SETTING = "review.finalize_commands"
+
+
+def warn_old_finalize(commands, source):
+    """One warning when the resolved commands name the old pair and not /finalize-sweep."""
+    names = [c.split()[0] for c in commands if c.split()]
+    if "/finalize-sweep" in names or not any(n in OLD_FINALIZE for n in names):
+        return
+    warn(
+        f"{source} sets {FINALIZE_SETTING} to {' '.join(commands)}; "
+        "/finalize-sweep replaces /finalize-change-footprint and /finalize-code-comments"
+    )
 
 
 def local_values(root):
@@ -1155,22 +1171,36 @@ def merged(layers, environ):
     return result
 
 
-def load_repo(start, environ=None):
+def load_repo(start, environ=None, exported=None):
     """Repo settings for the checkout containing start: committed file, the main checkout's personal file, its own."""
     environ = os.environ if environ is None else environ
     root = repo_root(start)
-    layers = []
+    layers, labels = [], []
     if root is not None:
         committed = root / REPO_FILE
         if committed.is_file():
             layers.append(
                 committed_layer(read_file(committed, "repo"), os.fspath(committed))
             )
+            labels.append(os.fspath(committed))
         main = main_checkout(root)
         if main is not None:
             layers.append(local_values(main))
+            labels.append(os.fspath(main / LOCAL_FILE))
         layers.append(local_values(root))
-    return merged(layers, environ)
+        labels.append(os.fspath(root / LOCAL_FILE))
+    result = merged(layers, environ)
+    setting = BY_KEY[FINALIZE_SETTING]
+    sources = [(global_layer(environ), config_path(environ)), *zip(layers, labels)]
+    exported = environ if exported is None else exported
+    source = setting.env if setting.env in exported else None
+    for layer, label in reversed(sources):
+        if source is None and any(k.key == FINALIZE_SETTING for k in layer):
+            source = label
+    if source is not None:
+        value = exported.get(setting.env, result[setting.env])
+        warn_old_finalize(value.split(setting.sep), source)
+    return result
 
 
 def load_remote(repo, ref, committed_text, clone=None, environ=None):
@@ -2030,16 +2060,19 @@ def main(argv):
             check_resolved_env(os.environ)
             sys.stdout.write(shell_lines(load_global(argv[2])))
         elif command == "print":
-            sys.stdout.write(
-                print_lines(
-                    printed(
-                        resolved_global(print_path(argv[2:], os.environ), os.environ)
-                    )
+            path = print_path(argv[2:], os.environ)
+            values = resolved_global(path, os.environ)
+            finalize = BY_KEY[FINALIZE_SETTING]
+            if finalize.env in os.environ:
+                warn_old_finalize(
+                    os.environ[finalize.env].split(finalize.sep), finalize.env
                 )
-            )
+            elif any(k.key == FINALIZE_SETTING for k in shared_values(path)):
+                warn_old_finalize(values[finalize.env].split(finalize.sep), path)
+            sys.stdout.write(print_lines(printed(values)))
         elif command == "repo" and len(argv) == 3:
             selected = {k: v for k, v in os.environ.items() if k == "ORCH_CONFIG"}
-            sys.stdout.write(shell_lines(load_repo(argv[2], selected)))
+            sys.stdout.write(shell_lines(load_repo(argv[2], selected, os.environ)))
         elif command == "migrate" and len(argv) == 5:
             print("\n".join(migrate(*argv[2:])))
         elif command == "upgrade" and len(argv) >= 3:
