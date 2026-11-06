@@ -478,13 +478,14 @@ raise SystemExit(0 if result.returncode == 130 else 1)
   run env ORCH_HEAVY_SLOTS_KILL_GRACE=2 python3 -c '
 import os, signal, subprocess, sys, time
 helper, slot_dir = sys.argv[1:]
+kill_grace, allowance = int(os.environ["ORCH_HEAVY_SLOTS_KILL_GRACE"]), 5
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 slot = os.path.join(slot_dir, "agent-interrupt")
 ready = os.path.join(slot_dir, "agent-interrupt.ready")
 terminated = os.path.join(slot_dir, "agent-interrupt.terminated")
 wrapper = subprocess.Popen([helper, "take", "agent-interrupt", "--", "bash", "-c",
                             "trap \"printf terminated > \\\"$2\\\"; exit 0\" TERM; printf ready > \"$1\"; while :; do sleep 1; done", "_", ready, terminated])
-deadline = time.monotonic() + 45
+deadline = time.monotonic() + 15
 while time.monotonic() < deadline:
     if (os.path.getsize(slot) if os.path.exists(slot) else 0) and os.path.exists(ready):
         break
@@ -495,7 +496,7 @@ else:
     raise SystemExit("child never became ready")
 child = int(open(slot).read().split()[0])
 os.kill(wrapper.pid, signal.SIGINT)
-deadline = time.monotonic() + 45
+deadline = time.monotonic() + kill_grace + allowance
 try:
     status = wrapper.wait(timeout=max(0, deadline - time.monotonic()))
 except subprocess.TimeoutExpired:
