@@ -512,6 +512,40 @@ except sweep_run.Failure as error:
   fi
 }
 
+gh_setsid_child() {
+  cat >"$TMP/bin/gh" <<EOF
+#!/usr/bin/env bash
+python3 -c 'import os, sys, time
+os.setsid()
+open(sys.argv[1], "w").write(str(os.getpid()))
+time.sleep(1000)' "$TMP/gh-child.pid" 2>/dev/null 3>&- 4>&- 5>&- &
+$1
+EOF
+  chmod +x "$TMP/bin/gh"
+  run --separate-stderr python3 -c 'import signal, sys, time
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+signal.alarm(10)
+sweep_run.GH_TIMEOUT = 2
+start = time.monotonic()
+try:
+    sweep_run.gh("api", "x")
+except sweep_run.Failure as error:
+    print(error, round(time.monotonic() - start) <= 3)' "$ROOT/lib"
+  child=$(cat "$TMP/gh-child.pid")
+  kill -9 "$child" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  [ "$output" = "gh api x timed out after 2s True" ]
+}
+
+@test "a gh whose child leaves its process group and keeps its output open times out" {
+  gh_setsid_child "sleep 1000"
+}
+
+@test "a gh that exits at once while a child outside its group keeps its output open times out" {
+  gh_setsid_child "exit 0"
+}
+
 @test "a gh that exits leaves no child behind" {
   printf '#!/usr/bin/env bash\nsleep 1000 >/dev/null 2>&1 &\necho $! >"%s/gh-child.pid"\necho ok\n' "$TMP" >"$TMP/bin/gh"
   run --separate-stderr python3 -c 'import sys

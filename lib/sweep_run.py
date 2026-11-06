@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import select
 import shutil
 import signal
 import stat
@@ -128,7 +129,8 @@ def git(*args, raw=False):
 def gh(*args):
     """gh's stdout, at most GH_MAX_BYTES within GH_TIMEOUT."""
     name = f"gh {' '.join(args)}"
-    expired = threading.Event()
+    deadline = time.monotonic() + GH_TIMEOUT
+    expired = False
     with tempfile.TemporaryFile() as err:
         proc = subprocess.Popen(
             ["gh", *args],
@@ -137,23 +139,33 @@ def gh(*args):
             stderr=err,
             start_new_session=True,
         )
-        timer = threading.Timer(
-            GH_TIMEOUT, lambda: (expired.set(), signal_group(proc.pid, signal.SIGKILL))
-        )
-        timer.start()
+        out = bytearray()
         try:
-            out = proc.stdout.read(GH_MAX_BYTES + 1)
-            if len(out) > GH_MAX_BYTES:
-                signal_group(proc.pid, signal.SIGKILL)
-                raise Failure(
-                    f"{name} printed more than {GH_MAX_BYTES} bytes; too much to read for one sweep"
-                )
+            fd = proc.stdout.fileno()
+            while True:
+                left = deadline - time.monotonic()
+                if left <= 0 or not select.select([fd], [], [], left)[0]:
+                    expired = True
+                    break
+                chunk = os.read(fd, 1 << 16)
+                if not chunk:
+                    break
+                out += chunk
+                if len(out) > GH_MAX_BYTES:
+                    raise Failure(
+                        f"{name} printed more than {GH_MAX_BYTES} bytes; too much to read for one sweep"
+                    )
+            if not expired:
+                try:
+                    proc.wait(max(deadline - time.monotonic(), 0))
+                except subprocess.TimeoutExpired:
+                    expired = True
         finally:
             proc.stdout.close()
-            proc.wait()
-            timer.cancel()
             signal_group(proc.pid, signal.SIGKILL)
-        if expired.is_set():
+            if proc.poll() is None:
+                threading.Thread(target=proc.wait, daemon=True).start()
+        if expired:
             raise Failure(f"{name} timed out after {GH_TIMEOUT}s")
         if proc.returncode:
             err.seek(0)
