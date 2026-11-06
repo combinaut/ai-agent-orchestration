@@ -330,7 +330,7 @@ def bucket(pr):
     return "ready"
 
 
-def snapshot(nodes):
+def snapshot(nodes, login=None):
     return {
         p["url"]: {
             "title": p["title"],
@@ -341,7 +341,7 @@ def snapshot(nodes):
             if p["mergeable"] == "UNKNOWN"
             else p["mergeable"] == "CONFLICTING",
             "sha": p.get("headRefOid") or "",
-            "requested": bool((p.get("reviewRequests") or {}).get("nodes")),
+            "requested": requested_of(p, login),
         }
         for p in nodes
     }
@@ -601,9 +601,9 @@ def changes(before, after, login=None):
             parts.append("back to draft")
         if was.get("sha") and now.get("sha") and was["sha"] != now["sha"]:
             parts.append(f"new commits ({now['sha'][:7]})")
-        if not was.get("requested") and now.get("requested"):
-            lines.append(f"ready: {url} — {now['title']}: review requested again")
-            continue
+        requested_changed = not was.get("requested") and now.get("requested")
+        if requested_changed:
+            parts.append("review requested again")
         if was["ci"] != now["ci"]:
             label = {
                 "SUCCESS": "CI green",
@@ -653,6 +653,12 @@ def changes(before, after, login=None):
                     or was["ci"] not in (None, "SUCCESS")
                     or (was.get("sha") != now.get("sha"))
                 )
+            )
+            became_ready = became_ready or (
+                requested_changed
+                and not now["draft"]
+                and now["conflict"] is False
+                and now["ci"] in (None, "SUCCESS")
             )
             prefix = "ready" if became_ready else "changed"
             lines.append(f"{prefix}: {url} — {now['title']}: {', '.join(parts)}")
@@ -721,11 +727,11 @@ def snapshot_counts(snap):
 
 
 def cmd_list(args, scope, label):
-    nodes, _login = fetch(scope)
+    nodes, login = fetch(scope)
     if any(p["mergeable"] == "UNKNOWN" for p in nodes):
         time.sleep(3)
-        nodes, _login = fetch(scope)
-    save_state(scope, snapshot(nodes))
+        nodes, login = fetch(scope)
+    save_state(scope, snapshot(nodes, login))
     order = ("ready", "unknown", "ci_run", "ci_fail", "conflict", "draft")
     titles = {
         "ready": "🔔 Ready for your review",
@@ -753,7 +759,7 @@ def cmd_watch(args, scope, _label):
     while True:
         try:
             nodes, login = fetch(scope)
-            after = snapshot(nodes)
+            after = snapshot(nodes, login)
             if before is not None:
                 lines, still_open = changes(before, after, login)
                 after = {**after, **still_open}
@@ -916,7 +922,10 @@ def cmd_claim_dispatched(args, _scope, _label):
         ):
             taken.append(True)
             return
-        set_head(data, args.url, args.sha, head_record(args, "pending"))
+        pending = head_record(args, "pending")
+        if args.retake and args.sha in known:
+            pending["previous"] = known[args.sha]
+        set_head(data, args.url, args.sha, pending)
 
     update_dispatched(claim)
     print(f"{'TAKEN' if taken else 'CLAIMED'} {args.sha}")
@@ -940,7 +949,11 @@ def cmd_release_dispatched(args, _scope, _label):
         known = dict(heads(data.get(args.url) or {}))
         if (known.get(args.sha) or {}).get("state") not in ("pending", "blocked"):
             return
-        del known[args.sha]
+        previous = (known.get(args.sha) or {}).get("previous")
+        if previous:
+            known[args.sha] = previous
+        else:
+            del known[args.sha]
         if known:
             data[args.url] = {"heads": known}
         else:

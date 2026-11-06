@@ -1459,9 +1459,9 @@ assert prs.needs_dispatch(pr, {url: {"heads": {"A": {"state": "blocked"}}}}, "me
 first = prs.agent_name("acme/app", 7, "A" * 40)
 again = prs.agent_name("acme/app", 7, "A" * 40, "2026-01-01T00:00:00+00:00")
 assert again != first and again.startswith(first[:10]) and len(again) <= 32
-before = prs.snapshot([pr])
+before = prs.snapshot([pr], "me")
 pr["reviewRequests"] = {"nodes": []}
-after = prs.snapshot([pr])
+after = prs.snapshot([pr], "me")
 assert prs.changes(after, before)[0] == ["ready: %s — t: review requested again" % url]
 # A stale queue snapshot can still show the request after its re-review completed.
 pr["timelineItems"] = {"nodes": [{"requestedReviewer": {"login": "Me"}, "createdAt": "2026-01-01T00:00:00+00:00"}]}
@@ -1482,6 +1482,30 @@ assert prs.needs_dispatch(pr, completed, "me") == (False, None)
   [ "$status" -eq 0 ]
 }
 
+@test "watch request changes are personal and retain simultaneous changes" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+def pr(requests):
+    return {"url": url, "title": "t", "isDraft": False, "mergeable": "MERGEABLE",
+            "headRefOid": "A", "author": {"login": "author"},
+            "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+            "reviewRequests": {"nodes": requests}}
+assert prs.snapshot([pr([{"requestedReviewer": {"login": "copilot"}}])], "me")[url]["requested"] is False
+assert prs.snapshot([pr([{"requestedReviewer": {"login": "teammate"}}])], "me")[url]["requested"] is False
+before = {url: {"title": "t", "draft": False, "author": "author", "ci": "SUCCESS", "conflict": False, "sha": "A", "requested": False}}
+commits = {url: {**before[url], "sha": "B", "requested": True}}
+assert prs.changes(before, commits)[0] == ["ready: %s — t: new commits (B), review requested again" % url]
+failing = {url: {**before[url], "ci": "FAILURE", "requested": True}}
+assert prs.changes(before, failing)[0] == ["changed: %s — t: review requested again, CI failing" % url]
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
 @test "claim --retake takes a done head again and never a pending or blocked one" {
   prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@"; }
   retake_url=https://github.com/acme/app/pull/7
@@ -1491,8 +1515,11 @@ assert prs.needs_dispatch(pr, completed, "me") == (False, None)
   [ "$status" -eq 3 ]
   run prs claim-dispatched --url "$retake_url" --sha a --retake
   [ "$status" -eq 0 ]
+  prs release-dispatched --url "$retake_url" --sha a
+  run python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]]["heads"]["a"]["state"])' "$HOME/.cache/review-prs/dispatched.json" "$retake_url"
+  [ "$output" = "done" ]
   run prs claim-dispatched --url "$retake_url" --sha a --retake
-  [ "$status" -eq 3 ]
+  [ "$status" -eq 0 ]
   prs mark-dispatched --url "$retake_url" --sha a --state blocked --reason hooks >/dev/null
   run prs claim-dispatched --url "$retake_url" --sha a --retake
   [ "$status" -eq 3 ]

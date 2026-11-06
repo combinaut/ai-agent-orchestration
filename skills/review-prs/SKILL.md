@@ -143,7 +143,7 @@ A manual review of a moved head is re-queued once when an older completed dispat
 
 ### Sweep in the review
 
-The prompt runs the repo's `review.finalize_commands` (default `/finalize-sweep` in report-only mode, with the base ref, the PR URL and 25 slices as inputs; `[]` leaves the sweep out) on your first review of a PR and on a head you would APPROVE, and skips it when the PR already holds a `<!-- finalize-sweep {"head":"<sha>"} -->` marker for that head. The findings table goes in the review body with that marker as its last line before the trailer; `fix` findings block APPROVE and `nit` findings never do. `last-review` marks a review `SWEPT` when its body carries the marker of the head, and `dispatch.sh` prints `SWEEP MISSING` for a first review or an APPROVE without it.
+The prompt runs the repo's `review.finalize_commands` (default `/finalize-sweep` in report-only mode, with the base ref, the PR URL and 25 slices as inputs; `[]` leaves the sweep out) on your first review of a PR and on a head you would APPROVE, and skips it when one of your own earlier reviews holds a `<!-- finalize-sweep {"head":"<sha>"} -->` marker for that head. The findings table goes in the review body with that marker as its last line before the trailer; `fix` findings block APPROVE and `nit` findings never do. `last-review` marks a review `SWEPT` when its body carries the marker of the head, and `dispatch.sh` prints `SWEEP MISSING` for a first review or an APPROVE without it.
 
 ## Rules
 
