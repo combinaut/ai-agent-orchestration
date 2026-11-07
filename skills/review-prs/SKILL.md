@@ -98,11 +98,11 @@ Requires `HERDR_ENV=1`. If not inside Herdr, say so and stop dispatch (list/watc
 ~/.claude/skills/review-prs/scripts/prs.sh dispatch-queue [scope]
 ```
 
-JSON fields per item: `url`, `number`, `title`, `author`, `repo`, `sha`, `kind` (`review` | `re-review`), `agent` (`rev<number>-<sha7>-<repo hash>`, unique per repo and head), `cwd` (local clone or `null`), `model`.
+JSON fields per item: `url`, `number`, `title`, `author`, `repo`, `sha`, `kind` (`review` | `re-review` | `re-request`), `agent` (`rev<number>-<sha7>-<repo hash>`, plus `-<4 hex>` for a `re-request`; unique per repo and head), `cwd` (local clone or `null`), `model`.
 
 `cwd` comes from the clones of the open work, the current directory, or `~/Projects/<owner>/<name>`; a clone matches when its `origin` is the repo, or else its `upstream` (a fork of it), and a clone whose `origin` is the repo wins. Skip entries with `cwd: null` and tell the user no local clone was found.
 
-Skip entries already marked for the same `sha`, pending, blocked, or done (script does this). Each `dispatch-queue` result includes every blocked current head with its recorded reason; a new head or an explicit `release-dispatched` clears that condition. Concurrency: **up to 3 Codex reviews at once**. Queue the rest; when any in-flight review finishes, start the next queued item until 3 are running again (or the queue is empty).
+Skip entries already marked for the same `sha`, pending, blocked, or done (script does this). Each `dispatch-queue` result includes every blocked current head with its recorded reason; a new head or an explicit `release-dispatched` clears that condition. It also lists in `stuck` every review pending for 30 minutes or more (`url`, `sha`, `agent`, `pane`, `minutes`); nothing expires, so release or finish it by hand. Concurrency: **up to 3 Codex reviews at once**. Queue the rest; when any in-flight review finishes, start the next queued item until 3 are running again (or the queue is empty).
 
 ### Launch one review
 
@@ -129,7 +129,7 @@ Report in one short line with the full bare PR URL:
 - `CHANGES_REQUESTED` → **Changes requested** https://github.com/...
 - `COMMENT` / `COMMENTED` → **Commented** https://github.com/...
 
-Take it from `LASTREVIEW` only: the agent's one-liner is a claim, the posted review is the fact. With `INCOMPLETE`, say **Review not posted** with the PR URL and a one-sentence note from the agent's lines, whatever verdict the agent printed — do not invent an approval.
+Take it from `LASTREVIEW` only (a trailing `SWEPT` means the review body carries the sweep marker): the agent's one-liner is a claim, the posted review is the fact. With `INCOMPLETE`, say **Review not posted** with the PR URL and a one-sentence note from the agent's lines, whatever verdict the agent printed — do not invent an approval.
 
 Close review panes only with `~/.claude/coordinator/watchers/close-pane.sh <pane_id>`: it marks the pane closed on purpose, so the workers watcher reports it as closed, not dead. `dispatch.sh` does this itself for a pane it opened once the review is posted and the prompt finished. For `LEFT OPEN` (no review yet, timeout, `blocked`, or a pane passed in as `PANE`), report first and close only when it is done or the user says to abandon it. Never close panes you did not create for this dispatch.
 
@@ -138,6 +138,12 @@ Close review panes only with `~/.claude/coordinator/watchers/close-pane.sh <pane
 `dispatch-queue` emits `kind: re-review` when the same URL was marked before with a **different** head SHA (new commits while still requesting you, or after CI became green again). Same launch path; prompt Mode is `re-review`.
 
 A manual review of a moved head is re-queued once when an older completed dispatched SHA remains recorded; the re-review claim prevents another duplicate.
+
+`dispatch-queue` emits `kind: re-request` when the head already has a done review and the PR asks for your review again personally (the author clicked re-request; a team-only request does not count, because a member's review does not clear it). `dispatch.sh` claims the head again with `claim-dispatched --retake`, and the agent name gets a suffix so it never meets the pane of the earlier review.
+
+### Sweep in the review
+
+The prompt runs the repo's `review.finalize_commands` (default `/finalize-sweep` in report-only mode, with the base ref, the PR URL and 25 slices as inputs; `[]` leaves the sweep out) on your first review of a PR and on a head you would APPROVE, and skips it when one of your own earlier reviews holds a `<!-- finalize-sweep {"head":"<sha>"} -->` marker for that head. The findings table goes in the review body with that marker as its last line before the trailer; `fix` findings block APPROVE and `nit` findings never do. `last-review` marks a review `SWEPT` when its body carries the marker of the head, and `dispatch.sh` prints `SWEEP MISSING` for a first review or an APPROVE without it.
 
 ## Rules
 
