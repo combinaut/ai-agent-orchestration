@@ -1667,4 +1667,6 @@ TOML
   [ "$status" -eq 0 ]
   run grep -Fq 'every entry equals the default or one constant' "$skill"
   [ "$status" -eq 0 ]
+  run grep -Fq 'membership checks, iteration, and missing-key fallback' "$skill"
+  [ "$status" -eq 0 ]
 }
