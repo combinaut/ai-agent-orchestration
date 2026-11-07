@@ -1663,4 +1663,6 @@ TOML
   [ "$status" -eq 0 ]
   run grep -Fq 'removed reader' "$skill"
   [ "$status" -eq 0 ]
+  run grep -Fq 'name the external consumer or public contract' "$skill"
+  [ "$status" -eq 0 ]
 }
