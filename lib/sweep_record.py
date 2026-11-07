@@ -137,31 +137,6 @@ def claude_brief(path):
     return ""
 
 
-def codex_brief(path):
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
-            item = json.loads(line)
-            payload = item.get("payload", {})
-            if (
-                item.get("type") == "response_item"
-                and payload.get("type") == "message"
-                and payload.get("role") == "user"
-            ):
-                content = payload.get("content", [])
-                if isinstance(content, list):
-                    return "".join(
-                        block.get("text", "")
-                        for block in content
-                        if isinstance(block, dict) and block.get("type") == "input_text"
-                    )
-            if (
-                item.get("type") == "event_msg"
-                and payload.get("type") == "user_message"
-            ):
-                return payload.get("message", "")
-    return ""
-
-
 def transcript_problem_for(found, family, swept, committed, agent_id, record_path):
     """(why, mtime): one candidate validator transcript's result and freshness."""
     try:
@@ -171,7 +146,7 @@ def transcript_problem_for(found, family, swept, committed, agent_id, record_pat
                 f"{record_path}: validator {agent_id} was written before commit {swept}",
                 mtime,
             )
-        brief = claude_brief(found) if family == "Claude" else codex_brief(found)
+        brief = claude_brief(found) if family == "Claude" else None
     except OSError as error:
         return (
             f"{record_path}: validator {agent_id} transcript cannot read: {error}",
@@ -179,8 +154,18 @@ def transcript_problem_for(found, family, swept, committed, agent_id, record_pat
         )
     except (ValueError, KeyError, TypeError, AttributeError):
         brief = ""
-    if not isinstance(brief, str) or (
-        VALIDATOR_MARKER not in brief or swept not in brief
+    if family == "Codex" and not agent_id.startswith(
+        f"/root/finalize_sweep_validator_{swept[:12]}"
+    ):
+        return (
+            f"{record_path}: Codex validator {agent_id} must start with "
+            f"/root/finalize_sweep_validator_{swept[:12]}",
+            mtime,
+        )
+    if family == "Claude" and (
+        not isinstance(brief, str)
+        or VALIDATOR_MARKER not in brief
+        or swept not in brief
     ):
         return (
             f"{record_path}: validator {agent_id} brief must include {VALIDATOR_MARKER} "

@@ -39,15 +39,14 @@ claude_agent() {
   [ -z "${3:-}" ] || printf '{"type":"assistant","message":{"content":"%s"}}\n' "$3" >>"$dir/agent-$1.jsonl"
 }
 
-# codex_agent <agent-path> <parent> [task] [later] [thread-id]: a Codex child rollout.
+# codex_agent <agent-path> <parent> [thread-id]: a Codex child rollout.
 codex_agent() {
   local dir="$CODEX_HOME/sessions/2026/11/06"
-  local thread_id=${5:-child-thread-id}
+  local thread_id=${3:-child-thread-id}
   mkdir -p "$dir"
   printf '{"type":"session_meta","payload":{"id":"child-thread-id","source":{"subagent":{"thread_spawn":{"parent_thread_id":"%s","agent_path":"%s"}}}}}\n' \
     "$2" "$1" >"$dir/rollout-2026-11-06T10-00-00-$thread_id.jsonl"
-  printf '{"type":"event_msg","payload":{"type":"user_message","message":"%s"}}\n' "${3:-finalize-sweep validator $HEAD_SHA}" >>"$dir/rollout-2026-11-06T10-00-00-$thread_id.jsonl"
-  [ -z "${4:-}" ] || printf '{"type":"event_msg","payload":{"type":"agent_message","message":"%s"}}\n' "$4" >>"$dir/rollout-2026-11-06T10-00-00-$thread_id.jsonl"
+  printf '%s\n' '{"type":"event_msg","payload":{"type":"agent_message","encrypted_content":"gAAAA..."}}' >>"$dir/rollout-2026-11-06T10-00-00-$thread_id.jsonl"
 }
 
 check() {
@@ -179,21 +178,25 @@ check() {
 }
 
 @test "a Codex subagent rollout spawned by the session that names the head passes" {
-  codex_agent /root/correctness "$SESSION"
-  record 2 '["/root/correctness"]'
+  codex_agent "/root/finalize_sweep_validator_${HEAD_SHA:0:12}" "$SESSION"
+  record 2 "[\"/root/finalize_sweep_validator_${HEAD_SHA:0:12}\"]"
   check
   [ "$status" -eq 0 ]
 }
 
-@test "a Codex child reads its live response-item task blocks" {
-  local dir="$CODEX_HOME/sessions/2026/11/07"
-  local rollout="$dir/rollout-2026-11-07T00-03-57-child-thread-id.jsonl"
-  mkdir -p "$dir"
-  printf '%s\n' '{"type":"session_meta","payload":{"id":"child-thread-id","source":{"subagent":{"thread_spawn":{"parent_thread_id":"11111111-2222-3333-4444-555555555555","agent_path":"/root/correctness"}}}}}' >"$rollout"
-  printf '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"finalize-sweep validator "},{"type":"input_text","text":"%s"}]}}\n' "$HEAD_SHA" >>"$rollout"
-  record 2 '["/root/correctness"]'
+@test "a Codex encrypted child rollout validates by its task name" {
+  codex_agent "/root/finalize_sweep_validator_${HEAD_SHA:0:12}" "$SESSION"
+  record 2 "[\"/root/finalize_sweep_validator_${HEAD_SHA:0:12}\"]"
   check
   [ "$status" -eq 0 ]
+}
+
+@test "a Codex validator path must name the swept head" {
+  codex_agent /root/correctness "$SESSION"
+  record 2 '["/root/correctness"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: Codex validator /root/correctness must start with /root/finalize_sweep_validator_${HEAD_SHA:0:12}" ]
 }
 
 @test "an id with no transcript fails" {
@@ -212,8 +215,8 @@ check() {
 }
 
 @test "a Codex rollout spawned by another thread fails" {
-  codex_agent /root/correctness some-other-thread
-  record 2 '["/root/correctness"]'
+  codex_agent "/root/finalize_sweep_validator_${HEAD_SHA:0:12}" some-other-thread
+  record 2 "[\"/root/finalize_sweep_validator_${HEAD_SHA:0:12}\"]"
   check
   [ "$status" -eq 1 ]
 }
@@ -245,20 +248,13 @@ check() {
   [ "$status" -eq 0 ]
 }
 
-@test "a Codex validator task must include the marker and head" {
-  codex_agent /root/correctness "$SESSION" 'sweep slice comments' "$HEAD_SHA"
-  record 2 '["/root/correctness"]'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: validator /root/correctness brief must include finalize-sweep validator and name $HEAD_SHA" ]
-}
-
 @test "a newer valid Codex rollout wins over an older same-path rollout" {
   local dir="$CODEX_HOME/sessions/2026/11/06"
-  codex_agent /root/correctness "$SESSION" 'sweep slice comments' '' 0-old
+  local id="/root/finalize_sweep_validator_${HEAD_SHA:0:12}"
+  codex_agent "$id" "$SESSION" 0-old
   touch -t 200001010000 "$dir/rollout-2026-11-06T10-00-00-0-old.jsonl"
-  codex_agent /root/correctness "$SESSION" '' '' z-new
-  record 2 '["/root/correctness"]'
+  codex_agent "$id" "$SESSION" z-new
+  record 2 "[\"$id\"]"
   check
   [ "$status" -eq 0 ]
 }
