@@ -277,10 +277,12 @@ def dispatched_records(pr, dispatched):
     return heads(entry)
 
 
-def dispatched_retry_due(pr, dispatched):
-    """Whether this head's newest completed turn awaits a successful gate recheck."""
+def dispatched_needs_tracking(pr, dispatched):
+    """Whether this head has an active, blocked or retryable review to retain."""
     head = pr.get("headRefOid") or ""
     records = dispatched_records(pr, dispatched)
+    if head_pending(records, head) or blocked_record(records, head) is not None:
+        return True
     latest = latest_completed_key(records, head)
     return latest is not None and records[latest].get("state") == "retry"
 
@@ -327,12 +329,14 @@ def fetch(scope):
     moved = [
         n
         for n in reviewed
-        if not dispatched_current_head_done(n, dispatched)
-        and (
-            (my_review_sha(n) and my_review_sha(n) != n.get("headRefOid"))
-            or dispatched_done_on_other_head(n, dispatched)
-            or dispatched_text_changed(n, dispatched)
-            or dispatched_retry_due(n, dispatched)
+        if dispatched_needs_tracking(n, dispatched)
+        or (
+            not dispatched_current_head_done(n, dispatched)
+            and (
+                (my_review_sha(n) and my_review_sha(n) != n.get("headRefOid"))
+                or dispatched_done_on_other_head(n, dispatched)
+                or dispatched_text_changed(n, dispatched)
+            )
         )
     ]
     seen = set()
@@ -682,11 +686,13 @@ def departure(url, login):
         if request.get("slug") and not request.get("login"):
             return None
     dispatched = read_dispatched()
-    if not dispatched_current_head_done(pr, dispatched) and (
-        (my_review_sha(pr) and my_review_sha(pr) != pr.get("headRefOid"))
-        or dispatched_done_on_other_head(pr, dispatched)
-        or dispatched_text_changed(pr, dispatched)
-        or dispatched_retry_due(pr, dispatched)
+    if dispatched_needs_tracking(pr, dispatched) or (
+        not dispatched_current_head_done(pr, dispatched)
+        and (
+            (my_review_sha(pr) and my_review_sha(pr) != pr.get("headRefOid"))
+            or dispatched_done_on_other_head(pr, dispatched)
+            or dispatched_text_changed(pr, dispatched)
+        )
     ):
         return None
     return "cleared"

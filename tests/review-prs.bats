@@ -40,6 +40,7 @@ case "$*" in
   'api user --jq .login') echo reviewer ;;
   'api repos/acme/app/pulls/7 --jq {title: .title, body: .body}')
     [ -z "${TEXT_READ_FAILS:-}" ] || exit 1
+    if [ -n "${TEXT_READ_FAILS_AFTER_START:-}" ] && grep -q '^agent start ' "$TMP/review-herdr.calls" 2>/dev/null; then exit 1; fi
     printf '{"title":"%s","body":"%s"}\n' "${PR_TITLE-}" "$(cat "$TMP/pr_body" 2>/dev/null || printf %s "${PR_BODY-}")"
     ;;
   'api repos/acme/app/pulls/7 --jq .base.ref') [ -z "${BASE_READ_FAILS:-}" ] || exit 1; echo main ;;
@@ -2243,4 +2244,73 @@ assert prs.fetch("repo:acme/app")[0] == []
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
+}
+@test "pending and blocked approvals stay visible after the personal request clears" {
+  run python3 -c '
+import contextlib, io, json, sys
+from types import SimpleNamespace
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "number": 7, "title": "t", "body": "b", "isDraft": False,
+      "mergeable": "MERGEABLE", "headRefOid": "A", "commits": {"nodes": []},
+      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
+      "myReviews": {"nodes": [{"commit": {"oid": "A"}}]}}
+prs.viewer_login = lambda: "me"
+prs.search = lambda q, me: [pr] if "reviewed-by:@me" in q else []
+prs.codex_enabled = lambda: True
+prs.worker_model = lambda: "test-model"
+prs.gh = lambda *args: json.dumps({"data": {"resource": {**pr, "state": "OPEN", "reviewRequests": {"nodes": []}}}})
+for state in ("pending", "blocked"):
+    record = {"state": state, "text": prs.text_hash(pr), "at": "2020-01-01T00:00:00Z",
+              "reason": "gate refused", "agent": "reviewer", "pane": "w1-p2"}
+    for reverted in (False, True):
+        records = {"A": record} if not reverted else {
+            "A": {"state": "done", "text": prs.text_hash(pr), "at": "2019-01-01T00:00:00Z"},
+            "A#changed": {**record, "text": "changed"}}
+        ledger = {url: {"heads": records}}
+        prs.load_dispatched = lambda: ledger
+        prs.read_dispatched = lambda: ledger
+        assert prs.fetch("repo:acme/app")[0] == [pr], (state, reverted, "fetch")
+        assert prs.departure(url, "me") is None, (state, reverted, "departure")
+        assert prs.needs_dispatch(pr, ledger, "me") == (False, None)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            prs.cmd_dispatch_queue(SimpleNamespace(), "repo:acme/app", "app")
+        queue = json.loads(output.getvalue())
+        assert queue["queue"] == [], queue
+        if state == "pending":
+            assert queue["stuck"][0]["pane"] == "w1-p2", queue
+        else:
+            assert queue["blocked"][0]["reason"] == "gate refused", queue
+    ledger = {url: {"heads": {"OLD": record}}}
+    assert prs.fetch("repo:acme/app")[0] == [], (state, "old head")
+    assert prs.departure(url, "me") == "cleared", (state, "old head")
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a late text change preserves the claim when owned cleanup fails" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  SWEEP_EDITS_BODY=1 PANE_CLOSE_FAILS=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'TEXT CHANGED'
+  contains "$output" 'LEFT OPEN w9-p2'
+  not_contains "$output" 'RELEASED'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+  [ ! -e "$TMP/review.prompt" ]
+}
+
+@test "a late text read failure preserves the claim when owned cleanup fails" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  TEXT_READ_FAILS_AFTER_START=1 PANE_CLOSE_FAILS=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'TEXT FAILED'
+  contains "$output" 'LEFT OPEN w9-p2'
+  not_contains "$output" 'RELEASED'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+  [ ! -e "$TMP/review.prompt" ]
 }

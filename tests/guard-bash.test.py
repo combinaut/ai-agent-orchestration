@@ -1557,6 +1557,16 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             False,
         ),
         (
+            "absolute herdr agent prompt naming gh pr review",
+            '/opt/bin/herdr agent prompt w1 "Do not use gh pr review; use orch-sweep post-review"',
+            False,
+        ),
+        (
+            "absolute herdr non-prompt review command",
+            '/opt/bin/herdr agent run w1 "gh pr review --approve"',
+            True,
+        ),
+        (
             "orch-signal done naming pr review",
             'orch-signal done --outcome succeeded --report /tmp/x --summary "R1 of PR 172: pr review done"',
             False,

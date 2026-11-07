@@ -1181,3 +1181,31 @@ sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow 
   [ "$status" -eq 1 ]
   [[ "$stderr" == "ERROR: the text sweep record in the comment differs from the local copy at "*".text.json" ]]
 }
+
+@test "git execution failures keep gate and post-review unavailable" {
+  run_sweep
+  [ "$status" -eq 0 ]
+  as_comment
+  run python3 -c '
+import io, os, subprocess, sys
+sys.path.insert(0, sys.argv[1])
+import sweep_record, sweep_run
+original = subprocess.run
+for fault in ("timeout", "oserror", "nonzero"):
+    def broken(args, **kwargs):
+        if args[:2] == ["git", "log"]:
+            if fault == "timeout":
+                raise subprocess.TimeoutExpired(args, 30)
+            if fault == "oserror":
+                raise OSError("git could not execute")
+            return subprocess.CompletedProcess(args, 128, "", "git log unavailable")
+        return original(args, **kwargs)
+    subprocess.run = broken
+    assert sweep_record.main(["record", "gate", "--pr", sys.argv[2], "--head", sys.argv[3]]) == 2, fault
+    sys.stdin = io.StringIO("{\"body\":\"ok\"}")
+    assert sweep_run.main(["sweep", "post-review", "--pr", sys.argv[2], "--head", sys.argv[3], "--event", "APPROVE", "--input", "-"]) == 2, fault
+    assert not os.path.exists(os.path.join(os.environ["TMP"], "review.json"))
+' "$ROOT/lib" "$PR" "$HEAD_SHA"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}

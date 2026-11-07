@@ -310,30 +310,49 @@ def problem(path, head, base=None):
     return None, record
 
 
-def git(*args):
+def git(*args, retry_errors=False):
     """Stdout of a git command in the current repo, else None."""
     try:
         done = subprocess.run(
             ["git", *args], capture_output=True, text=True, timeout=30
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as error:
+        if retry_errors:
+            raise GateError(f"git {' '.join(args)}: {error}") from error
         return None
+    if retry_errors and done.returncode and (args[0] == "log" or done.returncode != 1):
+        raise GateError(f"git {' '.join(args)} failed: {done.stderr.strip()}")
     return done.stdout if done.returncode == 0 else None
 
 
-def since(path, swept, base, head):
+def since(path, swept, base, head, retry_errors=False):
     """(why, commits): why the record's commits do not fit head, else the log of the commits after the swept one."""
     for sha in (swept, base, head):
-        if git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}") is None:
+        if (
+            git(
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                f"{sha}^{{commit}}",
+                retry_errors=retry_errors,
+            )
+            is None
+        ):
             return f"{path}: git cannot resolve {sha}", ""
-    if git("merge-base", "--is-ancestor", base, swept) is None:
+    if (
+        git("merge-base", "--is-ancestor", base, swept, retry_errors=retry_errors)
+        is None
+    ):
         return f"{path}: base {base} is not an ancestor of the swept {swept}", ""
-    if git("merge-base", "--is-ancestor", swept, head) is None:
+    if (
+        git("merge-base", "--is-ancestor", swept, head, retry_errors=retry_errors)
+        is None
+    ):
         return (
             f"{path}: swept {swept}, which is not an ancestor of the PR head {head}",
             "",
         )
-    commits = git("log", "--oneline", f"{swept}..{head}")
+    commits = git("log", "--oneline", f"{swept}..{head}", retry_errors=retry_errors)
     if commits is None:
         return f"{path}: git log {swept}..{head} failed", ""
     return None, commits
@@ -482,7 +501,13 @@ def gate(url, head):
         why = record_problem(record, repo, number, head)
         if why:
             return why
-        why, _ = since(f"the {record['kind']} sweep record", head, record["base"], head)
+        why, _ = since(
+            f"the {record['kind']} sweep record",
+            head,
+            record["base"],
+            head,
+            retry_errors=True,
+        )
         if why:
             return why
         if record["base"] != merge_base:

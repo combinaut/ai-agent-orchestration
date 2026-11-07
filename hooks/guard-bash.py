@@ -598,7 +598,7 @@ def review_segment(segment, where, piped, moved, raw):
     name = os.path.basename(words[0])
     if (
         name == "gh"
-        or words[:3] == ["herdr", "agent", "prompt"]
+        or (name == "herdr" and words[1:3] == ["agent", "prompt"])
         or (
             name in REVIEW_TEXT_TOOLS and not any(w.startswith("alias.") for w in words)
         )

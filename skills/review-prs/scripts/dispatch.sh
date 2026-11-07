@@ -60,14 +60,12 @@ release() {
 text_check() {
   if ! current=$(gh_bounded api "repos/$repo/pulls/$num" --jq '{title: .title, body: .body}' | "$py" "$here/prs.py" text-hash); then
     echo "TEXT FAILED could not read the title and body of $url; prompt not sent"
-    ${1:+"$1"}
-    release
+    if [ -z "${1:-}" ] || "$1"; then release; fi
     exit 1
   fi
   if [ "$current" != "$text" ]; then
     echo "TEXT CHANGED the title or body of $url changed since the queue; prompt not sent"
-    ${1:+"$1"}
-    release
+    if [ -z "${1:-}" ] || "$1"; then release; fi
     exit 1
   fi
 }
