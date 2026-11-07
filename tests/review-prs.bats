@@ -21,6 +21,7 @@ case "$1 $2" in
   'agent prompt')
     if [ -n "${PROMPT_REJECTED:-}" ]; then echo '{"error":{"code":"agent_blocked"}}' >&2; exit 1; fi
     printf '%s' "$4" >"$TMP/review.prompt"
+    [ -z "${UNPOSTED_CODE_FINDING:-}" ] || printf '%s\n' "$UNPOSTED_CODE_FINDING"
     exit "${PROMPT_STATUS:-0}" ;;
   'agent read')
     [ -z "${AGENT_READ_FAILS:-}" ] || exit 1
@@ -2116,17 +2117,34 @@ assert len(r["stuck"]) == 1 and r["stuck"][0]["agent"] == "text-agent", r
   [ "$status" -eq 0 ]
 }
 
-@test "a finished reviewer with a gate outage stays retryable" {
+@test "unposted findings stay pending when a completed turn has a gate outage" {
   stub_review_tools
   : >"$TMP/none.toml"
-  GH_NO_REVIEW=1 GATE_UNAVAILABLE=1 dispatch
+  GH_NO_REVIEW=1 GATE_UNAVAILABLE=1 UNPOSTED_CODE_FINDING='UNPOSTED CODE FINDING: app.rb:1 divides by zero' dispatch
   echo "$output"
   [ "$status" -eq 0 ]
+  contains "$output" 'UNPOSTED CODE FINDING: app.rb:1 divides by zero'
   contains "$output" 'GATE UNAVAILABLE'
-  contains "$output" 'RETRYABLE'
-  contains "$output" 'CLOSED w9-p2'
-  dispatch_state
-  [ "$(dispatch_state)" = 'True "retry"' ]
+  local dispatch_output=$output
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "title": "", "body": "edited after the unposted review",
+      "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": sys.argv[3],
+      "commits": {"nodes": []}}
+ledger = json.load(open(sys.argv[2]))
+result = prs.needs_dispatch(pr, ledger)
+assert result == (False, None), result
+' "$ROOT/$SKILL_DIR/scripts" "$HOME/.cache/review-prs/dispatched.json" "$SHA"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  contains "$dispatch_output" 'LEFT OPEN w9-p2'
+  not_contains "$dispatch_output" 'CLOSED w9-p2'
+  not_contains "$dispatch_output" 'REMOVED '
+  not_contains "$dispatch_output" 'RETRYABLE'
+  [ "$(dispatch_state)" = 'False "pending"' ]
 }
 
 @test "a gate outage after an incomplete reviewer keeps its claim and pane" {

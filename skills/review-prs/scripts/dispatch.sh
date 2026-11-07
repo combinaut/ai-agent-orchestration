@@ -311,7 +311,8 @@ else
     gate_out=$(cd "$cwd" && "${ORCH_SWEEP_RECORD_BIN:-$orch/orch-sweep-record}" gate --pr "$url" --head "$sha" 2>&1) || gate_status=$?
     if [ "$gate_status" -eq 2 ]; then
       echo "GATE UNAVAILABLE $sha ${gate_out#ERROR: }"
-      retry_completed
+      # A finished turn may still hold findings that never reached GitHub.
+      echo "LEFT OPEN $pane"
     else
       echo "LEFT OPEN $pane"
     fi
