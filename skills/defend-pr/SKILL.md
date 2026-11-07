@@ -36,9 +36,9 @@ Answer every line with evidence and a rung, or `GAP`. Rungs are those in the arc
 | Independent review on the current head | A review whose commit is `headRefOid`, by an agent or family that did not write the code. A review on an older head does not count. |
 | Rendered before/after | For every affected surface, output rendered on the base and on the head, with the differences listed. Includes other clients or tenants and other named themes or variants. |
 | Mutation evidence | Each guard the PR adds has a test that fails when the guard is removed. |
-| CI green on the current head | Check runs for `headRefOid` from the API (`gh api repos/<owner>/<repo>/commits/<head>/check-runs`). Skipped, pending, or suites that do not run on drafts are not green. |
+| CI green on the current head | All check runs for `headRefOid` (`gh api --paginate repos/<owner>/<repo>/commits/<head>/check-runs`) and its combined status (`gh api repos/<owner>/<repo>/commits/<head>/status`). Skipped, pending, or suites that do not run on drafts are not green; a failed or partial read is a gap. |
 | PR text matches the code | Each claim in the title and body holds at the head: file names, counts, behaviour, test steps. |
-| Legacy check | When the repo's `.orchestration.toml` or `.orchestration.local.toml` sets `legacy.scan = true`, the diff's files are checked against a fresh legacy map (`legacy-map.sh`) and `legacy-scan.sh <pr>` lists no added legacy lines, or each one is a named bridge. |
+| Legacy check | When the repo's `.orchestration.toml` or `.orchestration.local.toml` sets `legacy.scan = true`, the diff's files are checked against a fresh legacy map (`legacy-map.sh`) and `legacy-scan.sh <number> <owner>/<repo>`, with both taken from the pinned PR, lists no added legacy lines, or each one is a named bridge. |
 | No tenant names in shared code | Shared or core code the diff touches does not name a specific tenant or client. |
 | Stacked PR | When the base is not the default branch, the base PR's open defects count as this PR's until they are merged in. |
 | Human review state | No changes requested still open, on this head or an older one; required approvals present or named as missing. |
