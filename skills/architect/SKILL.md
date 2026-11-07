@@ -252,6 +252,7 @@ Before you report a task complete, every line must hold:
    does not cover (CoffeeScript, ERB, YAML, client overrides). A dangling reference is invisible to a
    green suite: nothing tests the path nobody thought about.
 9. **The repo's finalize commands ran on the current head, after the last merge or rebase of the base, their approved findings are applied, and the findings comment is on the PR.** With `review.finalize_commands = []` the whole gate is skipped; the comment is skipped when `review.finalize_comment` is `false`.
+10. **`/defend-pr` ran on the current head** before you call the PR ready or report it complete, and each gap it lists is closed or named in the report.
 
 When something fails the gate, it goes back to the pane that owns the branch. You do not fix it.
 
