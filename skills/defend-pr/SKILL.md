@@ -33,7 +33,7 @@ Answer every line with evidence and a rung, or `GAP`. Rungs are those in the arc
 
 | Check | Evidence that counts |
 |---|---|
-| Independent review on the current head | A review whose commit is `headRefOid`, by an agent or family that did not write the code. A review on an older head does not count. |
+| Independent review on the current head | A review by a reviewer satisfying architect acceptance-gate item 7, on `headRefOid`. A review on an older head does not count. |
 | Rendered before/after | For every affected surface, output rendered on the base and on the head, with the differences listed. Includes other clients or tenants and other named themes or variants. |
 | Mutation evidence | Each guard the PR adds has a test that fails when the guard is removed. |
 | CI green on the current head | All check runs for `headRefOid` (`gh api --paginate repos/<owner>/<repo>/commits/<head>/check-runs`) and its combined status (`gh api repos/<owner>/<repo>/commits/<head>/status`). Skipped, pending, or suites that do not run on drafts are not green; a failed or partial read is a gap. |
