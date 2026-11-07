@@ -797,6 +797,17 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     assert hook("git push origin master", webapp, workdir=webapp).returncode == 2
     assert hook("git push origin master", wiki, workdir=webapp).returncode == 2
     assert hook("git push origin master", webapp, workdir="webapp.wiki").returncode == 0
+    assert (
+        hook("git push origin master", webapp, workdir=wiki / "link/..").returncode == 2
+    )
+    assert (
+        hook("git push origin master", webapp, workdir="webapp.wiki/link/..").returncode
+        == 2
+    )
+    assert (
+        hook("git push origin master", webapp, workdir=wiki / "missing/..").returncode
+        == 2
+    )
     for name, command in [
         ("code compact git -C push", f"git -C{webapp} push origin master"),
         (
