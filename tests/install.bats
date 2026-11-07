@@ -1651,6 +1651,7 @@ TOML
 }
 
 @test "the architect gate runs /defend-pr on the current head" {
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
   grep -qF -- '**`/defend-pr` ran on the current head**' "$ROOT/skills/architect/SKILL.md"
 }
 
