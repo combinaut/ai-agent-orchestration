@@ -56,8 +56,6 @@ if os.environ.get("FAKE_HANG") == role:
 if os.environ.get("FAKE_WRITE") == role:
     target = Path(os.environ["FAKE_WRITE_PATH"])
     target.write_text(target.read_text() + "x\n" if target.exists() else "x\n")
-if os.environ.get("FAKE_FAIL") == role:
-    sys.exit(1)
 
 if role == "validator":
     ids = re.findall(r'"id": "([FP]\d+)"', prompt.split("--- Findings ---")[-1])

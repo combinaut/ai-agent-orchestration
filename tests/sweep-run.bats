@@ -921,7 +921,6 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
   run_sweep
   as_comment
   edit_comments 'r["sweep_agents"] += 1'
-  cp "$(cache_file)" "$TMP/copy.json"
   python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); r["sweep_agents"] += 1; json.dump(r, open(sys.argv[1], "w"))' "$(cache_file)"
   gate
   [ "$status" -eq 1 ]

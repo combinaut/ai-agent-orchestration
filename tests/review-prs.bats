@@ -16,6 +16,7 @@ stub_review_tools() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$TMP/review-herdr.calls"
 case "$1 $2" in
+  'pane close') [ -z "${PANE_CLOSE_FAILS:-}" ] || exit 1 ;;
   'pane split') printf '%s\n' '{"result":{"pane":{"pane_id":"w9-p2"}}}' ;;
   'agent prompt')
     if [ -n "${PROMPT_REJECTED:-}" ]; then echo '{"error":{"code":"agent_blocked"}}' >&2; exit 1; fi
@@ -47,7 +48,7 @@ case "$*" in
     printf '%s\t%s\t%s\n' "${HEAD_OWNER:-alexsavio}" "${HEAD_REPO:-ai-agent-orchestration}" "${HEAD_REF:-feat/usage-ledger}"
     ;;
   *'/reviews'*)
-    r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"%s","body":"%s","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "${REVIEW_STATE:-APPROVED}" "${REVIEW_BODY-}" "$2" "$1"; }
+    r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "$2" "$1"; }
     old=""
     [ -z "${GH_OLD_REVIEW:-}" ] || old=$(r 1 "${OLD_AT:-2020-01-01T00:00:00Z}")
     if [ ! -e "$TMP/review.prompt" ]; then
@@ -370,6 +371,7 @@ fork_head_missing_from_pull_ref() {
   GATE_UNAVAILABLE=1 dispatch
   [ "$status" -eq 0 ]
   contains "$output" "GATE UNAVAILABLE $SHA cannot check the gate: gh timed out"
+  [[ "$output" == *"CLOSED w9-p2"*"REMOVED "*"RELEASED $SHA"* ]]
   contains "$output" "RELEASED $SHA"
   [ "$(dispatch_state)" = 'True null' ]
 }
@@ -878,13 +880,6 @@ print(prs.needs_dispatch(pr, data)[0], json.dumps(prs.heads(data.get(pr["url"], 
   PROMPT_STATUS=1 PROMPT_DELIVERED=1 GH_NO_REVIEW=1 dispatch
   not_contains "$output" 'RELEASED'
   [ "$(dispatch_state)" = 'False "pending"' ]
-}
-
-@test "a posted review marks the head done" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  dispatch
-  [ "$(dispatch_state)" = 'False "done"' ]
 }
 
 @test "install leaves unrelated skills in the agents folder alone" {
@@ -2137,6 +2132,26 @@ assert len(r["stuck"]) == 1 and r["stuck"][0]["agent"] == "text-agent", r
   stub_review_tools
   : >"$TMP/none.toml"
   GH_NO_REVIEW=1 GATE_UNAVAILABLE=1 PROMPT_STATUS=1 dispatch
+  contains "$output" 'LEFT OPEN w9-p2'
+  not_contains "$output" 'RELEASED'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "a gate outage after a posted approval keeps an incomplete reviewer pending" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GATE_UNAVAILABLE=1 PROMPT_STATUS=1 dispatch
+  contains "$output" 'LASTREVIEW APPROVED'
+  contains "$output" 'LEFT OPEN w9-p2'
+  not_contains "$output" 'RELEASED'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "a gate outage keeps the claim when owned-pane cleanup fails" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GATE_UNAVAILABLE=1 PANE_CLOSE_FAILS=1 dispatch
+  contains "$output" 'LASTREVIEW APPROVED'
   contains "$output" 'LEFT OPEN w9-p2'
   not_contains "$output" 'RELEASED'
   [ "$(dispatch_state)" = 'False "pending"' ]

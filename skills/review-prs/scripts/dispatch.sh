@@ -193,6 +193,16 @@ herdr agent wait "$agent" --until idle --timeout 120000 >/dev/null 2>&1 || sleep
 mark() {
   "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --text "$text" --agent "$agent" --pane "$pane" --state "$1" --reason "${2:-}"
 }
+release_completed() {
+  if [ "$status" -ne 0 ]; then
+    echo "LEFT OPEN $pane"
+  elif [ -n "$opened" ]; then
+    close_opened && release
+  else
+    echo "LEFT OPEN $pane"
+    release
+  fi
+}
 block_hook_screen() {
   hook_list=$(printf '%s\n' "$1" | grep -Eo '(Pre|Post)ToolUse|Session(Start|End)|UserPromptSubmit' | sort -u | paste -sd ' ' -)
   echo "HOOKS UNTRUSTED ${hook_list:-unknown hooks}"
@@ -284,14 +294,16 @@ if [ -n "$review" ]; then
   if [ "$gate_status" -eq 2 ]; then
     # Exit 2: the gate could not read GitHub, git or the local record, so the head is not judged; a later dispatch retries.
     echo "GATE UNAVAILABLE $sha ${gate_out#ERROR: }"
-    release
+    release_completed
   elif [ "$gate_status" -ne 0 ]; then
     echo "GATE FAILED $sha ${gate_out#ERROR: }"
     mark blocked "sweep gate failed: ${gate_out#ERROR: }"
   else
     mark "done"
   fi
-  if [ "$status" -eq 0 ]; then close_opened; else echo "LEFT OPEN $pane"; fi
+  if [ "$gate_status" -ne 2 ]; then
+    if [ "$status" -eq 0 ]; then close_opened; else echo "LEFT OPEN $pane"; fi
+  fi
 else
   echo "INCOMPLETE no review of $sha"
   # A failed turn is retryable only when Herdr rejected its input and the pane it opened is closed.
@@ -303,7 +315,7 @@ else
     gate_out=$(cd "$cwd" && "${ORCH_SWEEP_RECORD_BIN:-$orch/orch-sweep-record}" gate --pr "$url" --head "$sha" 2>&1) || gate_status=$?
     if [ "$gate_status" -eq 2 ]; then
       echo "GATE UNAVAILABLE $sha ${gate_out#ERROR: }"
-      if [ -n "$opened" ]; then close_opened && release; else echo "LEFT OPEN $pane"; release; fi
+      release_completed
     else
       echo "LEFT OPEN $pane"
     fi
