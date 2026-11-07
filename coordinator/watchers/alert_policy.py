@@ -370,6 +370,10 @@ def todo_facts(line):
         item = fact("todo:answer:" + answer.group(1), line, terminal=True)
         item["text"] = line
         return [item]
+    if line.startswith("TODO AUTO-CLOSED "):
+        item = fact("todo:auto-closed:" + line, line, terminal=True)
+        item["text"] = line
+        return [item]
     if line.startswith("TODO READFAIL "):
         return [
             fact("todo:readfail:" + line[len("TODO READFAIL ") :], line, clearable=True)

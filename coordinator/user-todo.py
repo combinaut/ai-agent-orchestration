@@ -26,6 +26,15 @@ import todo_answers  # noqa: E402
 
 NOW = "## Waits on the user"
 PLACEHOLDERS = {"none", "none yet", "nothing", "nothing yet", "n/a", "-"}
+LINK = re.compile(
+    r"(?<![\w./@-])(?:https?://)?(?:www\.)?github\.com/([\w.-]+)/([\w.-]+)/(pull|issues)/(\d+)(?![\w-])",
+    re.IGNORECASE,
+)
+LINK_TTL = 300
+LINK_LOOKUPS_MAX = 5
+LINK_BUDGET_SECONDS = 10
+RESOLVED = ("merged", "closed")
+CHOICE_MARKER = re.compile(r"\[\d+:")
 
 
 def normalized(text):
@@ -95,8 +104,73 @@ def atomic_write(path, data):
             os.unlink(name)
 
 
-def merge(directory, output, state_path, now=None):
+def item_link(text):
+    """The normalised URL when the item's target is one GitHub PR or issue and the item has no `[<n>:` answer marker."""
+    if CHOICE_MARKER.search(text.rsplit(" -> ", 1)[0]):
+        return None
+    match = LINK.fullmatch(target(text))
+    if not match:
+        return None
+    owner, repo, kind, number = match.groups()
+    return f"https://github.com/{owner}/{repo}/{kind}/{number}".lower()
+
+
+def resolve_links(directory, state_path, lookup, now=None, clock=time.monotonic):
+    """Link states for the open items; lookups stop after LINK_LOOKUPS_MAX or LINK_BUDGET_SECONDS."""
     now = time.time() if now is None else now
+    try:
+        state = json.loads(Path(state_path).read_text())
+        dismissed = set(state.get("dismissed", []))
+        cached = state.get("links", {})
+        closed_links = state.get("closed_links", {})
+    except (OSError, ValueError, AttributeError):
+        dismissed, cached, closed_links = set(), {}, {}
+    items = status_items(directory)[0]
+    urls = [
+        url
+        for item in items
+        if item["id"] not in dismissed and (url := item_link(item["text"]))
+    ]
+    rechecks = {
+        closed_links[item["id"]]
+        for item in items
+        if item["id"] in dismissed and item["id"] in closed_links
+    } - set(urls)
+    urls += sorted(rechecks)
+    links, budget = {}, LINK_LOOKUPS_MAX
+    deadline = clock() + LINK_BUDGET_SECONDS
+
+    def checked_at(url):
+        entry = cached.get(url)
+        return entry.get("at", -1) if isinstance(entry, dict) else -1
+
+    for url in sorted(dict.fromkeys(urls), key=checked_at):
+        entry = cached.get(url)
+        if (
+            isinstance(entry, dict)
+            and entry.get("state") in RESOLVED + ("open", "unknown")
+            and (
+                entry["state"] == "merged"
+                or (
+                    (entry["state"] != "closed" or url in rechecks)
+                    and now - entry.get("at", 0) < LINK_TTL
+                )
+            )
+        ):
+            links[url] = entry
+        elif budget > 0 and clock() < deadline:
+            budget -= 1
+            try:
+                found = lookup(url, max(0.1, deadline - clock()))
+            except Exception:
+                found = "unknown"
+            links[url] = {"state": found, "at": now}
+    return links
+
+
+def merge(directory, output, state_path, now=None, links=None):
+    now = time.time() if now is None else now
+    links = links or {}
     directory = Path(directory)
     state_path = Path(state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,6 +200,36 @@ def merge(directory, output, state_path, now=None):
         present = {item["id"] for item in current}
         dismissed.update(todo_answers.pending_item_ids(seen) & present)
         dismissed &= present
+        closed_links = {
+            key: url
+            for key, url in state.get("closed_links", {}).items()
+            if key in dismissed
+        }
+        reopened = {
+            key
+            for key, url in closed_links.items()
+            if links.get(url, {}).get("state") == "open"
+        }
+        dismissed -= reopened
+        state["closed_links"] = {
+            key: url for key, url in closed_links.items() if key not in reopened
+        }
+        auto_closed = []
+        for item in current:
+            url = item_link(item["text"])
+            if (
+                item["id"] not in dismissed
+                and url
+                and links.get(url, {}).get("state") in RESOLVED
+            ):
+                auto_closed.append(dict(item, url=url, resolution=links[url]["state"]))
+        known = state.get("links", {})
+        state["links"] = {
+            url: entry
+            for item in current
+            if (url := item_link(item["text"]))
+            if (entry := links.get(url) or known.get(url))
+        }
         state["first_seen"] = {
             key: value for key, value in seen.items() if key in present
         }
@@ -139,12 +243,21 @@ def merge(directory, output, state_path, now=None):
         atomic_write(state_path, json.dumps(state, sort_keys=True))
         visible = [item for item in current if item["id"] not in dismissed]
         render(output, visible)
+        closing = {item["id"] for item in auto_closed}
         return {
-            "now": visible,
+            "auto_closed": auto_closed,
+            "now": [item for item in visible if item["id"] not in closing],
             "unreadable": unreadable,
             "read": sorted(read),
             "scanned": str(directory) not in unreadable,
         }
+
+
+def commit_auto_closed(items, state_path, output):
+    """Dismisses the auto-closed items once their feed events are handed off."""
+    for item in items:
+        reopenable = item["url"] if item["resolution"] == "closed" else None
+        dismiss_item(item, state_path, output, url=reopenable)
 
 
 AGE_PREFIX = re.compile(r"\[(now|\d+[mhd])\] (.*)")
@@ -372,7 +485,7 @@ def dismiss_locked(item, state_path, output, state):
         )
 
 
-def dismiss_item(item, state_path, output=None):
+def dismiss_item(item, state_path, output=None, url=None):
     state_path = Path(state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     with state_path.with_suffix(state_path.suffix + ".lock").open("a") as lock:
@@ -381,6 +494,8 @@ def dismiss_item(item, state_path, output=None):
             state = json.loads(state_path.read_text())
         except (OSError, ValueError):
             state = {"first_seen": {}, "items": {}}
+        if url:
+            state.setdefault("closed_links", {})[item["id"]] = url
         dismiss_locked(item, state_path, output, state)
     return True
 

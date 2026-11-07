@@ -53,6 +53,9 @@ query($q: String!, $me: String, $endCursor: String) {
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       reviewRequests(first: 20) { nodes { requestedReviewer {
         __typename ... on User { login } ... on Team { slug } ... on Bot { login } } } }
+      timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) { nodes {
+        ... on ReviewRequestedEvent { createdAt requestedReviewer { ... on User { login } } }
+      } }
       myReviews: reviews(last: 1, author: $me, states: [APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED]) {
         nodes { commit { oid } } }
     } }
@@ -234,6 +237,9 @@ def blocked_record(known, sha):
 
 def claim_key(known, sha, text):
     """The record key: the newest completed review's key when it holds this text or none, sha#text when it holds other text, else the head SHA."""
+    for key, record in head_records(known, sha).items():
+        if record.get("state") == "pending" and record.get("text") == text:
+            return key
     latest = latest_done_key(known, sha)
     if not text or latest is None:
         return sha
@@ -404,7 +410,7 @@ def bucket(pr):
     return "ready"
 
 
-def snapshot(nodes):
+def snapshot(nodes, login=None):
     return {
         p["url"]: {
             "title": p["title"],
@@ -416,6 +422,7 @@ def snapshot(nodes):
             else p["mergeable"] == "CONFLICTING",
             "sha": p.get("headRefOid") or "",
             "text": text_hash(p),
+            "requested": requested_of(p, login),
         }
         for p in nodes
     }
@@ -524,15 +531,50 @@ def cmd_remote(args, scope, label):
     print(remote)
 
 
-def agent_name(repo, number, sha, text=""):
-    """Unique per repo, PR and head: rev<number>-<sha7>-<repo hash>, plus -<text4> for a title or body re-review."""
+def agent_name(repo, number, sha, text="", round_at=""):
+    """Unique per repo, PR and head: rev<number>-<sha7>-<repo hash>, plus -<4 hex of the earlier review's time> for a re-request of the same head."""
     name = (
         f"rev{number}-{sha[:7]}-{hashlib.sha1(repo.lower().encode()).hexdigest()[:6]}"
     )
-    return (f"{name}-{text[:4]}" if text else name)[:32]
+    if text:
+        name += f"-{text[:4]}"
+    if round_at:
+        name += f"-{hashlib.sha1(round_at.encode()).hexdigest()[:4]}"
+    return name[:32]
 
 
-def needs_dispatch(pr, dispatched):
+def requested_of(pr, login):
+    """Whether the review of this PR is requested of login personally, not only of one of their teams."""
+    return any(
+        ((node.get("requestedReviewer") or {}).get("login") or "").lower()
+        == (login or "").lower()
+        for node in (pr.get("reviewRequests") or {}).get("nodes") or []
+    )
+
+
+def requested_after(pr, login, completed_at):
+    """Whether login was personally requested after the completed local review."""
+    if not requested_of(pr, login):
+        return False
+    latest = None
+    for node in (pr.get("timelineItems") or {}).get("nodes") or []:
+        reviewer = node.get("requestedReviewer") or {}
+        if (reviewer.get("login") or "").lower() != (login or "").lower():
+            continue
+        try:
+            requested = datetime.fromisoformat(
+                (node.get("createdAt") or "").replace("Z", "+00:00")
+            )
+            completed = datetime.fromisoformat(
+                (completed_at or "").replace("Z", "+00:00")
+            )
+        except ValueError:
+            return True
+        latest = max(latest, requested) if latest else requested
+    return bool(latest and latest > completed)
+
+
+def needs_dispatch(pr, dispatched, me=None):
     if bucket(pr) != "ready":
         return False, None
     sha = pr.get("headRefOid") or ""
@@ -540,6 +582,15 @@ def needs_dispatch(pr, dispatched):
     known = heads(entry)
     key = claim_key(known, sha, text_hash(pr))
     if sha and review_taken(known, sha, key):
+        latest = latest_done_key(known, sha)
+        if (
+            not head_pending(known, sha)
+            and blocked_record(known, sha) is None
+            and review_done(known, sha, key)
+            and latest
+            and requested_after(pr, me, known[latest].get("at"))
+        ):
+            return True, "re-request"
         return False, None
     if key != sha:
         return True, "text-re-review"
@@ -547,7 +598,7 @@ def needs_dispatch(pr, dispatched):
     return True, kind
 
 
-def dispatch_entry(pr, kind, model):
+def dispatch_entry(pr, kind, model, round_at=""):
     repo = pr["repository"]["nameWithOwner"]
     return {
         "url": pr["url"],
@@ -563,6 +614,7 @@ def dispatch_entry(pr, kind, model):
             pr["number"],
             pr.get("headRefOid") or "",
             text_hash(pr) if kind == "text-re-review" else "",
+            round_at=round_at,
         ),
         "cwd": resolve_cwd(repo),
         "model": model,
@@ -653,6 +705,9 @@ def changes(before, after, login=None):
         )
         if text_edited:
             parts.append("title or description edited")
+        requested_changed = not was.get("requested") and now.get("requested")
+        if requested_changed:
+            parts.append("review requested again")
         if was["ci"] != now["ci"]:
             label = {
                 "SUCCESS": "CI green",
@@ -704,6 +759,12 @@ def changes(before, after, login=None):
                     or (was.get("sha") != now.get("sha"))
                     or text_edited
                 )
+            )
+            became_ready = became_ready or (
+                requested_changed
+                and not now["draft"]
+                and now["conflict"] is False
+                and now["ci"] in (None, "SUCCESS")
             )
             prefix = "ready" if became_ready else "changed"
             lines.append(f"{prefix}: {url} — {now['title']}: {', '.join(parts)}")
@@ -772,11 +833,11 @@ def snapshot_counts(snap):
 
 
 def cmd_list(args, scope, label):
-    nodes, _login = fetch(scope)
+    nodes, login = fetch(scope)
     if any(p["mergeable"] == "UNKNOWN" for p in nodes):
         time.sleep(3)
-        nodes, _login = fetch(scope)
-    save_state(scope, snapshot(nodes))
+        nodes, login = fetch(scope)
+    save_state(scope, snapshot(nodes, login))
     order = ("ready", "unknown", "ci_run", "ci_fail", "conflict", "draft")
     titles = {
         "ready": "🔔 Ready for your review",
@@ -804,7 +865,7 @@ def cmd_watch(args, scope, _label):
     while True:
         try:
             nodes, login = fetch(scope)
-            after = snapshot(nodes)
+            after = snapshot(nodes, login)
             if before is not None:
                 lines, still_open = changes(before, after, login)
                 after = {**after, **still_open}
@@ -841,17 +902,37 @@ def cmd_dispatch_queue(args, scope, label):
         )
         return
     model = worker_model()
-    nodes, _login = fetch(scope)
+    nodes, login = fetch(scope)
     if any(p["mergeable"] == "UNKNOWN" for p in nodes):
         time.sleep(3)
-        nodes, _login = fetch(scope)
+        nodes, login = fetch(scope)
     dispatched = load_dispatched()
     queue = []
     blocked = []
+    stuck = []
     for pr in nodes:
-        ok, kind = needs_dispatch(pr, dispatched)
+        head = pr.get("headRefOid") or ""
+        for record in head_records(dispatched_records(pr, dispatched), head).values():
+            waited = pending_age(record)
+            if waited >= PENDING_STUCK:
+                stuck.append(
+                    {
+                        "url": pr["url"],
+                        "sha": head,
+                        "agent": record.get("agent"),
+                        "pane": record.get("pane"),
+                        "minutes": int(waited // 60),
+                    }
+                )
+        ok, kind = needs_dispatch(pr, dispatched, login)
         if ok:
-            queue.append(dispatch_entry(pr, kind, model))
+            latest = latest_done_key(dispatched_records(pr, dispatched), head)
+            round_at = (
+                (dispatched_records(pr, dispatched).get(latest) or {}).get("at") or ""
+                if kind == "re-request"
+                else ""
+            )
+            queue.append(dispatch_entry(pr, kind, model, round_at))
         else:
             records = dispatched_records(pr, dispatched)
             head = pr.get("headRefOid") or ""
@@ -871,6 +952,7 @@ def cmd_dispatch_queue(args, scope, label):
                 "model": model,
                 "queue": queue,
                 "blocked": blocked,
+                "stuck": stuck,
                 "skipped": sum(1 for p in nodes if bucket(p) == "ready") - len(queue),
             },
             indent=2,
@@ -879,6 +961,20 @@ def cmd_dispatch_queue(args, scope, label):
 
 
 HEADS_KEPT = 20
+PENDING_STUCK = 1800
+
+
+def pending_age(record):
+    """Seconds a pending record has run; 0 for any other state or a missing time."""
+    if record.get("state") != "pending":
+        return 0
+    try:
+        then = datetime.fromisoformat(record.get("at") or "")
+    except ValueError:
+        return 0
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - then).total_seconds()
 
 
 def heads(entry):
@@ -939,10 +1035,18 @@ def cmd_claim_dispatched(args, _scope, _label):
     def claim(data):
         known = heads(data.get(args.url) or {})
         key = claim_key(known, args.sha, args.text)
-        if review_taken(known, args.sha, key):
+        if review_taken(known, args.sha, key) and not (
+            args.retake
+            and review_done(known, args.sha, key)
+            and not head_pending(known, args.sha)
+            and blocked_record(known, args.sha) is None
+        ):
             taken.append(True)
             return
-        set_head(data, args.url, key, head_record(args, "pending"))
+        pending = head_record(args, "pending")
+        if args.retake and key in known:
+            pending["previous"] = known[key]
+        set_head(data, args.url, key, pending)
 
     update_dispatched(claim)
     print(f"{'TAKEN' if taken else 'CLAIMED'} {args.sha}")
@@ -954,14 +1058,16 @@ def cmd_mark_dispatched(args, _scope, _label):
     if not args.url or not args.sha:
         sys.exit("mark-dispatched needs --url and --sha")
     record = head_record(args, args.state)
-    update_dispatched(
-        lambda data: set_head(
-            data,
-            args.url,
-            claim_key(heads(data.get(args.url) or {}), args.sha, args.text),
-            record,
-        )
-    )
+
+    def mark(data):
+        known = heads(data.get(args.url) or {})
+        key = claim_key(known, args.sha, args.text)
+        previous = (known.get(key) or {}).get("previous")
+        if args.state == "pending" and previous:
+            record["previous"] = previous
+        set_head(data, args.url, key, record)
+
+    update_dispatched(mark)
     print(json.dumps(record))
 
 
@@ -982,7 +1088,11 @@ def cmd_release_dispatched(args, _scope, _label):
         if not drop:
             return
         for k in drop:
-            del known[k]
+            previous = (known[k] or {}).get("previous")
+            if previous:
+                known[k] = previous
+            else:
+                del known[k]
         if known:
             data[args.url] = {"heads": known}
         else:
@@ -1071,6 +1181,11 @@ def main():
     )
     parser.add_argument(
         "--text", help="claim/mark/release-dispatched: hash of the PR title and body"
+    )
+    parser.add_argument(
+        "--retake",
+        action="store_true",
+        help="claim-dispatched: claim a head whose review is done, for a re-request",
     )
     parser.add_argument("--agent", help="mark-dispatched: herdr agent name")
     parser.add_argument("--pane", help="mark-dispatched: herdr pane id")

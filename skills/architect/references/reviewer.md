@@ -6,6 +6,7 @@ Read this file before you brief an independent reviewer (acceptance gate item 7)
 
 ```
 You review <PR url> at head <sha>. You did not write it. Do not edit, commit or push.
+The author, not this independent reviewer, runs the repo's finalize commands before the PR is called done or ready.
 For every claim the PR makes, and every risk you find, open the code at that head and report one row.
 Write <report path> as this table and nothing else before it:
 
