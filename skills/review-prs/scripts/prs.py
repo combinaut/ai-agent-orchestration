@@ -4,9 +4,9 @@
   prs.py list          [scope] [--actionable]     markdown tables + snapshot for watch
   prs.py watch         [scope] [--interval S]     one line per change, forever
   prs.py dispatch-queue [scope]                   JSON: Ready PRs needing (re)review
-  prs.py mark-dispatched --url U --sha S [--text T] [--state pending|blocked|done] [--reason R] [--agent N] [--pane P]
-  prs.py claim-dispatched --url U --sha S [--text T] [--agent N]   marks S pending; exit 3 when a review of S is pending, S is blocked, or S's newest completed review holds the same text
-  prs.py release-dispatched --url U --sha S [--text T]   drops S while it is pending, and every blocked record of its head
+  prs.py mark-dispatched --url U --sha S [--text T] [--state pending|retry|blocked|done] [--reason R] [--agent N] [--pane P]
+  prs.py claim-dispatched --url U --sha S [--text T] [--agent N]   marks S pending; exit 3 when a review of S is pending, S is blocked, or S's newest completed turn is done with the same text
+  prs.py release-dispatched --url U --sha S [--text T]   releases pending claims of S (--text limits the match), and every blocked record of its head
   prs.py text-hash                                the hash of the PR title and body given as {"title","body"} JSON on stdin
   prs.py remote --cwd C --repo R                  the remote of clone C (origin or upstream) that is the GitHub repo R
   prs.py review-ids --login L                     stdin: gh api --paginate --slurp .../reviews; ids of L's submitted reviews
@@ -210,14 +210,14 @@ def head_records(known, sha):
     }
 
 
-def latest_done_key(known, sha):
-    """The key of the newest completed review of this head, or None."""
-    done = [
+def latest_completed_key(known, sha):
+    """The newest successful or retryable completed turn for this head, or None."""
+    completed = [
         (record.get("at") or "", key)
         for key, record in head_records(known, sha).items()
-        if record.get("state") == "done"
+        if record.get("state") in ("done", "retry")
     ]
-    return max(done)[1] if done else None
+    return max(completed)[1] if completed else None
 
 
 def head_pending(known, sha):
@@ -236,40 +236,53 @@ def blocked_record(known, sha):
 
 
 def claim_key(known, sha, text):
-    """The record key: the newest completed review's key when it holds this text or none, sha#text when it holds other text, else the head SHA."""
+    """The pending text key, else the newest completed key for this text, a new sha#text key, or the head SHA."""
     for key, record in head_records(known, sha).items():
         if record.get("state") == "pending" and record.get("text") == text:
             return key
-    latest = latest_done_key(known, sha)
+    latest = latest_completed_key(known, sha)
     if not text or latest is None:
         return sha
     return latest if known[latest].get("text") in (None, text) else f"{sha}#{text}"
 
 
 def review_taken(known, sha, key):
-    """Whether key needs no new review: a review of this head is running or blocked, key has a record that is not done, or key holds the newest completed one."""
+    """Whether key is reserved, or the newest completed turn is done and covers it."""
     record = known.get(key)
     return (
         head_pending(known, sha)
         or blocked_record(known, sha) is not None
         or bool(
             record
-            and (record.get("state") != "done" or key == latest_done_key(known, sha))
+            and (
+                record.get("state") not in ("done", "retry")
+                or (
+                    record.get("state") == "done"
+                    and key == latest_completed_key(known, sha)
+                )
+            )
         )
     )
 
 
 def review_done(known, sha, key):
-    """Whether key holds the newest completed review of this head."""
-    return (known.get(key) or {}).get("state") == "done" and key == latest_done_key(
-        known, sha
-    )
+    """Whether key holds this head's newest completed turn and that turn is done."""
+    latest = latest_completed_key(known, sha)
+    return (known.get(key) or {}).get("state") == "done" and key == latest
 
 
 def dispatched_records(pr, dispatched):
     """The valid per-head records for a PR from locally dispatched state."""
     entry = dispatched.get(pr["url"]) if isinstance(dispatched, dict) else None
     return heads(entry)
+
+
+def dispatched_retry_due(pr, dispatched):
+    """Whether this head's newest completed turn awaits a successful gate recheck."""
+    head = pr.get("headRefOid") or ""
+    records = dispatched_records(pr, dispatched)
+    latest = latest_completed_key(records, head)
+    return latest is not None and records[latest].get("state") == "retry"
 
 
 def dispatched_current_head_done(pr, dispatched):
@@ -319,6 +332,7 @@ def fetch(scope):
             (my_review_sha(n) and my_review_sha(n) != n.get("headRefOid"))
             or dispatched_done_on_other_head(n, dispatched)
             or dispatched_text_changed(n, dispatched)
+            or dispatched_retry_due(n, dispatched)
         )
     ]
     seen = set()
@@ -581,7 +595,7 @@ def needs_dispatch(pr, dispatched, me=None):
     known = heads(entry)
     key = claim_key(known, sha, text_hash(pr))
     if sha and review_taken(known, sha, key):
-        latest = latest_done_key(known, sha)
+        latest = latest_completed_key(known, sha)
         if (
             not head_pending(known, sha)
             and blocked_record(known, sha) is None
@@ -672,6 +686,7 @@ def departure(url, login):
         (my_review_sha(pr) and my_review_sha(pr) != pr.get("headRefOid"))
         or dispatched_done_on_other_head(pr, dispatched)
         or dispatched_text_changed(pr, dispatched)
+        or dispatched_retry_due(pr, dispatched)
     ):
         return None
     return "cleared"
@@ -925,7 +940,7 @@ def cmd_dispatch_queue(args, scope, label):
                 )
         ok, kind = needs_dispatch(pr, dispatched, login)
         if ok:
-            latest = latest_done_key(dispatched_records(pr, dispatched), head)
+            latest = latest_completed_key(dispatched_records(pr, dispatched), head)
             round_at = (
                 (dispatched_records(pr, dispatched).get(latest) or {}).get("at") or ""
                 if kind == "re-request"
@@ -1043,7 +1058,7 @@ def cmd_claim_dispatched(args, _scope, _label):
             taken.append(True)
             return
         pending = head_record(args, "pending")
-        if args.retake and key in known:
+        if key in known and (args.retake or known[key].get("state") == "retry"):
             pending["previous"] = known[key]
         set_head(data, args.url, key, pending)
 
@@ -1076,14 +1091,15 @@ def cmd_release_dispatched(args, _scope, _label):
 
     def release(data):
         known = dict(heads(data.get(args.url) or {}))
-        key = claim_key(known, args.sha, args.text)
         drop = {
             k
             for k, r in head_records(known, args.sha).items()
             if r.get("state") == "blocked"
+            or (
+                r.get("state") == "pending"
+                and (args.text is None or r.get("text") == args.text)
+            )
         }
-        if (known.get(key) or {}).get("state") == "pending":
-            drop.add(key)
         if not drop:
             return
         for k in drop:
@@ -1171,9 +1187,9 @@ def main():
     parser.add_argument("--sha", help="mark-dispatched: head SHA that was dispatched")
     parser.add_argument(
         "--state",
-        choices=["pending", "blocked", "done"],
+        choices=["pending", "retry", "blocked", "done"],
         default="done",
-        help="mark-dispatched: pending while the review runs, blocked when it cannot start, done once posted",
+        help="mark-dispatched: pending while running, retry after a gate outage and cleanup, blocked on refusal, done after success",
     )
     parser.add_argument(
         "--reason", help="mark-dispatched: reason for a blocked dispatch"
