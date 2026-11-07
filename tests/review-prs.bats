@@ -1646,7 +1646,7 @@ assert prs.snapshot([pr])[url]["text"] == prs.text_hash(pr)
   contains "$prompt" 'Mode: text-re-review'
   contains "$prompt" 'only the PR title or body was edited'
   contains "$prompt" 'Run no new code review: check the sweep comment below and any open review finding.'
-  contains "$prompt" 'APPROVE when no kept fix finding and no other finding is open, else REQUEST_CHANGES.'
+  contains "$prompt" 'APPROVE when no kept fix finding and no other fix finding is open, else REQUEST_CHANGES.'
   grep -q -- '--kind text$' "$TMP/sweep.calls"
 }
 
