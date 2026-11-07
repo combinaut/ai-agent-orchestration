@@ -1654,3 +1654,19 @@ TOML
   run grep -rniE 'spar''kle|combinaut|sleistner|stagehand|rubocop|mise run|\.ai/' "$ROOT/skills/finalize-sweep" "$ROOT/skills/finalize-change-footprint" "$ROOT/skills/finalize-code-comments"
   [ "$status" -eq 1 ]
 }
+
+@test "the footprint skill checks changed values for readers" {
+  skill="$ROOT/skills/finalize-change-footprint/SKILL.md"
+  run grep -Fq 'positive control' "$skill"
+  [ "$status" -eq 0 ]
+  run grep -Fq 'string-built names' "$skill"
+  [ "$status" -eq 0 ]
+  run grep -Fq 'removed reader' "$skill"
+  [ "$status" -eq 0 ]
+  run grep -Fq 'name the external consumer or public contract' "$skill"
+  [ "$status" -eq 0 ]
+  run grep -Fq 'every entry equals the default or one constant' "$skill"
+  [ "$status" -eq 0 ]
+  run grep -Fq 'membership checks, iteration, and missing-key fallback' "$skill"
+  [ "$status" -eq 0 ]
+}
