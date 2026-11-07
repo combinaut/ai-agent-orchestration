@@ -1665,4 +1665,6 @@ TOML
   [ "$status" -eq 0 ]
   run grep -Fq 'name the external consumer or public contract' "$skill"
   [ "$status" -eq 0 ]
+  run grep -Fq 'every entry equals the default or one constant' "$skill"
+  [ "$status" -eq 0 ]
 }
