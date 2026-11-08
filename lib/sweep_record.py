@@ -489,7 +489,19 @@ def main(argv):
         swept = record["head"]
         found, commits = since(args.record, swept, record["base"], args.head)
     legacy_record = (
-        record is not None and detailed and record.get("tool") != "orch-sweep"
+        record is not None
+        and record.get("tool") != "orch-sweep"
+        and any(
+            field in record
+            for field in (
+                "clean",
+                "mode",
+                "slices",
+                "sweep_agents",
+                "validators",
+                "verdicts",
+            )
+        )
     )
     attestation = (
         args.no_transcripts or not record or record["findings"] == 0 or legacy_record
