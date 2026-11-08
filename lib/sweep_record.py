@@ -215,11 +215,15 @@ def problem(path, head, base=None):
         return f"{path}: the record must be a JSON object", None
     # #166 records deliberately carry only the attestation fields.  The
     # richer orch-sweep format is checked below when its tool marker is set.
-    required = FIELDS if record.get("tool") == "orch-sweep" else (
-        "head",
-        "base",
-        "findings",
-        "validator_ids",
+    required = (
+        FIELDS
+        if record.get("tool") == "orch-sweep"
+        else (
+            "head",
+            "base",
+            "findings",
+            "validator_ids",
+        )
     )
     missing = [field for field in required if field not in record]
     if missing:
@@ -344,7 +348,14 @@ def one_line(text):
 
 def claude_transcript(session, agent_id):
     root = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-    pattern = os.path.join(glob.escape(root), "projects", "*", session, "subagents", f"agent-{agent_id}.jsonl")
+    pattern = os.path.join(
+        glob.escape(root),
+        "projects",
+        "*",
+        session,
+        "subagents",
+        f"agent-{agent_id}.jsonl",
+    )
     return next(iter(glob.glob(pattern)), None)
 
 
@@ -353,11 +364,19 @@ def codex_transcripts(session, agent_id):
         return []
     root = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
     matches = []
-    for candidate in glob.glob(os.path.join(glob.escape(root), "sessions", "**", "rollout-*.jsonl"), recursive=True):
+    for candidate in glob.glob(
+        os.path.join(glob.escape(root), "sessions", "**", "rollout-*.jsonl"),
+        recursive=True,
+    ):
         try:
             with open(candidate, encoding="utf-8") as handle:
-                spawn = json.loads(handle.readline())["payload"]["source"]["subagent"]["thread_spawn"]
-            if spawn.get("parent_thread_id") == session and spawn.get("agent_path") == agent_id:
+                spawn = json.loads(handle.readline())["payload"]["source"]["subagent"][
+                    "thread_spawn"
+                ]
+            if (
+                spawn.get("parent_thread_id") == session
+                and spawn.get("agent_path") == agent_id
+            ):
                 matches.append(candidate)
         except (OSError, ValueError, KeyError, TypeError):
             continue
@@ -372,7 +391,9 @@ def transcript_problem(path, swept, session, agent_id):
         found = claude_transcript(session, agent_id)
         if found:
             candidates.append(("Claude", found))
-    candidates.extend(("Codex", found) for found in codex_transcripts(session, agent_id))
+    candidates.extend(
+        ("Codex", found) for found in codex_transcripts(session, agent_id)
+    )
     if not candidates:
         return f"{path}: validator {agent_id} is no supported Claude or Codex subagent transcript of session {session}; Pi and Cursor validators are unsupported"
     committed = git("show", "-s", "--format=%ct", swept)
@@ -383,14 +404,43 @@ def transcript_problem(path, swept, session, agent_id):
         try:
             mtime = os.path.getmtime(found)
             if mtime < int(committed):
-                issue = f"{path}: validator {agent_id} was written before commit {swept}"
+                issue = (
+                    f"{path}: validator {agent_id} was written before commit {swept}"
+                )
             elif family == "Codex":
-                issue = None if agent_id.startswith(f"/root/finalize_sweep_validator_{swept[:12]}") else f"{path}: Codex validator {agent_id} must start with /root/finalize_sweep_validator_{swept[:12]}"
+                issue = (
+                    None
+                    if agent_id.startswith(
+                        f"/root/finalize_sweep_validator_{swept[:12]}"
+                    )
+                    else f"{path}: Codex validator {agent_id} must start with /root/finalize_sweep_validator_{swept[:12]}"
+                )
             else:
                 with open(found, encoding="utf-8") as handle:
-                    first = next((json.loads(line).get("message", {}).get("content", "") for line in handle if json.loads(line).get("type") == "user"), "")
-                text = "".join(block.get("text", "") for block in first if isinstance(block, dict)) if isinstance(first, list) else first
-                issue = None if isinstance(text, str) and VALIDATOR_MARKER in text and swept in text else f"{path}: validator {agent_id} brief must include {VALIDATOR_MARKER} and name {swept}"
+                    first = next(
+                        (
+                            json.loads(line).get("message", {}).get("content", "")
+                            for line in handle
+                            if json.loads(line).get("type") == "user"
+                        ),
+                        "",
+                    )
+                text = (
+                    "".join(
+                        block.get("text", "")
+                        for block in first
+                        if isinstance(block, dict)
+                    )
+                    if isinstance(first, list)
+                    else first
+                )
+                issue = (
+                    None
+                    if isinstance(text, str)
+                    and VALIDATOR_MARKER in text
+                    and swept in text
+                    else f"{path}: validator {agent_id} brief must include {VALIDATOR_MARKER} and name {swept}"
+                )
         except (OSError, ValueError, KeyError, TypeError) as error:
             issue = f"{path}: validator {agent_id} transcript cannot read: {error}"
             mtime = float("-inf")
@@ -432,7 +482,9 @@ def main(argv):
         if not args.session or not TOKEN.fullmatch(args.session):
             found = f"{args.record}: --session <worker session id> is required"
         for agent_id in record["validator_ids"]:
-            found = found or transcript_problem(args.record, record["head"], args.session, agent_id)
+            found = found or transcript_problem(
+                args.record, record["head"], args.session, agent_id
+            )
     if found:
         print(f"ERROR: {one_line(found)}", file=sys.stderr)
         return 1
