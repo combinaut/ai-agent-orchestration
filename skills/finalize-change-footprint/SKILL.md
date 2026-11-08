@@ -29,31 +29,31 @@ For each added or changed piece, ask:
    - ❌ `it "shows the empty state when there are no results"` beside a later `it "shows the empty state and hides the pagination when there are no results"`: the later one asserts everything the first does.
 2. **Leftovers from reverted or reworked approaches.** Imports, helpers, variables, styles, fixtures, or test setup that only the abandoned version used. Read the branch's commit list (`git log --oneline <base>..HEAD`) for reverts, fix-on-fix commits, and review-response commits, and check what each left behind.
    - ❌ an import or fixture that only a reverted commit used.
-3. **Machinery for cases nothing exercises.** Observers, listeners, guards, options, or fallbacks added during review for an input no current caller sends. Name the callers you checked. When none produces the case, recommend removing it and adding it when a caller needs it. This applies to internal code only: an input on a public surface (an API parameter, a CLI flag, a config key) or one the linked issue asks for stays, even with no caller in the repo.
+3. **Machinery for cases nothing exercises.** Observers, listeners, guards, options, or fallbacks added during review for an input no current caller sends. Name the callers you checked. When none produces the case, recommend removing it and adding it when a caller needs it. This applies to internal code only: an input the linked issue asks for stays, even with no caller in the repo.
    - ❌ an observer keeping a derived value in sync with content that every caller renders once and replaces wholesale to change.
-4. **Code the branch made dead, or found dead in the lines it touches.** Rules no element can match, classes no template uses, variables nothing reads, files nothing imports. Verify with a search (the class, the import path, the variable) before calling anything dead.
+4. **Code the branch made dead, or found dead in the lines it touches.** Rules no element can match, classes no template uses, variables, keys or settings nothing reads, a writer whose last reader the branch removed, files nothing imports. Verify with a search before calling anything dead, and make sure it would catch dynamic readers: indexed access such as `obj[name]`, built strings such as `"theme." + key`, and dynamic sends such as `send(:"#{x}")`. When a search comes back empty, run the same search over the same paths for a sibling name you know is read, and show it hits. Data the branch left with every entry equal to its fallback is dead too, once each reader (lookups, membership checks, iteration, and missing-key fallback) is shown to behave the same without it.
    - ❌ a style rule for an element's empty state when the template removes the element whenever it would be empty.
-5. **Changed values without readers.** For every value, setting, variable, key, or method the diff writes, changes, or removes, name its readers. Use one scoped `rg` per changed symbol, and search direct references plus string-built names: indexed access such as `obj[name]`, concatenation such as `"theme." + key`, and dynamic sends such as `send(:"#{x}")`. Include a positive control: show that the same search finds one known reader, so an empty result is meaningful. For a public surface, name the external consumer or public contract and keep it; it is not a finding solely because no local reader exists. Data that has readers but whose every entry equals the default or one constant carries no information and is a finding only after checking every reader behaves the same without it, including membership checks, iteration, and missing-key fallback, and naming that check in the finding, unless it is a public surface; for example, a per-domain map whose every value is `default`. A write with no reader is a finding. A removed reader that leaves its writer behind is a finding too.
-   - ❌ a config payload still writes `byPublishingDomain` after the only code reading that key was removed.
-6. **Churn that changes nothing.** Reformatting, reordering, or renames in lines the change does not otherwise need. Revert them to shrink the diff. A rename that makes code the change touches clearer is not churn.
+   - ❌ a config payload still writes `legacyColors` after the only code reading that key was removed.
+5. **Churn that changes nothing.** Reformatting, reordering, or renames in lines the change does not otherwise need. Revert them to shrink the diff. A rename that makes code the change touches clearer is not churn.
    - ❌ re-wrapping a literal in a function the change otherwise leaves alone.
-7. **Repetition the branch introduced.** The same literal, fallback, or expression added several times where one variable or helper would do. Recommend it only when it reads better, not just to reduce a count.
+6. **Repetition the branch introduced.** The same literal, fallback, or expression added several times where one variable or helper would do. Recommend it only when it reads better, not just to reduce a count.
    - ❌ the same fallback value written into several rules where one variable would carry it.
-8. **Misplaced additions.** Code inserted between a comment and the line it describes, a test in the wrong group, a doc entry in the wrong section.
-9. **Stale descriptions.** Docs, fixtures, and examples that describe a state a later commit reverted or changed. Report a stale PR description as well; editing it is outward-facing, so it waits for approval like everything else.
+7. **Misplaced additions.** Code inserted between a comment and the line it describes, a test in the wrong group, a doc entry in the wrong section.
+8. **Stale descriptions.** Docs, fixtures, and examples that describe a state a later commit reverted or changed. Report a stale PR description as well; editing it is outward-facing, so it waits for approval like everything else.
 
 ## What to keep
 
 - **Anything that changes behaviour.** This skill shrinks the diff; it does not redesign. A real fix stays even when it arrived late.
 - **Tests that pin distinct contracts.** Overlapping setup is not duplication; two tests are duplicates only when they share setup and inputs and one's assertions are a subset of the other's.
 - **Cheap, standard defensive code.** Say why it stays.
+- **Public surfaces.** An API parameter, CLI flag, config key, or payload field stays even with no reader in the repo. Name the contract that makes it public (docs, schema, route).
 - **Code outside the diff.** Pre-existing problems go in the report as follow-up candidates, not into the PR.
 
 ## Process
 
 1. Determine the scope with the base from Input: `git diff $(git merge-base HEAD <base>) -- <paths>` (committed, staged, and unstaged), `git ls-files --others --exclude-standard -- <paths>`, and `git log --oneline <base>..HEAD`. The scope is the complete PR diff, not the last commit.
 2. Read every changed file's diff, every untracked file from step 1 in full (they have no diff), and every touched test file in full.
-3. For each candidate, verify before proposing: search for usages, name readers and a positive control for every changed value, setting, variable, key, or method, name the test that covers a duplicate, and name the callers checked for an unexercised case.
+3. For each candidate, verify before proposing: search for usages, name the test that covers a duplicate, name the callers checked for an unexercised case.
 4. Present the findings as a table and wait for approval before changing anything:
 
    ```
