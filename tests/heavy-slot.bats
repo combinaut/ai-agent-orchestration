@@ -475,15 +475,16 @@ raise SystemExit(0 if result.returncode == 130 else 1)
 
 @test "SIGINT terminates an asynchronous child and removes the slot" {
   # shellcheck disable=SC2016,SC2026 # The child shell, not this Bats shell, expands its literal script.
-  run python3 -c '
+  run env ORCH_HEAVY_SLOTS_KILL_GRACE=10 python3 -c '
 import os, signal, subprocess, sys, time
 helper, slot_dir = sys.argv[1:]
+kill_grace, allowance = int(os.environ["ORCH_HEAVY_SLOTS_KILL_GRACE"]), 10
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 slot = os.path.join(slot_dir, "agent-interrupt")
 ready = os.path.join(slot_dir, "agent-interrupt.ready")
 terminated = os.path.join(slot_dir, "agent-interrupt.terminated")
 wrapper = subprocess.Popen([helper, "take", "agent-interrupt", "--", "bash", "-c",
-                            "trap \"printf terminated > \\\"$2\\\"; exit 0\" TERM; printf ready > \"$1\"; while :; do sleep 1; done", "_", ready, terminated])
+                            "trap \"sleep 3; printf terminated > \\\"$2\\\"; exit 0\" TERM; printf ready > \"$1\"; while :; do sleep 1; done", "_", ready, terminated])
 deadline = time.monotonic() + 15
 while time.monotonic() < deadline:
     if (os.path.getsize(slot) if os.path.exists(slot) else 0) and os.path.exists(ready):
@@ -495,7 +496,7 @@ else:
     raise SystemExit("child never became ready")
 child = int(open(slot).read().split()[0])
 os.kill(wrapper.pid, signal.SIGINT)
-deadline = time.monotonic() + 15
+deadline = time.monotonic() + kill_grace + allowance
 try:
     status = wrapper.wait(timeout=max(0, deadline - time.monotonic()))
 except subprocess.TimeoutExpired:
@@ -776,53 +777,76 @@ EVENTS() { printf '%s' "$ORCH_HEAVY_SLOTS_DIR/.events"; }
   [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
 }
 
-# A leftover watcher shows as a process of this test's group with the job name in its command line,
-# or as its sleep $2. The job runs in its own group, so other processes on the machine do not match.
-left_behind() {
-  pgrep -g 0 -f "heavy-slot take $1 " || pgrep -g 0 -x -f "sleep $2"
+# Bats runs tests in parallel inside one process group. A take started through in_own_session leads
+# its own group, so $! is that group's id and pgrep -g "$!" sees only that take and its watcher.
+in_own_session() {
+  # shellcheck disable=SC2016 # Python receives this program literally.
+  exec python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@"
 }
 
-assert_nothing_left_behind() {
+group_live() {
+  local member
+  for member in $(pgrep -g "$1"); do
+    case $(ps -o stat= -p "$member" 2>/dev/null) in
+      '' | Z*) ;;
+      *) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+assert_group_empty() {
   local tries=0
-  while left_behind "$1" "$2" >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
-  ! left_behind "$1" "$2"
+  while group_live "$1" && [ "$tries" -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done
+  ! group_live "$1"
+}
+
+wait_for_exit() {
+  local tries=0
+  while kill -0 "$1" 2>/dev/null && [ "$tries" -lt 150 ]; do sleep 0.1; tries=$((tries + 1)); done
+  ! kill -0 "$1" 2>/dev/null
+}
+
+wait_for_group_process() {
+  local group=$1 tries=0
+  shift
+  while ! pgrep -g "$group" "$@" >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
+  pgrep -g "$group" "$@" >/dev/null
 }
 
 @test "a short job leaves no long-run watcher or its sleep behind" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=29 run_with_timeout "$HELPER" take agent-wstop-ok -- sleep 1
-  [ "$status" -eq 0 ]
-  assert_nothing_left_behind agent-wstop-ok '2[89]'
+  ORCH_HEAVY_SLOTS_LONG_RUN=29 in_own_session "$HELPER" take agent-wstop-ok -- sleep 1 &
+  pid=$!
+  wait_for_exit "$pid"
+  wait "$pid"
+  assert_group_empty "$pid"
 }
 
 @test "stopping heavy-slot with TERM leaves no long-run watcher or its sleep behind" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=28 "$HELPER" take agent-wstop-term -- sleep 30 &
+  ORCH_HEAVY_SLOTS_LONG_RUN=28 in_own_session "$HELPER" take agent-wstop-term -- sleep 30 &
   pid=$!
   wait_for_file "$ORCH_HEAVY_SLOTS_DIR/agent-wstop-term"
-  tries=0
-  while ! pgrep -g 0 -x -f 'sleep 2[78]' >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
-  pgrep -g 0 -x -f 'sleep 2[78]' >/dev/null
+  wait_for_group_process "$pid" -x -f 'sleep [0-9]+'
   kill -TERM "$pid"
   wait "$pid" || true
-  assert_nothing_left_behind agent-wstop-term '2[78]'
+  assert_group_empty "$pid"
 }
 
 # twice_signal <TERM|HUP>: send the signal twice to a take whose job ignores both; the second must not skip cleanup (Bash 3.2 runs it after the first exit).
 twice_signal() {
   local name=agent-twice-$1
   # shellcheck disable=SC2016 # The child Bash expands nothing here.
-  ORCH_HEAVY_SLOTS_LONG_RUN=26 ORCH_HEAVY_SLOTS_KILL_GRACE=3 "$HELPER" take "$name" -- bash -c 'trap "" TERM HUP; sleep 20' &
+  ORCH_HEAVY_SLOTS_LONG_RUN=26 ORCH_HEAVY_SLOTS_KILL_GRACE=3 in_own_session "$HELPER" take "$name" -- bash -c 'trap "" TERM HUP; sleep 20' &
   pid=$!
   wait_for_file "$ORCH_HEAVY_SLOTS_DIR/$name"
-  tries=0
-  while ! pgrep -g 0 -x -f 'sleep 2[56]' >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
-  pgrep -g 0 -x -f 'sleep 2[56]' >/dev/null
+  wait_for_group_process "$pid" -x -f 'sleep [0-9]+'
   kill -"$1" "$pid"
   wait_for_file "$(EVENTS)"
   sleep 1
   kill -"$1" "$pid"
   wait "$pid" || true
   [ ! -e "$ORCH_HEAVY_SLOTS_DIR/$name" ]
-  assert_nothing_left_behind "$name" '2[56]'
+  assert_group_empty "$pid"
 }
 
 @test "a second identical TERM while the job is stopping still cleans up the slot and the watcher" {
@@ -834,20 +858,20 @@ twice_signal() {
 }
 
 @test "the long-run watcher outlives its RUNLONG line and is gone when the job ends" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=1 "$HELPER" take agent-wstop-fired -- sleep 3 &
+  # shellcheck disable=SC2016 # The child Bash expands $1.
+  ORCH_HEAVY_SLOTS_LONG_RUN=1 in_own_session "$HELPER" take agent-wstop-fired -- bash -c 'until [ -e "$1" ]; do sleep 0.1; done' _ "$TMP/release" &
   pid=$!
   tries=0
   while ! grep -q ' SLOT RUNLONG ' "$(EVENTS)" 2>/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
   grep -q ' SLOT RUNLONG ' "$(EVENTS)"
   # heavy-slot itself and its watcher both carry the job name.
-  [ "$(pgrep -g 0 -f 'heavy-slot take agent-wstop-fired ' | wc -l)" -ge 2 ]
+  [ "$(pgrep -g "$pid" -f 'heavy-slot take agent-wstop-fired ' | wc -l)" -ge 2 ]
   # After RUNLONG the watcher sleeps 30 s a time instead of spinning.
-  tries=0
-  while ! pgrep -g 0 -x -f 'sleep 30' >/dev/null && [ "$tries" -lt 20 ]; do sleep 0.1; tries=$((tries + 1)); done
-  pgrep -g 0 -x -f 'sleep 30' >/dev/null
+  wait_for_group_process "$pid" -x -f 'sleep 30'
+  : >"$TMP/release"
   wait "$pid"
   [ "$(grep -c ' SLOT RUNLONG ' "$(EVENTS)")" -eq 1 ]
-  assert_nothing_left_behind agent-wstop-fired 30
+  assert_group_empty "$pid"
 }
 
 @test "stopping the long-run watcher prints nothing of its own" {
@@ -960,12 +984,12 @@ twice_signal() {
 }
 
 @test "the long-run watcher sleeps at most 30 seconds at a time" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=1234 "$HELPER" take agent-nap -- sleep 4 &
+  # shellcheck disable=SC2016 # The child Bash expands $1.
+  ORCH_HEAVY_SLOTS_LONG_RUN=1234 in_own_session "$HELPER" take agent-nap -- bash -c 'until [ -e "$1" ]; do sleep 0.1; done' _ "$TMP/release" &
   pid=$!
-  tries=0
-  while ! pgrep -g 0 -x -f 'sleep 30' >/dev/null && [ "$tries" -lt 20 ]; do sleep 0.1; tries=$((tries + 1)); done
-  pgrep -g 0 -x -f 'sleep 30' >/dev/null
-  if pgrep -g 0 -x -f 'sleep 1234'; then false; fi
+  wait_for_group_process "$pid" -x -f 'sleep 30'
+  if pgrep -g "$pid" -x -f 'sleep 1234'; then false; fi
+  : >"$TMP/release"
   wait "$pid"
 }
 

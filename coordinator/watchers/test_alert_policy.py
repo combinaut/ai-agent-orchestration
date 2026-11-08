@@ -20,6 +20,7 @@ from unittest.mock import patch
 from test_support import IsolatedTestCase
 
 import alert_policy as policy
+import feed_actions
 import feed_attach
 import feed_follow
 import watchers as w
@@ -78,6 +79,23 @@ class PolicyTest(IsolatedTestCase):
 
     def run_at(self, now, *alerts):
         return policy.apply(self.state, list(alerts), now, CFG)
+
+    def test_todo_auto_closed_lines_are_terminal_and_distinct_per_item(self):
+        first = "TODO AUTO-CLOSED Architect_Tooling: Merge https://github.com/acme/app/pull/7 (https://github.com/acme/app/pull/7 merged)"
+        second = first.replace("pull/7", "pull/8")
+        out = self.run_at(
+            0,
+            {"mode": "todo", "events": [first]},
+            {"mode": "todo", "events": [second]},
+        )
+        self.assertEqual(out, [f"todo: {first} (start)", f"todo: {second} (start)"])
+        self.assertNotIn("unparsed", self.state)
+        self.assertEqual(len(self.state["keys"]), 2)
+
+    def test_todo_auto_closed_line_is_fyi_not_an_action(self):
+        line = "2026-10-27T12:00:00+00:00 todo: TODO AUTO-CLOSED Architect_Tooling: Merge https://github.com/acme/app/pull/7 (https://github.com/acme/app/pull/7 merged) (start)"
+        self.assertEqual(inbox.feed_lines([line]), [])
+        self.assertFalse(feed_actions.is_action(line, feed_actions.action_patterns()))
 
     def test_first_alert_writes_one_start_line(self):
         self.assertEqual(
