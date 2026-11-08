@@ -215,9 +215,10 @@ def problem(path, head, base=None):
         return f"{path}: the record must be a JSON object", None
     # #166 records deliberately carry only the attestation fields.  The
     # richer orch-sweep format is checked below when its tool marker is set.
+    detailed = record.get("tool") == "orch-sweep" or "clean" in record
     required = (
         FIELDS
-        if record.get("tool") == "orch-sweep"
+        if detailed
         else (
             "head",
             "base",
@@ -234,7 +235,7 @@ def problem(path, head, base=None):
     for name, sha in (("--head", head), ("--base", base)):
         if sha is not None and not SHA.fullmatch(sha):
             return f"{name} {sha!r} is not a full 40-character SHA", None
-    if record.get("tool") != "orch-sweep":
+    if not detailed:
         findings, ids = record["findings"], record["validator_ids"]
         if isinstance(findings, bool) or not isinstance(findings, int) or findings < 0:
             return f"{path}: findings must be a non-negative integer", None
