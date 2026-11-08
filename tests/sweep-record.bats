@@ -37,7 +37,7 @@ drop_field() {
 
 check() {
   cd "$REPO" || return 1
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "${1:-$HEAD_SHA}" ${EXPECT_BASE:+--base "$EXPECT_BASE"}
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "${1:-$HEAD_SHA}" --no-transcripts ${EXPECT_BASE:+--base "$EXPECT_BASE"}
 }
 
 @test "a missing record fails with one stderr line" {
@@ -66,7 +66,7 @@ check() {
   record 4 1 '{"FALSE": 4}' "$FIRST_SHA"
   check
   [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "OK: $REC swept $FIRST_SHA; commits since:" ]
+  [ "${lines[0]}" = "OK: $REC swept $FIRST_SHA; attestation only; commits since:" ]
   [ "${#lines[@]}" -eq 3 ]
   [[ "${lines[1]}" == *" third" ]]
   [[ "${lines[2]}" == *" second" ]]
@@ -111,8 +111,33 @@ check() {
   record 5 1 '{"FALSE": 3, "CONFIRMED_NEW": 2}'
   check
   [ "$status" -eq 0 ]
-  [ "$output" = "OK: $REC covers $HEAD_SHA" ]
+  [ "$output" = "OK: $REC covers $HEAD_SHA; attestation only" ]
   [ "$stderr" = "" ]
+}
+
+@test "a #166 record ignores an extra field" {
+  python3 - "$REC" "$HEAD_SHA" "$ZERO_SHA" <<'PY'
+import json, sys
+json.dump({"head": sys.argv[2], "base": sys.argv[3], "findings": 0,
+           "validator_ids": [], "clean": True}, open(sys.argv[1], "w"))
+PY
+  check
+  [ "$status" -eq 0 ]
+}
+
+@test "a detailed legacy record with findings requires a validator transcript" {
+  record 5 1 '{"FALSE": 5}'
+  cd "$REPO" || return 1
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: --session <worker session id> is required" ]
+}
+
+@test "malformed Codex rollout metadata is skipped" {
+  mkdir -p "$TMP/codex/sessions/a"
+  printf '%s\n' '{"payload":{"source":{"subagent":{"thread_spawn":null}}}}' >"$TMP/codex/sessions/a/rollout-a.jsonl"
+  CODEX_HOME="$TMP/codex" run python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import sweep_record; assert sweep_record.codex_transcripts("session", "/root/finalize_sweep_validator_123456789abc") == []' "$ROOT/lib"
+  [ "$status" -eq 0 ]
 }
 
 @test "a sweep with no findings and no validators passes" {
@@ -161,6 +186,7 @@ check() {
 
 @test "a record without the clean field fails" {
   record 5 1 '{"FALSE": 5}'
+  python3 -c 'import json,sys; p=sys.argv[1]; r=json.load(open(p)); r["tool"]="orch-sweep"; json.dump(r,open(p,"w"))' "$REC"
   drop_field clean
   check
   [ "$status" -eq 1 ]
@@ -313,6 +339,7 @@ check() {
 
 @test "a record without the mode field fails" {
   record 5 1 '{"FALSE": 5}'
+  python3 -c 'import json,sys; p=sys.argv[1]; r=json.load(open(p)); r["tool"]="orch-sweep"; json.dump(r,open(p,"w"))' "$REC"
   drop_field mode
   check
   [ "$status" -eq 1 ]

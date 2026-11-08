@@ -213,19 +213,10 @@ def problem(path, head, base=None):
         return f"{path}: not valid JSON: {error}", None
     if not isinstance(record, dict):
         return f"{path}: the record must be a JSON object", None
-    # #166 records deliberately carry only the attestation fields.  The
-    # richer orch-sweep format is checked below when its tool marker is set.
-    detailed = record.get("tool") == "orch-sweep" or any(
-        field in record
-        for field in (
-            "clean",
-            "mode",
-            "slices",
-            "sweep_agents",
-            "validators",
-            "verdicts",
-        )
-    )
+    # #166 records deliberately carry only the attestation fields; unknown
+    # fields remain ignored.  Only the explicit tool marker selects the
+    # richer orch-sweep schema.
+    detailed = record.get("tool") == "orch-sweep" or all(field in record for field in FIELDS)
     required = (
         FIELDS
         if detailed
@@ -389,7 +380,7 @@ def codex_transcripts(session, agent_id):
                 and spawn.get("agent_path") == agent_id
             ):
                 matches.append(candidate)
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
             continue
     return matches
 
@@ -452,7 +443,7 @@ def transcript_problem(path, swept, session, agent_id):
                     and swept in text
                     else f"{path}: validator {agent_id} brief must include {VALIDATOR_MARKER} and name {swept}"
                 )
-        except (OSError, ValueError, KeyError, TypeError) as error:
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
             issue = f"{path}: validator {agent_id} transcript cannot read: {error}"
             mtime = float("-inf")
         if issue is None:
@@ -488,24 +479,7 @@ def main(argv):
     if not found:
         swept = record["head"]
         found, commits = since(args.record, swept, record["base"], args.head)
-    legacy_record = (
-        record is not None
-        and record.get("tool") != "orch-sweep"
-        and any(
-            field in record
-            for field in (
-                "clean",
-                "mode",
-                "slices",
-                "sweep_agents",
-                "validators",
-                "verdicts",
-            )
-        )
-    )
-    attestation = (
-        args.no_transcripts or not record or record["findings"] == 0 or legacy_record
-    )
+    attestation = args.no_transcripts or not record or record["findings"] == 0
     if not found and not attestation:
         if not args.session or not TOKEN.fullmatch(args.session):
             found = f"{args.record}: --session <worker session id> is required"

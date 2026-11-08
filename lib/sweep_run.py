@@ -48,6 +48,7 @@ TRAILERS = {
     "codex": "*(Generated using Codex)*",
     "claude": "*(Generated using Claude Code)*",
 }
+ACTIVE_GH = set()
 FINDING = {
     "type": "object",
     "properties": {
@@ -140,6 +141,7 @@ def gh(*args):
             stderr=err,
             start_new_session=True,
         )
+        ACTIVE_GH.add(proc)
         out = bytearray()
         try:
             fd = proc.stdout.fileno()
@@ -164,6 +166,7 @@ def gh(*args):
         finally:
             proc.stdout.close()
             signal_group(proc.pid, signal.SIGKILL)
+            ACTIVE_GH.discard(proc)
             if proc.poll() is None:
                 threading.Thread(target=proc.wait, daemon=True).start()
         if expired:
@@ -804,6 +807,12 @@ def run(args):
     if dirty:
         raise Failure(f"the tree is not clean; commit first: {dirty.splitlines()[0]}")
     top = Path.cwd().resolve()
+    def cancel_before_runner(signum, _frame):
+        stop(*list(ACTIVE_GH))
+        raise SystemExit(128 + signum)
+
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, cancel_before_runner)
     for label, path in (
         ("--record", args.record),
         ("the record cache", cache_path(repo, number, args.head)),
@@ -953,7 +962,7 @@ def run(args):
     if not args.no_comment:
         body = fitting_body(record)
         posted = subprocess.run(
-            [sys.executable, str(LIB / "github_write.py"), "--timeout", "240", "api", "-X", "POST",
+            [sys.executable, "-I", str(LIB / "github_write.py"), "--timeout", "240", "api", "-X", "POST",
              f"repos/{repo}/issues/{number}/comments", "--input", "-"],
             input=json.dumps({"body": body}), capture_output=True, text=True,
         )  # fmt: skip
