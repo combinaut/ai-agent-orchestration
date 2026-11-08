@@ -2,7 +2,7 @@
 name: finalize-sweep
 description: Run the comment and footprint sweeps over a complete PR diff, split into slices of at most 400 changed lines, check the PR title and body against the code, then validate the findings against the PR's context. Use when a workflow, worker brief, or user requests a sweep at the end of a piece of work before a PR is called done or ready. Run it again after every merge or rebase of the base into the PR branch. Report the surviving findings for approval; do not start a sweep for unrelated edits.
 user-invocable: true
-argument-hint: "[<base-ref>]"
+argument-hint: "[<base-ref>] [report-only pr=<url> max-slices=<n>]"
 ---
 
 # Finalize Sweep
@@ -16,6 +16,10 @@ Run the skill again after every merge or rebase of the base into the PR branch. 
 ## Input
 
 `$ARGUMENTS` (optional): a base ref to diff against (default: merge-base with `origin/<base>`, where `<base>` is the current PR's base from `gh pr view --json baseRefName`; the repo default branch only when no PR exists).
+
+## Report-only mode
+
+A caller that passes `report-only`, a `pr=<url>` and a `max-slices=<n>` runs the skill with no developer present: use the base ref and the PR URL it gives instead of looking them up, never pause to ask, and do not wait for approval or apply anything. Above `max-slices`, stop before step 3 and report the slice count. Step 6 ends with the table and the counts.
 
 ## 1. Scope
 
