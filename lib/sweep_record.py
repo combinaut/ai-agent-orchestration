@@ -216,7 +216,9 @@ def problem(path, head, base=None):
     # #166 records deliberately carry only the attestation fields; unknown
     # fields remain ignored.  Only the explicit tool marker selects the
     # richer orch-sweep schema.
-    detailed = record.get("tool") == "orch-sweep" or all(field in record for field in FIELDS)
+    detailed = record.get("tool") == "orch-sweep" or all(
+        field in record for field in FIELDS
+    )
     required = (
         FIELDS
         if detailed

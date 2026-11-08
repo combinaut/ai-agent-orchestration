@@ -807,6 +807,7 @@ def run(args):
     if dirty:
         raise Failure(f"the tree is not clean; commit first: {dirty.splitlines()[0]}")
     top = Path.cwd().resolve()
+
     def cancel_before_runner(signum, _frame):
         stop(*list(ACTIVE_GH))
         raise SystemExit(128 + signum)
