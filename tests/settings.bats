@@ -429,6 +429,7 @@ pattern = "mine"' ]
 @test "Python version probes ignore a checkout sitecustomize module" {
   mkdir -p "$TMP/hostile"
   printf 'from pathlib import Path\nPath("%s").touch()\n' "$TMP/probe-marker" >"$TMP/hostile/sitecustomize.py"
+  # shellcheck disable=SC2016 # The child shell expands its positional arguments.
   run env PYTHONPATH=. ORCH_PYTHON3="$(command -v python3)" bash -c 'cd "$1"; . "$2/coordinator/watchers/coord-lib.sh"; orch_python' _ "$TMP/hostile" "$ROOT"
   [ "$status" -eq 0 ]
   [ ! -e "$TMP/probe-marker" ]
