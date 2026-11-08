@@ -125,6 +125,17 @@ PY
   [ "$status" -eq 0 ]
 }
 
+@test "a rich-only field cannot downgrade a partial record to #166 compatibility" {
+  python3 - "$REC" "$HEAD_SHA" "$ZERO_SHA" <<'PY'
+import json, sys
+json.dump({"head": sys.argv[2], "base": sys.argv[3], "findings": 0,
+           "validator_ids": [], "version": 1}, open(sys.argv[1], "w"))
+PY
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: missing field clean" ]
+}
+
 @test "a detailed legacy record with findings requires a validator transcript" {
   record 5 1 '{"FALSE": 5}'
   cd "$REPO" || return 1

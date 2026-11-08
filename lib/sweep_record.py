@@ -7,8 +7,11 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 SHA = re.compile(r"[0-9a-f]{40}")
 TOKEN = re.compile(r"[A-Za-z0-9_-]+")
@@ -45,6 +48,7 @@ SCRIPT_FIELDS = (
     "open_fix",
     "deviation",
 )
+RICH_ONLY_FIELDS = ("tool", *SCRIPT_FIELDS)
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 EMPTY_HASH = hashlib.sha256(b"").hexdigest()
 CLEAN_TREE = {
@@ -54,6 +58,31 @@ CLEAN_TREE = {
     "untracked": {},
     "untracked_hash": hashlib.sha256(b"{}").hexdigest(),
 }
+GIT = shutil.which("git")
+if not GIT:
+    raise RuntimeError("git is not on PATH")
+GIT = str(Path(GIT).resolve())
+GIT_HOOKS = tempfile.TemporaryDirectory(prefix="orch-sweep-record-git-hooks-")
+GIT_ENV = {
+    key: value
+    for key, value in os.environ.items()
+    if key != "GIT_CONFIG_COUNT"
+    and not key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+}
+GIT_ENV.update(
+    {
+        "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+)
+GIT_CONFIG = (
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    f"core.hooksPath={GIT_HOOKS.name}",
+    "-c",
+    "core.attributesFile=/dev/null",
+)
 
 
 def plan_problem(slices, paths=None):
@@ -213,12 +242,11 @@ def problem(path, head, base=None):
         return f"{path}: not valid JSON: {error}", None
     if not isinstance(record, dict):
         return f"{path}: the record must be a JSON object", None
-    # #166 records deliberately carry only the attestation fields; unknown
-    # fields remain ignored.  Only the explicit tool marker selects the
-    # richer orch-sweep schema.
-    detailed = record.get("tool") == "orch-sweep" or all(
-        field in record for field in FIELDS
-    )
+    # #166's four attestation fields intentionally ignore unrelated extras.
+    # Fields reserved by orch-sweep, however, must never downgrade a partial
+    # rich record into that weaker format.
+    rich = any(field in record for field in RICH_ONLY_FIELDS)
+    detailed = rich or all(field in record for field in FIELDS)
     required = (
         FIELDS
         if detailed
@@ -307,7 +335,9 @@ def problem(path, head, base=None):
             f"{path}: verdicts add up to {sum(verdicts.values())}, findings is {record['findings']}",
             None,
         )
-    if record.get("tool") == "orch-sweep":
+    if rich:
+        if record.get("tool") != "orch-sweep":
+            return f"{path}: rich records must set tool to orch-sweep", None
         why = script_problem(record)
         if why:
             return f"{path}: {why}", None
@@ -317,8 +347,14 @@ def problem(path, head, base=None):
 def git(*args):
     """Stdout of a git command in the current repo, else None."""
     try:
+        if args and args[0] == "diff":
+            args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
         done = subprocess.run(
-            ["git", *args], capture_output=True, text=True, timeout=30
+            [GIT, *GIT_CONFIG, *args],
+            capture_output=True,
+            env=GIT_ENV,
+            text=True,
+            timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return None

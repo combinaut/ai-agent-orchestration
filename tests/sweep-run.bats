@@ -356,11 +356,70 @@ assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_S
 
 @test "the isolated posting helper imports only the trusted library" {
   printf 'raise RuntimeError("checkout import")\n' >"$REPO/subprocess.py"
-  run --separate-stderr python3 -I "$ROOT/lib/github_write_isolated.py" --help
+  run --separate-stderr /opt/homebrew/bin/python3 -I "$ROOT/lib/github_write_isolated.py" --help
   [ "$status" -eq 0 ]
   [[ "$output" == usage:* ]]
   [[ "$stderr" != *"ModuleNotFoundError: No module named 'github_poll'"* ]]
   [[ "$stderr" != *"checkout import"* ]]
+}
+
+@test "runner Git commands ignore checkout hooks, filters, config includes, fsmonitor and textconv" {
+  marker="$TMP/git-side-effect"
+  mkdir -p "$REPO/hooks"
+  printf '#!/bin/sh\nprintf hook >>"%s"\n' "$marker" >"$REPO/hooks/post-index-change"
+  chmod +x "$REPO/hooks/post-index-change"
+  printf '#!/bin/sh\nprintf filter >>"%s"\ncat\n' "$marker" >"$TMP/filter"
+  chmod +x "$TMP/filter"
+  printf '#!/bin/sh\nprintf textconv >>"%s"\ncat "$1"\n' "$marker" >"$TMP/textconv"
+  chmod +x "$TMP/textconv"
+  printf '*.txt filter=evil diff=evil\n' >"$REPO/.gitattributes"
+  write lib/probe.txt 1
+  commit hostile-git-config
+  git -C "$REPO" config core.hooksPath hooks
+  git -C "$REPO" config core.fsmonitor "$TMP/filter"
+  git -C "$REPO" config filter.evil.clean "$TMP/filter"
+  git -C "$REPO" config diff.evil.textconv "$TMP/textconv"
+  printf '[core]\nfsmonitor = %s\n' "$TMP/filter" >"$TMP/included.gitconfig"
+  git -C "$REPO" config include.path "$TMP/included.gitconfig"
+  rm -f "$marker"
+  cd "$REPO"
+  run --separate-stderr python3 -I "$ROOT/lib/sweep_run.py" tree
+  [ "$status" -eq 0 ]
+  run python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import sweep_run
+assert "core.fsmonitor=false" in sweep_run.GIT_CONFIG
+assert any(v.startswith("core.hooksPath=") for v in sweep_run.GIT_CONFIG)
+assert "core.attributesFile=/dev/null" in sweep_run.GIT_CONFIG' "$ROOT/lib"
+  [ "$status" -eq 0 ]
+}
+
+@test "agents use an absolute executable and receive no interpreter injection variables" {
+  PYTHONPATH=checkout PYTHONHOME=checkout NODE_OPTIONS=--require=checkout run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,os,sys
+for line in open(sys.argv[1]):
+    call=json.loads(line)
+    assert os.path.isabs(call["executable"]), call
+    assert all(value is None for value in call["injected"].values()), call' "$TMP/agent.calls"
+}
+
+@test "a checkout write immediately before record publication is rejected" {
+  cd "$REPO"
+  run --separate-stderr python3 -c 'import sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+real = sweep_run.compare
+calls = 0
+def late(before, when):
+    global calls
+    calls += 1
+    if when == "record publication":
+        open("lib/alpha.py", "a").write("late write\\n")
+    return real(before, when)
+sweep_run.compare = late
+sys.exit(sweep_run.main(["orch-sweep", *sys.argv[2:]]))' "$ROOT/lib" run --pr "$PR" --head "$HEAD_SHA" --base-ref main --record "$TMP/late.json" --no-comment
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"record publication"* ]]
+  [ ! -e "$TMP/late.json" ]
 }
 
 @test "a run after a fix push sweeps the whole PR diff again" {

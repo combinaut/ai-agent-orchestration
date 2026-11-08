@@ -49,6 +49,43 @@ TRAILERS = {
     "claude": "*(Generated using Claude Code)*",
 }
 ACTIVE_GH = set()
+GIT = shutil.which("git")
+if not GIT:
+    raise RuntimeError("git is not on PATH")
+GIT = str(Path(GIT).resolve())
+GIT_HOOKS = tempfile.TemporaryDirectory(prefix="orch-sweep-git-hooks-")
+GIT_ENV = {
+    key: value
+    for key, value in os.environ.items()
+    if key != "GIT_CONFIG_COUNT"
+    and not key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+}
+GIT_ENV.update(
+    {
+        "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+)
+GIT_CONFIG = (
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    f"core.hooksPath={GIT_HOOKS.name}",
+    "-c",
+    "core.attributesFile=/dev/null",
+)
+AGENT_ENV_DROP = {
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONUSERBASE",
+    "PYTHONSTARTUP",
+    "PYTHONSAFEPATH",
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "NODE_EXTRA_CA_CERTS",
+    "BASH_ENV",
+    "ENV",
+}
 FINDING = {
     "type": "object",
     "properties": {
@@ -113,7 +150,11 @@ def sha(data):
 
 
 def git(*args, raw=False):
-    done = subprocess.run(["git", *args], capture_output=True, timeout=60)
+    if args and args[0] == "diff":
+        args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
+    done = subprocess.run(
+        [GIT, *GIT_CONFIG, *args], capture_output=True, env=GIT_ENV, timeout=60
+    )
     if done.returncode:
         error = done.stderr.decode(errors="replace").strip()
         raise Failure(f"git {' '.join(args)} failed: {error}")
@@ -342,19 +383,30 @@ def model_for(runtime, given):
 
 
 def command(runtime, model, schema, out, diffs):
+    executable = shutil.which(runtime)
+    if not executable:
+        raise Failure(f"{runtime} is not on PATH")
+    executable = os.path.abspath(executable)
     if runtime == "codex":
         return [
-            "codex", "exec", "-m", model, "-C", os.getcwd(), "-s", "read-only",
+            executable, "exec", "-m", model, "-C", os.getcwd(), "-s", "read-only",
             "--ephemeral", "--ignore-user-config", "-c", "project_doc_max_bytes=0",
             "--json", "--output-schema", schema, "-o", out, "-",
         ]  # fmt: skip
     return [
-        "claude", "-p", "--model", model, "--output-format", "json",
+        executable, "-p", "--model", model, "--output-format", "json",
         "--json-schema", Path(schema).read_text(), "--permission-mode", "dontAsk",
         "--setting-sources", "user", "--strict-mcp-config", "--no-session-persistence",
         "--tools", ",".join(CLAUDE_TOOLS), "--add-dir", diffs,
         "--allowedTools", *CLAUDE_TOOLS, "--disallowedTools", "Edit", "Write", "NotebookEdit",
     ]  # fmt: skip
+
+
+def agent_environment():
+    """The child keeps ordinary user configuration but not interpreter injection."""
+    return {
+        key: value for key, value in os.environ.items() if key not in AGENT_ENV_DROP
+    }
 
 
 def signal_group(pid, signum):
@@ -427,7 +479,7 @@ class Runner:
                 try:
                     proc = subprocess.Popen(
                         argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE, start_new_session=True,
+                        stderr=subprocess.PIPE, start_new_session=True, env=agent_environment(),
                     )  # fmt: skip
                 except OSError as error:
                     raise AgentError(
@@ -818,7 +870,10 @@ def run(args):
         ("--record", args.record),
         ("the record cache", cache_path(repo, number, args.head)),
     ):
-        if path and Path(path).resolve().is_relative_to(top):
+        if path and (
+            Path(path).resolve().is_relative_to(top)
+            or Path(path).parent.resolve().is_relative_to(top)
+        ):
             raise Failure(f"{label} {path} is inside the checkout; write it outside")
     model = model_for(args.runtime, args.model)
     merge_base = git("merge-base", "HEAD", args.base_ref).strip()
@@ -953,6 +1008,7 @@ def run(args):
             raise Failure(
                 f"the record fails its own check: {why.replace(staged[0], str(paths[0]))}"
             )
+        compare(before, "record publication")
         for temp, path in zip(staged, paths):
             os.replace(temp, path)
         staged = []

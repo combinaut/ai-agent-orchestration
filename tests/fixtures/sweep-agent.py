@@ -18,7 +18,21 @@ kind = Path(sys.argv[0]).name
 prompt = sys.stdin.read()
 role = re.search(r"^ROLE: (\S+)", prompt, re.M).group(1)
 with (tmp / "agent.calls").open("a") as log:
-    log.write(json.dumps({"kind": kind, "role": role, "argv": sys.argv[1:]}) + "\n")
+    log.write(
+        json.dumps(
+            {
+                "kind": kind,
+                "role": role,
+                "argv": sys.argv[1:],
+                "executable": sys.argv[0],
+                "injected": {
+                    key: os.environ.get(key)
+                    for key in ("PYTHONPATH", "PYTHONHOME", "NODE_OPTIONS")
+                },
+            }
+        )
+        + "\n"
+    )
 prompts = tmp / "prompts"
 prompts.mkdir(exist_ok=True)
 (prompts / f"{role}.{os.getpid()}").write_text(prompt)
