@@ -298,7 +298,7 @@ PY
   real=$(command -v git)
   mkdir "$TMP/bin"
   # shellcheck disable=SC2016 # The fake git expands its own $1 and "$@".
-  printf '#!/bin/sh\n[ "$1" = log ] && exit 1\nexec %s "$@"\n' "$real" >"$TMP/bin/git"
+  printf '#!/bin/sh\nwhile [ "$1" = -c ]; do shift 2; done\n[ "$1" = log ] && exit 1\nexec %s "$@"\n' "$real" >"$TMP/bin/git"
   chmod +x "$TMP/bin/git"
   record 4 1 '{"FALSE": 4}' "$FIRST_SHA"
   PATH="$TMP/bin:$PATH" check
