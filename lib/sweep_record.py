@@ -478,12 +478,11 @@ def main(argv):
     if not found:
         swept = record["head"]
         found, commits = since(args.record, swept, record["base"], args.head)
-    legacy_record = "clean" in record and record.get("tool") != "orch-sweep"
+    legacy_record = (
+        record is not None and "clean" in record and record.get("tool") != "orch-sweep"
+    )
     attestation = (
-        args.no_transcripts
-        or not record
-        or record["findings"] == 0
-        or legacy_record
+        args.no_transcripts or not record or record["findings"] == 0 or legacy_record
     )
     if not found and not attestation:
         if not args.session or not TOKEN.fullmatch(args.session):
