@@ -37,7 +37,7 @@ drop_field() {
 
 check() {
   cd "$REPO" || return 1
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "${1:-$HEAD_SHA}" ${EXPECT_BASE:+--base "$EXPECT_BASE"}
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "${1:-$HEAD_SHA}" --no-transcripts ${EXPECT_BASE:+--base "$EXPECT_BASE"}
 }
 
 @test "a missing record fails with one stderr line" {
@@ -440,7 +440,7 @@ PY
   script_record
   check
   [ "$status" -eq 0 ]
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --exact
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --exact --no-transcripts
   [ "$status" -eq 0 ]
 }
 
