@@ -356,8 +356,9 @@ assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_S
 
 @test "the isolated posting helper imports only the trusted library" {
   printf 'raise RuntimeError("checkout import")\n' >"$REPO/subprocess.py"
-  run python3 -I "$ROOT/lib/github_write_isolated.py" --timeout 1 api
-  [ "$status" -ne 0 ]
+  run --separate-stderr python3 -I "$ROOT/lib/github_write_isolated.py" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == usage:* ]]
   [[ "$stderr" != *"ModuleNotFoundError: No module named 'github_poll'"* ]]
   [[ "$stderr" != *"checkout import"* ]]
 }
