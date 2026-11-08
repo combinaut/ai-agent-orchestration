@@ -177,13 +177,6 @@ check() {
   [ "$output" = "OK: $REC covers $HEAD_SHA" ]
 }
 
-@test "a Codex subagent rollout spawned by the session that names the head passes" {
-  codex_agent "/root/finalize_sweep_validator_${HEAD_SHA:0:12}" "$SESSION"
-  record 2 "[\"/root/finalize_sweep_validator_${HEAD_SHA:0:12}\"]"
-  check
-  [ "$status" -eq 0 ]
-}
-
 @test "a Codex encrypted child rollout validates by its task name" {
   codex_agent "/root/finalize_sweep_validator_${HEAD_SHA:0:12}" "$SESSION"
   record 2 "[\"/root/finalize_sweep_validator_${HEAD_SHA:0:12}\"]"
