@@ -215,7 +215,17 @@ def problem(path, head, base=None):
         return f"{path}: the record must be a JSON object", None
     # #166 records deliberately carry only the attestation fields.  The
     # richer orch-sweep format is checked below when its tool marker is set.
-    detailed = record.get("tool") == "orch-sweep" or "clean" in record
+    detailed = record.get("tool") == "orch-sweep" or any(
+        field in record
+        for field in (
+            "clean",
+            "mode",
+            "slices",
+            "sweep_agents",
+            "validators",
+            "verdicts",
+        )
+    )
     required = (
         FIELDS
         if detailed
@@ -479,7 +489,7 @@ def main(argv):
         swept = record["head"]
         found, commits = since(args.record, swept, record["base"], args.head)
     legacy_record = (
-        record is not None and "clean" in record and record.get("tool") != "orch-sweep"
+        record is not None and detailed and record.get("tool") != "orch-sweep"
     )
     attestation = (
         args.no_transcripts or not record or record["findings"] == 0 or legacy_record
