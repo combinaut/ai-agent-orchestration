@@ -182,6 +182,10 @@ close_opened() {
   fi
 }
 
+cleanup_before_prompt() {
+  if [ -n "$opened" ]; then close_opened; else echo "LEFT OPEN $pane"; fi
+}
+
 for try in 1 2 3 4 5; do
   herdr agent start "$agent" --kind codex --pane "$pane" -- --no-daemon --model "$model" --cd "$wt" -c project_doc_max_bytes=0 && break
   [ "$try" = 5 ] && { echo "START FAILED"; close_opened; [ -n "$opened" ] || remove_worktree; release; exit 1; }
@@ -266,7 +270,7 @@ Rules:
 - When finished, reply with one line: APPROVE|COMMENT|REQUEST_CHANGES — $url
 - After posting the review, reply with that one line and end your turn. Do not poll, sleep, or wait for CI, other reviewers or replies."
 
-text_check close_opened
+text_check cleanup_before_prompt
 prompt_out=$(herdr agent prompt "$agent" "$prompt" --wait --timeout 1800000 2>&1)
 status=$?
 [ -z "$prompt_out" ] || printf '%s\n' "$prompt_out"

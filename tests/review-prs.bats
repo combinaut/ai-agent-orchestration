@@ -1714,8 +1714,30 @@ print(sorted((k.split("#")[-1] if "#" in k else "-", v["state"]) for k, v in h.i
   PANE=w9-p5 SWEEP_EDITS_BODY=1 dispatch
   [ "$status" -ne 0 ]
   contains "$output" 'LEFT OPEN w9-p5'
+  contains "$output" "RELEASED $SHA"
   [[ "$output" != *'REMOVED '* ]]
+  [ "$(dispatch_state)" = 'True null' ]
+  [ -d "${XDG_CACHE_HOME:-$HOME/.cache}/review-prs/worktrees/rev7" ]
   [ ! -e "$TMP/review.prompt" ]
+  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url https://github.com/acme/app/pull/7 --sha "$SHA" --text 0123456789ab
+  [ "$status" -eq 0 ]
+}
+
+@test "a caller pane late text read failure releases the claim without removing resources" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PANE=w9-p5 TEXT_READ_FAILS_AFTER_START=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'TEXT FAILED'
+  contains "$output" 'LEFT OPEN w9-p5'
+  contains "$output" "RELEASED $SHA"
+  not_contains "$output" 'CLOSED '
+  not_contains "$output" 'REMOVED '
+  [ "$(dispatch_state)" = 'True null' ]
+  [ -d "${XDG_CACHE_HOME:-$HOME/.cache}/review-prs/worktrees/rev7" ]
+  [ ! -e "$TMP/review.prompt" ]
+  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url https://github.com/acme/app/pull/7 --sha "$SHA" --text 0123456789ab
+  [ "$status" -eq 0 ]
 }
 
 @test "a dispatch of any kind without the text hash exits before claiming" {
