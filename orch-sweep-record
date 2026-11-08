@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks a /finalize-sweep record: orch-sweep-record check --record <path> --head <sha> [--base <sha>].
+# Checks a /finalize-sweep record: orch-sweep-record check --record <path> --head <sha> [--base <sha>] --session <worker-session-id>.
 set -euo pipefail
 
 self=${BASH_SOURCE[0]}

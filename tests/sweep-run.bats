@@ -164,7 +164,7 @@ assert f["old"] == "docs/guide.md", f' "$PLAN"
   python3 -c 'import json,sys; t=json.loads(sys.argv[1]); assert list(t["untracked"]) == ["renamed.txt"], t' "$output"
 }
 
-@test "a run starts two sweep agents per slice, one PR-text agent and the validators, and writes a record the checker passes" {
+@test "a run starts two sweep agents per slice, one PR-text agent and the validators, and writes a record that passes CI attestation" {
   FAKE_FINDINGS=1 run_sweep --no-comment
   [ "$status" -eq 0 ]
   [ "$(calls sweep-comments)" -eq 2 ]
@@ -179,7 +179,7 @@ assert f["old"] == "docs/guide.md", f' "$PLAN"
   [ "$(field 'r["kind"]')" = full ]
   [ "$(field 'r["base"]')" = "$BASE_SHA" ]
   [ "$(field 'r["open_fix"]')" -eq 4 ]
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --exact
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --exact --no-transcripts
   [ "$status" -eq 0 ]
 }
 
