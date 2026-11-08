@@ -29,12 +29,9 @@ def git(path, *args):
     ).stdout.strip()
 
 
-def hook(command, cwd, timeout=20, workdir=None):
-    tool_input = {"command": command}
-    if workdir is not None:
-        tool_input["workdir"] = str(workdir)
+def hook(command, cwd, timeout=20):
     payload = json.dumps(
-        {"tool_name": "Bash", "cwd": str(cwd), "tool_input": tool_input}
+        {"tool_name": "Bash", "cwd": str(cwd), "tool_input": {"command": command}}
     )
     try:
         return subprocess.run(
@@ -785,29 +782,6 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("wiki default push", "git push --force-with-lease"),
     ]:
         case(name, command, False, wiki if name == "wiki default push" else root)
-    assert hook("git push origin master", webapp, workdir=wiki).returncode == 0
-    assert (
-        hook(
-            "git add x && git commit -m y && git push origin master",
-            webapp,
-            workdir=wiki,
-        ).returncode
-        == 0
-    )
-    assert hook("git push origin master", webapp, workdir=webapp).returncode == 2
-    assert hook("git push origin master", wiki, workdir=webapp).returncode == 2
-    assert hook("git push origin master", webapp, workdir="webapp.wiki").returncode == 0
-    assert (
-        hook("git push origin master", webapp, workdir=wiki / "link/..").returncode == 2
-    )
-    assert (
-        hook("git push origin master", webapp, workdir="webapp.wiki/link/..").returncode
-        == 2
-    )
-    assert (
-        hook("git push origin master", webapp, workdir=wiki / "missing/..").returncode
-        == 2
-    )
     for name, command in [
         ("code compact git -C push", f"git -C{webapp} push origin master"),
         (

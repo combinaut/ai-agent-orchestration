@@ -2242,12 +2242,6 @@ def main():
         cwd = data["cwd"]
         if not isinstance(command, str) or not isinstance(cwd, str):
             raise ValueError("invalid hook input")
-        workdir = data["tool_input"].get("workdir")
-        if workdir is not None:
-            if not isinstance(workdir, str):
-                raise ValueError("invalid hook input")
-            candidate = os.path.join(cwd, os.path.expanduser(workdir))
-            cwd = os.path.realpath(candidate) if os.path.isdir(candidate) else candidate
         reason = evaluate(command, cwd)
     except Exception as exc:
         log_failure(exc, command)

@@ -2,6 +2,8 @@
 
 `hooks/guard-bash.py` runs before every Bash tool call in Claude Code. It reads the command and never runs it. It denies:
 
+For Codex 0.166.0 and later, the hook receives a command's resolved workdir only through the top-level `cwd`; `tool_input` contains the command.
+
 - `git push` to `main` or `master` in code repositories (including `--all`, `--mirror`, `:` and glob refspecs). Push a branch and open a PR; GitHub wiki remotes are allowed.
 - AI attribution in commit messages, PR titles and PR bodies, such as `Co-Authored-By: Claude` or "Generated with Claude Code".
 - Broad process kills. Stop your own pid instead.
