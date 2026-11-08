@@ -208,7 +208,7 @@ assert f["old"] == "docs/guide.md", f' "$PLAN"
   python3 -c 'import json,sys; t=json.loads(sys.argv[1]); assert list(t["untracked"]) == ["renamed.txt"], t' "$output"
 }
 
-@test "a run starts two sweep agents per slice, one PR-text agent and the validators, and writes a record the checker passes" {
+@test "a run starts two sweep agents per slice, one PR-text agent and the validators, and writes a record the CI checker attests" {
   FAKE_FINDINGS=1 run_sweep --no-comment
   [ "$status" -eq 0 ]
   [ "$(calls sweep-comments)" -eq 2 ]
@@ -223,8 +223,9 @@ assert f["old"] == "docs/guide.md", f' "$PLAN"
   [ "$(field 'r["kind"]')" = full ]
   [ "$(field 'r["base"]')" = "$BASE_SHA" ]
   [ "$(field 'r["open_fix"]')" -eq 4 ]
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --exact
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --exact --no-transcripts
   [ "$status" -eq 0 ]
+  [[ "$output" == *"; attestation only" ]]
 }
 
 @test "codex agents run in a read-only sandbox with the schema" {
@@ -650,7 +651,7 @@ print(sweep_run.gh("api", "x").strip())' "$ROOT/lib"
   run --separate-stderr python3 -c 'import sys
 sys.path.insert(0, sys.argv[1])
 import sweep_record, sweep_run
-sweep_record.FIELDS += ("required_by_this_test",)
+sweep_record.RICH_FIELDS += ("required_by_this_test",)
 sys.exit(sweep_run.main(["orch-sweep", *sys.argv[2:]]))' "$ROOT/lib" run --pr "$PR" --head "$HEAD_SHA" --base-ref main --record "$TMP/new.json" --no-comment
   [ "$status" -eq 1 ]
   [[ "$stderr" == *"the record fails its own check"*"missing field required_by_this_test"* ]]

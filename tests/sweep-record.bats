@@ -15,29 +15,47 @@ setup() {
   FIRST_SHA=$(git -C "$REPO" rev-parse HEAD~2)
   HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
   REC="$TMP/record.json"
+  SESSION=11111111-2222-3333-4444-555555555555
+  export CLAUDE_CONFIG_DIR="$TMP/claude" CODEX_HOME="$TMP/codex"
 }
 
 teardown() {
   rm -rf "$TMP"
 }
 
-# record <findings> <validators> <verdicts-json> [head]: writes the record file; BASE, SLICES, AGENTS, MODE and CLEAN override its defaults.
+# record <findings> <ids-json> [head]: writes the record file; BASE overrides its base.
 record() {
-  local ids="" i
-  for ((i = 1; i <= $2; i++)); do ids="${ids:+$ids, }\"agent-$i\""; done
   cat >"$REC" <<JSON
-{"head": "${4:-$HEAD_SHA}", "base": "${BASE:-$ZERO_SHA}", "clean": ${CLEAN:-true}, "mode": "${MODE:-agents}", "slices": ${SLICES:-3}, "sweep_agents": ${AGENTS:-6},
- "validators": $2, "validator_ids": [$ids], "findings": $1, "verdicts": $3}
+{"head": "${3:-$HEAD_SHA}", "base": "${BASE:-$ZERO_SHA}", "findings": $1, "validator_ids": $2, "extra": "ignored"}
 JSON
 }
 
-drop_field() {
-  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); del d[sys.argv[2]]; json.dump(d, open(sys.argv[1], "w"))' "$REC" "$1"
+# claude_agent <id> [brief] [later]: a Claude subagent transcript of SESSION.
+claude_agent() {
+  local dir="$CLAUDE_CONFIG_DIR/projects/-some-project/$SESSION/subagents"
+  mkdir -p "$dir"
+  printf '{"type":"user","message":{"role":"user","content":"%s"' "${2:-finalize-sweep validator $HEAD_SHA}" >"$dir/agent-$1.jsonl"
+  printf '%s\n' '}}' >>"$dir/agent-$1.jsonl"
+  [ -z "${3:-}" ] || printf '{"type":"assistant","message":{"content":"%s"}}\n' "$3" >>"$dir/agent-$1.jsonl"
+}
+
+# codex_agent <agent-path> <parent> [thread-id]: a Codex child rollout.
+codex_agent() {
+  local dir="$CODEX_HOME/sessions/2026/11/06"
+  local thread_id=${3:-child-thread-id}
+  mkdir -p "$dir"
+  printf '{"type":"session_meta","payload":{"id":"child-thread-id","source":{"subagent":{"thread_spawn":{"parent_thread_id":"%s","agent_path":"%s"}}}}}\n' \
+    "$2" "$1" >"$dir/rollout-2026-11-06T10-00-00-$thread_id.jsonl"
+  printf '%s\n' '{"type":"event_msg","payload":{"type":"agent_message","encrypted_content":"gAAAA..."}}' >>"$dir/rollout-2026-11-06T10-00-00-$thread_id.jsonl"
 }
 
 check() {
   cd "$REPO" || return 1
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "${1:-$HEAD_SHA}" ${EXPECT_BASE:+--base "$EXPECT_BASE"}
+  local -a args=(check --record "$REC" --head "${PR_HEAD:-$HEAD_SHA}")
+  [ -z "${EXPECT_BASE:-}" ] || args+=(--base "$EXPECT_BASE")
+  [ -z "${SESSION_ARG-x}" ] || args+=(--session "${SESSION_ARG:-$SESSION}")
+  [ -z "${NO_TRANSCRIPTS:-}" ] || args+=(--no-transcripts)
+  run --separate-stderr "$ROOT/orch-sweep-record" "${args[@]}"
 }
 
 @test "a missing record fails with one stderr line" {
@@ -54,362 +72,271 @@ check() {
   [[ "$stderr" == "ERROR: $REC: not valid JSON"* ]]
 }
 
-@test "a record without a field fails naming it" {
-  record 4 1 '{"FALSE": 4}'
-  drop_field validator_ids
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: missing field validator_ids" ]
-}
-
-@test "a record for an ancestor of the head passes and lists the commits since" {
-  record 4 1 '{"FALSE": 4}' "$FIRST_SHA"
-  check
-  [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "OK: $REC swept $FIRST_SHA; commits since:" ]
-  [ "${#lines[@]}" -eq 3 ]
-  [[ "${lines[1]}" == *" third" ]]
-  [[ "${lines[2]}" == *" second" ]]
-}
-
-@test "a record whose head is not an ancestor fails" {
-  record 4 1 '{"FALSE": 4}' "$HEAD_SHA"
-  check "$FIRST_SHA"
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: swept $HEAD_SHA, which is not an ancestor of the PR head $FIRST_SHA" ]
-}
-
-@test "a SHA git cannot resolve fails" {
-  record 4 1 '{"FALSE": 4}' fedcba9876543210fedcba9876543210fedcba98
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: git cannot resolve fedcba9876543210fedcba9876543210fedcba98" ]
-}
-
-@test "a head that is not a full SHA fails" {
-  record 4 1 '{"FALSE": 4}' --upload-pack=x
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: head '--upload-pack=x' is not a full 40-character SHA" ]
-}
-
-@test "findings with no validator fail" {
-  record 64 0 '{"FALSE": 64}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: 64 findings and no validator started" ]
-}
-
-@test "verdict counts that do not add up to the findings fail" {
-  record 5 1 '{"FALSE": 2, "CONFIRMED_NEW": 2}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: verdicts add up to 4, findings is 5" ]
-}
-
-@test "a valid record passes" {
-  record 5 1 '{"FALSE": 3, "CONFIRMED_NEW": 2}'
-  check
-  [ "$status" -eq 0 ]
-  [ "$output" = "OK: $REC covers $HEAD_SHA" ]
-  [ "$stderr" = "" ]
-}
-
-@test "a sweep with no findings and no validators passes" {
-  record 0 0 '{}'
-  check
-  [ "$status" -eq 0 ]
-}
-
-@test "a count that is not a whole number fails" {
-  record 5 1 '{"FALSE": 5}'
-  sed -i.bak 's/"validators": 1/"validators": "1"/' "$REC"
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: validators must be a non-negative integer" ]
-}
-
-@test "validator ids that do not match the validator count fail" {
-  record 5 3 '{"FALSE": 5}'
-  sed -i.bak 's/"agent-2", "agent-3"//; s/, \]/]/' "$REC"
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: 1 validator_ids for 3 validators" ]
-}
-
-@test "a blank validator id fails" {
-  record 5 1 '{"FALSE": 5}'
-  sed -i.bak 's/"agent-1"/""/' "$REC"
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: validator_ids must be a list of non-empty strings" ]
-}
-
-@test "a verdict outside the skill's list fails naming it" {
-  record 5 1 '{"PENDING": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: unknown verdict PENDING" ]
-}
-
-@test "a record from a dirty tree fails" {
-  CLEAN=false record 5 1 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: $REC: clean must be true"* ]]
-}
-
-@test "a record without the clean field fails" {
-  record 5 1 '{"FALSE": 5}'
-  drop_field clean
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: missing field clean" ]
-}
-
-@test "every verdict the checker accepts is a row of the skill's verdict table" {
-  local verdicts v count=0
-  verdicts=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import sweep_record; print(*sweep_record.VERDICTS, sep="\n")' "$ROOT/lib")
-  while IFS= read -r v; do
-    grep -qF "| \`$v\` |" "$ROOT/skills/finalize-sweep/SKILL.md"
-    count=$((count + 1))
-  done <<<"$verdicts"
-  # shellcheck disable=SC2016 # Backticks in the grep pattern are literal.
-  [ "$count" -eq "$(grep -c '^| `[A-Z_]*` |' "$ROOT/skills/finalize-sweep/SKILL.md")" ]
-}
-
-@test "duplicate validator ids fail" {
-  record 5 2 '{"FALSE": 5}'
-  sed -i.bak 's/"agent-2"/"agent-1"/' "$REC"
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: validator_ids repeat an id" ]
-}
-
-@test "a base that is not a full SHA fails" {
-  BASE=abc123 record 5 1 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: base 'abc123' is not a full 40-character SHA" ]
-}
-
-@test "a base git cannot resolve fails" {
-  BASE=fedcba9876543210fedcba9876543210fedcba98 record 5 1 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: git cannot resolve fedcba9876543210fedcba9876543210fedcba98" ]
-}
-
-@test "a base that is not an ancestor of the swept head fails" {
-  BASE=$HEAD_SHA record 5 1 '{"FALSE": 5}' "$FIRST_SHA"
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: base $HEAD_SHA is not an ancestor of the swept $FIRST_SHA" ]
-}
-
-@test "--base must equal the record's base" {
-  record 5 1 '{"FALSE": 5}'
-  EXPECT_BASE=$HEAD_SHA check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: base is $ZERO_SHA, expected $HEAD_SHA" ]
-}
-
-@test "--base equal to the record's base passes" {
-  record 5 1 '{"FALSE": 5}'
-  EXPECT_BASE=$ZERO_SHA check
-  [ "$status" -eq 0 ]
-}
-
-@test "a sweep with zero slices fails" {
-  SLICES=0 record 5 1 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: slices must be at least 1" ]
-}
-
-@test "a sweep with zero sweep agents fails" {
-  AGENTS=0 record 5 1 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: sweep_agents must be at least 1" ]
-}
-
-@test "a verdict key holding a newline still gives one stderr line" {
-  record 5 1 '{"PENDING\nSECOND": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [ "${#lines[@]}" -eq 0 ]
-  [ "$stderr" = "ERROR: $REC: unknown verdict PENDING\\nSECOND" ]
-}
-
-@test "a --head that is not a full SHA blames the argument, not the record" {
-  record 5 1 '{"FALSE": 5}'
-  check abc123
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: --head 'abc123' is not a full 40-character SHA" ]
-}
-
-@test "a --base that is not a full SHA blames the argument, not the record" {
-  record 5 1 '{"FALSE": 5}'
-  EXPECT_BASE=abc123 check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: --base 'abc123' is not a full 40-character SHA" ]
-}
-
-@test "a failed git log fails instead of passing with no commits" {
-  local real
-  real=$(command -v git)
-  mkdir "$TMP/bin"
-  # shellcheck disable=SC2016 # The fake git expands its own $1 and "$@".
-  printf '#!/bin/sh\n[ "$1" = log ] && exit 1\nexec %s "$@"\n' "$real" >"$TMP/bin/git"
-  chmod +x "$TMP/bin/git"
-  record 4 1 '{"FALSE": 4}' "$FIRST_SHA"
-  PATH="$TMP/bin:$PATH" check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: git log $FIRST_SHA..$HEAD_SHA failed" ]
-}
-
-@test "a serial record with findings passes and says there is no independent validator" {
-  MODE=serial AGENTS=0 record 5 0 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 0 ]
-  [ "$output" = "OK: $REC covers $HEAD_SHA; serial: no independent validator" ]
-}
-
-@test "a serial record in the ancestor case says it on the first line" {
-  MODE=serial AGENTS=0 record 5 0 '{"FALSE": 5}' "$FIRST_SHA"
-  check
-  [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "OK: $REC swept $FIRST_SHA; serial: no independent validator; commits since:" ]
-}
-
-@test "a serial record that counts sweep agents fails" {
-  MODE=serial record 5 0 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: a serial record has no sweep agents, validators or validator ids" ]
-}
-
-@test "a serial record that counts a validator fails" {
-  MODE=serial AGENTS=0 record 5 1 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: a serial record has no sweep agents, validators or validator ids" ]
-}
-
-@test "a serial record with zero slices fails" {
-  MODE=serial AGENTS=0 SLICES=0 record 5 0 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: slices must be at least 1" ]
-}
-
-@test "a mode other than agents or serial fails" {
-  MODE=parallel record 5 1 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: mode must be agents or serial" ]
-}
-
-@test "a record without the mode field fails" {
-  record 5 1 '{"FALSE": 5}'
-  drop_field mode
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: missing field mode" ]
-}
-
-@test "a serial record that lists a validator id fails" {
-  MODE=serial AGENTS=0 record 5 0 '{"FALSE": 5}'
-  sed -i.bak 's/"validator_ids": \[\]/"validator_ids": ["agent-1"]/' "$REC"
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: a serial record has no sweep agents, validators or validator ids" ]
-}
-
-@test "fewer than two sweep agents per slice fail" {
-  SLICES=25 AGENTS=1 record 5 1 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: 1 sweep_agents for 25 slices; each slice starts two" ]
-}
-
-@test "more sweep agents than two per slice pass" {
-  SLICES=3 AGENTS=8 record 5 1 '{"FALSE": 5}'
-  check
-  [ "$status" -eq 0 ]
-}
-
-@test "a negative verdict count fails" {
-  record 64 1 '{"FALSE": 65, "NOT_WORTH_IT": -1}'
-  check
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: verdicts must map each verdict to a count" ]
-}
-
-@test "a record that is not a JSON object fails" {
-  printf '[1, 2]' >"$REC"
+@test "a record that is not an object fails" {
+  printf '[1]' >"$REC"
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: the record must be a JSON object" ]
 }
 
-@test "a record path that cannot be read says so, not bad JSON" {
-  mkdir "$REC"
+@test "a record without a field fails naming it" {
+  printf '{"head": "%s", "base": "%s", "findings": 0}' "$HEAD_SHA" "$ZERO_SHA" >"$REC"
   check
   [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: $REC: cannot read: "* ]]
+  [ "$stderr" = "ERROR: $REC: missing field validator_ids" ]
 }
 
-@test "a record whose head is its base swept nothing and fails" {
-  BASE=$FIRST_SHA record 0 0 '{}' "$FIRST_SHA"
+@test "a head that is not a full SHA fails" {
+  record 0 '[]' abc123
+  check
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"head 'abc123' is not a full 40-character SHA" ]]
+}
+
+@test "a record with no findings and no validators passes and ignores extra fields" {
+  record 0 '[]'
+  check
+  [ "$status" -eq 0 ]
+  [ "$output" = "OK: $REC covers $HEAD_SHA" ]
+}
+
+@test "findings and no validator id fail" {
+  record 4 '[]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: 4 findings and no validator id" ]
+}
+
+@test "findings that are negative or not an integer fail" {
+  record -1 '[]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: findings must be a non-negative integer" ]
+  record true '[]'
+  check
+  [ "$status" -eq 1 ]
+}
+
+@test "validator_ids that is not a list of strings fails" {
+  record 1 '"agent-1"'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator_ids must be a list of strings" ]
+}
+
+@test "a stale head fails and an ancestor head lists the commits since" {
+  record 0 '[]' "$FIRST_SHA"
+  check
+  [ "$status" -eq 0 ]
+  [[ "$output" == "OK: $REC swept $FIRST_SHA; commits since:"* ]]
+  [[ "$output" == *second* && "$output" == *third* ]]
+  PR_HEAD=$FIRST_SHA check
+  [ "$status" -eq 0 ]
+  [ "$output" = "OK: $REC covers $FIRST_SHA" ]
+  record 0 '[]'
+  PR_HEAD=$FIRST_SHA check
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"not an ancestor of the PR head"* ]]
+}
+
+@test "a base that is not an ancestor of the head fails" {
+  BASE=$HEAD_SHA record 0 '[]' "$FIRST_SHA"
+  check
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"is not an ancestor of $FIRST_SHA" ]]
+}
+
+@test "head equal to base fails" {
+  BASE=$HEAD_SHA record 0 '[]'
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: head equals base; the sweep covered an empty diff" ]
 }
 
-@test "an unknown flag fails with one ERROR line and exit 1" {
-  cd "$REPO" || return 1
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --bogus
+@test "a SHA git cannot resolve fails" {
+  record 0 '[]' 1111111111111111111111111111111111111111
+  check
   [ "$status" -eq 1 ]
-  [ "$output" = "" ]
-  [ "$stderr" = "ERROR: unrecognized arguments: --bogus" ]
+  [[ "$stderr" == *"git cannot resolve 1111111111111111111111111111111111111111" ]]
+}
+
+@test "--base must equal the record's base" {
+  record 0 '[]'
+  EXPECT_BASE=$FIRST_SHA check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: base $ZERO_SHA, expected $FIRST_SHA" ]
+  EXPECT_BASE=$ZERO_SHA check
+  [ "$status" -eq 0 ]
+}
+
+@test "a Claude subagent transcript of the session that names the head passes" {
+  claude_agent a1b2c3
+  record 2 '["a1b2c3"]'
+  check
+  [ "$status" -eq 0 ]
+  [ "$output" = "OK: $REC covers $HEAD_SHA" ]
+}
+
+@test "a Codex subagent rollout spawned by the session that names the head passes" {
+  codex_agent "/root/finalize_sweep_validator_${HEAD_SHA:0:12}" "$SESSION"
+  record 2 "[\"/root/finalize_sweep_validator_${HEAD_SHA:0:12}\"]"
+  check
+  [ "$status" -eq 0 ]
+}
+
+@test "a Codex encrypted child rollout validates by its task name" {
+  codex_agent "/root/finalize_sweep_validator_${HEAD_SHA:0:12}" "$SESSION"
+  record 2 "[\"/root/finalize_sweep_validator_${HEAD_SHA:0:12}\"]"
+  check
+  [ "$status" -eq 0 ]
+}
+
+@test "a Codex validator path must name the swept head" {
+  codex_agent /root/correctness "$SESSION"
+  record 2 '["/root/correctness"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: Codex validator /root/correctness must start with /root/finalize_sweep_validator_${HEAD_SHA:0:12}" ]
+}
+
+@test "an id with no transcript fails" {
+  record 2 '["ghost"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator ghost is no supported Claude or Codex subagent transcript of session $SESSION; Pi and Cursor validators are unsupported" ]
+}
+
+@test "a transcript of another session fails" {
+  claude_agent a1b2c3
+  record 2 '["a1b2c3"]'
+  SESSION_ARG=other-session check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator a1b2c3 is no supported Claude or Codex subagent transcript of session other-session; Pi and Cursor validators are unsupported" ]
+}
+
+@test "a Codex rollout spawned by another thread fails" {
+  codex_agent "/root/finalize_sweep_validator_${HEAD_SHA:0:12}" some-other-thread
+  record 2 "[\"/root/finalize_sweep_validator_${HEAD_SHA:0:12}\"]"
+  check
+  [ "$status" -eq 1 ]
+}
+
+@test "a malformed Codex rollout is skipped" {
+  local id=/root/correctness
+  mkdir -p "$CODEX_HOME/sessions/2026/11/06"
+  printf '%s\n' '{"type":"session_meta","payload":{"id":"child-thread-id","source":{"subagent":{"thread_spawn":[]}}}}' >"$CODEX_HOME/sessions/2026/11/06/rollout-2026-11-06T10-00-00-child-thread-id.jsonl"
+  record 2 "[\"$id\"]"
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator $id is no supported Claude or Codex subagent transcript of session $SESSION; Pi and Cursor validators are unsupported" ]
+}
+
+@test "a Claude SHA outside the validator brief fails" {
+  claude_agent a1b2c3 'sweep slice comments' "finalize-sweep validator $HEAD_SHA"
+  record 2 '["a1b2c3"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator a1b2c3 brief must include finalize-sweep validator and name $HEAD_SHA" ]
+}
+
+@test "a Claude validator brief may use text blocks" {
+  local dir="$CLAUDE_CONFIG_DIR/projects/-some-project/$SESSION/subagents"
+  mkdir -p "$dir"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"finalize-sweep validator "},{"type":"text","text":"%s"}]}}\n' "$HEAD_SHA" >"$dir/agent-a1b2c3.jsonl"
+  record 2 '["a1b2c3"]'
+  check
+  [ "$status" -eq 0 ]
+}
+
+@test "a newer valid Codex rollout wins over an older same-path rollout" {
+  local dir="$CODEX_HOME/sessions/2026/11/06"
+  local id="/root/finalize_sweep_validator_${HEAD_SHA:0:12}"
+  codex_agent "$id" "$SESSION" 0-old
+  touch -t 200001010000 "$dir/rollout-2026-11-06T10-00-00-0-old.jsonl"
+  codex_agent "$id" "$SESSION" z-new
+  record 2 "[\"$id\"]"
+  check
+  [ "$status" -eq 0 ]
+}
+
+@test "a transcript written before the head commit fails" {
+  claude_agent a1b2c3
+  touch -t 200001010000 "$CLAUDE_CONFIG_DIR/projects/-some-project/$SESSION/subagents/agent-a1b2c3.jsonl"
+  record 2 '["a1b2c3"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator a1b2c3 was written before commit $HEAD_SHA" ]
+}
+
+@test "an unreadable transcript fails with one ERROR line" {
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/-some-project/$SESSION/subagents/agent-a1b2c3.jsonl"
+  record 2 '["a1b2c3"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "${stderr#"ERROR: $REC: validator a1b2c3 transcript cannot read: "}" != "$stderr" ]
+  [ "$(printf '%s\n' "$stderr" | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "a transcript that does not name the head fails" {
+  claude_agent a1b2c3 'finalize-sweep validator some other commit'
+  record 2 '["a1b2c3"]'
+  check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: validator a1b2c3 brief must include finalize-sweep validator and name $HEAD_SHA" ]
+}
+
+@test "an id with a path separator fails" {
+  record 2 '["../x"]'
+  check
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"is not a plain id" ]]
+}
+
+@test "findings without --session fail" {
+  claude_agent a1b2c3
+  record 2 '["a1b2c3"]'
+  SESSION_ARG='' check
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: $REC: --session <worker session id> is required" ]
+}
+
+@test "--no-transcripts accepts the ids unresolved and says so" {
+  record 2 '["ghost"]'
+  NO_TRANSCRIPTS=1 SESSION_ARG='' check
+  [ "$status" -eq 0 ]
+  [ "$output" = "OK: $REC covers $HEAD_SHA; attestation only" ]
 }
 
 @test "a missing --head fails with one ERROR line and exit 1" {
-  cd "$REPO" || return 1
   run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC"
   [ "$status" -eq 1 ]
-  [ "$output" = "" ]
   [ "$stderr" = "ERROR: the following arguments are required: --head" ]
 }
 
 @test "an unknown subcommand fails with one ERROR line and exit 1" {
-  cd "$REPO" || return 1
   run --separate-stderr "$ROOT/orch-sweep-record" bogus
   [ "$status" -eq 1 ]
-  [ "${#lines[@]}" -eq 0 ]
-  [[ "$stderr" == "ERROR: "* ]]
-  [ "$(printf '%s\n' "$stderr" | wc -l)" -eq 1 ]
-}
-
-@test "a missing --record fails with one ERROR line and exit 1" {
-  cd "$REPO" || return 1
-  run --separate-stderr "$ROOT/orch-sweep-record" check --head "$HEAD_SHA"
-  [ "$status" -eq 1 ]
-  [ "$output" = "" ]
-  [ "$stderr" = "ERROR: the following arguments are required: --record" ]
+  [ "$(printf '%s\n' "$stderr" | grep -c '^ERROR:')" = 1 ]
 }
 
 @test "a control character in a usage error is escaped" {
-  cd "$REPO" || return 1
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" $'--bo\ngus'
+  run --separate-stderr "$ROOT/orch-sweep-record" "$(printf 'bad\nsub')"
   [ "$status" -eq 1 ]
-  [ "$stderr" = 'ERROR: unrecognized arguments: --bo\ngus' ]
+  [ "$(printf '%s\n' "$stderr" | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "the checker runs through a symlink" {
+  mkdir "$TMP/bin"
+  ln -s "$ROOT/orch-sweep-record" "$TMP/bin/orch-sweep-record"
+  record 0 '[]'
+  cd "$REPO" || return 1
+  run "$TMP/bin/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA"
+  [ "$status" -eq 0 ]
 }
 
 # script_record [python statement]: a valid orch-sweep record, then the statement run on it as r.
 script_record() {
+  claude_agent v-1
   python3 - "$REC" "$HEAD_SHA" "$ZERO_SHA" "${1:-pass}" <<'PY'
 import hashlib, json, sys
 path, head, base, change = sys.argv[1:5]
@@ -440,7 +367,7 @@ PY
   script_record
   check
   [ "$status" -eq 0 ]
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --exact
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --session "$SESSION" --exact
   [ "$status" -eq 0 ]
 }
 
@@ -448,7 +375,7 @@ PY
   script_record 'r["head"] = sys.argv[2]; r["tree"]["head"] = r["head"]'
   sed -i.bak "s/$HEAD_SHA/$FIRST_SHA/g" "$REC"
   cd "$REPO"
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --exact
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --session "$SESSION" --exact
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: swept $FIRST_SHA, not the exact head $HEAD_SHA" ]
 }
@@ -651,4 +578,65 @@ PY
   check
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: $REC: the findings hold RESPECT_DROP 1, verdicts says 0" ]
+}
+
+@test "script records also require the session-bound validator transcript" {
+  script_record
+  rm -f "$CLAUDE_CONFIG_DIR/projects/-some-project/$SESSION/subagents/agent-v-1.jsonl"
+  check
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"is no supported Claude or Codex subagent transcript"* ]]
+}
+
+@test "script records retain strict clean count and verdict metadata checks" {
+  script_record
+  cd "$REPO" || return 1
+  run python3 - "$ROOT/orch-sweep-record" "$REC" "$HEAD_SHA" "$SESSION" <<'PY'
+import copy, json, subprocess, sys
+checker, path, head, session = sys.argv[1:]
+original = json.load(open(path))
+cases = [
+    ({"clean": False}, None, "clean must be true"),
+    ({}, "clean", "missing field clean"),
+    ({"mode": "unknown"}, None, "mode must be agents or serial"),
+    ({}, "mode", "missing field mode"),
+    ({"slices": 0}, None, "slices must be at least 1"),
+    ({"sweep_agents": 0}, None, "sweep_agents must be at least 1"),
+    ({"sweep_agents": 3}, None, "each slice starts two"),
+    ({"validator_ids": [""]}, None, "validator_ids must be a list of non-empty strings"),
+    ({"validator_ids": ["v-1", "v-2"]}, None, "2 validator_ids for 1 validators"),
+    ({"validator_ids": ["v-1", "v-1"], "validators": 2}, None, "validator_ids repeat an id"),
+    ({"validator_ids": [], "validators": 0}, None, "3 findings and no validator id"),
+    ({"verdicts": {"unknown": 3}}, None, "unknown verdict unknown"),
+    ({"verdicts": {"FALSE": -1}}, None, "verdicts must map each verdict to a count"),
+    ({"verdicts": {"FALSE": True}}, None, "verdicts must map each verdict to a count"),
+    ({"verdicts": {"FALSE": 2}}, None, "verdicts add up to 2, findings is 3"),
+]
+for field in ("slices", "sweep_agents", "validators", "findings"):
+    for value in (-1, True, 0.5):
+        cases.append(({field: value}, None, f"{field} must be a non-negative integer"))
+for changes, drop, expected in cases:
+    record = copy.deepcopy(original)
+    record.update(changes)
+    if drop:
+        del record[drop]
+    with open(path, "w") as out:
+        json.dump(record, out)
+    result = subprocess.run([checker, "check", "--record", path, "--head", head, "--session", session], capture_output=True, text=True)
+    assert result.returncode == 1 and expected in result.stderr, (changes, drop, expected, result.returncode, result.stderr)
+PY
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a failed ordinary-record git log cannot pass the check" {
+  record 0 '[]'
+  mkdir "$TMP/bin"
+  real_git=$(command -v git)
+  # shellcheck disable=SC2016 # The fake git expands its own arguments.
+  printf '#!/bin/sh\n[ "$1" != log ] || exit 1\nexec "%s" "$@"\n' "$real_git" >"$TMP/bin/git"
+  chmod +x "$TMP/bin/git"
+  PATH="$TMP/bin:$PATH" check
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"git log $HEAD_SHA..$HEAD_SHA failed" ]]
 }
