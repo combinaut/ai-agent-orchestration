@@ -378,6 +378,32 @@ fork_head_missing_from_pull_ref() {
   [ "$(dispatch_state)" = 'True "retry"' ]
 }
 
+@test "a gate outage after a posted approval keeps a caller pane pending" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PANE=w9-p5 GATE_UNAVAILABLE=1 dispatch
+  echo "$output"
+  [ "$status" -eq 0 ]
+  contains "$output" 'LASTREVIEW APPROVED'
+  contains "$output" 'LEFT OPEN w9-p5'
+  not_contains "$output" 'CLOSED '
+  not_contains "$output" 'REMOVED '
+  not_contains "$output" 'RETRYABLE'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "title": "", "body": "", "isDraft": False,
+      "mergeable": "MERGEABLE", "headRefOid": sys.argv[3], "commits": {"nodes": []}}
+ledger = json.load(open(sys.argv[2]))
+assert prs.needs_dispatch(pr, ledger) == (False, None), ledger
+' "$ROOT/$SKILL_DIR/scripts" "$HOME/.cache/review-prs/dispatched.json" "$SHA"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
 @test "an APPROVE that fails the sweep gate after the turn blocks the head" {
   stub_review_tools
   : >"$TMP/none.toml"

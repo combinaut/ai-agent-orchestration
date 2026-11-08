@@ -22,7 +22,7 @@ Goal: when you pass the PR, a human reviewer finds nothing left to clean up.
 ```
 
 - **claim**: one sentence, from the PR body, a commit message, a comment or your own reading.
-- **file:line opened**: a real `file:line` you opened at the head. No line, no row.
+- **file:line opened**: a real `file:line` you opened at the head. For a PR-text claim the code cannot verify, name the claim in the PR title or body and the missing evidence instead; do not invent a code line.
 - **verdict**: `confirmed`, `incorrect` or `unresolved`. An `unresolved` row names the missing evidence (what to run, read or ask) in the evidence column.
 - **evidence**: what you saw or ran, with the real output. Grade what the code does, not how the author got there.
 - **rung**: the highest rung you reached for that fact.

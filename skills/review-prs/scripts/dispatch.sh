@@ -200,7 +200,7 @@ retry_completed() {
     echo "LEFT OPEN $pane"
     return
   fi
-  if [ -n "$opened" ]; then close_opened || return 1; else echo "LEFT OPEN $pane"; fi
+  close_opened || return 1
   mark "retry" && echo "RETRYABLE $sha"
 }
 block_hook_screen() {

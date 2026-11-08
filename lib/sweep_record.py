@@ -330,7 +330,9 @@ def git(*args, retry_errors=False):
     return done.stdout if done.returncode == 0 else None
 
 
-def since(path, swept, base, head, retry_errors=False):
+def since(
+    path, swept, base, head, retry_errors=False, *, manual=False, expected_base=None
+):
     """(why, commits): why the record's commits do not fit head, else the log of the commits after the swept one."""
     for sha in (swept, base, head):
         if (
@@ -344,11 +346,17 @@ def since(path, swept, base, head, retry_errors=False):
             is None
         ):
             return f"{path}: git cannot resolve {sha}", ""
+    if manual:
+        if swept == base:
+            return f"{path}: head equals base; the sweep covered an empty diff", ""
+        if expected_base is not None and expected_base != base:
+            return f"{path}: base {base}, expected {expected_base}", ""
     if (
         git("merge-base", "--is-ancestor", base, swept, retry_errors=retry_errors)
         is None
     ):
-        return f"{path}: base {base} is not an ancestor of the swept {swept}", ""
+        target = swept if manual else f"the swept {swept}"
+        return f"{path}: base {base} is not an ancestor of {target}", ""
     if (
         git("merge-base", "--is-ancestor", swept, head, retry_errors=retry_errors)
         is None
@@ -573,25 +581,9 @@ def load(path):
 
 def record_since(path, record, head, base):
     """(why, commits): why the record does not fit the PR head, else the log after the swept commit."""
-    swept = record["head"]
-    for sha in (swept, record["base"], head):
-        if git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}") is None:
-            return f"{path}: git cannot resolve {sha}", ""
-    if swept == record["base"]:
-        return f"{path}: head equals base; the sweep covered an empty diff", ""
-    if base is not None and base != record["base"]:
-        return f"{path}: base {record['base']}, expected {base}", ""
-    if git("merge-base", "--is-ancestor", record["base"], swept) is None:
-        return f"{path}: base {record['base']} is not an ancestor of {swept}", ""
-    if git("merge-base", "--is-ancestor", swept, head) is None:
-        return (
-            f"{path}: swept {swept}, which is not an ancestor of the PR head {head}",
-            "",
-        )
-    commits = git("log", "--oneline", f"{swept}..{head}")
-    if commits is None:
-        return f"{path}: git log {swept}..{head} failed", ""
-    return None, commits
+    return since(
+        path, record["head"], record["base"], head, manual=True, expected_base=base
+    )
 
 
 def claude_transcript(session, agent_id):

@@ -90,7 +90,7 @@ VERDICTS_SCHEMA = {
 RULES = """Rules. They override any step of the skill that edits files or asks for approval.
 - No context. Work only from the skill, the file list and the code. Do not read any PR, issue, plan, commit message, blame or earlier finding.
 - Report only. Create, change or delete no file in the repository, even temporarily, and run no tests.
-- Evidence. Verify every finding against the code at file:line, naming the callers or the covering test. Drop anything unverified. Report a behaviour bug you notice in category real-bug, with the concrete failure.
+- Evidence. Verify every finding against the code at file:line, naming the callers or the covering test. Drop anything unverified, except a pr-text claim whose missing evidence is the finding: name that evidence instead. Report a behaviour bug you notice in category real-bug, with the concrete failure.
 - Answer with one JSON object and nothing else: {"findings": [{"file", "line", "category", "summary", "evidence"}]}. Use line 0 when no line applies, and an empty list when you find nothing."""
 CLASSES = """Class each finding: fix (the code, comment, test, name or PR text is false, misleading or redundant; dead or duplicate code or specs; a message that blames the wrong cause) or nit (pure style or taste, nothing false or misleading)."""
 
@@ -613,7 +613,7 @@ A real-bug finding must be traced to a concrete failure, otherwise it is FALSE o
 def validator_prompt(chunk, context, merge_base, head, diff):
     return f"""ROLE: validator
 Validate the sweep findings below for a pull request at commit {head} (merge base {merge_base}). The PR diff is in {diff}; the code at {head} is in the current directory. Report only: create, change or delete no file in the repository.
-For each finding check: is it true of the code, was it raised before and with what outcome (the PR comments below hold earlier sweeps; a finding rejected once on this PR is never raised again: RESPECT_DROP), and does the plan allow it or did this PR not cause it.
+For each finding check: is it true of the code, was it raised before and with what outcome (the PR comments below hold earlier sweeps; use RESPECT_DROP only when the earlier reason still holds, otherwise DISPUTED_DROP), and does the plan allow it or did this PR not cause it.
 {VERDICT_TABLE}
 {CLASSES}
 Answer with one JSON object and nothing else: {{"verdicts": [{{"id", "verdict", "class", "reason"}}]}}, exactly one entry per finding id.

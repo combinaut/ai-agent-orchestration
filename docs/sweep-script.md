@@ -41,7 +41,7 @@ Before the agents start, after the sweep agents, and after the validators, the s
 
 ## Every head
 
-Every run sweeps the whole PR diff from the merge base, also after a fix push. The validators get the findings and verdicts of the earlier sweep comments, to judge `RESPECT_DROP`: each distinct finding and verdict once, its author, file, category and summary cut to 40, 200, 60 and 300 characters, rejections first, at most 60000 characters in all with the notice of how many were left out; a finding that does not fit is skipped and later ones that fit are kept. The 60000 bound is for this history only. A sweep comment with a malformed finding counts as an ordinary comment. They also get the latest 50 other comments, review-thread comments and review summaries, each cut to 4000 characters. Nothing in the script itself stops a rejected finding from being raised again.
+Every run sweeps the whole PR diff from the merge base, also after a fix push. The validators get the findings and verdicts of the earlier sweep comments, to judge `RESPECT_DROP`: each distinct finding and verdict once, its author, file, category and summary cut to 40, 200, 60 and 300 characters, rejections first, at most 60000 characters in all with the notice of how many were left out; a finding that does not fit is skipped and later ones that fit are kept. The 60000 bound is for this history only. A sweep comment with a malformed finding counts as an ordinary comment. They also get the latest 50 other comments, review-thread comments and review summaries, each cut to 4000 characters. An earlier rejection is `RESPECT_DROP` only when its reason still holds; when the reason no longer holds, the validator uses `DISPUTED_DROP`. Nothing in the script itself stops a rejected finding from being raised again.
 
 ## Record and comment
 
@@ -71,12 +71,14 @@ Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- or
 
 `orch-sweep-record gate --pr <url> --head <sha>` runs in the PR's clone and passes (exit 0) when the PR head is `<sha>` and the newest `orch-sweep` comment by the `gh` login for that exact head holds a full record that:
 
-- passes the checks of `orch-sweep-record check`, its git checks included: the base resolves and is an ancestor of the head;
+- passes the script-record schema and Git checks: the base resolves and is an ancestor of the head;
 - has the base the PR's current base branch gives: the merge base of the head and `<remote>/<base>`, the remote being the clone's `origin` or `upstream` that is the PR repo (the local `<base>` when neither is), so a PR retargeted after the sweep fails until a new sweep;
 - equals the copy in `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json`;
 - has no open kept fix finding.
 
 When the newest sweep comment for that head is a text sweep, its record must pass the same checks against `<head>.text.json` with no open fix finding, and the full record may hold open fix findings only in the `pr-text` category; an older text sweep is not checked. The newest record's `pr_text_sha256`, the hash of the title and body that sweep read, must equal the live title and body; after an edit, `orch-sweep run --kind text` sweeps the new text. A finding exits 1 with one `ERROR:` line; a gate that cannot read GitHub, git or the local record copy exits 2 with `ERROR: cannot check the gate: ...`, and `post-review` exits 2 the same way and posts nothing.
+
+`orch-sweep-record check` additionally validates session-bound validator transcripts when the record has findings; the gate does not run that transcript phase.
 
 The local copy shows that the comment's record is the one a run wrote; anyone who can write the cache and post as the `gh` login can fake both.
 
