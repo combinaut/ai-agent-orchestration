@@ -831,9 +831,15 @@ def run(args):
     top = Path.cwd().resolve()
     for label, path in (
         ("--record", args.record),
-        ("the record cache", sweep_record.cache_path(repo, number, args.head)),
+        (
+            "the record cache",
+            sweep_record.cache_path(repo, number, args.head, args.kind),
+        ),
     ):
-        if path and Path(path).resolve().is_relative_to(top):
+        if path and (
+            Path(path).resolve().is_relative_to(top)
+            or Path(path).parent.resolve().is_relative_to(top)
+        ):
             raise Failure(f"{label} {path} is inside the checkout; write it outside")
     if (
         args.kind == "text"
@@ -978,6 +984,7 @@ def run(args):
             raise Failure(
                 f"the record fails its own check: {why.replace(staged[0], str(paths[0]))}"
             )
+        compare(before, "record publication")
         for temp, path in zip(staged, paths):
             os.replace(temp, path)
         staged = []

@@ -661,6 +661,59 @@ sys.exit(sweep_run.main(["orch-sweep", *sys.argv[2:]]))' "$ROOT/lib" run --pr "$
   [ -z "$(find "$TMP" -mindepth 1 -maxdepth 1 -name '.*')" ]
 }
 
+late_record_change() {
+  local mode=$1
+  local cache="$XDG_CACHE_HOME/review-prs/sweeps/acme/app/7"
+  mkdir -p "$cache"
+  printf older >"$cache/$HEAD_SHA.json"
+  cd "$REPO" || return 1
+  run --separate-stderr python3 -c 'import subprocess, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import sweep_record, sweep_run
+plain = sweep_record.problem
+def changed(*args, **kwargs):
+    result = plain(*args, **kwargs)
+    with Path("lib/alpha.py").open("a") as out: out.write("late change\n")
+    if sys.argv[2] == "commit":
+        subprocess.run(["git", "add", "lib/alpha.py"], check=True)
+        subprocess.run(["git", "commit", "-qm", "late commit"], check=True)
+    return result
+sweep_record.problem = changed
+sys.exit(sweep_run.main(["orch-sweep", *sys.argv[3:]]))' "$ROOT/lib" "$mode" run --pr "$PR" --head "$HEAD_SHA" --base-ref main --record "$TMP/new.json"
+  echo "$output" "$stderr"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"tree changed"*"record publication"* ]]
+  [ "$(cat "$cache/$HEAD_SHA.json")" = older ]
+  [ ! -e "$TMP/new.json" ]
+  [ ! -e "$TMP/posted.json" ]
+  [ "$(find "$cache" -mindepth 1 -maxdepth 1 -exec basename {} \;)" = "$HEAD_SHA.json" ]
+}
+
+@test "a dirty edit after record validation prevents publication" {
+  late_record_change dirty
+}
+
+@test "a clean commit after record validation prevents publication" {
+  late_record_change commit
+  [ -z "$(git -C "$REPO" status --porcelain)" ]
+  [ "$(git -C "$REPO" rev-parse HEAD)" != "$HEAD_SHA" ]
+}
+
+@test "an output symlink inside the checkout cannot hide its publication directory" {
+  ln -s "$TMP/external.json" "$REPO/record-link.json"
+  commit symlink
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  sweep run --pr "$PR" --head "$HEAD_SHA" --base-ref main --record "$REPO/record-link.json"
+  echo "$output" "$stderr"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"--record "*"is inside the checkout"* ]]
+  [ -L "$REPO/record-link.json" ]
+  [ -z "$(git -C "$REPO" status --porcelain)" ]
+  [ ! -e "$TMP/agent.calls" ]
+  [ ! -e "$TMP/posted.json" ]
+}
+
 @test "a relative record path is relative to the directory the sweep starts in" {
   name=$(basename "$TMP")
   cd "$REPO/lib"
