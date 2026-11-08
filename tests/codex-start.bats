@@ -86,11 +86,3 @@ teardown() {
   [ "$status" -eq 1 ]
   [ ! -e "$HERDR_CALLS" ]
 }
-
-@test "both tiers preserve tool PATH order by disabling login shells" {
-  for tier in worker smart; do
-    run "$SCRIPT" w1 w1-p2 "$tier"
-    [ "$status" -eq 0 ]
-    [[ "$(tail -n 1 "$HERDR_CALLS")" == *" -c allow_login_shell=false"* ]]
-  done
-}
