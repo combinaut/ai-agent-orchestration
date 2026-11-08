@@ -354,6 +354,14 @@ assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_S
   [ -f "$XDG_CACHE_HOME/review-prs/sweeps/acme/app/7/$HEAD_SHA.json" ]
 }
 
+@test "the isolated posting helper imports only the trusted library" {
+  printf 'raise RuntimeError("checkout import")\n' >"$REPO/subprocess.py"
+  run python3 -I "$ROOT/lib/github_write_isolated.py" --timeout 1 api
+  [ "$status" -ne 0 ]
+  [[ "$stderr" != *"ModuleNotFoundError: No module named 'github_poll'"* ]]
+  [[ "$stderr" != *"checkout import"* ]]
+}
+
 @test "a run after a fix push sweeps the whole PR diff again" {
   run_sweep --no-comment
   write lib/delta.py 4

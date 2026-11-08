@@ -963,7 +963,7 @@ def run(args):
     if not args.no_comment:
         body = fitting_body(record)
         posted = subprocess.run(
-            [sys.executable, "-I", str(LIB / "github_write.py"), "--timeout", "240", "api", "-X", "POST",
+            [sys.executable, "-I", str(LIB / "github_write_isolated.py"), "--timeout", "240", "api", "-X", "POST",
              f"repos/{repo}/issues/{number}/comments", "--input", "-"],
             input=json.dumps({"body": body}), capture_output=True, text=True,
         )  # fmt: skip
