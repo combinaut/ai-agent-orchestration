@@ -69,24 +69,17 @@ Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- or
 
 ## The gate
 
-`orch-sweep-record gate --pr <url> --head <sha>` runs in the PR's clone and passes (exit 0) when the PR head is `<sha>` and the newest `orch-sweep` comment by the `gh` login for that exact head holds a full record that:
+`orch-sweep-record gate --pr <url> --head <sha>` checks the exact live PR head and the newest trusted published full record (reviewer or PR author). It validates schema, Git ancestry and the merge base using GitHub's live `base.sha`, current title/body hash and undisputed fix findings. Missing base objects or GitHub/Git failures exit 2; fetch the base and retry later. No local cache equality or local allow-file lookup is required: collaborators are trusted to publish truthful records, including approved deviations.
 
-- passes the script-record schema and Git checks: the base resolves and is an ancestor of the head;
-- has the base the PR's current base branch gives: the merge base of the head and `<remote>/<base>`, the remote being the clone's `origin` or `upstream` that is the PR repo (the local `<base>` when neither is), so a PR retargeted after the sweep fails until a new sweep;
-- equals the copy in `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json`;
-- has no open kept fix finding.
+A newest text sweep can supersede PR-text findings in the full record, but cannot clear code fixes. Its own undisputed fixes still block. An older text sweep does not override a newer full sweep. Disputes are visible review-body lines: `Sweep dispute <sweep-comment-id>/<finding-id>: <specific code reason>`. Empty reasons, different sweep comments and reviews of other heads do not count. `post-review` evaluates its supplied body; later gate checks read the reviewer's latest submitted review at that head.
 
-When the newest sweep comment for that head is a text sweep, its record must pass the same checks against `<head>.text.json` with no open fix finding, and the full record may hold open fix findings only in the `pr-text` category; an older text sweep is not checked. The newest record's `pr_text_sha256`, the hash of the title and body that sweep read, must equal the live title and body; after an edit, `orch-sweep run --kind text` sweeps the new text. A finding exits 1 with one `ERROR:` line; a gate that cannot read GitHub, git or the local record copy exits 2 with `ERROR: cannot check the gate: ...`, and `post-review` exits 2 the same way and posts nothing.
+`review.finalize_commands = []` skips record checks, while review posting still pins and checks the requested head. Dispatch checks for reusable evidence before starting agents, never sweeps unchanged-head re-requests, and does not rerun a sweep merely because its findings need assessment. The independent review supplies that assessment.
 
-`orch-sweep-record check` additionally validates session-bound validator transcripts when the record has findings; the gate does not run that transcript phase.
-
-The local copy shows that the comment's record is the one a run wrote; anyone who can write the cache and post as the `gh` login can fake both.
-
-`orch-sweep post-review` reads `{"body": "...", "comments": [...]}` on stdin and posts the review pinned to `--head` through `lib/github_write.py`. For APPROVE it runs the gate first and posts nothing when the gate fails.
+`orch-sweep post-review` reads `{body, comments}` on stdin, gates APPROVE and pins `commit_id` to `--head`. Tool failures, including uncertain review-POST outcomes, exit 2; do not post a replacement verdict or replay an uncertain request.
 
 ## Deviations
 
-The only deviation is a sweep over 25 slices. The user allows it for one head with `orch-sweep allow`, which reads a typed `yes` from `/dev/tty` and stops without a terminal; it writes `<head>.allow.json` next to the record copy. A run over 25 slices continues only when that file names `slices-over-25` and the head; the record's `deviation` then holds the reason, the time and the file's sha256, and the comment says "Deviation approved by the user". The gate accepts that record only while the file's hash still matches. A terminal can be faked (`script`), so this proves a terminal answered, not who typed.
+A sweep over 25 slices still requires `orch-sweep allow` with typed terminal confirmation at the producer. Its record contains the approved deviation. Consumers trust the author's/reviewer's published attestation rather than requiring the producer's local allow file. This is not cryptographic proof that a review ran.
 
 ## Exit codes
 

@@ -1083,7 +1083,7 @@ def cmd_mark_dispatched(args, _scope, _label):
         known = heads(data.get(args.url) or {})
         key = claim_key(known, args.sha, args.text)
         previous = (known.get(key) or {}).get("previous")
-        if args.state == "pending" and previous:
+        if args.state in ("pending", "blocked") and previous:
             record["previous"] = previous
         set_head(data, args.url, key, record)
 

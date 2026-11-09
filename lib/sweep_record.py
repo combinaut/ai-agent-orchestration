@@ -385,10 +385,6 @@ def cache_path(repo, number, head, kind="full"):
     return root / "review-prs" / "sweeps" / repo / str(number) / name
 
 
-def canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"))
-
-
 def file_hash(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -408,7 +404,7 @@ def comment_record(body):
 
 
 class GateError(Exception):
-    """A gate that cannot read what it checks: GitHub, git or the local record copy."""
+    """A gate that cannot read GitHub, Git or its settings."""
 
 
 def gh_json(*args):
@@ -429,55 +425,55 @@ def gh_json(*args):
         raise GateError(f"gh {' '.join(args)}: not JSON: {error}") from error
 
 
-def record_problem(record, repo, number, head):
-    """Why a comment's record fails the gate's checks of its own, else None."""
+def record_problem(record, head):
+    """Why a published record fails schema validation, else None."""
     with tempfile.TemporaryDirectory(prefix="orch-gate-") as scratch:
         path = Path(scratch, "record.json")
         path.write_text(json.dumps(record))
         why, _ = problem(str(path), head)
-    kind = record.get("kind")
-    if why:
-        return f"the {kind} sweep record of {head}: {why.split(': ', 1)[1]}"
-    copy = cache_path(repo, number, head, kind)
-    try:
-        cached = json.loads(copy.read_text())
-    except (OSError, ValueError):
-        raise GateError(
-            f"no readable local copy of the {kind} sweep record at {copy}; orch-sweep run writes it"
-        )
-    if canonical(cached) != canonical(record):
-        return f"the {kind} sweep record in the comment differs from the local copy at {copy}"
-    deviation = record["deviation"]
-    if deviation is not None:
-        allow = cache_path(repo, number, head, "allow")
-        try:
-            allowed = file_hash(allow)
-        except OSError:
-            return f"the record names the deviation {deviation['what']}, and the user's allow file {allow} is missing"
-        if allowed != deviation["sha256"]:
-            return (
-                f"the user's allow file {allow} does not match the record's deviation"
-            )
-    return None
+    return (
+        f"the {record.get('kind')} sweep record of {head}: {why.split(': ', 1)[1]}"
+        if why
+        else None
+    )
 
 
-def pr_merge_base(repo, base_ref, head):
-    """The merge base of head and <remote>/<base_ref>, the remote being the clone's one for repo (origin or upstream); the local <base_ref> when no remote is; None when git cannot tell."""
+def finalize_enabled():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import orch_settings
 
     try:
-        remote = orch_settings.matching_remote(".", repo)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    ref = f"refs/remotes/{remote}/{base_ref}" if remote else f"refs/heads/{base_ref}"
-    if git("rev-parse", "--verify", "--quiet", ref) is None:
-        return None
-    found = git("merge-base", ref, head)
-    return found.strip() if found else None
+        return bool(orch_settings.load_repo(".")["ORCH_REVIEW_FINALIZE_COMMANDS"])
+    except (orch_settings.ConfigError, OSError) as error:
+        raise GateError(f"cannot read finalize settings: {error}") from error
 
 
-def gate(url, head):
+def pr_merge_base(base, head):
+    if not isinstance(base, str) or not SHA.fullmatch(base):
+        raise GateError("the PR response has no valid base.sha")
+    if (
+        git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}", retry_errors=True)
+        is None
+    ):
+        raise GateError(f"git cannot resolve live base {base}; fetch the base branch")
+    found = git("merge-base", base, head, retry_errors=True)
+    if not found:
+        raise GateError(
+            f"git cannot find the merge base of live base {base} and {head}"
+        )
+    return found.strip()
+
+
+def review_disputes(body):
+    return {
+        (int(comment), finding.strip())
+        for comment, finding, _ in re.findall(
+            r"^Sweep dispute ([0-9]+)/([^:\n]+):[ \t]+(\S[^\n]*)$", body or "", re.M
+        )
+    }
+
+
+def gate(url, head, review_body=None):
     """Why the PR at url may not be approved at head, else None; raises GateError when GitHub cannot be read."""
     match = PR_URL.fullmatch(url)
     if not match:
@@ -489,29 +485,31 @@ def gate(url, head):
     live = (pr.get("head") or {}).get("sha")
     if live != head:
         return f"the PR head is {live}, not {head}"
+    if not finalize_enabled():
+        return None
     base_ref = (pr.get("base") or {}).get("ref")
-    merge_base = pr_merge_base(repo, base_ref, head) if base_ref else None
-    if merge_base is None:
-        raise GateError(
-            f"git cannot find the merge base of the PR base {base_ref!r} and {head}; fetch the base branch"
-        )
+    merge_base = pr_merge_base((pr.get("base") or {}).get("sha"), head)
     me = gh_json("api", "user").get("login")
+    trusted = {me, (pr.get("user") or {}).get("login")} - {None}
+    if not me:
+        raise GateError("cannot read the reviewer login")
     pages = gh_json(
         "api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"
     )
     order = []
     for comment in (c for page in pages for c in page):
-        if (comment.get("user") or {}).get("login") != me:
+        if (comment.get("user") or {}).get("login") not in trusted:
             continue
         record = comment_record(comment.get("body") or "")
         if record and record.get("head") == head and record.get("kind") in KINDS:
-            order.append(record)
-    latest = {record["kind"]: record for record in order}
+            order.append((record, comment.get("id")))
+    latest = {record["kind"]: (record, cid) for record, cid in order}
     if "full" not in latest:
         return f"no full orch-sweep comment by {me} for the exact head {head}"
-    full, newest = latest["full"], order[-1]
+    full, full_id = latest["full"]
+    newest, newest_id = order[-1]
     for record in [full] + ([newest] if newest["kind"] == "text" else []):
-        why = record_problem(record, repo, number, head)
+        why = record_problem(record, head)
         if why:
             return why
         why, _ = since(
@@ -527,20 +525,44 @@ def gate(url, head):
             return f"the PR base changed since the {record['kind']} sweep: it swept from {record['base']}, and {base_ref} gives {merge_base}; run orch-sweep run"
     if newest.get("pr_text_sha256") != text_sha(pr):
         return f"the PR title or body changed since the {newest['kind']} sweep of {head}; run orch-sweep run --kind text"
-    if newest["kind"] == "text":
-        code = sum(
-            1
-            for i in full["items"]
-            if i["class"] == "fix" and i["category"] != "pr-text"
+    has_fixes = full["open_fix"] or newest["open_fix"]
+    if review_body is None and has_fixes:
+        reviews = gh_json(
+            "api", "--paginate", "--slurp", f"repos/{repo}/pulls/{number}/reviews"
         )
-        if code:
-            return f"the full sweep of {head} has {code} open fix findings outside the PR text"
-        if newest["open_fix"]:
-            return (
-                f"the text sweep of {head} has {newest['open_fix']} open fix findings"
+        own = [
+            r
+            for page in reviews
+            for r in page
+            if (r.get("user") or {}).get("login") == me
+            and r.get("commit_id") == head
+            and r.get("submitted_at")
+        ]
+        review_body = (
+            max(own, key=lambda r: r["submitted_at"]).get("body") if own else ""
+        )
+    disputes = review_disputes(review_body)
+    for record, cid in [(full, full_id)] + (
+        [(newest, newest_id)] if newest["kind"] == "text" else []
+    ):
+        count = sum(
+            1
+            for item in record["items"]
+            if item["class"] == "fix"
+            and not (
+                record is full
+                and newest["kind"] == "text"
+                and item["category"] == "pr-text"
             )
-    elif full["open_fix"]:
-        return f"the full sweep of {head} has {full['open_fix']} open fix findings"
+            and (cid, item["id"]) not in disputes
+        )
+        if count:
+            suffix = (
+                " outside the PR text"
+                if record is full and newest["kind"] == "text"
+                else ""
+            )
+            return f"the {record['kind']} sweep of {head} has {count} open fix findings{suffix}"
     return None
 
 

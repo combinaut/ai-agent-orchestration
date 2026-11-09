@@ -1070,7 +1070,7 @@ def post_review(args):
         raise Failure('the review on stdin is {"body": "...", "comments": [...]}')
     if args.event == "APPROVE":
         try:
-            why = sweep_record.gate(args.pr, args.head)
+            why = sweep_record.gate(args.pr, args.head, review_body=payload["body"])
         except sweep_record.GateError as error:
             raise Failure(
                 f"APPROVE refused: cannot check the gate: {error}", 2
@@ -1083,14 +1083,21 @@ def post_review(args):
         "body": payload["body"],
         "comments": payload.get("comments", []),
     }
-    posted = subprocess.run(
-        [sys.executable, str(LIB / "github_write.py"), "--timeout", "240", "api", "-X", "POST",
-         f"repos/{repo}/pulls/{number}/reviews", "--input", "-"],
-        input=json.dumps(review), capture_output=True, text=True,
-    )  # fmt: skip
+    try:
+        posted = subprocess.run(
+            [sys.executable, str(LIB / "github_write.py"), "--timeout", "240", "api", "-X", "POST",
+             f"repos/{repo}/pulls/{number}/reviews", "--input", "-"],
+            input=json.dumps(review), capture_output=True, text=True,
+        )  # fmt: skip
+    except (OSError, subprocess.SubprocessError) as error:
+        raise Failure(f"review POST outcome unknown: {error}", 2) from error
     if posted.returncode:
-        raise Failure(f"posting the review failed: {posted.stderr.strip()}")
-    print(f"REVIEW {args.event} {json.loads(posted.stdout).get('html_url', '')}")
+        raise Failure(f"review POST outcome unknown: {posted.stderr.strip()}", 2)
+    try:
+        review_url = json.loads(posted.stdout).get("html_url", "")
+    except (ValueError, AttributeError) as error:
+        raise Failure("review POST outcome unknown: invalid response", 2) from error
+    print(f"REVIEW {args.event} {review_url}")
     return 0
 
 

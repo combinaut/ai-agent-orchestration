@@ -12,6 +12,9 @@ setup() {
     ln -s "$ROOT/tests/fixtures/sweep-agent.py" "$TMP/bin/$agent"
   done
   stub_gh
+  export ORCH_CONFIG="$TMP/none.toml"
+  : >"$ORCH_CONFIG"
+  unset ORCH_REVIEW_FINALIZE_COMMANDS
   export PATH="$TMP/bin:$PATH" ORCH_CODEX_WORKER_MODEL=gpt-test ORCH_CLAUDE_TIERS=haiku,sonnet,opus
   export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=t GIT_CONFIG_KEY_1=user.email GIT_CONFIG_VALUE_1=t@example.com
   REPO="$TMP/repo"
@@ -28,6 +31,7 @@ setup() {
   HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
   PR=https://github.com/acme/app/pull/7
   printf %s "$HEAD_SHA" >"$TMP/pr_head"
+  printf %s "$BASE_SHA" >"$TMP/pr_base_sha"
 }
 
 teardown() {
@@ -52,7 +56,7 @@ stub_gh() {
 printf '%s\n' "$*" >>"$TMP/gh.calls"
 [ -z "${GH_DOWN:-}" ] || { echo "gh down" >&2; exit 1; }
 case "$*" in
-  'api repos/acme/app/pulls/7') printf '{"title":"Add alpha","body":"%s","base":{"ref":"%s"},"head":{"sha":"%s"}}\n' "$(cat "$TMP/pr_body" 2>/dev/null || echo 'Adds alpha and its test.')" "$(cat "$TMP/pr_base" 2>/dev/null || echo main)" "$(cat "$TMP/pr_head" 2>/dev/null)" ;;
+  'api repos/acme/app/pulls/7') printf '{"title":"Add alpha","body":"%s","user":{"login":"author"},"base":{"ref":"%s","sha":"%s"},"head":{"sha":"%s"}}\n' "$(cat "$TMP/pr_body" 2>/dev/null || echo 'Adds alpha and its test.')" "$(cat "$TMP/pr_base" 2>/dev/null || echo main)" "$(cat "$TMP/pr_base_sha")" "$(cat "$TMP/pr_head" 2>/dev/null)" ;;
   'api user') echo '{"login":"me"}' ;;
   'api --paginate --slurp repos/acme/app/issues/7/comments') cat "$TMP/comments.json" 2>/dev/null || echo '[[]]' ;;
   'api --paginate --slurp repos/acme/app/pulls/7/comments') echo '[[]]' ;;
@@ -62,6 +66,7 @@ case "$*" in
     echo '{"html_url":"https://github.com/acme/app/pull/7#issuecomment-1"}' ;;
   'api -X POST repos/acme/app/pulls/7/reviews --input -')
     cat >"$TMP/review.json"
+    [ -z "${REVIEW_POST_FAIL:-}" ] || { echo "transport outcome unknown" >&2; exit 1; }
     echo '{"html_url":"https://github.com/acme/app/pull/7#pullrequestreview-1"}' ;;
   *) echo "gh stub: unexpected $*" >&2; exit 1 ;;
 esac
@@ -83,7 +88,7 @@ as_comment() {
   python3 -c 'import json,os,sys
 path = os.path.join(sys.argv[1], "comments.json")
 pages = json.load(open(path)) if os.path.exists(path) else [[]]
-pages[0].append({"user": {"login": sys.argv[2]}, "body": json.load(open(os.path.join(sys.argv[1], "posted.json")))["body"]})
+pages[0].append({"id": len(pages[0]) + 1, "user": {"login": sys.argv[2]}, "body": json.load(open(os.path.join(sys.argv[1], "posted.json")))["body"]})
 json.dump(pages, open(path, "w"))' "$TMP" "${1:-me}"
 }
 
@@ -923,21 +928,6 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
   [[ "$stderr" == "ERROR: no full orch-sweep comment by me for the exact head"* ]]
 }
 
-@test "the gate needs the comment's record to equal the local copy" {
-  run_sweep
-  as_comment
-  edit_comments 'r["model"] = "other"'
-  gate
-  [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: the full sweep record in the comment differs from the local copy at "* ]]
-  rm "$TMP/comments.json"
-  as_comment
-  rm "$(cache_file)"
-  gate
-  [ "$status" -eq 2 ]
-  [[ "$stderr" == "ERROR: cannot check the gate: no readable local copy of the full sweep record at "* ]]
-}
-
 @test "the gate exits 2 when GitHub cannot be read, and 1 for a finding" {
   run_sweep
   as_comment
@@ -948,13 +938,13 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
   [ "$status" -eq 0 ]
 }
 
-@test "the gate exits 2 when git cannot find the merge base" {
+@test "the gate exits 2 when the live base SHA is unavailable" {
   run_sweep
   as_comment
-  echo nobase >"$TMP/pr_base"
+  : >"$TMP/pr_base_sha"
   gate
   [ "$status" -eq 2 ]
-  [[ "$stderr" == "ERROR: cannot check the gate: git cannot find the merge base of the PR base 'nobase'"* ]]
+  [ "$stderr" = "ERROR: cannot check the gate: the PR response has no valid base.sha" ]
 }
 
 @test "post-review exits 2 and posts nothing when the gate cannot be checked" {
@@ -1033,7 +1023,7 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
   [[ "$stderr" == "ERROR: the text sweep of $HEAD_SHA has 1 open fix findings" ]]
 }
 
-@test "the user's allow file lets a sweep pass 25 slices and the gate checks that file" {
+@test "the producer allow file permits a wide sweep and consumers trust its attestation" {
   for n in $(seq 1 26); do write "d$n/x.py" 5; done
   commit wide
   HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
@@ -1047,10 +1037,9 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
   as_comment
   gate
   [ "$status" -eq 0 ]
-  echo >>"$(cache_file .allow)"
+  rm "$(cache_file .allow)"
   gate
-  [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: the user's allow file "*" does not match the record's deviation" ]]
+  [ "$status" -eq 0 ]
 }
 
 @test "an allow file for another deviation or head does not lift the slice limit" {
@@ -1192,7 +1181,7 @@ sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow 
   as_comment
   run_sweep --kind text
   as_comment
-  python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); r["model"] = "other"; json.dump(r, open(sys.argv[1], "w"))' "$(cache_file .text)"
+  echo edited >"$TMP/pr_body"
   run_sweep
   [ "$status" -eq 0 ]
   as_comment
@@ -1208,28 +1197,17 @@ sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow 
   HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
   printf %s "$HEAD_SHA" >"$TMP/pr_head"
   printf layer >"$TMP/pr_base"
+  printf %s "$layer" >"$TMP/pr_base_sha"
   sweep run --pr "$PR" --head "$HEAD_SHA" --base-ref layer --record "$TMP/record.json"
   [ "$status" -eq 0 ]
   as_comment
   gate
   [ "$status" -eq 0 ]
   printf main >"$TMP/pr_base"
+  printf %s "$BASE_SHA" >"$TMP/pr_base_sha"
   gate
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: the PR base changed since the full sweep: it swept from $layer, and main gives $BASE_SHA; run orch-sweep run" ]
-}
-
-@test "in a fork clone the gate takes the base from the remote that is the PR repo" {
-  git -C "$REPO" remote add origin https://github.com/someone/app.git
-  git -C "$REPO" remote add upstream https://github.com/acme/app.git
-  git -C "$REPO" update-ref refs/remotes/origin/main "$HEAD_SHA"
-  git -C "$REPO" update-ref refs/remotes/upstream/main "$BASE_SHA"
-  sweep run --pr "$PR" --head "$HEAD_SHA" --base-ref upstream/main --record "$TMP/record.json"
-  [ "$status" -eq 0 ]
-  as_comment
-  gate
-  [ "$status" -eq 0 ]
-  [ "$output" = "OK: the sweep of $HEAD_SHA allows APPROVE" ]
 }
 
 @test "a title or body changed after the sweep fails the gate until a text sweep" {
@@ -1247,17 +1225,6 @@ sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow 
   as_comment
   gate
   [ "$status" -eq 0 ]
-}
-
-@test "a text record that differs from its local copy fails the gate" {
-  run_sweep
-  as_comment
-  run_sweep --kind text
-  as_comment
-  edit_comments 'r["model"] = "other" if r["kind"] == "text" else r["model"]'
-  gate
-  [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: the text sweep record in the comment differs from the local copy at "*".text.json" ]]
 }
 
 @test "git execution failures keep gate and post-review unavailable" {
@@ -1286,4 +1253,77 @@ for fault in ("timeout", "oserror", "nonzero"):
 ' "$ROOT/lib" "$PR" "$HEAD_SHA"
   echo "$output"
   [ "$status" -eq 0 ]
+}
+
+@test "an author record unlocks approval without a local cache copy" {
+  run_sweep
+  [ "$status" -eq 0 ]
+  as_comment author
+  rm -rf "$XDG_CACHE_HOME/review-prs/sweeps"
+  review APPROVE
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/review.json" ]
+}
+
+@test "the finalize opt-out permits posting without a sweep" {
+  ORCH_REVIEW_FINALIZE_COMMANDS='' review APPROVE
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/review.json" ]
+}
+
+@test "review body disputes need a reason and the exact sweep comment" {
+  FAKE_PR_FINDINGS=1 run_sweep
+  [ "$status" -eq 0 ]
+  as_comment author
+  for body in 'Sweep dispute 1/F1: ' 'Sweep dispute 999/F1: false finding'; do
+    review APPROVE "{\"body\":\"$body\"}"
+    [ "$status" -eq 1 ]
+    [ ! -e "$TMP/review.json" ]
+  done
+  review APPROVE '{"body":"Sweep dispute 1/F1: covered by the existing guard"}'
+  [ "$status" -eq 0 ]
+  gate
+  [ "$status" -eq 1 ]
+  for wrong in "someone:$HEAD_SHA" "me:$BASE_SHA"; do
+    IFS=: read -r reviewer reviewed <<<"$wrong"
+    printf '[[{"id":1,"user":{"login":"%s"},"commit_id":"%s","submitted_at":"2099-01-01T00:00:00Z","body":"Sweep dispute 1/F1: covered"}]]' "$reviewer" "$reviewed" >"$TMP/reviews.json"
+    gate
+    [ "$status" -eq 1 ]
+  done
+  printf '[[{"id":1,"user":{"login":"me"},"commit_id":"%s","submitted_at":"2099-01-01T00:00:00Z","body":"Sweep dispute 1/F1: covered"},{"id":2,"user":{"login":"me"},"commit_id":"%s","submitted_at":"2020-01-01T00:00:00Z","body":""}]]' "$HEAD_SHA" "$HEAD_SHA" >"$TMP/reviews.json"
+  gate
+  [ "$status" -eq 0 ]
+}
+
+@test "live base SHA overrides a stale local branch and missing objects are tool errors" {
+  run_sweep
+  as_comment
+  git -C "$REPO" branch stale "$HEAD_SHA"
+  printf %s "$HEAD_SHA" >"$TMP/pr_base_sha"
+  review APPROVE
+  [ "$status" -eq 1 ]
+  [ ! -e "$TMP/review.json" ]
+  printf %s ffffffffffffffffffffffffffffffffffffffff >"$TMP/pr_base_sha"
+  review APPROVE
+  [ "$status" -eq 2 ]
+  [ ! -e "$TMP/review.json" ]
+}
+
+@test "a review POST transport failure is a tool error and is never replayed" {
+  run_sweep
+  as_comment
+  : >"$TMP/gh.calls"
+  REVIEW_POST_FAIL=1 review APPROVE
+  [ "$status" -eq 2 ]
+  [ "$(grep -c '^api -X POST .*reviews ' "$TMP/gh.calls")" -eq 1 ]
+}
+
+@test "a committed finalize_commands empty list opts out of record checks" {
+  printf '[review]\nfinalize_commands = []\n' >"$REPO/.orchestration.toml"
+  commit opt-out
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  printf %s "$HEAD_SHA" >"$TMP/pr_head"
+  review APPROVE
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/review.json" ]
 }
