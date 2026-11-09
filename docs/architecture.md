@@ -51,7 +51,7 @@ The architect confirms `tokens.owner` with `herdr workspace get <worker-id>` bef
 
 [Herdr Radar](https://github.com/combinaut/herdr-radar) reads these tags and groups workers under their architects in its Agents panel. Radar is optional; its checkout is `ORCH_RADAR_PATH`. See [`env/README.md`](../env/README.md).
 
-Workspace names stay true: `PR <n> · <job>` once a PR exists, `#<issue> · <job> (no PR yet)` before. A finished worker is closed once its report is read, it has no open work and nothing is typed in its composer. A reviewer's pane is closed with `close-pane.sh` (a workspace closes with its last pane), then its workspace with `herdr workspace close <id>` if it is still there, and its detached worktree removed (`git worktree remove <path> --force`), once its findings are dispatched. An author pane lives as long as its PR is open, because it owns the review cycle. Panes are closed with [`close-pane.sh`](../coordinator/watchers/close-pane.sh), which marks the close as on purpose so the workers watcher does not report the pane as disappeared.
+Workspace names stay true: `PR <n> · <job>` once a PR exists, `#<issue> · <job> (no PR yet)` before. A finished worker is closed once its report is read, it has no open work and `composer-state.py` finds nothing typed in its composer (a dim prompt suggestion is not typed). A reviewer's pane is closed with `close-pane.sh` (a workspace closes with its last pane), then its workspace with `herdr workspace close <id>` if it is still there, and its detached worktree removed (`git worktree remove <path> --force`), once its findings are dispatched. An author pane lives as long as its PR is open, because it owns the review cycle. Panes are closed with [`close-pane.sh`](../coordinator/watchers/close-pane.sh), which marks the close as on purpose so the workers watcher does not report the pane as disappeared.
 
 ## 💬 Messaging
 
@@ -66,7 +66,7 @@ flowchart LR
 - `herdr agent prompt` is allowed for:
   - a brand-new worker's first brief, and follow-ups to a worker pane the architect owns and nobody types into;
   - the startup of a fresh successor pane after a recycle (`date`, the `/architect` or `/coordinate` brief, startup slash commands), Claude panes only.
-  - `/remote-control` to an idle architect whose Remote Control failed while `remote_control.architects` is on, after the idle state and an empty composer are verified.
+  - `/remote-control` to an idle architect whose Remote Control failed while `remote_control.architects` is on, after the idle state is verified and `composer-state.py` prints `empty`.
 - Never type into a composer a person may be using.
 - Herdr stays available for layout and read-only inspection.
 
@@ -216,7 +216,7 @@ The Coordinator session is the user's remote channel. An instruction it relays a
 
 - A merge uses `gh pr merge <n> --squash` or `gh pr merge <n> --squash --auto`; never a merge commit or a rebase merge. The named PR must be approved, green and not draft when it merges.
 - An approval is not merge authorization. The Coordinator relays every approval and merge to its owner.
-- Acceptance gate before an architect calls work done: output diffs against base where rendering changed, a mutation table with a kill per guard and a unique kill per test, no spec edits in a pure refactor, linter and formatter both run, CI green on the actual head, any claim that decides behavior on live pages verified by the architect itself from the code, an independent review by the other family (or, when no other family is on, a fresh Sonnet pane of the author's family (Opus for an Opus author), a stronger allowed tier only for credentials, security, shared config, money, installer or watchers, or a HIGH finding; with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code), a removal audit when a PR deletes a public surface, and `/defend-pr` run on the current head.
+- Acceptance gate before an architect calls work done: output diffs against base where rendering changed, a mutation table with a kill per guard and a unique kill per test, no spec edits in a pure refactor, linter and formatter both run, CI green on the actual head, any claim that decides behavior on live pages verified by the architect itself from the code, an independent review by the other family (or, when no other family is on, a fresh Sonnet pane of the author's family (Opus for an Opus author), a stronger allowed tier only for credentials, security, shared config, money, installer or watchers, or a HIGH finding; with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code), a removal audit when a PR deletes a public surface, and `/pr-defend` run on the current head.
 - A ready PR has a human reviewer. When there is none, the architect asks the user at once.
 - A worker owns its PR's review cycle: it resolves every thread, verifies each bot claim against the code, and re-requests the bot review after each push. Merging, undrafting, reviewer changes and scope changes are never the worker's.
 

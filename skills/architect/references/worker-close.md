@@ -2,7 +2,15 @@
 
 Read this file before you close a worker, or act on a `WORKER IDLE` message. The reason is machine load: every open Claude session holds memory and runs hook processes.
 
-**Done means all of:** the worker's report is written and you have read it; its PR is merged or closed (or it never had one); nothing is typed in its composer (`herdr pane read <pane>`); it holds no heavy slot (`heavy-slot list`).
+**Done means all of:** the worker's report is written and you have read it; its PR is merged or closed (or it never had one); nothing is typed in its composer (see below); it holds no heavy slot (`heavy-slot list`).
+
+## Composer check
+
+`~/.claude/coordinator/composer-state.py <pane>` reads a Claude composer with ANSI. Dim text is a prompt suggestion, so it does not count as typed; a pending paste such as `[Pasted text #1 +29 lines]` does.
+
+- `empty` (exit 0): nothing is typed.
+- `typed: <text>` (exit 1): keep the worker.
+- `unknown` (exit 2): another agent kind, a dialog over the composer, or a failed read. Read `herdr pane read <pane> --source visible --ansi` and count only text that is not inside `ESC[2m` … `ESC[0m` or `ESC[22m`; when in doubt, keep the worker.
 
 ## Close
 
@@ -16,7 +24,7 @@ The script removes no worktree and no branch. A squash or rebase merge leaves th
 
 ## Bring a closed worker back
 
-The recovery line ends with the resume command of the worker's agent: `claude --resume <id>`, `codex resume <id>`, or `session <id>` for another agent. Run it in the worktree from the line, in a new pane. Start it as in step 5 of [`worker-recycle.md`](worker-recycle.md), with that command in place of the fresh start. Keep the `owner=$HERDR_WORKSPACE_ID` tag on its workspace.
+The recovery line ends with the resume command of the worker's agent: `claude --resume <id>`, `codex resume <id>`, or `session <id>` for another agent. Run it in the worktree from the line, in a new pane. Start it as in step 5 of [`worker-recycle.md`](worker-recycle.md), with its `export CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` line first and that command in place of the fresh start. Keep the `owner=$HERDR_WORKSPACE_ID` tag on its workspace.
 
 ## WORKER IDLE
 

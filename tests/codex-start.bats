@@ -26,27 +26,27 @@ teardown() {
 @test "the worker tier starts Codex with hook trust bypassed on the worker model" {
   run "$SCRIPT" w1 w1-p2 worker
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind codex --pane w1-p2 -- --no-daemon --dangerously-bypass-hook-trust --model worker-model" ]
+  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind codex --pane w1-p2 -- --no-daemon --dangerously-bypass-hook-trust --model worker-model -c allow_login_shell=false" ]
 }
 
 @test "the smart tier uses the smart model at medium reasoning effort" {
   run "$SCRIPT" w1 w1-p2 smart
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind codex --pane w1-p2 -- --no-daemon --dangerously-bypass-hook-trust --model smart-model -c model_reasoning_effort=medium" ]
+  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind codex --pane w1-p2 -- --no-daemon --dangerously-bypass-hook-trust --model smart-model -c allow_login_shell=false -c model_reasoning_effort=medium" ]
 }
 
 @test "the smart tier passes the configured reasoning effort" {
   printf '[models]\ncodex_smart = "smart-model"\ncodex_smart_reasoning_effort = "high"\n' >"$ORCH_CONFIG"
   run "$SCRIPT" w1 w1-p2 smart
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind codex --pane w1-p2 -- --no-daemon --dangerously-bypass-hook-trust --model smart-model -c model_reasoning_effort=high" ]
+  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind codex --pane w1-p2 -- --no-daemon --dangerously-bypass-hook-trust --model smart-model -c allow_login_shell=false -c model_reasoning_effort=high" ]
 }
 
 @test "the worker tier ignores the reasoning effort" {
   printf '[models]\ncodex_worker = "worker-model"\ncodex_smart_reasoning_effort = "high"\n' >"$ORCH_CONFIG"
   run "$SCRIPT" w1 w1-p2 worker
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind codex --pane w1-p2 -- --no-daemon --dangerously-bypass-hook-trust --model worker-model" ]
+  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind codex --pane w1-p2 -- --no-daemon --dangerously-bypass-hook-trust --model worker-model -c allow_login_shell=false" ]
 }
 
 @test "a reasoning effort that is not one lowercase word is refused" {

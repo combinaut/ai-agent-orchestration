@@ -1629,9 +1629,9 @@ TOML
   [ "$output" = "$HOME/.claude/ai-agent-orchestration" ]
 }
 
-@test "install links the finalize and defend-pr skills for Claude and the shared agents folder" {
+@test "install links the finalize and pr-defend skills for Claude and the shared agents folder" {
   fresh_install
-  for name in finalize-sweep finalize-change-footprint finalize-code-comments defend-pr; do
+  for name in finalize-sweep finalize-change-footprint finalize-code-comments pr-defend; do
     skill="$(cd "$CLONE" && pwd -P)/skills/$name"
     [ -f "$skill/SKILL.md" ]
     [ "$(readlink "$HOME/.claude/skills/$name")" = "$skill" ]
@@ -1650,12 +1650,12 @@ TOML
   printf '%s\n' "$output" | grep -q "^collision  *$HOME/.agents/skills/finalize-change-footprint "
 }
 
-@test "the architect gate runs /defend-pr on the current head" {
+@test "the architect gate runs /pr-defend on the current head" {
   # shellcheck disable=SC2016 # The backticks are literal skill text.
-  grep -qF -- '**`/defend-pr` ran on the current head**' "$ROOT/skills/architect/SKILL.md"
+  grep -qF -- '**`/pr-defend` ran on the current head**' "$ROOT/skills/architect/SKILL.md"
 }
 
-@test "the finalize and defend-pr skills carry no repo-specific names" {
-  run grep -rniE 'spar''kle|combinaut|sleistner|stagehand|rubocop|mise run|\.ai/' "$ROOT/skills/finalize-sweep" "$ROOT/skills/finalize-change-footprint" "$ROOT/skills/finalize-code-comments" "$ROOT/skills/defend-pr"
+@test "the finalize and pr-defend skills carry no repo-specific names" {
+  run grep -rniE 'spar''kle|combinaut|sleistner|stagehand|rubocop|mise run|\.ai/' "$ROOT/skills/finalize-sweep" "$ROOT/skills/finalize-change-footprint" "$ROOT/skills/finalize-code-comments" "$ROOT/skills/pr-defend"
   [ "$status" -eq 1 ]
 }

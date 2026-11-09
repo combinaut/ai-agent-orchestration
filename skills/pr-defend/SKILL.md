@@ -1,5 +1,5 @@
 ---
-name: defend-pr
+name: pr-defend
 description: Explain a PR from its code and say why it is sound, with every soundness claim backed by evidence checked on the current head or listed as a gap. Use when a user, architect or worker brief asks to explain or defend a PR, and before an architect calls a PR ready or reports it complete. Read-only; it does not edit the PR.
 user-invocable: true
 argument-hint: "<pr-number-or-url>"
