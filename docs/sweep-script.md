@@ -12,7 +12,9 @@ orch-sweep tree                               # the five tree values and the unt
 
 Run it inside a clean checkout whose `HEAD` is `--head`. It stops with one `ERROR:` line and exit 1 when `HEAD` differs, the tree is dirty, or `--record` or the record cache resolves inside the checkout.
 
-The transcript check catches skipped sweeps and evidence reused from another head, run or worker; it does not defend against a worker deliberately forging a CLI session, matching the legacy subagent path's trust boundary. At run time the script reads the live worker session from Herdr and puts that session, the swept SHA and a fresh nonce in each validator's initial user message; the checker uses the architect-supplied `--session`, requires a matching persisted transcript newer than the commit, and compares every recorded finding with the initial brief and every verdict, class and reason with the validator's final answer. Without a live worker session the run fails unless `--no-transcripts` explicitly selects CI attestation, which cannot satisfy the transcript gate.
+The transcript check catches skipped sweeps and evidence reused from another head, run or worker; it does not defend against a worker deliberately forging a CLI session, matching the legacy subagent path's trust boundary. At run time the script reads the live worker session from Herdr and puts that session, the swept SHA and a fresh nonce in every sweep agent's and validator's initial real user message; the checker uses the architect-supplied `--session`, requires matching persisted transcripts newer than the commit for every sweep agent (including zero-finding records) and validator, and compares every recorded finding with the initial brief and every verdict, class and reason with the validator's final answer. Without a live worker session the run fails unless `--no-transcripts` explicitly selects CI attestation, which cannot satisfy the transcript gate.
+
+An automated dispatcher establishes its owning worker session before invoking `run`. `--no-transcripts` remains CI attestation and cannot replace that session at the architect gate.
 
 ## Agents
 
@@ -20,8 +22,8 @@ Each slice starts one `finalize-code-comments` agent and one `finalize-change-fo
 
 | Runtime | Command |
 |---|---|
-| `codex` (default) | sweep agents use `codex exec -m <model> -C <checkout> -s read-only --ephemeral ...`; validators omit `--ephemeral` so their recorded thread ids have persisted transcripts |
-| `claude` | sweep agents use `claude -p ... --no-session-persistence ...`; validators keep session persistence so their recorded session ids have persisted transcripts |
+| `codex` (default) | all agents use `codex exec -m <model> -C <checkout> -s read-only ...` with persistence so every recorded thread id has a transcript |
+| `claude` | all agents use `claude -p ...` with persistence so every recorded session id has a transcript; structured answers are read from the persisted `StructuredOutput` tool call |
 
 The script writes the PR diff and each slice's diff (`git diff --no-ext-diff --no-textconv`) to a temporary folder outside the checkout and names the file in each prompt; the folder is removed when the run ends. Claude agents have no shell. Codex agents have one inside the read-only sandbox: a command can run a program from the checkout (`rg --pre`), but it cannot write files or reach the network.
 

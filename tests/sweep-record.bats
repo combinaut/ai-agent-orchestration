@@ -326,3 +326,27 @@ check() {
   run "$TMP/bin/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA"
   [ "$status" -eq 0 ]
 }
+
+@test "the revived serial shape cannot pass with findings and no validator" {
+  record 5 '[]'
+  python3 -c 'import json,sys
+p=sys.argv[1];r=json.load(open(p));r.update(clean=True,mode="serial",slices=1,sweep_agents=0,validators=0,verdicts={"CONFIRMED_NEW":5});json.dump(r,open(p,"w"))' "$REC"
+  check
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *'5 findings and no validator id'* ]]
+}
+
+@test "manual records ignore unrelated script-looking extra keys" {
+  record 0 '[]'
+  python3 -c 'import json,sys
+p=sys.argv[1];r=json.load(open(p));r.update(pr="extra",model="extra",mode="serial",clean=False);json.dump(r,open(p,"w"))' "$REC"
+  check
+  [ "$status" -eq 0 ]
+}
+
+@test "a manual zero-finding record still verifies a validator id it lists" {
+  record 0 '["ghost"]'
+  check
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *'validator ghost is no supported'* ]]
+}

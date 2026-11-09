@@ -7,6 +7,7 @@ setup() {
   ROOT=$(cd "$BATS_TEST_DIRNAME/.." && pwd -P)
   TMP=$(mktemp -d "${TMPDIR:-/tmp}/sweep-run-bats.XXXXXX")
   export TMP HOME="$TMP/home" XDG_CACHE_HOME="$TMP/cache" PYTHONDONTWRITEBYTECODE=1
+  export CODEX_HOME="$TMP/codex" CLAUDE_CONFIG_DIR="$TMP/claude"
   mkdir -p "$HOME" "$TMP/bin"
   for agent in codex claude; do
     ln -s "$ROOT/tests/fixtures/sweep-agent.py" "$TMP/bin/$agent"
@@ -221,7 +222,7 @@ for line in open(sys.argv[1]):
     assert argv[:3] == ["exec", "-m", "gpt-test"], argv
     assert argv[argv.index("-s") + 1] == "read-only", argv
     assert "--output-schema" in argv, argv
-    assert ("--ephemeral" in argv) == (call["role"] != "validator"), argv' "$TMP/agent.calls"
+    assert "--ephemeral" not in argv, argv' "$TMP/agent.calls"
 }
 
 @test "claude agents run headless with no write tool and the worker tier" {
@@ -239,7 +240,7 @@ for line in open(sys.argv[1]):
     assert not any("Bash" in a for a in argv), argv
     assert not argv[argv.index("--add-dir") + 1].startswith(sys.argv[2]), argv
     assert argv[-4:] == ["--disallowedTools", "Edit", "Write", "NotebookEdit"], argv
-    assert ("--no-session-persistence" in argv) == (call["role"] != "validator"), argv
+    assert "--no-session-persistence" not in argv, argv
     assert not any(a.startswith(("Edit", "Write")) for a in argv[argv.index("--allowedTools"):-4]), argv' "$TMP/agent.calls" "$REPO"
 }
 
@@ -922,7 +923,7 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
     cp "$TMP/record.json" "$TMP/original.json"
     run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
     [ "$status" -eq 0 ]
-    for mutation in worker nonce head later old verdict class reason omitted file line category summary envelope; do
+    for mutation in worker nonce head later old verdict class reason omitted file line category summary envelope added; do
       cp "$TMP/original.json" "$TMP/record.json"
       python3 -c 'import json,os,pathlib,sys
 r=json.load(open(sys.argv[1])); mode=sys.argv[2]; runtime=sys.argv[3]
@@ -960,11 +961,17 @@ else:
  elif mode=="reason": f["reason"]="invented justification"
  elif mode in ("file","category","summary"): f[mode]="unreviewed replacement"
  elif mode=="line": f["line"]+=1
+ elif mode=="added":
+  r["items"].append(dict(f,id="F9",summary="No validator reviewed this added finding"))
+  r["findings"]+=1; r["verdicts"][f["verdict"]]+=1; r["open_fix"]+=1
  elif mode=="omitted":
   r["items"].remove(f); r["findings"]-=1; r["verdicts"][f["verdict"]]-=1; r["open_fix"]-=1
 json.dump(r,open(sys.argv[1],"w"))' "$TMP/record.json" "$mutation" "$runtime"
       run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
       if [ "$status" -ne 1 ]; then echo "accepted $runtime $mutation"; return 1; fi
+      if [ "$mutation" = added ]; then
+        [[ "$stderr" == *'transcript verdict ids do not cover every record finding' ]]
+      fi
     done
   done
 }
@@ -1018,4 +1025,175 @@ p=sys.argv[1];r=json.load(open(p));json.dump({k:r[k] for k in ("head","base","fi
   run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
   [ "$status" -eq 1 ]
   [[ "$stderr" == *'no supported Claude or Codex subagent'* ]]
+}
+
+@test "Claude StructuredOutput transcripts match the real persisted schema output" {
+  FAKE_FINDINGS=1 FAKE_PERSIST=1 run_sweep --no-comment --runtime claude
+  [ "$status" -eq 0 ]
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,pathlib,sys
+r=json.load(open(sys.argv[1]));id=r["validator_ids"][0]
+p=next(pathlib.Path(sys.argv[2]).rglob(id+".jsonl"));rows=[json.loads(l) for l in p.read_text().splitlines()]
+block=rows[-1]["message"]["content"][0]
+assert block["name"]=="StructuredOutput" and block["type"]=="tool_use"
+block["input"]["verdicts"][0]["reason"]="different reason"
+p.write_text("\n".join(map(json.dumps,rows))+"\n")' "$TMP/record.json" "$CLAUDE_CONFIG_DIR"
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *'differs from transcript'* ]]
+}
+
+@test "zero-finding script records verify every sweep agent initial binding and freshness" {
+  for runtime in codex claude; do
+    FAKE_PERSIST=1 run_sweep --no-comment --runtime "$runtime"
+    [ "$status" -eq 0 ]
+    run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+    [ "$status" -eq 0 ]
+    for mutation in worker nonce head later old missing; do
+      python3 -c 'import json,os,pathlib,sys
+r=json.load(open(sys.argv[1]));mode=sys.argv[2];runtime=sys.argv[3]
+id=r["sweep_agent_ids"][-1]
+root=pathlib.Path(os.environ["CODEX_HOME"] if runtime=="codex" else os.environ["CLAUDE_CONFIG_DIR"])
+p=next(root.rglob(("rollout-"+id if runtime=="codex" else id)+".jsonl"))
+b=p.with_suffix(".backup")
+if not b.exists():b.write_bytes(p.read_bytes())
+p.write_bytes(b.read_bytes())
+if mode=="worker":p.write_text(p.read_text().replace("worker-session","other-worker"))
+elif mode=="nonce":p.write_text(p.read_text().replace(r["run_nonce"],"0"*32))
+elif mode=="head":p.write_text(p.read_text().replace(r["head"],"a"*40))
+elif mode=="old":os.utime(p,(1,1))
+elif mode=="missing":p.unlink()
+elif mode=="later":
+ rows=[json.loads(l) for l in p.read_text().splitlines()]
+ user=next(x for x in rows if "ROLE: pr-text" in json.dumps(x))
+ rows.remove(user)
+ m={"role":"user","content":"ordinary question"}
+ first={"type":"response_item","payload":dict(m,type="message")} if runtime=="codex" else {"type":"user","sessionId":id,"message":m}
+ rows.insert(1 if runtime=="codex" else 0,first);rows.append(user)
+ p.write_text("\n".join(map(json.dumps,rows))+"\n")' "$TMP/record.json" "$mutation" "$runtime"
+      run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+      if [ "$status" -ne 1 ]; then echo "accepted sweep $runtime $mutation"; return 1; fi
+      [[ "$stderr" == *'sweep agent'* ]]
+    done
+  done
+}
+
+@test "a hand-written zero-finding record with invented sweep ids fails" {
+  run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys
+p=sys.argv[1];r=json.load(open(p));r["sweep_agent_ids"]=["invented-"+str(n) for n in range(r["sweep_agents"])];json.dump(r,open(p,"w"))' "$TMP/record.json"
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *'sweep agent invented-0'* ]]
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --no-transcripts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'attestation only'* ]]
+}
+
+@test "installed sweep documentation links the script and preserves the architect gate" {
+  run python3 -c 'import pathlib,sys
+root=pathlib.Path(sys.argv[1]);installer=(root/"docs/installer.md").read_text()
+assert "| `orch-sweep` |" in installer and "sweep-script.md" in installer
+row=next(l for l in installer.splitlines() if l.startswith("| `orch-sweep-record` |"));assert "--exact" in row
+workers=(root/"docs/workers.md").read_text();assert "`orch-sweep`" in workers and "sweep-script.md" in workers
+gate=next(l for l in (root/"skills/architect/SKILL.md").read_text().splitlines() if l.startswith("9. **The repo"))
+assert "script records are checked in full" in gate.lower()
+assert "`/pr-defend` ran on the current head" in (root/"skills/architect/SKILL.md").read_text()' "$ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "listed validators cannot be skipped by deleting every recorded finding" {
+  FAKE_FINDINGS=1 FAKE_PERSIST=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  cp "$TMP/record.json" "$TMP/original.json"
+  for ids in kept removed; do
+    python3 -c 'import json,sys
+r=json.load(open(sys.argv[1]));r.update(findings=0,items=[],dropped=[],open_fix=0,verdicts={v:0 for v in r["verdicts"]})
+if sys.argv[3]=="removed":r.update(validators=0,validator_ids=[])
+json.dump(r,open(sys.argv[2],"w"))' "$TMP/original.json" "$TMP/record.json" "$ids"
+    run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+    [ "$status" -eq 1 ]
+    if [ "$ids" = kept ]; then
+      [[ "$stderr" == *'transcript verdict ids do not match record findings'* ]]
+    else
+      [[ "$stderr" == *'sweep transcript has findings but record claims none'* ]]
+    fi
+  done
+}
+
+@test "ordinary PR comments quoting binding lines cannot invalidate genuine records" {
+  python3 -c 'import json,sys
+json.dump([[{"user":{"login":"stranger"},"body":"Quoted diagnostic:\nSweep binding: not even JSON\nSweep binding: {\"worker_session\":\"someone else\"}"}]],open(sys.argv[1],"w"))' "$TMP/comments.json"
+  for runtime in codex claude; do
+    FAKE_FINDINGS=1 FAKE_PERSIST=1 run_sweep --no-comment --runtime "$runtime"
+    [ "$status" -eq 0 ]
+    grep -q 'Sweep binding: not even JSON' "$TMP"/prompts/validator.[0-9]*
+    run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "review prompts share the class rule and reserve no-context rules for sweep agents" {
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import pathlib,sys
+root=pathlib.Path(sys.argv[1]);prompts=pathlib.Path(sys.argv[2])
+pr=next(p for p in prompts.glob("pr-text.*") if p.suffix!=".diff").read_text()
+sweep=next(p for p in prompts.glob("sweep-comments.*") if p.suffix!=".diff").read_text()
+validator=next(prompts.glob("validator.*")).read_text()
+assert "Do not read any PR" not in pr
+assert "No plan or ticket excuses" in sweep and "This skips the footprint" in sweep
+assert "**Report only.**" in pr and "**Evidence.**" in pr
+classes=(root/"skills/review-prs/references/finding-classes.txt").read_text().strip()
+assert classes in validator and "redundant but not misleading" in classes' "$ROOT" "$TMP/prompts"
+}
+
+@test "a signal during GitHub spawn registration stops the newly created child" {
+  printf '#!/usr/bin/env bash\nsleep 30\n' >"$TMP/bin/gh"
+  run --separate-stderr python3 -c 'import os,signal,subprocess,sys,time
+from unittest.mock import patch
+sys.path.insert(0,sys.argv[1]);import sweep_run
+spawn=subprocess.Popen;created=[]
+def interrupted(*args,**kwargs):
+    child=spawn(*args,**kwargs);created.append(child)
+    os.kill(os.getpid(),signal.SIGTERM)
+    return child
+runner=sweep_run.Runner("codex","unused",1,60,time.monotonic()+60,0,sys.argv[2])
+previous=signal.signal(signal.SIGTERM,runner.stop_all)
+try:
+    with patch.object(subprocess,"Popen",side_effect=interrupted):
+        try:sweep_run.gh("api","fixture")
+        except SystemExit as error:assert error.code==143
+    assert created and all(p.poll() is not None for p in created),"unregistered GitHub child survived"
+finally:
+    signal.signal(signal.SIGTERM,previous)
+    sweep_run.stop(*created)' "$ROOT/lib" "$TMP"
+  [ "$status" -eq 0 ]
+}
+
+@test "cancelling a sweep during posting stops the posting GitHub process" {
+  python3 -c 'import pathlib,sys
+p=pathlib.Path(sys.argv[1]);s=p.read_text().replace("    cat >\"$TMP/posted.json\"", "    echo $$ >\"$TMP/posting.pid\"\n    cat >\"$TMP/posted.json\"\n    sleep 2\n    touch \"$TMP/post-landed\"");p.write_text(s)' "$TMP/bin/gh"
+  cd "$REPO"
+  run --separate-stderr python3 -c 'import os,pathlib,signal,subprocess,sys,time
+root,tmp,head,pr=sys.argv[1:];tmp=pathlib.Path(tmp)
+proc=subprocess.Popen([root+"/orch-sweep","run","--pr",pr,"--head",head,"--base-ref","main","--record",str(tmp/"record.json")],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+try:
+    end=time.monotonic()+20
+    while not (tmp/"posting.pid").exists() and time.monotonic()<end and proc.poll() is None:time.sleep(.02)
+    assert (tmp/"posting.pid").exists(),proc.communicate(timeout=2)
+    proc.send_signal(signal.SIGTERM)
+    proc.communicate(timeout=10)
+    assert proc.returncode==143,proc.returncode
+    time.sleep(2.2)
+    assert not (tmp/"post-landed").exists(),"comment landed after cancellation"
+finally:
+    if proc.poll() is None:proc.kill();proc.wait()
+    pidfile=tmp/"posting.pid"
+    if pidfile.exists():
+        try:os.kill(int(pidfile.read_text()),signal.SIGKILL)
+        except ProcessLookupError:pass' "$ROOT" "$TMP" "$HEAD_SHA" "$PR"
+  [ "$status" -eq 0 ]
 }

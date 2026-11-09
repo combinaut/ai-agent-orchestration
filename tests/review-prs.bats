@@ -1613,6 +1613,7 @@ assert r["stuck"] == [{"url": old["url"], "sha": "A", "agent": "rev1", "pane": "
   contains "$prompt" 'Put the findings table in the review body, one post per head'
   contains "$prompt" '<!-- finalize-sweep {"head":"'"$SHA"'","dropped":'
   contains "$prompt" 'redundant but not misleading'
+  contains "$prompt" "$(cat "$ROOT/skills/review-prs/references/finding-classes.txt")"
   not_contains "$prompt" 'issues/7/comments'
   rm -f "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
   ORCH_REVIEW_FINALIZE_COMMANDS='/finalize-code-comments|/lint-prs' dispatch

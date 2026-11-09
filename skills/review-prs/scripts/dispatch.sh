@@ -14,6 +14,7 @@ orch_load_repo_config "$cwd"
 py=$(orch_python) || exit 2
 # review.finalize_commands: unset means the default sweep, empty means the repo opted out.
 finalize=${ORCH_REVIEW_FINALIZE_COMMANDS-/finalize-sweep}
+finding_classes=$(cat "$here/../references/finding-classes.txt") || exit 1
 
 # herdr: the executable close-pane.sh uses too.
 herdr() {
@@ -196,7 +197,7 @@ if [ -n "$finalize" ]; then
   sweep_rules="
 - Sweep: run it on your first review of this PR, and on a head you would APPROVE. Skip it when one of your earlier submitted reviews already holds a marker for this exact head (<!-- finalize-sweep {\"head\":\"$sha\"...} -->; repeat it in your review body), and on a later head you send back with REQUEST_CHANGES for other reasons: its replacement gets the sweep. The aim is that a human finds nothing false, misleading, dead or duplicated left.
   - $sweep_run over the whole PR diff, with inputs: report-only pr=$url max-slices=25 and base ref $remote/$base (over 25 slices, post the review as COMMENT naming the slice count and stop).
-  - Class each finding: fix (false, misleading, dead or duplicated code, comment, test, name or PR text, or a message that blames the wrong cause) or nit (style, taste, or redundant but not misleading). A fix blocks APPROVE; a nit never does.
+  - $finding_classes A fix blocks APPROVE; a nit never does.
   - Put the findings table in the review body, one post per head, and put the marker <!-- finalize-sweep {\"head\":\"$sha\",\"dropped\":[\"<id of each finding dropped as settled>\"]} --> on the last line before the trailer; with no findings the marker is the whole record. Read the markers of your earlier reviews first: a finding dropped for a reason that still holds in the code is not raised again."
 fi
 

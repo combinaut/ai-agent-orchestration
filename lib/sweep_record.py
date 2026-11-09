@@ -17,8 +17,8 @@ SHA = re.compile(r"[0-9a-f]{40}")
 TOKEN = re.compile(r"[A-Za-z0-9_-]+")
 CODEX_PATH = re.compile(r"/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*")
 VALIDATOR_MARKER = "finalize-sweep validator"
+SWEEP_MARKER = "finalize-sweep sweep agent"
 COUNTS = ("slices", "sweep_agents", "validators", "findings")
-MODES = ("agents", "serial")
 FIELDS = ("head", "base", "clean", "mode", *COUNTS, "validator_ids", "verdicts")
 VERDICTS = (
     "CONFIRMED_NEW",
@@ -49,7 +49,6 @@ SCRIPT_FIELDS = (
     "open_fix",
     "deviation",
 )
-RICH_ONLY_FIELDS = ("tool", *SCRIPT_FIELDS)
 PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 EMPTY_HASH = hashlib.sha256(b"").hexdigest()
 CLEAN_TREE = {
@@ -277,21 +276,8 @@ def problem(path, head, base=None):
         return f"{path}: not valid JSON: {error}", None
     if not isinstance(record, dict):
         return f"{path}: the record must be a JSON object", None
-    # #166's four attestation fields intentionally ignore unrelated extras.
-    # Fields reserved by orch-sweep, however, must never downgrade a partial
-    # rich record into that weaker format.
-    rich = any(field in record for field in RICH_ONLY_FIELDS)
-    detailed = rich or all(field in record for field in FIELDS)
-    required = (
-        FIELDS
-        if detailed
-        else (
-            "head",
-            "base",
-            "findings",
-            "validator_ids",
-        )
-    )
+    rich = record.get("tool") == "orch-sweep"
+    required = FIELDS if rich else ("head", "base", "findings", "validator_ids")
     missing = [field for field in required if field not in record]
     if missing:
         return f"{path}: missing field {missing[0]}", None
@@ -301,7 +287,7 @@ def problem(path, head, base=None):
     for name, sha in (("--head", head), ("--base", base)):
         if sha is not None and not SHA.fullmatch(sha):
             return f"{name} {sha!r} is not a full 40-character SHA", None
-    if not detailed:
+    if not rich:
         findings, ids = record["findings"], record["validator_ids"]
         if isinstance(findings, bool) or not isinstance(findings, int) or findings < 0:
             return f"{path}: findings must be a non-negative integer", None
@@ -323,23 +309,13 @@ def problem(path, head, base=None):
             return f"{path}: {field} must be a non-negative integer", None
     if record["head"] == record["base"]:
         return f"{path}: head equals base; the sweep covered an empty diff", None
-    if record["mode"] not in MODES:
-        return f"{path}: mode must be agents or serial", None
-    serial = record["mode"] == "serial"
     if record["slices"] < 1:
         return f"{path}: slices must be at least 1", None
-    if not serial and record["sweep_agents"] < 1:
+    if record["sweep_agents"] < 1:
         return f"{path}: sweep_agents must be at least 1", None
-    if not serial and record["sweep_agents"] < 2 * record["slices"]:
+    if record["sweep_agents"] < 2 * record["slices"]:
         return (
             f"{path}: {record['sweep_agents']} sweep_agents for {record['slices']} slices; each slice starts two",
-            None,
-        )
-    if serial and (
-        record["sweep_agents"] or record["validators"] or record["validator_ids"]
-    ):
-        return (
-            f"{path}: a serial record has no sweep agents, validators or validator ids",
             None,
         )
     if base and record["base"] != base:
@@ -363,7 +339,7 @@ def problem(path, head, base=None):
             f"{path}: {len(ids)} validator_ids for {record['validators']} validators",
             None,
         )
-    if not serial and record["findings"] > 0 and record["validators"] < 1:
+    if record["findings"] > 0 and record["validators"] < 1:
         return f"{path}: {record['findings']} findings and no validator started", None
     if sum(verdicts.values()) != record["findings"]:
         return (
@@ -371,8 +347,6 @@ def problem(path, head, base=None):
             None,
         )
     if rich:
-        if record.get("tool") != "orch-sweep":
-            return f"{path}: rich records must set tool to orch-sweep", None
         why = script_problem(record)
         if why:
             return f"{path}: {why}", None
@@ -466,7 +440,7 @@ def codex_transcripts(session, agent_id):
 
 
 def codex_session_transcripts(agent_id):
-    """Persistent standalone Codex sessions written by orch-sweep validators."""
+    """Persistent standalone Codex sessions written by orch-sweep agents."""
     root = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
     matches = []
     for candidate in glob.glob(
@@ -506,7 +480,33 @@ def initial_user_message(messages):
     return ""
 
 
-def standalone_evidence(found, family, swept, session, record, verified):
+def assistant_answer(messages, family):
+    final = next(
+        (
+            m
+            for m in reversed(messages)
+            if m.get("role") == "assistant" and m.get("phase") in (None, "final_answer")
+        ),
+        {},
+    )
+    if family == "Claude":
+        for message in reversed(messages):
+            if message.get("role") != "assistant":
+                continue
+            content = message.get("content", [])
+            if not isinstance(content, list):
+                continue
+            for block in reversed(content):
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_use"
+                    and block.get("name") == "StructuredOutput"
+                ):
+                    return block["input"]
+    return json.loads(message_text(final.get("content")))
+
+
+def standalone_evidence(found, family, swept, session, record, verified, kind):
     with open(found, encoding="utf-8") as handle:
         rows = [json.loads(line) for line in handle if line.strip()]
     messages = []
@@ -516,27 +516,27 @@ def standalone_evidence(found, family, swept, session, record, verified):
             if message.get("type") == "message":
                 messages.append(message)
         elif family == "Claude" and row.get("type") in ("user", "assistant"):
-            if row.get("sessionId") != record["_validator_id"]:
-                return "transcript session id does not match validator id"
+            if row.get("sessionId") != record["_agent_id"]:
+                return "transcript session id does not match agent id"
             messages.append(row.get("message", {}))
     brief = initial_user_message(messages)
-    bindings = re.findall(r"^Sweep binding: (.+)$", brief, re.M)
+    header = brief.splitlines()[:3]
     expected = {"worker_session": session, "head": swept, "nonce": record["run_nonce"]}
+    marker = VALIDATOR_MARKER if kind == "validator" else SWEEP_MARKER
     if (
-        VALIDATOR_MARKER not in brief
-        or len(bindings) != 1
-        or json.loads(bindings[0]) != expected
+        len(header) != 3
+        or header[1] != f"{marker} {swept}"
+        or not header[2].startswith("Sweep binding: ")
+        or json.loads(header[2].removeprefix("Sweep binding: ")) != expected
     ):
-        return "initial user message must bind validator marker, head, worker session and run nonce"
-    final = next(
-        (
-            m
-            for m in reversed(messages)
-            if m.get("role") == "assistant" and m.get("phase") in (None, "final_answer")
-        ),
-        {},
-    )
-    answer = json.loads(message_text(final.get("content")))
+        return f"initial user message must bind {kind} marker, head, worker session and run nonce"
+    answer = assistant_answer(messages, family)
+    if kind == "sweep agent":
+        if not isinstance(answer.get("findings"), list):
+            return "transcript has no completed sweep findings answer"
+        if answer["findings"] and not record["findings"]:
+            return "sweep transcript has findings but record claims none"
+        return None
     given = answer.get("verdicts")
     if not isinstance(given, list) or not given:
         return "transcript has no validator verdicts"
@@ -569,9 +569,11 @@ def standalone_evidence(found, family, swept, session, record, verified):
     return None
 
 
-def transcript_problem(path, swept, session, agent_id, record=None, verified=None):
+def transcript_problem(
+    path, swept, session, agent_id, record=None, verified=None, kind="validator"
+):
     if not TOKEN.fullmatch(agent_id) and not CODEX_PATH.fullmatch(agent_id):
-        return f"{path}: validator id {agent_id!r} is not a plain id"
+        return f"{path}: {kind} id {agent_id!r} is not a plain id"
     candidates = []
     if record is not None:
         found = claude_session_transcript(agent_id)
@@ -589,7 +591,7 @@ def transcript_problem(path, swept, session, agent_id, record=None, verified=Non
             ("Codex", found, False) for found in codex_transcripts(session, agent_id)
         )
     if not candidates:
-        return f"{path}: validator {agent_id} is no supported Claude or Codex subagent transcript of session {session}; Pi and Cursor validators are unsupported"
+        return f"{path}: {kind} {agent_id} is no supported Claude or Codex subagent transcript of session {session}; Pi and Cursor validators are unsupported"
     committed = git("show", "-s", "--format=%ct", swept)
     if committed is None:
         return f"{path}: git cannot read the commit time of {swept}"
@@ -598,16 +600,14 @@ def transcript_problem(path, swept, session, agent_id, record=None, verified=Non
         try:
             mtime = os.path.getmtime(found)
             if mtime < int(committed):
-                issue = (
-                    f"{path}: validator {agent_id} was written before commit {swept}"
-                )
+                issue = f"{path}: {kind} {agent_id} was written before commit {swept}"
             elif family == "Codex" and not persisted and CODEX_PATH.fullmatch(agent_id):
                 issue = (
                     None
                     if agent_id.startswith(
                         f"/root/finalize_sweep_validator_{swept[:12]}"
                     )
-                    else f"{path}: Codex validator {agent_id} must start with /root/finalize_sweep_validator_{swept[:12]}"
+                    else f"{path}: Codex {kind} {agent_id} must start with /root/finalize_sweep_validator_{swept[:12]}"
                 )
             elif persisted:
                 reason = standalone_evidence(
@@ -615,10 +615,11 @@ def transcript_problem(path, swept, session, agent_id, record=None, verified=Non
                     family,
                     swept,
                     session,
-                    dict(record, _validator_id=agent_id),
+                    dict(record, _agent_id=agent_id),
                     verified,
+                    kind,
                 )
-                issue = f"{path}: validator {agent_id}: {reason}" if reason else None
+                issue = f"{path}: {kind} {agent_id}: {reason}" if reason else None
             else:
                 with open(found, encoding="utf-8") as handle:
                     first = next(
@@ -643,10 +644,10 @@ def transcript_problem(path, swept, session, agent_id, record=None, verified=Non
                     if isinstance(text, str)
                     and VALIDATOR_MARKER in text
                     and swept in text
-                    else f"{path}: validator {agent_id} brief must include {VALIDATOR_MARKER} and name {swept}"
+                    else f"{path}: {kind} {agent_id} brief must include {VALIDATOR_MARKER} and name {swept}"
                 )
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
-            issue = f"{path}: validator {agent_id} transcript cannot read: {error}"
+            issue = f"{path}: {kind} {agent_id} transcript cannot read: {error}"
             mtime = float("-inf")
         if issue is None:
             return None
@@ -681,24 +682,40 @@ def main(argv):
     if not found:
         swept = record["head"]
         found, commits = since(args.record, swept, record["base"], args.head)
-    attestation = args.no_transcripts or not record or record["findings"] == 0
+    script = record if record and record.get("tool") == "orch-sweep" else None
+    attestation = (
+        args.no_transcripts
+        or not record
+        or (script is None and record["findings"] == 0 and not record["validator_ids"])
+    )
     if not found and not attestation:
         if not args.session or not TOKEN.fullmatch(args.session):
             found = f"{args.record}: --session <worker session id> is required"
         verified = set()
-        script = record if record.get("tool") == "orch-sweep" else None
         for agent_id in record["validator_ids"]:
             found = found or transcript_problem(
                 args.record, record["head"], args.session, agent_id, script, verified
             )
         if not found and script is not None and len(verified) != record["findings"]:
             found = f"{args.record}: transcript verdict ids do not cover every record finding"
+        if script is not None:
+            for agent_id in script["sweep_agent_ids"]:
+                found = found or transcript_problem(
+                    args.record,
+                    record["head"],
+                    args.session,
+                    agent_id,
+                    script,
+                    kind="sweep agent",
+                )
     if found:
         print(f"ERROR: {one_line(found)}", file=sys.stderr)
         return 1
-    note = "; attestation only" if record["findings"] and args.no_transcripts else ""
-    if record.get("mode") == "serial":
-        note = "; serial: no independent validator"
+    note = (
+        "; attestation only"
+        if args.no_transcripts and (script is not None or record["findings"])
+        else ""
+    )
     if commits:
         print(one_line(f"OK: {args.record} swept {swept}{note}; commits since:"))
         print(commits, end="")

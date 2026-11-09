@@ -113,7 +113,7 @@ else:
         answer["findings"][0]["file"] = ""
 
 session = f"{kind}-{uuid.uuid4().hex[:12]}"
-if role == "validator" and os.environ.get("FAKE_PERSIST"):
+if os.environ.get("FAKE_PERSIST"):
     if kind == "codex":
         home = Path(os.environ["CODEX_HOME"])
         path = home / "sessions" / "2026" / "11" / f"rollout-{session}.jsonl"
@@ -182,15 +182,16 @@ if role == "validator" and os.environ.get("FAKE_PERSIST"):
                 "sessionId": session,
                 "message": {"role": "user", "content": prompt},
             },
-            {
-                "type": "assistant",
-                "sessionId": session,
-                "message": {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": json.dumps(answer)}],
-                },
-            },
+            json.loads(
+                Path(__file__)
+                .resolve()
+                .with_name("claude-structured-output.json")
+                .read_text()
+            ),
         ]
+    if kind == "claude":
+        rows[-1]["sessionId"] = session
+        rows[-1]["message"]["content"][0]["input"] = answer
     path.write_text("\n".join(map(json.dumps, rows)) + "\n")
 if kind == "codex":
     out = sys.argv[sys.argv.index("-o") + 1]
