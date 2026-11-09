@@ -252,7 +252,7 @@ Before you report a task complete, every line must hold:
    does not cover (CoffeeScript, ERB, YAML, client overrides). A dangling reference is invisible to a
    green suite: nothing tests the path nobody thought about.
 9. **The repo's finalize commands ran on the current head, after the last merge or rebase of the base, their approved findings are applied, and the findings comment is on the PR.** When the commands include `/finalize-sweep`, run, inside the PR's repo after `git fetch origin`, `orch-sweep-record check --record <worker's record path> --head <the PR's current head SHA> --base $(git merge-base origin/<base branch> <the PR's current head SHA>) --session <worker-session-id>`; it must pass or this item fails. The record contains only `head`, `base`, `findings`, and `validator_ids` (other keys are ignored); a re-run adds findings and validator ids. Its validator contract is defined in `/finalize-sweep` sections 5 (Validate) and 6 (Report, steps 4–5). The record passes when its head is the PR head or an ancestor of it; read the commits the check lists, and a code push beyond the approved findings needs a re-sweep. `--no-transcripts` is CI attestation only. With `review.finalize_commands = []` the whole gate is skipped; the comment is required only when the branch has a PR and `review.finalize_comment` is not `false`.
-10. **`/defend-pr` ran on the current head** before you call the PR ready or report it complete, and each gap it lists is closed or named in the report.
+10. **`/pr-defend` ran on the current head** before you call the PR ready or report it complete, and each gap it lists is closed or named in the report.
 
 When something fails the gate, it goes back to the pane that owns the branch. You do not fix it.
 

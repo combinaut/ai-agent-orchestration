@@ -63,7 +63,7 @@ macOS or Linux, Bash 3.2 or newer; `git`, `jq`, `python3`, `curl`; `gh` for the 
 | `skills/finalize-sweep/` | `~/.claude/skills/finalize-sweep` (directory link) | `/finalize-sweep`: the PR diff split into slices of at most 400 changed lines, swept by both skills below per slice, the PR title and body checked against the code, and the findings validated against the PR's context |
 | `skills/finalize-change-footprint/` | `~/.claude/skills/finalize-change-footprint` (directory link) | `/finalize-change-footprint`: the PR diff swept for duplicated tests, leftovers and dead code |
 | `skills/finalize-code-comments/` | `~/.claude/skills/finalize-code-comments` (directory link) | `/finalize-code-comments`: the PR diff's comments swept for narration and noise |
-| `skills/defend-pr/` | `~/.claude/skills/defend-pr` (directory link) | `/defend-pr`: a PR explained from its code, with each soundness claim checked on the current head or listed as a gap |
+| `skills/pr-defend/` | `~/.claude/skills/pr-defend` (directory link) | `/pr-defend`: a PR explained from its code, with each soundness claim checked on the current head or listed as a gap |
 | `coordinator/watchers/coord-audit-watch.sh` | `~/.claude/coordinator/watchers/` | PR problems, blocked workers, stale heavy slots, git pile-ups |
 | `coordinator/watchers/context-watch.sh` | `~/.claude/coordinator/watchers/` | Writes context alerts for the inbox notifier |
 | `coordinator/watchers/coord-host-watch.sh` | `~/.claude/coordinator/watchers/` | Host pressure: memory, swap, processes, open files, load (macOS and Linux) |
