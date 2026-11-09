@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dispatch.sh <url> <number> <title> <author> <sha> <kind> <agent> <cwd> <owner/repo> <direction>
+# dispatch.sh <url> <number> <title> <author> <sha> <kind> <agent> <cwd> <owner/repo> [direction]
 # Starts a Codex review of one PR in a detached worktree at <sha>, in a new Herdr pane (or $PANE), reports it,
 # and closes a pane it opened.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"

@@ -232,7 +232,7 @@ def fetch(scope):
     requested = search(
         f"is:pr is:open review-requested:@me archived:false {scope}".strip(), login
     )
-    # PRs I reviewed whose head moved since, with no new review request.
+    # Include reviewed PRs that still need tracking without a new review request.
     reviewed = search(
         f"is:pr is:open reviewed-by:@me -review-requested:@me archived:false {scope}".strip(),
         login,
