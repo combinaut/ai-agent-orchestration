@@ -12,6 +12,14 @@ setup() {
     ln -s "$ROOT/tests/fixtures/sweep-agent.py" "$TMP/bin/$agent"
   done
   stub_gh
+  export HERDR_PANE_ID=test-pane
+  cat >"$TMP/bin/herdr" <<'EOF'
+#!/usr/bin/env bash
+[ "$*" = 'agent get test-pane' ] || exit 1
+[ -z "${FAKE_NO_SESSION:-}" ] || { echo '{}'; exit 0; }
+echo '{"result":{"agent":{"agent_session":{"value":"worker-session"}}}}'
+EOF
+  chmod +x "$TMP/bin/herdr"
   export PATH="$TMP/bin:$PATH" ORCH_CODEX_WORKER_MODEL=gpt-test ORCH_CLAUDE_TIERS=haiku,sonnet,opus
   export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=t GIT_CONFIG_KEY_1=user.email GIT_CONFIG_VALUE_1=t@example.com
   REPO="$TMP/repo"
@@ -427,9 +435,11 @@ assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_S
   printf '[core]\nfsmonitor = %s\n' "$TMP/filter" >"$TMP/included.gitconfig"
   git -C "$REPO" config include.path "$TMP/included.gitconfig"
   rm -f "$marker"
+  touch "$REPO/lib/probe.txt"
   cd "$REPO"
   run --separate-stderr python3 -I "$ROOT/lib/sweep_run.py" tree
   [ "$status" -eq 0 ]
+  [ ! -e "$marker" ]
   run python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import sweep_run
 assert "core.fsmonitor=false" in sweep_run.GIT_CONFIG
 assert any(v.startswith("core.hooksPath=") for v in sweep_run.GIT_CONFIG)
@@ -756,9 +766,9 @@ sys.exit(sweep_run.main(["orch-sweep", *sys.argv[2:]]))' "$ROOT/lib" run --pr "$
 sys.path.insert(0, sys.argv[1])
 import sweep_run
 plain = sweep_run.command
-def slow(*args):
+def slow(*args, **kwargs):
     time.sleep(0.3)
-    return plain(*args)
+    return plain(*args, **kwargs)
 sweep_run.command = slow
 runner = sweep_run.Runner("codex", "gpt-test", 1, 900, time.monotonic() + 0.1, 0, sys.argv[2])
 try:
@@ -798,7 +808,7 @@ for round in range(10):
     kept = [finding(round * 100 + n, "CONFIRMED_NEW") for n in range(50)]
     rejected = [finding(5000 + round * 100 + n, "FALSE") for n in range(50)]
     record = {"tool": "orch-sweep", "items": kept, "dropped": rejected + [finding(9999, "RESPECT_DROP", "nit")]}
-    comments.append({"user": {"login": "reviewer"}, "body": "<!-- orch-sweep v1 -->\n```json\n" + json.dumps(record) + "\n```\n"})
+    comments.append({"author_association": "MEMBER", "user": {"login": "reviewer"}, "body": "<!-- orch-sweep v1 -->\n```json\n" + json.dumps(record) + "\n```\n"})
 json.dump([comments], open(sys.argv[1], "w"))' "$TMP/comments.json"
   FAKE_FINDINGS=1 run_sweep --no-comment
   [ "$status" -eq 0 ]
@@ -902,4 +912,76 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
   [[ "$stderr" == "ERROR: the sweep comment needs"*"characters; GitHub allows 65536"* ]]
   [ ! -e "$TMP/posted.json" ]
   [ -s "$TMP/record.json" ]
+}
+
+@test "standalone validator evidence binds initial prompt, worker, nonce, age and recorded answers for both runtimes" {
+  for runtime in codex claude; do
+    export CODEX_HOME="$TMP/codex" CLAUDE_CONFIG_DIR="$TMP/claude"
+    FAKE_FINDINGS=1 FAKE_PERSIST=1 run_sweep --no-comment --runtime "$runtime"
+    [ "$status" -eq 0 ]
+    cp "$TMP/record.json" "$TMP/original.json"
+    run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+    [ "$status" -eq 0 ]
+    for mutation in worker nonce head later old verdict class reason omitted; do
+      cp "$TMP/original.json" "$TMP/record.json"
+      python3 -c 'import json,os,pathlib,sys
+r=json.load(open(sys.argv[1])); mode=sys.argv[2]; runtime=sys.argv[3]
+id=r["validator_ids"][0]
+root=pathlib.Path(os.environ["CODEX_HOME"] if runtime=="codex" else os.environ["CLAUDE_CONFIG_DIR"])
+p=next(root.rglob(("rollout-"+id if runtime=="codex" else id)+".jsonl"))
+backup=p.with_suffix(".backup")
+if not backup.exists(): backup.write_bytes(p.read_bytes())
+p.write_bytes(backup.read_bytes())
+rows=[json.loads(l) for l in p.read_text().splitlines()]
+if mode=="worker":
+ p.write_text(p.read_text().replace("worker-session", "other-worker-session"))
+elif mode=="nonce":
+ r["run_nonce"]="0"*32
+elif mode=="head":
+ p.write_text(p.read_text().replace(r["head"],"a"*40))
+elif mode=="later":
+ user=next(x for x in rows if x.get("type")=="user" or (x.get("type")=="response_item" and x["payload"].get("role")=="user"))
+ rows.remove(user)
+ if runtime=="codex": rows.insert(1,{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"ordinary question"}]}})
+ else: rows.insert(0,{"type":"user","sessionId":id,"message":{"role":"user","content":"ordinary question"}})
+ rows.append(user); p.write_text("\n".join(map(json.dumps,rows))+"\n")
+elif mode=="old": os.utime(p,(1,1))
+else:
+ # Verdict mutations keep the record internally consistent.
+ f=r["items"][0]
+ if mode=="verdict":
+  r["items"].remove(f); r["dropped"].append(f)
+  r["verdicts"][f["verdict"]]-=1; f["verdict"]="FALSE"; r["verdicts"]["FALSE"]+=1; r["open_fix"]-=1
+ elif mode=="class": f["class"]="nit"; r["open_fix"]-=1
+ elif mode=="reason": f["reason"]="invented justification"
+ elif mode=="omitted":
+  r["items"].remove(f); r["findings"]-=1; r["verdicts"][f["verdict"]]-=1; r["open_fix"]-=1
+json.dump(r,open(sys.argv[1],"w"))' "$TMP/record.json" "$mutation" "$runtime"
+      run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+      if [ "$status" -ne 1 ]; then echo "accepted $runtime $mutation"; return 1; fi
+    done
+  done
+}
+
+@test "a run requires the live worker session unless explicitly using CI attestation" {
+  FAKE_NO_SESSION=1 run_sweep --no-comment
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *'worker session'* ]]
+  [ ! -e "$TMP/agent.calls" ]
+  FAKE_NO_SESSION=1 run_sweep --no-comment --no-transcripts
+  [ "$status" -eq 0 ]
+}
+
+@test "validator reasons survive the record comment and bounded outcome history" {
+  FAKE_FINDINGS=1 FAKE_VERDICT=FALSE run_sweep
+  [ "$status" -eq 0 ]
+  [ "$(field 'r["dropped"][0]["reason"]')" = checked ]
+  python3 -c 'import json,sys; sys.path.insert(0,sys.argv[1]); import sweep_run
+r=json.load(open(sys.argv[2])); body=json.load(open(sys.argv[3]))["body"]
+assert "| checked |" in body
+h=sweep_run.history([("reviewer",r["dropped"])])
+assert "reason: checked" in h
+f=r["dropped"][0]
+h=sweep_run.history([("reviewer",[dict(f,reason="a"*90000),dict(f,reason="different rationale")])])
+assert "different rationale" in h and len(h)<=sweep_run.HISTORY_LIMIT' "$ROOT/lib" "$TMP/record.json" "$TMP/posted.json"
 }

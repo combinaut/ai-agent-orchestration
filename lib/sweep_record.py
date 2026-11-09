@@ -72,6 +72,7 @@ GIT_ENV = {
 GIT_ENV.update(
     {
         "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_ATTR_SOURCE": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
         "GIT_CONFIG_NOSYSTEM": "1",
     }
 )
@@ -83,6 +84,33 @@ GIT_CONFIG = (
     "-c",
     "core.attributesFile=/dev/null",
 )
+
+
+def git_config():
+    """Disable every configured filter, including those named by tracked attributes."""
+    done = subprocess.run(
+        [
+            GIT,
+            *GIT_CONFIG,
+            "config",
+            "--null",
+            "--name-only",
+            "--get-regexp",
+            r"^filter\..*\.(clean|process|required)$",
+        ],
+        capture_output=True,
+        env=GIT_ENV,
+        timeout=30,
+    )
+    if done.returncode not in (0, 1):
+        raise OSError("cannot enumerate Git filters safely")
+    overrides = []
+    for key in done.stdout.decode().split("\0"):
+        if key:
+            overrides.extend(
+                ("-c", f"{key}={'false' if key.endswith('.required') else ''}")
+            )
+    return (*GIT_CONFIG, *overrides)
 
 
 def plan_problem(slices, paths=None):
@@ -148,6 +176,8 @@ def finding_problem(finding):
         return f"finding {name}: class must be fix or nit"
     if finding.get("verdict") not in VERDICTS:
         return f"finding {name}: verdict {finding.get('verdict')!r} is not a validator verdict"
+    if "reason" in finding and not isinstance(finding["reason"], str):
+        return f"finding {name}: reason must be a string"
     return None
 
 
@@ -350,7 +380,7 @@ def git(*args):
         if args and args[0] == "diff":
             args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
         done = subprocess.run(
-            [GIT, *GIT_CONFIG, *args],
+            [GIT, *git_config(), *args],
             capture_output=True,
             env=GIT_ENV,
             text=True,
@@ -441,36 +471,94 @@ def codex_session_transcripts(agent_id):
         try:
             with open(candidate, encoding="utf-8") as handle:
                 meta = json.loads(handle.readline())["payload"]
-            if meta.get("session_id") == agent_id:
+            if meta.get("id") == agent_id:
                 matches.append(candidate)
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             continue
     return matches
 
 
-def transcript_text(found):
-    """Plaintext transcript lines that bind a persisted validator to its brief."""
+def message_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(b.get("text", "") for b in content if isinstance(b, dict))
+    return ""
+
+
+def standalone_evidence(found, family, swept, session, record, verified):
     with open(found, encoding="utf-8") as handle:
-        return "\n".join(line for line in handle if line.strip())
+        rows = [json.loads(line) for line in handle if line.strip()]
+    messages = []
+    for row in rows:
+        if family == "Codex" and row.get("type") == "response_item":
+            message = row.get("payload", {})
+            if message.get("type") == "message":
+                messages.append(message)
+        elif family == "Claude" and row.get("type") in ("user", "assistant"):
+            if row.get("sessionId") != record["_validator_id"]:
+                return "transcript session id does not match validator id"
+            messages.append(row.get("message", {}))
+    initial = next((m for m in messages if m.get("role") == "user"), {})
+    brief = message_text(initial.get("content"))
+    bindings = re.findall(r"^Sweep binding: (.+)$", brief, re.M)
+    expected = {"worker_session": session, "head": swept, "nonce": record["run_nonce"]}
+    if (
+        VALIDATOR_MARKER not in brief
+        or len(bindings) != 1
+        or json.loads(bindings[0]) != expected
+    ):
+        return "initial user message must bind validator marker, head, worker session and run nonce"
+    final = next(
+        (
+            m
+            for m in reversed(messages)
+            if m.get("role") == "assistant" and m.get("phase") in (None, "final_answer")
+        ),
+        {},
+    )
+    answer = json.loads(message_text(final.get("content")))
+    given = answer.get("verdicts")
+    if not isinstance(given, list) or not given:
+        return "transcript has no validator verdicts"
+    entries = {f["id"]: f for f in record["items"] + record["dropped"]}
+    local = set()
+    for verdict in given:
+        name = verdict.get("id")
+        if name in local or name in verified or name not in entries:
+            return "transcript verdict ids do not match record findings"
+        if any(
+            verdict.get(k) != entries[name].get(k)
+            for k in ("verdict", "class", "reason")
+        ):
+            return f"record verdict, class or reason for {name} differs from transcript"
+        local.add(name)
+    verified.update(local)
+    return None
 
 
-def transcript_problem(path, swept, session, agent_id):
+def transcript_problem(path, swept, session, agent_id, record=None, verified=None):
     if not TOKEN.fullmatch(agent_id) and not CODEX_PATH.fullmatch(agent_id):
         return f"{path}: validator id {agent_id!r} is not a plain id"
     candidates = []
-    if TOKEN.fullmatch(agent_id):
-        found = claude_transcript(session, agent_id)
-        if found:
-            candidates.append(("Claude", found, False))
+    if record is not None:
+        nonce = record.get("run_nonce")
+        if not isinstance(nonce, str) or not re.fullmatch(r"[0-9a-f]{32}", nonce):
+            return f"{path}: run_nonce must be a fresh 32-character hex nonce"
         found = claude_session_transcript(agent_id)
         if found:
             candidates.append(("Claude", found, True))
-    candidates.extend(
-        ("Codex", found, False) for found in codex_transcripts(session, agent_id)
-    )
-    candidates.extend(
-        ("Codex", found, True) for found in codex_session_transcripts(agent_id)
-    )
+        candidates.extend(
+            ("Codex", found, True) for found in codex_session_transcripts(agent_id)
+        )
+    else:
+        if TOKEN.fullmatch(agent_id):
+            found = claude_transcript(session, agent_id)
+            if found:
+                candidates.append(("Claude", found, False))
+        candidates.extend(
+            ("Codex", found, False) for found in codex_transcripts(session, agent_id)
+        )
     if not candidates:
         return f"{path}: validator {agent_id} is no supported Claude or Codex subagent transcript of session {session}; Pi and Cursor validators are unsupported"
     committed = git("show", "-s", "--format=%ct", swept)
@@ -493,12 +581,15 @@ def transcript_problem(path, swept, session, agent_id):
                     else f"{path}: Codex validator {agent_id} must start with /root/finalize_sweep_validator_{swept[:12]}"
                 )
             elif persisted:
-                text = transcript_text(found)
-                issue = (
-                    None
-                    if VALIDATOR_MARKER in text and swept in text
-                    else f"{path}: validator {agent_id} brief must include {VALIDATOR_MARKER} and name {swept}"
+                reason = standalone_evidence(
+                    found,
+                    family,
+                    swept,
+                    session,
+                    dict(record, _validator_id=agent_id),
+                    verified,
                 )
+                issue = f"{path}: validator {agent_id}: {reason}" if reason else None
             else:
                 with open(found, encoding="utf-8") as handle:
                     first = next(
@@ -565,10 +656,14 @@ def main(argv):
     if not found and not attestation:
         if not args.session or not TOKEN.fullmatch(args.session):
             found = f"{args.record}: --session <worker session id> is required"
+        verified = set()
+        script = record if record.get("tool") == "orch-sweep" else None
         for agent_id in record["validator_ids"]:
             found = found or transcript_problem(
-                args.record, record["head"], args.session, agent_id
+                args.record, record["head"], args.session, agent_id, script, verified
             )
+        if not found and script is not None and len(verified) != record["findings"]:
+            found = f"{args.record}: transcript verdict ids do not cover every record finding"
     if found:
         print(f"ERROR: {one_line(found)}", file=sys.stderr)
         return 1

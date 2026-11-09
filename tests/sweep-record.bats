@@ -192,11 +192,11 @@ check() {
   [ "$status" -eq 0 ]
 }
 
-@test "a persisted Codex validator session that names the head passes" {
+@test "a manual record cannot borrow a standalone Codex session" {
   codex_session 12345678-1234-1234-1234-123456789abc
   record 2 '["12345678-1234-1234-1234-123456789abc"]'
   check
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
 }
 
 @test "a Codex validator path must name the swept head" {

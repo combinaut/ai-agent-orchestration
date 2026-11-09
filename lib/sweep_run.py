@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import secrets
 import select
 import shutil
 import signal
@@ -33,7 +34,7 @@ GH_TIMEOUT = 45
 GH_MAX_BYTES = 32 * 1024 * 1024
 STOP_GRACE = 5
 HISTORY_LIMIT = 60000
-OUTCOME_FIELDS = {"who": 40, "file": 200, "category": 60, "summary": 300}
+OUTCOME_FIELDS = {"who": 40, "file": 200, "category": 60, "summary": 300, "reason": 500}
 COMMENT_LIMIT = 65536
 MARKER = "<!-- orch-sweep v1 -->"
 ROLES = {
@@ -63,6 +64,7 @@ GIT_ENV = {
 GIT_ENV.update(
     {
         "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_ATTR_SOURCE": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
         "GIT_CONFIG_NOSYSTEM": "1",
     }
 )
@@ -153,7 +155,10 @@ def git(*args, raw=False):
     if args and args[0] == "diff":
         args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
     done = subprocess.run(
-        [GIT, *GIT_CONFIG, *args], capture_output=True, env=GIT_ENV, timeout=60
+        [GIT, *sweep_record.git_config(), *args],
+        capture_output=True,
+        env=GIT_ENV,
+        timeout=60,
     )
     if done.returncode:
         error = done.stderr.decode(errors="replace").strip()
@@ -621,6 +626,8 @@ def verdicts_check(ids):
                 "nit",
             ):
                 raise ValueError(f"bad verdict or class for {v['id']}")
+            if not isinstance(v.get("reason"), str):
+                raise ValueError(f"bad reason for {v['id']}")
             given[v["id"]] = v
         missing = [i for i in ids if i not in given]
         if missing:
@@ -691,9 +698,10 @@ CONFIRMED_NEW (true, never raised, worth doing; keep), CONFIRMED_REGRESSED (repo
 A real-bug finding must be traced to a concrete failure, otherwise it is FALSE or NOT_WORTH_IT."""
 
 
-def validator_prompt(chunk, context, merge_base, head, diff):
+def validator_prompt(chunk, context, merge_base, head, diff, session, nonce):
     return f"""ROLE: validator
 finalize-sweep validator {head}
+Sweep binding: {json.dumps({"worker_session": session, "head": head, "nonce": nonce})}
 Validate the sweep findings below for a pull request at commit {head} (merge base {merge_base}). The PR diff is in {diff}; the code at {head} is in the current directory. Report only: create, change or delete no file in the repository.
 For each finding check: is it true of the code, was it raised before and with what outcome (the PR comments below hold earlier sweeps), and does the plan allow it or did this PR not cause it. Use RESPECT_DROP when the earlier reason holds and DISPUTED_DROP when it does not.
 {VERDICT_TABLE}
@@ -748,13 +756,14 @@ def history(outcomes):
     lines, seen = [], set()
     for who, findings in outcomes:
         for f in findings:
-            key = tuple(f[k] for k in ("file", "line", "category", "class", "verdict", "summary"))  # fmt: skip
+            key = tuple(f[k] for k in ("file", "line", "category", "class", "verdict", "summary")) + (f.get("reason", ""),)  # fmt: skip
             if key not in seen:
                 seen.add(key)
                 cut = {
-                    k: str(dict(f, who=who)[k])[:n] for k, n in OUTCOME_FIELDS.items()
+                    k: str(dict(f, who=who).get(k, ""))[:n]
+                    for k, n in OUTCOME_FIELDS.items()
                 }
-                lines.append((f["verdict"] in sweep_record.KEEP, f"- {cut['who']}: {cut['file']}:{f['line']} {cut['category']} {f['class']} {f['verdict']}: {cut['summary']}"))  # fmt: skip
+                lines.append((f["verdict"] in sweep_record.KEEP, f"- {cut['who']}: {cut['file']}:{f['line']} {cut['category']} {f['class']} {f['verdict']}: {cut['summary']}; reason: {cut['reason']}"))  # fmt: skip
     lines.sort(key=lambda pair: pair[0])
     notice = (
         "- {} earlier sweep outcomes left out to fit {} characters; rejections go first"
@@ -827,13 +836,13 @@ def comment_body(record, tables=("Kept", "Dropped"), indent=1):
         lines += [
             f"**{title}**",
             "",
-            "| id | class | where | category | verdict | finding |",
-            "|---|---|---|---|---|---|",
+            "| id | class | where | category | verdict | finding | reason |",
+            "|---|---|---|---|---|---|---|",
         ]
         for i in rows:
             where = f"{i['file']}:{i['line']}" if i["line"] else i["file"]
             lines.append(
-                f"| {i['id']} | {i['class']} | `{cell(where)}` | {cell(i['category'])} | {i['verdict']} | {cell(i['summary'])} |"
+                f"| {i['id']} | {i['class']} | `{cell(where)}` | {cell(i['category'])} | {i['verdict']} | {cell(i['summary'])} | {cell(i.get('reason', ''))} |"
             )
         lines.append("")
     if not record["items"] and not record["dropped"]:
@@ -879,6 +888,37 @@ def cache_path(repo, number, head):
     return root / "review-prs" / "sweeps" / repo / str(number) / f"{head}.json"
 
 
+def worker_session(no_transcripts):
+    try:
+        pane = os.environ.get("HERDR_PANE_ID")
+        if not pane:
+            raise ValueError("HERDR_PANE_ID is missing")
+        done = subprocess.run(
+            ["herdr", "agent", "get", pane],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if done.returncode:
+            raise ValueError("Herdr could not identify the worker")
+        session = json.loads(done.stdout)["result"]["agent"]["agent_session"]["value"]
+        if not isinstance(session, str) or not sweep_record.TOKEN.fullmatch(session):
+            raise ValueError("invalid worker session id")
+        return session
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        ValueError,
+        KeyError,
+        TypeError,
+    ) as error:
+        if no_transcripts:
+            return None
+        raise Failure(
+            f"worker session unavailable: {error}; --no-transcripts is CI attestation only"
+        ) from None
+
+
 def run(args):
     match = PR_URL.fullmatch(args.pr)
     if not match:
@@ -907,6 +947,8 @@ def run(args):
             or Path(path).parent.resolve().is_relative_to(top)
         ):
             raise Failure(f"{label} {path} is inside the checkout; write it outside")
+    session = worker_session(args.no_transcripts)
+    nonce = secrets.token_hex(16)
     model = model_for(args.runtime, args.model)
     merge_base = git("merge-base", "HEAD", args.base_ref).strip()
     pr, comments, threads, reviews = pr_data(repo, number)
@@ -976,7 +1018,9 @@ def run(args):
         [
             {
                 "name": f"validator {n + 1}",
-                "prompt": validator_prompt(chunk, text, merge_base, args.head, pr_diff),
+                "prompt": validator_prompt(
+                    chunk, text, merge_base, args.head, pr_diff, session, nonce
+                ),
                 "schema": VERDICTS_SCHEMA,
                 "check": verdicts_check([f["id"] for f in chunk]),
             }
@@ -994,7 +1038,7 @@ def run(args):
         verdicts[v["verdict"]] += 1
         entry = {
             "id": f["id"], "file": f["file"], "line": f["line"], "category": f["category"],
-            "class": v["class"], "verdict": v["verdict"], "summary": f["summary"],
+            "class": v["class"], "verdict": v["verdict"], "summary": f["summary"], "reason": v["reason"],
         }  # fmt: skip
         (items if v["verdict"] in sweep_record.KEEP else dropped).append(entry)
     record = {
@@ -1009,6 +1053,7 @@ def run(args):
         "findings": len(found),
         "verdicts": verdicts,
         "tool": "orch-sweep",
+        "run_nonce": nonce,
         "version": 1,
         "pr": args.pr,
         "runtime": args.runtime,
@@ -1076,6 +1121,11 @@ def main(argv):
     go.add_argument("--timeout", type=int, default=3600)
     go.add_argument("--record")
     go.add_argument("--no-comment", action="store_true")
+    go.add_argument(
+        "--no-transcripts",
+        action="store_true",
+        help="allow missing worker session for CI attestation only",
+    )
     show = commands.add_parser("plan")
     show.add_argument("--base", required=True)
     show.add_argument("--head", default="HEAD")
