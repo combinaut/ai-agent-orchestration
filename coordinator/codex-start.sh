@@ -28,4 +28,5 @@ herdr_bin=${ORCH_HERDR_BIN:-herdr}
 orch_need_cmd "$herdr_bin"
 extra=()
 [ "$tier" != smart ] || extra=(-c "model_reasoning_effort=${ORCH_CODEX_SMART_REASONING_EFFORT:-medium}")
-exec "$herdr_bin" agent start "$name" --kind codex --pane "$pane" -- --no-daemon --dangerously-bypass-hook-trust --model "$model" ${extra[@]+"${extra[@]}"}
+# Login profiles can move system tools ahead of mise's inherited PATH.
+exec "$herdr_bin" agent start "$name" --kind codex --pane "$pane" -- --no-daemon --dangerously-bypass-hook-trust --model "$model" -c allow_login_shell=false ${extra[@]+"${extra[@]}"}
