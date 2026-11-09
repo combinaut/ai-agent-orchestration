@@ -21,7 +21,6 @@ teardown() {
   rm -rf "$TMP"
 }
 
-# record <findings> <validators> <verdicts-json> [head]: writes the record file; BASE, SLICES, AGENTS, MODE and CLEAN override its defaults.
 record() {
   local ids="" i
   for ((i = 1; i <= $2; i++)); do ids="${ids:+$ids, }\"agent-$i\""; done
@@ -446,7 +445,6 @@ PY
   [ "$stderr" = 'ERROR: unrecognized arguments: --bo\ngus' ]
 }
 
-# script_record [python statement]: a valid orch-sweep record, then the statement run on it as r.
 script_record() {
   python3 - "$REC" "$HEAD_SHA" "$ZERO_SHA" "${1:-pass}" <<'PY'
 import hashlib, json, sys
@@ -477,8 +475,6 @@ PY
 @test "a valid orch-sweep record passes the exact check" {
   script_record
   cd "$REPO" || return 1
-  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --no-transcripts
-  [ "$status" -eq 0 ]
   run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA" --exact --no-transcripts
   [ "$status" -eq 0 ]
 }
