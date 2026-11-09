@@ -132,7 +132,34 @@ if role == "validator" and os.environ.get("FAKE_PERSIST"):
                 "payload": {
                     "type": "message",
                     "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "# AGENTS.md instructions\n<environment_context>runtime context</environment_context>",
+                        }
+                    ],
+                    "internal_chat_message_metadata_passthrough": {
+                        "content_item_kinds": [
+                            "agents_md.instructions",
+                            "environments.environment_context",
+                        ],
+                        "content_item_metadata": [
+                            {"provenance": {"type": "agents_md"}},
+                            {"provenance": {"type": "harness", "hook": False}},
+                        ],
+                    },
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
                     "content": [{"type": "input_text", "text": prompt}],
+                    "internal_chat_message_metadata_passthrough": {
+                        "content_item_kinds": ["user.text"],
+                        "content_item_metadata": [{"provenance": {"type": "user"}}],
+                    },
                 },
             },
             {

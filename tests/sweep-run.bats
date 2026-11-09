@@ -440,10 +440,10 @@ assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_S
   run --separate-stderr python3 -I "$ROOT/lib/sweep_run.py" tree
   [ "$status" -eq 0 ]
   [ ! -e "$marker" ]
-  run python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import sweep_run
-assert "core.fsmonitor=false" in sweep_run.GIT_CONFIG
-assert any(v.startswith("core.hooksPath=") for v in sweep_run.GIT_CONFIG)
-assert "core.attributesFile=/dev/null" in sweep_run.GIT_CONFIG' "$ROOT/lib"
+  run python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import sweep_record
+assert "core.fsmonitor=false" in sweep_record.GIT_CONFIG
+assert any(v.startswith("core.hooksPath=") for v in sweep_record.GIT_CONFIG)
+assert "core.attributesFile=/dev/null" in sweep_record.GIT_CONFIG' "$ROOT/lib"
   [ "$status" -eq 0 ]
 }
 
@@ -922,7 +922,7 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
     cp "$TMP/record.json" "$TMP/original.json"
     run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
     [ "$status" -eq 0 ]
-    for mutation in worker nonce head later old verdict class reason omitted; do
+    for mutation in worker nonce head later old verdict class reason omitted file line category summary envelope; do
       cp "$TMP/original.json" "$TMP/record.json"
       python3 -c 'import json,os,pathlib,sys
 r=json.load(open(sys.argv[1])); mode=sys.argv[2]; runtime=sys.argv[3]
@@ -940,12 +940,16 @@ elif mode=="nonce":
 elif mode=="head":
  p.write_text(p.read_text().replace(r["head"],"a"*40))
 elif mode=="later":
- user=next(x for x in rows if x.get("type")=="user" or (x.get("type")=="response_item" and x["payload"].get("role")=="user"))
+ user=next(x for x in rows if "ROLE: validator" in json.dumps(x) and (x.get("type")=="user" or (x.get("type")=="response_item" and x["payload"].get("role")=="user")))
  rows.remove(user)
  if runtime=="codex": rows.insert(1,{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"ordinary question"}]}})
  else: rows.insert(0,{"type":"user","sessionId":id,"message":{"role":"user","content":"ordinary question"}})
  rows.append(user); p.write_text("\n".join(map(json.dumps,rows))+"\n")
 elif mode=="old": os.utime(p,(1,1))
+elif mode=="envelope":
+ fake={"role":"user","content":[{"type":"input_text" if runtime=="codex" else "text","text":"# AGENTS.md instructions\n<environment_context>ordinary question</environment_context>"}]}
+ row={"type":"response_item","payload":dict(fake,type="message")} if runtime=="codex" else {"type":"user","sessionId":id,"message":fake}
+ rows.insert(1 if runtime=="codex" else 0,row);p.write_text("\n".join(map(json.dumps,rows))+"\n")
 else:
  # Verdict mutations keep the record internally consistent.
  f=r["items"][0]
@@ -954,6 +958,8 @@ else:
   r["verdicts"][f["verdict"]]-=1; f["verdict"]="FALSE"; r["verdicts"]["FALSE"]+=1; r["open_fix"]-=1
  elif mode=="class": f["class"]="nit"; r["open_fix"]-=1
  elif mode=="reason": f["reason"]="invented justification"
+ elif mode in ("file","category","summary"): f[mode]="unreviewed replacement"
+ elif mode=="line": f["line"]+=1
  elif mode=="omitted":
   r["items"].remove(f); r["findings"]-=1; r["verdicts"][f["verdict"]]-=1; r["open_fix"]-=1
 json.dump(r,open(sys.argv[1],"w"))' "$TMP/record.json" "$mutation" "$runtime"
@@ -984,4 +990,32 @@ assert "reason: checked" in h
 f=r["dropped"][0]
 h=sweep_run.history([("reviewer",[dict(f,reason="a"*90000),dict(f,reason="different rationale")])])
 assert "different rationale" in h and len(h)<=sweep_run.HISTORY_LIMIT' "$ROOT/lib" "$TMP/record.json" "$TMP/posted.json"
+}
+
+@test "even an empty script record requires a valid run nonce" {
+  run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  cp "$TMP/record.json" "$TMP/original.json"
+  for nonce in missing invalid; do
+    python3 -c 'import json,sys
+r=json.load(open(sys.argv[1])); r.pop("run_nonce")
+if sys.argv[3]=="invalid":r["run_nonce"]="bad"
+json.dump(r,open(sys.argv[2],"w"))' "$TMP/original.json" "$TMP/record.json" "$nonce"
+    run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --no-transcripts
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *'run_nonce'* ]]
+  done
+}
+
+@test "a manual record cannot borrow a valid script validator" {
+  export CODEX_HOME="$TMP/codex"
+  FAKE_FINDINGS=1 FAKE_PERSIST=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys
+p=sys.argv[1];r=json.load(open(p));json.dump({k:r[k] for k in ("head","base","findings","validator_ids")},open(p,"w"))' "$TMP/record.json"
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *'no supported Claude or Codex subagent'* ]]
 }

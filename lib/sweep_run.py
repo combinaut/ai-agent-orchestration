@@ -50,32 +50,8 @@ TRAILERS = {
     "claude": "*(Generated using Claude Code)*",
 }
 ACTIVE_GH = set()
-GIT = shutil.which("git")
-if not GIT:
-    raise RuntimeError("git is not on PATH")
-GIT = str(Path(GIT).resolve())
-GIT_HOOKS = tempfile.TemporaryDirectory(prefix="orch-sweep-git-hooks-")
-GIT_ENV = {
-    key: value
-    for key, value in os.environ.items()
-    if key != "GIT_CONFIG_COUNT"
-    and not key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
-}
-GIT_ENV.update(
-    {
-        "GIT_ATTR_NOSYSTEM": "1",
-        "GIT_ATTR_SOURCE": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
-        "GIT_CONFIG_NOSYSTEM": "1",
-    }
-)
-GIT_CONFIG = (
-    "-c",
-    "core.fsmonitor=false",
-    "-c",
-    f"core.hooksPath={GIT_HOOKS.name}",
-    "-c",
-    "core.attributesFile=/dev/null",
-)
+GIT = sweep_record.GIT
+GIT_ENV = sweep_record.GIT_ENV
 AGENT_ENV_DROP = {
     "PYTHONPATH",
     "PYTHONHOME",

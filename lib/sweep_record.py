@@ -35,6 +35,7 @@ KEEP = ("CONFIRMED_NEW", "CONFIRMED_REGRESSED", "DISPUTED_DROP")
 SLICE_LINES = 400
 SCRIPT_FIELDS = (
     "version",
+    "run_nonce",
     "pr",
     "runtime",
     "model",
@@ -188,6 +189,10 @@ def script_problem(record):
         return f"missing field {missing[0]}"
     if record["version"] != 1 or isinstance(record["version"], bool):
         return "version must be 1"
+    if not isinstance(record["run_nonce"], str) or not re.fullmatch(
+        r"[0-9a-f]{32}", record["run_nonce"]
+    ):
+        return "run_nonce must be a 32-character hex nonce"
     if record["deviation"] is not None:
         return "deviation must be null"
     if not isinstance(record["pr"], str) or not PR_URL.fullmatch(record["pr"]):
@@ -486,6 +491,21 @@ def message_text(content):
     return ""
 
 
+def initial_user_message(messages):
+    for message in messages:
+        if message.get("role") != "user":
+            continue
+        metadata = message.get("internal_chat_message_metadata_passthrough") or {}
+        kinds = metadata.get("content_item_kinds", [])
+        if kinds and all(
+            k in {"agents_md.instructions", "environments.environment_context"}
+            for k in kinds
+        ):
+            continue
+        return message_text(message.get("content"))
+    return ""
+
+
 def standalone_evidence(found, family, swept, session, record, verified):
     with open(found, encoding="utf-8") as handle:
         rows = [json.loads(line) for line in handle if line.strip()]
@@ -499,8 +519,7 @@ def standalone_evidence(found, family, swept, session, record, verified):
             if row.get("sessionId") != record["_validator_id"]:
                 return "transcript session id does not match validator id"
             messages.append(row.get("message", {}))
-    initial = next((m for m in messages if m.get("role") == "user"), {})
-    brief = message_text(initial.get("content"))
+    brief = initial_user_message(messages)
     bindings = re.findall(r"^Sweep binding: (.+)$", brief, re.M)
     expected = {"worker_session": session, "head": swept, "nonce": record["run_nonce"]}
     if (
@@ -521,18 +540,31 @@ def standalone_evidence(found, family, swept, session, record, verified):
     given = answer.get("verdicts")
     if not isinstance(given, list) or not given:
         return "transcript has no validator verdicts"
+    findings = json.loads(brief.rsplit("\n--- Findings ---\n", 1)[-1])
+    if not isinstance(findings, list):
+        return "initial user message has no findings payload"
+    described = {f["id"]: f for f in findings}
+    if len(described) != len(findings):
+        return "initial user message repeats a finding id"
     entries = {f["id"]: f for f in record["items"] + record["dropped"]}
     local = set()
     for verdict in given:
         name = verdict.get("id")
         if name in local or name in verified or name not in entries:
             return "transcript verdict ids do not match record findings"
+        if name not in described or any(
+            described[name].get(k) != entries[name].get(k)
+            for k in ("file", "line", "category", "summary")
+        ):
+            return f"record finding {name} differs from the initial validator brief"
         if any(
             verdict.get(k) != entries[name].get(k)
             for k in ("verdict", "class", "reason")
         ):
             return f"record verdict, class or reason for {name} differs from transcript"
         local.add(name)
+    if local != set(described):
+        return "transcript verdict ids do not cover its initial findings"
     verified.update(local)
     return None
 
@@ -542,9 +574,6 @@ def transcript_problem(path, swept, session, agent_id, record=None, verified=Non
         return f"{path}: validator id {agent_id!r} is not a plain id"
     candidates = []
     if record is not None:
-        nonce = record.get("run_nonce")
-        if not isinstance(nonce, str) or not re.fullmatch(r"[0-9a-f]{32}", nonce):
-            return f"{path}: run_nonce must be a fresh 32-character hex nonce"
         found = claude_session_transcript(agent_id)
         if found:
             candidates.append(("Claude", found, True))
