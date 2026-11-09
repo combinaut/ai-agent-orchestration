@@ -343,6 +343,14 @@ for line in open(sys.argv[1]):
   [ ! -e "$TMP/record.json" ]
 }
 
+@test "a first sweep-agent failure starts no later jobs at concurrency one" {
+  FAKE_FAIL=sweep-comments run_sweep --no-comment --concurrency 1
+  [ "$status" -eq 4 ]
+  [ "$(calls sweep-comments)" -eq 2 ]
+  [ "$(calls sweep-footprint)" -eq 0 ]
+  [ "$(calls pr-text)" -eq 0 ]
+}
+
 @test "a validator that leaves a finding without a verdict fails the run" {
   FAKE_FINDINGS=1 FAKE_DROP_ID=F2 run_sweep --no-comment
   [ "$status" -eq 4 ]
