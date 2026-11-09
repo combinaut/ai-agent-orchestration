@@ -1283,6 +1283,26 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "python3 -c \"import os; os.system('gh --hostname=github.com -Ra/b pr --repo=a/b review 7 --approve')\"",
             True,
         ),
+        (
+            "quoted review word piped to sh",
+            "echo 'gh pr \"review\" 7 --approve' | sh",
+            True,
+        ),
+        (
+            "quoted pr word piped to bash",
+            "echo 'gh \"pr\" review 7' | bash",
+            True,
+        ),
+        (
+            "quoted review word with repo option piped to sh",
+            "echo 'gh -R a/b pr \"review\" 7' | sh",
+            True,
+        ),
+        (
+            "quoted review word inside Python",
+            'python3 -c "import os; os.system(\'gh pr \\"review\\" 7 --approve\')"',
+            True,
+        ),
         ("gh pr --repo review", "gh pr --repo a/b review 7 --approve", True),
         ("gh pr -R review", "gh pr -R a/b review 7 --approve", True),
         (

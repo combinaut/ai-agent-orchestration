@@ -456,10 +456,11 @@ GH_OR_CURL = re.compile(r"(?:^|[\s;&|(`])(?:\S*/)?(?:gh|curl)(?=[\s;&|)`]|$)")
 
 def review_marker(text, call=REVIEW_CALL):
     text = urllib.parse.unquote(text)
+    call_text = text.translate(QUOTING) if call is GH_REVIEW_CALL else text
     return bool(
         REVIEW_ENDPOINT.search(text)
         or REVIEW_MUTATION.search(text)
-        or call.search(text)
+        or call.search(call_text)
     )
 
 
