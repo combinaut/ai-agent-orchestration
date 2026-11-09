@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs /finalize-sweep as a script: orch-sweep run|plan|tree|allow|post-review (see lib/sweep_run.py).
+# Runs /finalize-sweep as a script: orch-sweep run|plan|tree|post-review (see lib/sweep_run.py).
 set -euo pipefail
 
 self=${BASH_SOURCE[0]}

@@ -63,6 +63,7 @@ case "$*" in
   'api --paginate --slurp repos/acme/app/pulls/7/reviews') cat "$TMP/reviews.json" 2>/dev/null || echo '[[]]' ;;
   'api -X POST repos/acme/app/issues/7/comments --input -')
     cat >"$TMP/posted.json"
+    [ -z "${COMMENT_POST_FAIL:-}" ] || { echo "comment transport failed" >&2; exit 1; }
     echo '{"html_url":"https://github.com/acme/app/pull/7#issuecomment-1"}' ;;
   'api -X POST repos/acme/app/pulls/7/reviews --input -')
     cat >"$TMP/review.json"
@@ -118,7 +119,7 @@ review() {
 }
 
 cache_file() {
-  echo "$XDG_CACHE_HOME/review-prs/sweeps/acme/app/7/$HEAD_SHA$1.json"
+  echo "$XDG_CACHE_HOME/review-prs/sweeps/acme/app/7/$HEAD_SHA.json"
 }
 
 # field <expr>: a Python expression over the record r.
@@ -897,7 +898,7 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
   as_comment
   gate
   [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: the full sweep of $HEAD_SHA has "*" open fix findings" ]]
+  [[ "$stderr" == "ERROR: the full sweep of $HEAD_SHA has "*" open fix findings"* ]]
   rm "$TMP/comments.json"
   FAKE_FINDINGS=1 FAKE_CLASS=nit run_sweep
   as_comment
@@ -917,7 +918,7 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
   printf %s "$NEW" >"$TMP/pr_head"
   gate "$NEW"
   [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: no full orch-sweep comment by me for the exact head $NEW" ]]
+  [[ "$stderr" == "ERROR: no full orch-sweep comment by the reviewer or PR author for the exact head $NEW" ]]
 }
 
 @test "a sweep comment by another login does not count" {
@@ -925,7 +926,7 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
   as_comment someone
   gate
   [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: no full orch-sweep comment by me for the exact head"* ]]
+  [[ "$stderr" == "ERROR: no full orch-sweep comment by the reviewer or PR author for the exact head"* ]]
 }
 
 @test "the gate exits 2 when GitHub cannot be read, and 1 for a finding" {
@@ -972,90 +973,19 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
   [[ "$stderr" == "ERROR: the full sweep record of $HEAD_SHA: "*"sweep_agents"* ]]
 }
 
-@test "a text sweep needs a full sweep of the head first" {
-  run_sweep --kind text
-  [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: a text sweep needs a full sweep of $HEAD_SHA first" ]]
-}
-
-@test "a text sweep starts only the PR-text agent and keeps its own copy" {
-  run_sweep --no-comment
-  rm "$TMP/agent.calls"
-  run_sweep --no-comment --kind text
-  [ "$status" -eq 0 ]
-  [ "$(calls pr-text)" -eq 1 ]
-  [ "$(calls sweep-comments)" -eq 0 ]
-  [ "$(field 'r["kind"]')" = text ]
-  [ "$(field 'r["slices"]')" -eq 0 ]
-  [ -s "$(cache_file)" ]
-  [ -s "$(cache_file .text)" ]
-}
-
-@test "a later text sweep clears a PR-text fix finding of the full sweep" {
+@test "a new full sweep replaces the previous full findings" {
   FAKE_PR_FINDINGS=1 run_sweep
   as_comment
   gate
   [ "$status" -eq 1 ]
-  run_sweep --kind text
-  [ "$status" -eq 0 ]
-  as_comment
-  gate
-  [ "$status" -eq 0 ]
-}
-
-@test "a text sweep does not clear a code fix finding of the full sweep" {
-  FAKE_FINDINGS=1 run_sweep
-  as_comment
-  run_sweep --kind text
-  as_comment
-  gate
-  [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: the full sweep of $HEAD_SHA has "*" open fix findings outside the PR text" ]]
-}
-
-@test "an open fix finding of the text sweep blocks the gate" {
-  run_sweep
-  as_comment
-  FAKE_PR_FINDINGS=1 run_sweep --kind text
-  as_comment
-  gate
-  [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: the text sweep of $HEAD_SHA has 1 open fix findings" ]]
-}
-
-@test "the producer allow file permits a wide sweep and consumers trust its attestation" {
-  for n in $(seq 1 26); do write "d$n/x.py" 5; done
-  commit wide
-  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
-  printf %s "$HEAD_SHA" >"$TMP/pr_head"
-  mkdir -p "$(dirname "$(cache_file)")"
-  printf '{"pr": "%s", "head": "%s", "what": "slices-over-25", "reason": "one generated tree", "at": "2026-11-06T00:00:00Z"}\n' "$PR" "$HEAD_SHA" >"$(cache_file .allow)"
   run_sweep
   [ "$status" -eq 0 ]
-  [ "$(field 'r["deviation"]["what"]')" = slices-over-25 ]
-  python3 -c 'import json,sys; assert "Deviation approved by the user: slices-over-25 — one generated tree" in json.load(open(sys.argv[1]))["body"]' "$TMP/posted.json"
   as_comment
   gate
   [ "$status" -eq 0 ]
-  rm "$(cache_file .allow)"
-  gate
-  [ "$status" -eq 0 ]
 }
 
-@test "an allow file for another deviation or head does not lift the slice limit" {
-  for n in $(seq 1 26); do write "d$n/x.py" 5; done
-  commit wide
-  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
-  mkdir -p "$(dirname "$(cache_file)")"
-  printf '{"head": "%s", "what": "slices-over-25", "reason": "x"}\n' "$BASE_SHA" >"$(cache_file .allow)"
-  run_sweep --no-comment
-  [ "$status" -eq 3 ]
-  printf '{"head": "%s", "what": "serial", "reason": "x"}\n' "$HEAD_SHA" >"$(cache_file .allow)"
-  run_sweep --no-comment
-  [ "$status" -eq 3 ]
-}
-
-@test "the record checks refuse more than 25 slices without a deviation" {
+@test "the record checks refuse more than 25 slices" {
   run_sweep --no-comment
   python3 -c 'import json,sys
 r = json.load(open(sys.argv[1]))
@@ -1065,54 +995,13 @@ r["sweep_agent_ids"] = [f"a{n}" for n in range(53)]
 json.dump(r, open(sys.argv[1], "w"))' "$TMP/record.json"
   run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA"
   [ "$status" -eq 1 ]
-  [[ "$stderr" == *"26 slices pass the limit of 25 without the user's slices-over-25 allow" ]]
-}
-
-@test "orch-sweep allow needs a terminal" {
-  cd "$REPO"
-  run --separate-stderr python3 -c 'import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$ROOT/orch-sweep" allow --pr "$PR" --head "$HEAD_SHA" --what slices-over-25 --reason why
-  [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: orch-sweep allow reads the user's yes from a terminal; run it in a shell" ]]
-  [ ! -e "$(cache_file .allow)" ]
-}
-
-@test "orch-sweep allow writes the allow file only after a typed yes" {
-  cd "$REPO"
-  for answer in no yes; do
-    python3 -c 'import os,pty,select,sys,time
-pid, fd = pty.fork()
-if pid == 0:
-    os.execvp(sys.argv[2], sys.argv[2:])
-out, sent, status, deadline = b"", False, None, time.monotonic() + 30
-while status is None and time.monotonic() < deadline:
-    if select.select([fd], [], [], 0.5)[0]:
-        try:
-            out += os.read(fd, 1024)
-        except OSError:
-            pass
-    if not sent and b"Type yes" in out:
-        os.write(fd, sys.argv[1].encode() + b"\n")
-        sent = True
-    done, code = os.waitpid(pid, os.WNOHANG)
-    if done:
-        status = code
-if status is None:
-    os.kill(pid, 9)
-    sys.exit(f"no answer in 30s: {out!r}")
-sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow --pr "$PR" --head "$HEAD_SHA" --what slices-over-25 --reason "one generated tree" && result=0 || result=$?
-    if [ "$answer" = no ]; then
-      [ "$result" -eq 1 ]
-      [ ! -e "$(cache_file .allow)" ]
-    fi
-  done
-  [ "$result" -eq 0 ]
-  python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); assert (a["what"], a["head"], a["reason"]) == ("slices-over-25", sys.argv[2], "one generated tree"), a' "$(cache_file .allow)" "$HEAD_SHA"
+  [[ "$stderr" == *"26 slices pass the limit of 25" ]]
 }
 
 @test "post-review refuses APPROVE when the gate fails and posts nothing" {
   review APPROVE
   [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: APPROVE refused: no full orch-sweep comment by me for the exact head $HEAD_SHA" ]]
+  [[ "$stderr" == "ERROR: APPROVE refused: no full orch-sweep comment by the reviewer or PR author for the exact head $HEAD_SHA" ]]
   [ ! -e "$TMP/review.json" ]
 }
 
@@ -1176,19 +1065,6 @@ sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow 
   done
 }
 
-@test "a newer full sweep is not blocked by an older text record" {
-  run_sweep
-  as_comment
-  run_sweep --kind text
-  as_comment
-  echo edited >"$TMP/pr_body"
-  run_sweep
-  [ "$status" -eq 0 ]
-  as_comment
-  gate
-  [ "$status" -eq 0 ]
-}
-
 @test "a PR retargeted to another base after the sweep fails the gate" {
   layer=$HEAD_SHA
   git -C "$REPO" branch layer "$layer"
@@ -1208,23 +1084,6 @@ sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow 
   gate
   [ "$status" -eq 1 ]
   [ "$stderr" = "ERROR: the PR base changed since the full sweep: it swept from $layer, and main gives $BASE_SHA; run orch-sweep run" ]
-}
-
-@test "a title or body changed after the sweep fails the gate until a text sweep" {
-  run_sweep
-  as_comment
-  echo "Adds alpha, its test and more." >"$TMP/pr_body"
-  gate
-  [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: the PR title or body changed since the full sweep of $HEAD_SHA; run orch-sweep run --kind text" ]
-  review APPROVE
-  [ "$status" -eq 1 ]
-  [ ! -e "$TMP/review.json" ]
-  run_sweep --kind text
-  [ "$status" -eq 0 ]
-  as_comment
-  gate
-  [ "$status" -eq 0 ]
 }
 
 @test "git execution failures keep gate and post-review unavailable" {
@@ -1318,12 +1177,126 @@ for fault in ("timeout", "oserror", "nonzero"):
   [ "$(grep -c '^api -X POST .*reviews ' "$TMP/gh.calls")" -eq 1 ]
 }
 
-@test "a committed finalize_commands empty list opts out of record checks" {
+@test "head finalize opt-out cannot disable base review checks" {
   printf '[review]\nfinalize_commands = []\n' >"$REPO/.orchestration.toml"
   commit opt-out
   HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
   printf %s "$HEAD_SHA" >"$TMP/pr_head"
   review APPROVE
+  [ "$status" -eq 1 ]
+  [ ! -e "$TMP/review.json" ]
+}
+
+@test "sweep comment POST failure has the GitHub retry exit code" {
+  COMMENT_POST_FAIL=1 run_sweep
+  [ "$status" -eq 6 ]
+  [[ "$stderr" == *"posting the sweep comment failed"* ]]
+  [ -s "$TMP/record.json" ]
+}
+
+@test "disputes follow visible Markdown rather than examples or comments" {
+  run python3 - "$ROOT/lib" <<'PYTEST'
+import sys
+sys.path.insert(0, sys.argv[1])
+from sweep_record import review_disputes
+line = "Sweep dispute 1/F1: covered by a guard"
+for prefix in ("", "  ", "- ", "* ", "+ ", "1. ", "2) ", "  - "):
+    assert review_disputes(prefix + line) == {(1, "F1")}, prefix
+for body in (f"```text\n{line}\n```", f"~~~\n{line}\n~~~", f"<!--\n{line}\n-->", f"> {line}", f"  > {line}", f"> quoted example\n{line}", "Sweep dispute 1/F1: <!-- invisible -->", "Sweep dispute 1/F1: **<!-- hidden -->**", f"<!-- unclosed\n{line}"):
+    assert not review_disputes(body), repr(body)
+assert review_disputes("Sweep dispute 1/F1: <!-- note --> visible") == {(1,"F1")}
+assert review_disputes("> quote\n\n- " + line) == {(1,"F1")}
+assert review_disputes("> quote\n- " + line) == {(1,"F1")}
+PYTEST
+  [ "$status" -eq 0 ]
+}
+
+@test "a fenced example cannot unlock approval and refusals count parsed disputes" {
+  FAKE_PR_FINDINGS=1 run_sweep
+  as_comment author
+  review APPROVE '{"body":"The fix stays open.\n```\nSweep dispute 1/F1: example only\n```"}'
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"disputes parsed: 0"* ]]
+  [ ! -e "$TMP/review.json" ]
+  review APPROVE '{"body":"- Sweep dispute 1/F99: different finding"}'
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"disputes parsed: 1"* ]]
+  review APPROVE '{"body":"  1. Sweep dispute 1/F1: already covered by a guard"}'
+  [ "$status" -eq 0 ]
+}
+
+@test "a base opt-out survives its removal from the PR checkout" {
+  git -C "$REPO" switch -q main
+  printf '[review]\nfinalize_commands = []\n' >"$REPO/.orchestration.toml"
+  commit base-opt-out
+  BASE_SHA=$(git -C "$REPO" rev-parse HEAD)
+  printf %s "$BASE_SHA" >"$TMP/pr_base_sha"
+  git -C "$REPO" switch -q feature
+  review APPROVE
   [ "$status" -eq 0 ]
   [ -s "$TMP/review.json" ]
+}
+
+@test "a copied record from another PR cannot unlock approval" {
+  run_sweep
+  as_comment author
+  edit_comments 'r["pr"] = "https://github.com/acme/app/pull/8"'
+  review APPROVE
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"by the reviewer or PR author"* ]]
+  [ ! -e "$TMP/review.json" ]
+}
+
+@test "open fixes expose a stable record reuse marker" {
+  FAKE_PR_FINDINGS=1 run_sweep
+  as_comment
+  gate
+  [ "$status" -eq 1 ]
+  [ "$output" = RECORD_REUSABLE ]
+}
+
+@test "the removed allow command is not accepted" {
+  sweep allow --help
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"invalid choice: 'allow'"* ]]
+}
+
+@test "the removed text sweep option is not accepted" {
+  sweep run --pr "$PR" --head "$HEAD_SHA" --base-ref main --kind text
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"unrecognized arguments: --kind text"* ]]
+}
+
+@test "script records accept only full sweeps with null deviation" {
+  run_sweep
+  [ "$status" -eq 0 ]
+  run python3 - "$ROOT/lib" "$TMP/record.json" <<'PYTEST'
+import copy, json, sys
+sys.path.insert(0, sys.argv[1])
+from sweep_record import script_problem
+record = json.load(open(sys.argv[2]))
+assert script_problem(record) is None
+text = copy.deepcopy(record)
+text.update(kind="text", slices=0, plan=[], sweep_agents=1, sweep_agent_ids=record["sweep_agent_ids"][:1])
+assert script_problem(text), "text record accepted"
+deviation = copy.deepcopy(record)
+deviation["deviation"] = {"what":"slices-over-25", "reason":"approved", "sha256":"a"*64}
+assert script_problem(deviation), "deviation accepted"
+PYTEST
+  [ "$status" -eq 0 ]
+}
+
+@test "changed PR text requires a fresh full sweep" {
+  run_sweep
+  as_comment
+  echo "Adds alpha, its test and more." >"$TMP/pr_body"
+  review APPROVE
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"PR title or body changed"* ]]
+  [ ! -e "$TMP/review.json" ]
+  run_sweep
+  [ "$status" -eq 0 ]
+  as_comment
+  review APPROVE
+  [ "$status" -eq 0 ]
 }

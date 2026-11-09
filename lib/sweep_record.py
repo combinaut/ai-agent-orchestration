@@ -34,8 +34,6 @@ VERDICTS = (
 KEEP = ("CONFIRMED_NEW", "CONFIRMED_REGRESSED", "DISPUTED_DROP")
 SLICE_LINES = 400
 MAX_SLICES = 25
-KINDS = ("full", "text")
-DEVIATIONS = ("slices-over-25",)
 MARKER = "<!-- orch-sweep v1 -->"
 PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 GH_TIMEOUT = 45
@@ -145,8 +143,8 @@ def script_problem(record):
         return "runtime must be codex or claude"
     if not isinstance(record["model"], str) or not record["model"]:
         return "model must name the agents' model"
-    if record["kind"] not in KINDS:
-        return "kind must be full or text"
+    if record["kind"] != "full":
+        return "kind must be full"
     if record["pr_text"] != 1 or isinstance(record["pr_text"], bool):
         return "pr_text must be 1; every orch-sweep run checks the PR title and body"
     expected = 2 * record["slices"] + record["pr_text"]
@@ -167,32 +165,15 @@ def script_problem(record):
         or any(tree.get(k) != v for k, v in CLEAN_TREE.items())
     ):
         return "tree must hold the five tree values of a clean tree at head"
-    if record["kind"] == "text":
-        if record["plan"] != [] or record["slices"] != 0:
-            return "a text record sweeps no slices: plan [] and slices 0"
-    else:
-        why = plan_problem(record["plan"])
-        if why:
-            return f"plan: {why}"
-        if len(record["plan"]) != record["slices"]:
-            return (
-                f"plan has {len(record['plan'])} slices, slices is {record['slices']}"
-            )
-    deviation = record["deviation"]
-    if deviation is not None and not (
-        isinstance(deviation, dict)
-        and deviation.get("what") in DEVIATIONS
-        and isinstance(deviation.get("reason"), str)
-        and deviation["reason"].strip()
-        and isinstance(deviation.get("sha256"), str)
-        and re.fullmatch(r"[0-9a-f]{64}", deviation["sha256"])
-    ):
-        return f"deviation must be null or name one of {', '.join(DEVIATIONS)} with a reason and the sha256 of the user's allow file"
-    if (
-        record["slices"] > MAX_SLICES
-        and (deviation or {}).get("what") != "slices-over-25"
-    ):
-        return f"{record['slices']} slices pass the limit of {MAX_SLICES} without the user's slices-over-25 allow"
+    why = plan_problem(record["plan"])
+    if why:
+        return f"plan: {why}"
+    if len(record["plan"]) != record["slices"]:
+        return f"plan has {len(record['plan'])} slices, slices is {record['slices']}"
+    if record["deviation"] is not None:
+        return "deviation must be null"
+    if record["slices"] > MAX_SLICES:
+        return f"{record['slices']} slices pass the limit of {MAX_SLICES}"
     items, dropped = record["items"], record["dropped"]
     if not isinstance(items, list) or not isinstance(dropped, list):
         return "items and dropped must be lists of findings"
@@ -263,8 +244,7 @@ def problem(path, head, base=None):
     if record["mode"] not in MODES:
         return f"{path}: mode must be agents or serial", None
     serial = record["mode"] == "serial"
-    text = record.get("tool") == "orch-sweep" and record.get("kind") == "text"
-    if record["slices"] < 1 and not text:
+    if record["slices"] < 1:
         return f"{path}: slices must be at least 1", None
     if not serial and record["sweep_agents"] < 1:
         return f"{path}: sweep_agents must be at least 1", None
@@ -378,15 +358,10 @@ def text_sha(pr):
     ).hexdigest()
 
 
-def cache_path(repo, number, head, kind="full"):
-    """Where orch-sweep keeps its copy of a record; an allow file has kind allow."""
+def cache_path(repo, number, head):
+    """Where orch-sweep keeps its copy of a full record."""
     root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-    name = f"{head}.json" if kind == "full" else f"{head}.{kind}.json"
-    return root / "review-prs" / "sweeps" / repo / str(number) / name
-
-
-def file_hash(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    return root / "review-prs" / "sweeps" / repo / str(number) / f"{head}.json"
 
 
 def comment_record(body):
@@ -438,12 +413,26 @@ def record_problem(record, head):
     )
 
 
-def finalize_enabled():
+def finalize_enabled(repo, base):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import orch_settings
 
+    if "ORCH_REVIEW_FINALIZE_COMMANDS" in os.environ:
+        return bool(os.environ["ORCH_REVIEW_FINALIZE_COMMANDS"])
+    if not isinstance(base, str) or not SHA.fullmatch(base):
+        raise GateError("the PR response has no valid base.sha")
+    listed = git(
+        "ls-tree", "--name-only", base, "--", orch_settings.REPO_FILE, retry_errors=True
+    )
+    text = (
+        git("show", f"{base}:{orch_settings.REPO_FILE}", retry_errors=True)
+        if listed.strip()
+        else ""
+    )
     try:
-        return bool(orch_settings.load_repo(".")["ORCH_REVIEW_FINALIZE_COMMANDS"])
+        return bool(
+            orch_settings.load_remote(repo, base, text)["ORCH_REVIEW_FINALIZE_COMMANDS"]
+        )
     except (orch_settings.ConfigError, OSError) as error:
         raise GateError(f"cannot read finalize settings: {error}") from error
 
@@ -465,12 +454,45 @@ def pr_merge_base(base, head):
 
 
 def review_disputes(body):
-    return {
-        (int(comment), finding.strip())
-        for comment, finding, _ in re.findall(
-            r"^Sweep dispute ([0-9]+)/([^:\n]+):[ \t]+(\S[^\n]*)$", body or "", re.M
-        )
-    }
+    """Scoped disputes in visible prose, excluding comments, quotations and fenced examples."""
+    body = re.sub(r"<!--.*?(?:-->|$)", "", body or "", flags=re.S)
+    disputes, fence, quoted = set(), None, False
+    for line in body.splitlines():
+        listed = re.match(r"^\s*(?:[-+*]|[0-9]+[.)])\s+", line)
+        line = re.sub(r"^\s*(?:[-+*]|[0-9]+[.)])\s+", "", line).lstrip()
+        if not line:
+            quoted = False
+        if line.startswith(">"):
+            if not fence:
+                quoted = True
+            continue
+        if not fence and quoted:
+            if not listed and not re.match(r"^(?:#{1,6}\s|`{3,}|~{3,})", line):
+                continue
+            quoted = False
+        marker = re.match(r"(`{3,}|~{3,})(.*)$", line)
+        if fence:
+            if (
+                marker
+                and marker[1][0] == fence[0]
+                and len(marker[1]) >= len(fence)
+                and not marker[2].strip()
+            ):
+                fence = None
+            continue
+        if marker:
+            fence = marker[1]
+            continue
+        match = re.fullmatch(r"Sweep dispute ([0-9]+)/([^:\n]+):[ \t]+(.+)", line)
+        if match:
+            reason = re.sub(r"<[^>]*>", "", match[3]).strip(" \t*_`~")
+            if reason:
+                disputes.add((int(match[1]), match[2].strip()))
+    return disputes
+
+
+class OpenFix(str):
+    """A valid reusable record whose remaining fixes need reviewer assessment."""
 
 
 def gate(url, head, review_body=None):
@@ -485,7 +507,7 @@ def gate(url, head, review_body=None):
     live = (pr.get("head") or {}).get("sha")
     if live != head:
         return f"the PR head is {live}, not {head}"
-    if not finalize_enabled():
+    if not finalize_enabled(repo, (pr.get("base") or {}).get("sha")):
         return None
     base_ref = (pr.get("base") or {}).get("ref")
     merge_base = pr_merge_base((pr.get("base") or {}).get("sha"), head)
@@ -501,31 +523,29 @@ def gate(url, head, review_body=None):
         if (comment.get("user") or {}).get("login") not in trusted:
             continue
         record = comment_record(comment.get("body") or "")
-        if record and record.get("head") == head and record.get("kind") in KINDS:
+        if (
+            record
+            and record.get("pr") == url
+            and record.get("head") == head
+            and record.get("kind") == "full"
+        ):
             order.append((record, comment.get("id")))
-    latest = {record["kind"]: (record, cid) for record, cid in order}
-    if "full" not in latest:
-        return f"no full orch-sweep comment by {me} for the exact head {head}"
-    full, full_id = latest["full"]
-    newest, newest_id = order[-1]
-    for record in [full] + ([newest] if newest["kind"] == "text" else []):
-        why = record_problem(record, head)
-        if why:
-            return why
-        why, _ = since(
-            f"the {record['kind']} sweep record",
-            head,
-            record["base"],
-            head,
-            retry_errors=True,
-        )
-        if why:
-            return why
-        if record["base"] != merge_base:
-            return f"the PR base changed since the {record['kind']} sweep: it swept from {record['base']}, and {base_ref} gives {merge_base}; run orch-sweep run"
-    if newest.get("pr_text_sha256") != text_sha(pr):
-        return f"the PR title or body changed since the {newest['kind']} sweep of {head}; run orch-sweep run --kind text"
-    has_fixes = full["open_fix"] or newest["open_fix"]
+    if not order:
+        return f"no full orch-sweep comment by the reviewer or PR author for the exact head {head}"
+    record, cid = order[-1]
+    why = record_problem(record, head)
+    if why:
+        return why
+    why, _ = since(
+        "the full sweep record", head, record["base"], head, retry_errors=True
+    )
+    if why:
+        return why
+    if record["base"] != merge_base:
+        return f"the PR base changed since the full sweep: it swept from {record['base']}, and {base_ref} gives {merge_base}; run orch-sweep run"
+    if record.get("pr_text_sha256") != text_sha(pr):
+        return f"the PR title or body changed since the full sweep of {head}; run orch-sweep run"
+    has_fixes = record["open_fix"]
     if review_body is None and has_fixes:
         reviews = gh_json(
             "api", "--paginate", "--slurp", f"repos/{repo}/pulls/{number}/reviews"
@@ -542,27 +562,15 @@ def gate(url, head, review_body=None):
             max(own, key=lambda r: r["submitted_at"]).get("body") if own else ""
         )
     disputes = review_disputes(review_body)
-    for record, cid in [(full, full_id)] + (
-        [(newest, newest_id)] if newest["kind"] == "text" else []
-    ):
-        count = sum(
-            1
-            for item in record["items"]
-            if item["class"] == "fix"
-            and not (
-                record is full
-                and newest["kind"] == "text"
-                and item["category"] == "pr-text"
-            )
-            and (cid, item["id"]) not in disputes
+    count = sum(
+        1
+        for item in record["items"]
+        if item["class"] == "fix" and (cid, item["id"]) not in disputes
+    )
+    if count:
+        return OpenFix(
+            f"the full sweep of {head} has {count} open fix findings; disputes parsed: {len(disputes)}"
         )
-        if count:
-            suffix = (
-                " outside the PR text"
-                if record is full and newest["kind"] == "text"
-                else ""
-            )
-            return f"the {record['kind']} sweep of {head} has {count} open fix findings{suffix}"
     return None
 
 
@@ -761,6 +769,8 @@ def main(argv):
             )
             return 2
         if found:
+            if isinstance(found, OpenFix):
+                print("RECORD_REUSABLE")
             print(f"ERROR: {one_line(found)}", file=sys.stderr)
             return 1
         print(f"OK: the sweep of {args.head} allows APPROVE")

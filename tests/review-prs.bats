@@ -39,11 +39,6 @@ EOF
 #!/usr/bin/env bash
 case "$*" in
   'api user --jq .login') echo reviewer ;;
-  'api repos/acme/app/pulls/7 --jq {title: .title, body: .body}')
-    [ -z "${TEXT_READ_FAILS:-}" ] || exit 1
-    if [ -n "${TEXT_READ_FAILS_AFTER_START:-}" ] && grep -q '^agent start ' "$TMP/review-herdr.calls" 2>/dev/null; then exit 1; fi
-    printf '{"title":"%s","body":"%s"}\n' "${PR_TITLE-}" "$(cat "$TMP/pr_body" 2>/dev/null || printf %s "${PR_BODY-}")"
-    ;;
   'api repos/acme/app/pulls/7 --jq .base.ref') [ -z "${BASE_READ_FAILS:-}" ] || exit 1; echo main ;;
   'api repos/acme/app/pulls/7 --jq [.head.repo.owner.login // "-", .head.repo.name // "-", .head.ref // "-"] | @tsv')
     [ -z "${HEAD_READ_FAILS:-}" ] || exit 1
@@ -74,8 +69,6 @@ EOF
   cat >"$BIN/orch-sweep-stub" <<'EOF'
 #!/usr/bin/env bash
 printf '%s|%s\n' "$(pwd -P)" "$*" >>"$TMP/sweep.calls"
-[ -z "${SWEEP_EDITS_BODY:-}" ] || echo edited >"$TMP/pr_body"
-case " $* " in *" --kind text "*) [ -z "${SWEEP_TEXT_NEEDS_FULL:-}" ] || { echo "ERROR: a text sweep needs a full sweep of $SHA first" >&2; exit 1; } ;; esac
 [ -z "${SWEEP_EXIT:-}" ] || { echo "ERROR: sweep exit $SWEEP_EXIT" >&2; exit "$SWEEP_EXIT"; }
 [ -z "${SWEEP_FAILS:-}" ] || { echo "ERROR: validator 1: exited 1" >&2; exit 4; }
 echo "COMMENT https://github.com/acme/app/pull/7#issuecomment-9"
@@ -87,7 +80,7 @@ printf '%s\n' "$*" >>"$TMP/gate.calls"
 if [ ! -e "$TMP/review.prompt" ]; then
   [ -z "${GATE_PREFLIGHT_UNAVAILABLE:-}" ] || { echo "ERROR: cannot check the gate: gh timed out" >&2; exit 2; }
   [ -z "${GATE_ACCEPTS:-}" ] || { echo "OK: existing record"; exit 0; }
-  [ -z "${GATE_PREFLIGHT_OPEN:-}" ] || { echo "ERROR: the full sweep has 1 open fix findings" >&2; exit 1; }
+  [ -z "${GATE_PREFLIGHT_OPEN:-}" ] || { echo RECORD_REUSABLE; echo "ERROR: reviewer assessment needed" >&2; exit 1; }
   echo "ERROR: no full orch-sweep comment for the exact head" >&2
   exit 1
 fi
@@ -132,7 +125,7 @@ EOF
     export PATH="$TMP/fetch-ok:$PATH"
   fi
   run env ORCH_CONFIG="$TMP/none.toml" bash "$ROOT/$SKILL_DIR/scripts/dispatch.sh" \
-    https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" "${KIND:-review}" rev7 "$TMP/app" acme/app right "${TEXT-5ba93c9db0cf}"
+    https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" "${KIND:-review}" rev7 "$TMP/app" acme/app right
 }
 
 fork_head_missing_from_pull_ref() {
@@ -333,8 +326,8 @@ fork_head_missing_from_pull_ref() {
   : >"$TMP/none.toml"
   SWEEP_OPEN_FIX=2 dispatch
   [ "$status" -eq 0 ]
-  [[ "$(cat "$TMP/sweep.calls")" == */review-prs/worktrees/rev7"|run --pr https://github.com/acme/app/pull/7 --head $SHA --base-ref origin/main --kind full" ]]
-  grep -qx "take review-rev7-sweep --note orch sweep -- $BIN/orch-sweep-stub run --pr https://github.com/acme/app/pull/7 --head $SHA --base-ref origin/main --kind full" "$TMP/heavy-slot.calls"
+  [[ "$(cat "$TMP/sweep.calls")" == */review-prs/worktrees/rev7"|run --pr https://github.com/acme/app/pull/7 --head $SHA --base-ref origin/main" ]]
+  grep -qx "take review-rev7-sweep --note orch sweep -- $BIN/orch-sweep-stub run --pr https://github.com/acme/app/pull/7 --head $SHA --base-ref origin/main" "$TMP/heavy-slot.calls"
   prompt=$(cat "$TMP/review.prompt")
   contains "$prompt" 'Sweep dispute <sweep-comment-id>/<finding-id>: <specific code reason>'
   contains "$prompt" 'Only undisputed kept fixes block APPROVE'
@@ -766,24 +759,6 @@ assert retained == {url: dict(present[url], misses=1) for url in urls}, retained
   [ "$status" -eq 0 ]
 }
 
-@test "a per-PR read keeps an open PR whose title or body changed since its done review" {
-  # shellcheck disable=SC2016 # Python source.
-  run python3 -c '
-import json, sys
-sys.path.insert(0, sys.argv[1])
-import prs
-url = "https://github.com/acme/app/pull/7"
-present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="head", conflict=False)}
-prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "title": "t", "body": "edited", "headRefOid": "head", "reviewRequests": {"nodes": []}, "myReviews": {"nodes": [{"commit": {"oid": "head"}}]}}}})
-prs.read_dispatched = lambda: {url: {"heads": {"head": {"state": "done", "text": "stale"}}}}
-lines, retained = prs.changes(present, {}, "reviewer")
-assert lines == [], lines
-assert retained == {url: dict(present[url], misses=1)}, retained
-' "$ROOT/$SKILL_DIR/scripts"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
 @test "an unreadable dispatch ledger does not confirm a departure" {
   # shellcheck disable=SC2016 # Python source.
   run python3 -c '
@@ -1047,38 +1022,6 @@ assert prs.needs_dispatch({**base, "headRefOid": "B"}, dispatched) == (True, "re
   [ "$status" -eq 0 ]
   prs release-dispatched --url "$u" --sha "$SHA"
   [ "$(dispatch_state)" = 'True null' ]
-}
-
-@test "a blocked review of a head holds the head for every title and body until it is released" {
-  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
-  blocked_url=https://github.com/acme/app/pull/7
-  prs claim-dispatched --url "$blocked_url" --sha a --text t0
-  prs mark-dispatched --url "$blocked_url" --sha a --text t0 --state "done"
-  prs claim-dispatched --url "$blocked_url" --sha a --text t1
-  prs mark-dispatched --url "$blocked_url" --sha a --text t1 --state blocked --reason 'hooks need review'
-  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$blocked_url" --sha a --text t2
-  [ "$status" -eq 3 ]
-  # shellcheck disable=SC2016 # Python source.
-  run python3 -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-import prs
-url = "https://github.com/acme/app/pull/7"
-pr = {"url": url, "number": 7, "title": "t", "body": "x", "isDraft": False,
-      "mergeable": "MERGEABLE", "headRefOid": "a",
-      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
-      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
-      "myReviews": {"nodes": [{"commit": {"oid": "a"}}]}}
-heads = {"a": {"state": "done", "text": "t0", "at": "1"},
-         "a#t1": {"state": "blocked", "text": "t1", "reason": "hooks need review", "at": "2"}}
-dispatched = {url: {"heads": heads}}
-assert prs.needs_dispatch(pr, dispatched) == (False, None)
-assert prs.blocked_record(prs.heads(dispatched[url]), "a")["reason"] == "hooks need review"
-' "$ROOT/$SKILL_DIR/scripts"
-  echo "$output"
-  [ "$status" -eq 0 ]
-  prs release-dispatched --url "$blocked_url" --sha a --text t2
-  prs claim-dispatched --url "$blocked_url" --sha a --text t2
 }
 
 @test "dispatch-queue reports a blocked current head once with its reason" {
@@ -1461,325 +1404,6 @@ assert not prs.dispatched_done_on_other_head(pr, dispatched)
   [ "$status" -eq 0 ]
 }
 
-@test "a title or body edit at the same head makes a reviewed PR due again as a text re-review" {
-  # shellcheck disable=SC2016 # Python source.
-  run python3 -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-import prs
-url = "https://github.com/acme/app/pull/7"
-pr = {"url": url, "number": 7, "title": "t", "body": "old", "isDraft": False,
-      "mergeable": "MERGEABLE", "headRefOid": "A",
-      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
-      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
-      "myReviews": {"nodes": [{"commit": {"oid": "A"}}]}}
-old = prs.text_hash(pr)
-dispatched = {url: {"heads": {"A": {"state": "done", "text": old}}}}
-assert prs.needs_dispatch(pr, dispatched) == (False, None)
-assert prs.dispatched_current_head_done(pr, dispatched)
-pr["body"] = "new"
-new = prs.text_hash(pr)
-assert new != old
-assert prs.needs_dispatch(pr, dispatched) == (True, "text-re-review")
-assert not prs.dispatched_current_head_done(pr, dispatched)
-assert prs.dispatched_text_changed(pr, dispatched)
-entry = prs.dispatch_entry(pr, "text-re-review", "m")
-assert entry["text"] == new and entry["agent"].endswith("-" + new[:4]), entry
-dispatched[url]["heads"]["A#" + new] = {"state": "pending", "text": new}
-assert prs.needs_dispatch(pr, dispatched) == (False, None)
-dispatched[url]["heads"]["A#" + new]["state"] = "done"
-assert prs.dispatched_current_head_done(pr, dispatched)
-assert not prs.dispatched_text_changed(pr, dispatched)
-legacy = {url: {"heads": {"A": {"state": "done"}}}}
-assert prs.needs_dispatch(pr, legacy) == (False, None)
-pending = {url: {"heads": {"A": {"state": "pending", "text": old}}}}
-assert prs.needs_dispatch(pr, pending) == (False, None)
-' "$ROOT/$SKILL_DIR/scripts"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
-@test "a reviewed PR whose body changed at the same head is found by fetch" {
-  # shellcheck disable=SC2016 # Python source.
-  run python3 -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-import prs
-url = "https://github.com/acme/app/pull/7"
-pr = {"url": url, "number": 7, "title": "t", "body": "fixed", "isDraft": False,
-      "mergeable": "MERGEABLE", "headRefOid": "A",
-      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
-      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
-      "myReviews": {"nodes": [{"commit": {"oid": "A"}}]}}
-dispatched = {url: {"heads": {"A": {"state": "done", "text": "stale"}}}}
-prs.viewer_login = lambda: "reviewer"
-prs.search = lambda query, _login: [] if " review-requested:@me " in query else [pr]
-prs.load_dispatched = lambda: dispatched
-nodes, _login = prs.fetch("repo:acme/app")
-assert nodes == [pr], nodes
-dispatched[url]["heads"]["A"]["text"] = prs.text_hash(pr)
-nodes, _login = prs.fetch("repo:acme/app")
-assert nodes == [], nodes
-' "$ROOT/$SKILL_DIR/scripts"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
-@test "claim, mark and release key a text re-review by head and text hash" {
-  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
-  states() {
-    # shellcheck disable=SC2016 # Python source.
-    python3 -c '
-import json, sys
-sys.path.insert(0, sys.argv[1])
-import prs
-e = json.load(open(sys.argv[2]))[sys.argv[3]]
-print(" ".join(s + "=" + h["state"] for s, h in sorted(prs.heads(e).items())))
-' "$ROOT/$SKILL_DIR/scripts" "$HOME/.cache/review-prs/dispatched.json" "$pr_url"
-  }
-  pr_url=https://github.com/acme/app/pull/7
-  prs claim-dispatched --url "$pr_url" --sha a --text t1
-  prs mark-dispatched --url "$pr_url" --sha a --text t1 --state "done"
-  [ "$(states)" = 'a=done' ]
-  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t1
-  [ "$status" -eq 3 ]
-  prs claim-dispatched --url "$pr_url" --sha a --text t2
-  [ "$(states)" = 'a=done a#t2=pending' ]
-  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t2
-  [ "$status" -eq 3 ]
-  prs release-dispatched --url "$pr_url" --sha a --text t2
-  [ "$(states)" = 'a=done' ]
-  prs claim-dispatched --url "$pr_url" --sha a --text t2
-  prs mark-dispatched --url "$pr_url" --sha a --text t2 --state "done"
-  [ "$(states)" = 'a=done a#t2=done' ]
-}
-
-@test "restoring an earlier reviewed title or body at the same head is due against the newest completed review" {
-  # shellcheck disable=SC2016 # Python source.
-  run python3 -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-import prs
-url = "https://github.com/acme/app/pull/7"
-pr = {"url": url, "number": 7, "title": "t", "body": "old", "isDraft": False,
-      "mergeable": "MERGEABLE", "headRefOid": "A",
-      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
-      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
-      "myReviews": {"nodes": [{"commit": {"oid": "A"}}]}}
-old = prs.text_hash(pr)
-pr["body"] = "new"
-new = prs.text_hash(pr)
-heads = {"A": {"state": "done", "text": old, "at": "1"},
-         "A#" + new: {"state": "done", "text": new, "at": "2"}}
-dispatched = {url: {"heads": heads}}
-assert prs.needs_dispatch(pr, dispatched) == (False, None)
-pr["body"] = "old"
-assert prs.needs_dispatch(pr, dispatched) == (True, "text-re-review")
-assert prs.dispatched_text_changed(pr, dispatched)
-assert not prs.dispatched_current_head_done(pr, dispatched)
-heads["A#" + old] = {"state": "done", "text": old, "at": "3"}
-assert prs.needs_dispatch(pr, dispatched) == (False, None)
-assert prs.dispatched_current_head_done(pr, dispatched)
-pr["body"] = "new"
-assert prs.needs_dispatch(pr, dispatched) == (True, "text-re-review")
-' "$ROOT/$SKILL_DIR/scripts"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
-@test "a pending review of a head blocks every other claim on that head until it completes or is released" {
-  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
-  pr_url=https://github.com/acme/app/pull/7
-  prs claim-dispatched --url "$pr_url" --sha a --text t0
-  prs mark-dispatched --url "$pr_url" --sha a --text t0 --state "done"
-  prs claim-dispatched --url "$pr_url" --sha a --text t1
-  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t2
-  [ "$status" -eq 3 ]
-  prs release-dispatched --url "$pr_url" --sha a --text t2
-  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url "$pr_url" --sha a --text t2
-  [ "$status" -eq 3 ]
-  prs mark-dispatched --url "$pr_url" --sha a --text t1 --state "done"
-  prs claim-dispatched --url "$pr_url" --sha a --text t2
-  prs release-dispatched --url "$pr_url" --sha a --text t2
-  prs claim-dispatched --url "$pr_url" --sha a --text t0
-  # shellcheck disable=SC2016 # Python source.
-  run python3 -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-import prs
-url = "https://github.com/acme/app/pull/7"
-pr = {"url": url, "number": 7, "title": "t", "body": "x", "isDraft": False,
-      "mergeable": "MERGEABLE", "headRefOid": "a",
-      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
-      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
-      "myReviews": {"nodes": [{"commit": {"oid": "a"}}]}}
-heads = {"a": {"state": "done", "text": "t0", "at": "1"}, "a#t1": {"state": "pending", "text": "t1", "at": "2"}}
-assert prs.needs_dispatch(pr, {url: {"heads": heads}}) == (False, None)
-heads["a#t1"]["state"] = "done"
-assert prs.needs_dispatch(pr, {url: {"heads": heads}}) == (True, "text-re-review")
-' "$ROOT/$SKILL_DIR/scripts"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
-@test "the watcher reports a title or body edit at the same head as ready" {
-  # shellcheck disable=SC2016 # Python source.
-  run python3 -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-import prs
-url = "https://github.com/acme/app/pull/7"
-base = {"title": "t", "draft": False, "author": "a", "ci": "SUCCESS", "conflict": False, "sha": "A", "text": "one"}
-before = {url: dict(base)}
-after = {url: {**base, "text": "two"}}
-lines = prs.changes(before, after)[0]
-assert len(lines) == 1 and lines[0].startswith("ready: ") and "title or description edited" in lines[0], lines
-assert prs.changes({url: dict(base)}, {url: dict(base)})[0] == []
-old = {url: {k: v for k, v in base.items() if k != "text"}}
-assert prs.changes(old, {url: dict(base)})[0] == []
-unknown = {url: {**base, "text": "two", "conflict": None}}
-prs.changes({url: dict(base)}, unknown)
-assert unknown[url].get("pending_ready") is True, unknown
-assert " body " in prs.QUERY
-assert " body " in prs.DEPARTURE_QUERY
-pr = {"url": url, "number": 7, "title": "t", "body": "b", "isDraft": False, "mergeable": "MERGEABLE",
-      "headRefOid": "A", "author": {"login": "a"},
-      "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}}
-assert prs.snapshot([pr])[url]["text"] == prs.text_hash(pr)
-' "$ROOT/$SKILL_DIR/scripts"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
-@test "a text re-review prompt runs a text sweep and no new code review at the same head" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  KIND=text-re-review PR_BODY=edited TEXT=787a81271575 dispatch
-  prompt=$(cat "$TMP/review.prompt")
-  contains "$prompt" 'Mode: text-re-review'
-  contains "$prompt" 'only the PR title or body was edited'
-  contains "$prompt" 'Run no new code review'
-  contains "$prompt" 'Only undisputed kept fixes block APPROVE'
-  grep -q -- '--kind text$' "$TMP/sweep.calls"
-}
-
-@test "a text re-review runs a full sweep when the head has none" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  KIND=text-re-review PR_BODY=edited TEXT=787a81271575 SWEEP_TEXT_NEEDS_FULL=1 dispatch
-  [ "$status" -eq 0 ]
-  [ "$(sed 's/.*--kind //' "$TMP/sweep.calls" | paste -sd ' ' -)" = 'text full' ]
-  [ -e "$TMP/review.prompt" ]
-}
-
-@test "dispatch claims and completes a review with the title and body hash" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  PR_BODY=edited TEXT=787a81271575 dispatch
-  # shellcheck disable=SC2016 # Python source.
-  run python3 -c '
-import json, sys
-d = json.load(open(sys.argv[1]))
-print(json.dumps(d["https://github.com/acme/app/pull/7"]["heads"][sys.argv[2]].get("text")))
-' "$HOME/.cache/review-prs/dispatched.json" "$SHA"
-  [ "$output" = '"787a81271575"' ]
-}
-
-@test "dispatch of a text re-review claims the edited text on a head that is already done" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  mkdir -p "$HOME/.cache/review-prs"
-  printf '{"https://github.com/acme/app/pull/7":{"heads":{"%s":{"state":"done","text":"old111"}}}}' "$SHA" >"$HOME/.cache/review-prs/dispatched.json"
-  KIND=text-re-review PR_BODY=edited TEXT=787a81271575 dispatch
-  [ -e "$TMP/review.prompt" ]
-  # shellcheck disable=SC2016 # Python source.
-  run python3 -c '
-import json, sys
-h = json.load(open(sys.argv[1]))["https://github.com/acme/app/pull/7"]["heads"]
-print(sorted((k.split("#")[-1] if "#" in k else "-", v["state"]) for k, v in h.items()))
-' "$HOME/.cache/review-prs/dispatched.json"
-  [ "$output" = "[('-', 'done'), ('787a81271575', 'done')]" ]
-}
-
-@test "dispatch releases its claim and sends nothing when the title or body changed since the queue" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  PR_BODY=edited dispatch
-  [ "$status" -ne 0 ]
-  contains "$output" 'TEXT CHANGED'
-  contains "$output" "RELEASED $SHA"
-  [ "$(dispatch_state)" = 'True null' ]
-  [ ! -e "$TMP/review.prompt" ]
-  TEXT_READ_FAILS=1 dispatch
-  [ "$status" -ne 0 ]
-  contains "$output" 'TEXT FAILED'
-  [ "$(dispatch_state)" = 'True null' ]
-}
-
-@test "dispatch sends nothing when the title or body changes during the sweep" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  SWEEP_EDITS_BODY=1 dispatch
-  [ "$status" -ne 0 ]
-  contains "$output" 'TEXT CHANGED'
-  contains "$output" 'REMOVED '
-  contains "$output" "RELEASED $SHA"
-  [ "$(dispatch_state)" = 'True null' ]
-  [ ! -e "$TMP/review.prompt" ]
-  rm "$TMP/pr_body"
-  PANE=w9-p5 SWEEP_EDITS_BODY=1 dispatch
-  [ "$status" -ne 0 ]
-  contains "$output" 'LEFT OPEN w9-p5'
-  contains "$output" "RELEASED $SHA"
-  [[ "$output" != *'REMOVED '* ]]
-  [ "$(dispatch_state)" = 'True null' ]
-  [ -d "${XDG_CACHE_HOME:-$HOME/.cache}/review-prs/worktrees/rev7" ]
-  [ ! -e "$TMP/review.prompt" ]
-  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url https://github.com/acme/app/pull/7 --sha "$SHA" --text 0123456789ab
-  [ "$status" -eq 0 ]
-}
-
-@test "a caller pane late text read failure releases the claim without removing resources" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  PANE=w9-p5 TEXT_READ_FAILS_AFTER_START=1 dispatch
-  [ "$status" -ne 0 ]
-  contains "$output" 'TEXT FAILED'
-  contains "$output" 'LEFT OPEN w9-p5'
-  contains "$output" "RELEASED $SHA"
-  not_contains "$output" 'CLOSED '
-  not_contains "$output" 'REMOVED '
-  [ "$(dispatch_state)" = 'True null' ]
-  [ -d "${XDG_CACHE_HOME:-$HOME/.cache}/review-prs/worktrees/rev7" ]
-  [ ! -e "$TMP/review.prompt" ]
-  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" claim-dispatched --url https://github.com/acme/app/pull/7 --sha "$SHA" --text 0123456789ab
-  [ "$status" -eq 0 ]
-}
-
-@test "a dispatch of any kind without the text hash exits before claiming" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  for kind in review re-review text-re-review; do
-    KIND=$kind TEXT='' dispatch
-    [ "$status" -ne 0 ]
-    contains "$output" 'the text hash is the 11th argument'
-    [ ! -e "$HOME/.cache/review-prs/dispatched.json" ]
-    [ ! -e "$TMP/review-herdr.calls" ]
-  done
-}
-
-@test "a first review prompt has no text re-review rule" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  dispatch
-  not_contains "$(cat "$TMP/review.prompt")" 'Text re-review:'
-}
-
-@test "the skill documents the text re-review" {
-  grep -qF 'hash of the PR title and body' "$ROOT/$SKILL_DIR/SKILL.md"
-  grep -qF 'text-re-review' "$ROOT/$SKILL_DIR/SKILL.md"
-}
-
 @test "dispatch uses the configured Herdr executable for every call" {
   stub_review_tools
   : >"$TMP/none.toml"
@@ -2092,69 +1716,6 @@ assert r["stuck"] == [{"url": old["url"], "sha": "A", "agent": "rev1", "pane": "
   grep -qF 'joins the running turn' "$ROOT/skills/architect/SKILL.md"
 }
 
-@test "re-requests never bypass a pending or blocked text review" {
-  run python3 -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-import prs
-url = "https://github.com/acme/app/pull/7"
-pr = {"url": url, "title": "t", "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": "A", "commits": {"nodes": []},
-      "reviewRequests": {"nodes": [{"requestedReviewer": {"login": "me"}}]},
-      "timelineItems": {"nodes": [{"requestedReviewer": {"login": "me"}, "createdAt": "2026-01-02T00:00:00Z"}]}}
-for state in ("pending", "blocked"):
-    known = {"A": {"state": "done", "text": prs.text_hash(pr), "at": "2026-01-01T00:00:00Z"},
-             "A#other": {"state": state}}
-    assert prs.needs_dispatch(pr, {url: {"heads": known}}, "me") == (False, None), state
-' "$ROOT/$SKILL_DIR/scripts"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
-@test "dispatch-queue reports stuck text reviews of the current head" {
-  run python3 -c '
-import io, json, sys
-from contextlib import redirect_stdout
-from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
-sys.path.insert(0, sys.argv[1])
-import prs
-pr = {"url": "https://github.com/acme/app/pull/7", "title": "t", "isDraft": False,
-      "mergeable": "MERGEABLE", "headRefOid": "A", "commits": {"nodes": []}}
-ledger = {pr["url"]: {"heads": {"A": {"state": "done", "text": "old"},
-          "A#text": {"state": "pending", "agent": "text-agent", "pane": "p2",
-          "at": (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat()}}}}
-prs.codex_enabled = lambda: True
-prs.worker_model = lambda: "model"
-prs.fetch = lambda scope: ([pr], "me")
-prs.load_dispatched = lambda: ledger
-out = io.StringIO()
-with redirect_stdout(out): prs.cmd_dispatch_queue(SimpleNamespace(), "repo:acme/app", "acme/app")
-r = json.loads(out.getvalue())
-assert r["queue"] == [], r
-assert len(r["stuck"]) == 1 and r["stuck"][0]["agent"] == "text-agent", r
-' "$ROOT/$SKILL_DIR/scripts"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
-@test "retaking a completed text review preserves its key on release and completion" {
-  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@"; }
-  review_url=https://github.com/acme/app/pull/7
-  mkdir -p "$HOME/.cache/review-prs"
-  printf '{"%s":{"heads":{"a#text":{"state":"done","text":"text","at":"2026-01-01T00:00:00Z"}}}}' "$review_url" >"$HOME/.cache/review-prs/dispatched.json"
-  prs claim-dispatched --url "$review_url" --sha a --text text --retake
-  prs mark-dispatched --url "$review_url" --sha a --text text --state pending
-  prs release-dispatched --url "$review_url" --sha a --text text
-  run python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))[sys.argv[2]]["heads"]; assert list(r) == ["a#text"] and r["a#text"]["state"] == "done", r' "$HOME/.cache/review-prs/dispatched.json" "$review_url"
-  echo "$output"
-  [ "$status" -eq 0 ]
-  prs claim-dispatched --url "$review_url" --sha a --text text --retake
-  prs mark-dispatched --url "$review_url" --sha a --text text --state "done"
-  run python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))[sys.argv[2]]["heads"]; assert list(r) == ["a#text"] and r["a#text"]["state"] == "done" and "previous" not in r["a#text"], r' "$HOME/.cache/review-prs/dispatched.json" "$review_url"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
 @test "unposted findings stay pending without a redundant gate read" {
   stub_review_tools
   : >"$TMP/none.toml"
@@ -2169,7 +1730,7 @@ import json, sys
 sys.path.insert(0, sys.argv[1])
 import prs
 url = "https://github.com/acme/app/pull/7"
-pr = {"url": url, "title": "", "body": "edited after the unposted review",
+pr = {"url": url, "title": "",
       "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": sys.argv[3],
       "commits": {"nodes": []}}
 ledger = json.load(open(sys.argv[2]))
@@ -2224,7 +1785,7 @@ pr = {"url": url, "number": 7, "title": "t", "body": "b", "isDraft": False,
       "mergeable": "MERGEABLE", "headRefOid": "A", "commits": {"nodes": []},
       "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
       "myReviews": {"nodes": [{"commit": {"oid": "A"}}]}}
-ledger = {url: {"heads": {"A": {"state": "retry", "text": prs.text_hash(pr)}}}}
+ledger = {url: {"heads": {"A": {"state": "retry"}}}}
 prs.viewer_login = lambda: "me"
 prs.search = lambda q, me: [pr] if "reviewed-by:@me" in q else []
 prs.load_dispatched = lambda: ledger
@@ -2242,65 +1803,13 @@ assert prs.departure(url, "me") is None
   stub_review_tools
   : >"$TMP/none.toml"
   mkdir -p "$HOME/.cache/review-prs"
-  printf '{"https://github.com/acme/app/pull/7":{"heads":{"%s":{"state":"retry","text":"5ba93c9db0cf"}}}}' "$SHA" >"$HOME/.cache/review-prs/dispatched.json"
-  TEXT_READ_FAILS=1 dispatch
-  contains "$output" 'TEXT FAILED'
+  printf '{"https://github.com/acme/app/pull/7":{"heads":{"%s":{"state":"retry"}}}}' "$SHA" >"$HOME/.cache/review-prs/dispatched.json"
+  GH_SNAPSHOT_FAIL=1 dispatch
+  contains "$output" 'SNAPSHOT FAILED'
   contains "$output" 'RELEASED'
   [ "$(dispatch_state)" = 'True "retry"' ]
 }
 
-@test "release without text clears the pending text claim but keeps done and other heads" {
-  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
-  u=https://github.com/acme/app/pull/7
-  prs claim-dispatched --url "$u" --sha a --text t1
-  prs mark-dispatched --url "$u" --sha a --text t1 --state "done"
-  prs claim-dispatched --url "$u" --sha a --text t2
-  prs claim-dispatched --url "$u" --sha b --text other
-  prs release-dispatched --url "$u" --sha a
-  run python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))[sys.argv[2]]["heads"]; assert "a#t2" not in r and r["a"]["state"] == "done" and r["b"]["state"] == "pending", r' "$HOME/.cache/review-prs/dispatched.json" "$u"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
-@test "release with text requires an exact match even for a bare SHA claim" {
-  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
-  u=https://github.com/acme/app/pull/7
-  prs claim-dispatched --url "$u" --sha a --text t1
-  prs release-dispatched --url "$u" --sha a --text wrong
-  run python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))[sys.argv[2]]["heads"]; assert r["a"]["state"] == "pending", r' "$HOME/.cache/review-prs/dispatched.json" "$u"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
-
-@test "retry and successful reviews follow the newest completed turn when text reverts" {
-  run python3 -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-import prs
-url = "https://github.com/acme/app/pull/7"
-pr = {"url": url, "number": 7, "title": "t", "body": "old", "isDraft": False,
-      "mergeable": "MERGEABLE", "headRefOid": "A", "commits": {"nodes": []},
-      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
-      "myReviews": {"nodes": [{"commit": {"oid": "A"}}]}}
-old = prs.text_hash(pr)
-new = prs.text_hash({**pr, "body": "new"})
-ledger = {url: {"heads": {
-    "A": {"state": "done", "text": old, "at": "2026-01-01T00:00:00Z"},
-    "A#" + new: {"state": "retry", "text": new, "at": "2026-01-02T00:00:00Z"}}}}
-prs.viewer_login = lambda: "me"
-prs.search = lambda q, me: [pr] if "reviewed-by:@me" in q else []
-prs.load_dispatched = lambda: ledger
-assert prs.needs_dispatch(pr, ledger, "me") == (True, "text-re-review")
-assert prs.fetch("repo:acme/app")[0] == [pr]
-ledger = {url: {"heads": {
-    "A": {"state": "retry", "text": old, "at": "2026-01-01T00:00:00Z"},
-    "A#" + old: {"state": "done", "text": old, "at": "2026-01-03T00:00:00Z"}}}}
-assert prs.needs_dispatch(pr, ledger, "me") == (False, None)
-assert prs.fetch("repo:acme/app")[0] == []
-' "$ROOT/$SKILL_DIR/scripts"
-  echo "$output"
-  [ "$status" -eq 0 ]
-}
 @test "pending and blocked approvals stay visible after the personal request clears" {
   run python3 -c '
 import contextlib, io, json, sys
@@ -2318,57 +1827,29 @@ prs.codex_enabled = lambda: True
 prs.worker_model = lambda: "test-model"
 prs.gh = lambda *args: json.dumps({"data": {"resource": {**pr, "state": "OPEN", "reviewRequests": {"nodes": []}}}})
 for state in ("pending", "blocked"):
-    record = {"state": state, "text": prs.text_hash(pr), "at": "2020-01-01T00:00:00Z",
+    record = {"state": state, "at": "2020-01-01T00:00:00Z",
               "reason": "gate refused", "agent": "reviewer", "pane": "w1-p2"}
-    for reverted in (False, True):
-        records = {"A": record} if not reverted else {
-            "A": {"state": "done", "text": prs.text_hash(pr), "at": "2019-01-01T00:00:00Z"},
-            "A#changed": {**record, "text": "changed"}}
-        ledger = {url: {"heads": records}}
-        prs.load_dispatched = lambda: ledger
-        prs.read_dispatched = lambda: ledger
-        assert prs.fetch("repo:acme/app")[0] == [pr], (state, reverted, "fetch")
-        assert prs.departure(url, "me") is None, (state, reverted, "departure")
-        assert prs.needs_dispatch(pr, ledger, "me") == (False, None)
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            prs.cmd_dispatch_queue(SimpleNamespace(), "repo:acme/app", "app")
-        queue = json.loads(output.getvalue())
-        assert queue["queue"] == [], queue
-        if state == "pending":
-            assert queue["stuck"][0]["pane"] == "w1-p2", queue
-        else:
-            assert queue["blocked"][0]["reason"] == "gate refused", queue
+    ledger = {url: {"heads": {"A": record}}}
+    prs.load_dispatched = lambda: ledger
+    prs.read_dispatched = lambda: ledger
+    assert prs.fetch("repo:acme/app")[0] == [pr], (state, "fetch")
+    assert prs.departure(url, "me") is None, (state, "departure")
+    assert prs.needs_dispatch(pr, ledger, "me") == (False, None)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        prs.cmd_dispatch_queue(SimpleNamespace(), "repo:acme/app", "app")
+    queue = json.loads(output.getvalue())
+    assert queue["queue"] == [], queue
+    if state == "pending":
+        assert queue["stuck"][0]["pane"] == "w1-p2", queue
+    else:
+        assert queue["blocked"][0]["reason"] == "gate refused", queue
     ledger = {url: {"heads": {"OLD": record}}}
     assert prs.fetch("repo:acme/app")[0] == [], (state, "old head")
     assert prs.departure(url, "me") == "cleared", (state, "old head")
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
-}
-
-@test "a late text change preserves the claim when owned cleanup fails" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  SWEEP_EDITS_BODY=1 PANE_CLOSE_FAILS=1 dispatch
-  [ "$status" -ne 0 ]
-  contains "$output" 'TEXT CHANGED'
-  contains "$output" 'LEFT OPEN w9-p2'
-  not_contains "$output" 'RELEASED'
-  [ "$(dispatch_state)" = 'False "pending"' ]
-  [ ! -e "$TMP/review.prompt" ]
-}
-
-@test "a late text read failure preserves the claim when owned cleanup fails" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  TEXT_READ_FAILS_AFTER_START=1 PANE_CLOSE_FAILS=1 dispatch
-  [ "$status" -ne 0 ]
-  contains "$output" 'TEXT FAILED'
-  contains "$output" 'LEFT OPEN w9-p2'
-  not_contains "$output" 'RELEASED'
-  [ "$(dispatch_state)" = 'False "pending"' ]
-  [ ! -e "$TMP/review.prompt" ]
 }
 
 @test "dispatch reuses an acceptable record without a sweep or heavy slot" {
@@ -2380,12 +1861,12 @@ for state in ("pending", "blocked"):
   [ ! -e "$TMP/heavy-slot.calls" ]
 }
 
-@test "an unchanged head re-request never sweeps even if its record is missing" {
+@test "a re-request with missing evidence runs a sweep" {
   stub_review_tools
   : >"$TMP/none.toml"
   KIND=re-request dispatch
   [ "$status" -eq 0 ]
-  [ ! -e "$TMP/sweep.calls" ]
+  [ -s "$TMP/sweep.calls" ]
 }
 
 @test "dispatch honors the finalize opt-out including its post-turn check" {
@@ -2402,11 +1883,11 @@ for state in ("pending", "blocked"):
   [ ! -e "$TMP/gate.calls" ]
 }
 
-@test "sweep exit one is retryable and preflight tool errors do not start a sweep" {
+@test "lasting sweep exit one blocks while preflight tool errors release" {
   stub_review_tools
   : >"$TMP/none.toml"
   SWEEP_EXIT=1 dispatch
-  [ "$(dispatch_state)" = 'True null' ]
+  [ "$(dispatch_state)" = 'False "blocked"' ]
   rm -f "$HOME/.cache/review-prs/dispatched.json" "$TMP/sweep.calls"
   GATE_PREFLIGHT_UNAVAILABLE=1 dispatch
   [ "$status" -ne 0 ]
@@ -2452,4 +1933,18 @@ for state in ("pending", "blocked"):
   for file in skills/architect/references/worker-close.md skills/architect/SKILL.md skills/coordinate/SKILL.md docs/architecture.md; do
     grep -qF 'composer-state.py' "$ROOT/$file"
   done
+}
+
+@test "body edits alone do not queue another review of a completed head" {
+  run python3 - "$ROOT/$SKILL_DIR/scripts" <<'PYTEST'
+import hashlib, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url":url, "title":"t", "body":"old", "headRefOid":"A", "isDraft":False, "mergeable":"MERGEABLE", "commits":{"nodes":[]}}
+prior = hashlib.sha1(b"t\0old").hexdigest()[:12]
+ledger = {url:{"heads":{"A":{"state":"done", "text":prior}}}}
+assert prs.needs_dispatch({**pr, "body":"new"}, ledger) == (False, None)
+PYTEST
+  [ "$status" -eq 0 ]
 }

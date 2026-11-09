@@ -450,11 +450,11 @@ PY
   [ "$stderr" = "ERROR: $REC: plan: slice lib: binary files go only in the binary slice" ]
 }
 
-@test "an orch-sweep record of a kind other than full or text fails" {
+@test "an orch-sweep record of a kind other than full fails" {
   script_record 'r["kind"] = "incremental"'
   check
   [ "$status" -eq 1 ]
-  [ "$stderr" = "ERROR: $REC: kind must be full or text" ]
+  [ "$stderr" = "ERROR: $REC: kind must be full" ]
 }
 
 @test "a tree taken at another head fails" {
@@ -524,7 +524,7 @@ PY
   script_record 'r["deviation"] = {"ok": True}'
   check
   [ "$status" -eq 1 ]
-  [[ "$stderr" == "ERROR: $REC: deviation must be null or name one of "* ]]
+  [ "$stderr" = "ERROR: $REC: deviation must be null" ]
 }
 
 @test "an orch-sweep record whose pr is not a pull request URL fails" {

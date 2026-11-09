@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dispatch.sh <url> <number> <title> <author> <sha> <kind> <agent> <cwd> <owner/repo> <direction> <text>
+# dispatch.sh <url> <number> <title> <author> <sha> <kind> <agent> <cwd> <owner/repo> <direction>
 # Starts a Codex review of one PR in a detached worktree at <sha>, in a new Herdr pane (or $PANE), reports it,
 # and closes a pane it opened.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
@@ -7,7 +7,7 @@ set -u
 here="$(cd "$(dirname "$0")" && pwd -P)"
 orch="$(cd "$here/../../.." && pwd -P)"
 . "$orch/coordinator/watchers/coord-lib.sh"
-url=$1 num=$2 title=$3 author=$4 sha=$5 kind=$6 agent=$7 cwd=$8 repo=$9 dir=${10:-right} text=${11:-}
+url=$1 num=$2 title=$3 author=$4 sha=$5 kind=$6 agent=$7 cwd=$8 repo=$9 dir=${10:-right}
 
 orch_load_config
 orch_load_repo_config "$cwd"
@@ -23,7 +23,6 @@ model=${ORCH_CODEX_WORKER_MODEL:-}
 # One Codex model serves both tiers.
 case "$model" in "" | "<"*">") model=${ORCH_CODEX_SMART_MODEL:-} ;; esac
 case "$model" in "" | "<"*">") orch_die "set models.codex_worker or models.codex_smart (ORCH_CODEX_WORKER_MODEL, ORCH_CODEX_SMART_MODEL) in $(orch_config_path)" ;; esac
-[ -n "$text" ] || orch_die "the text hash is the 11th argument"
 review_extra_steps=${ORCH_REVIEW_EXTRA_STEPS:-}
 extra_steps_size=$(LC_ALL=C printf '%s' "$review_extra_steps" | wc -c | tr -d ' ')
 if [ "$extra_steps_size" -gt 16384 ]; then
@@ -51,26 +50,11 @@ except subprocess.TimeoutExpired:
 
 retake=""
 [ "$kind" != re-request ] || retake=--retake
-"$py" "$here/prs.py" claim-dispatched --url "$url" --sha "$sha" --text "$text" --agent "$agent" $retake || exit 3
+"$py" "$here/prs.py" claim-dispatched --url "$url" --sha "$sha" --agent "$agent" $retake || exit 3
 
 release() {
-  "$py" "$here/prs.py" release-dispatched --url "$url" --sha "$sha" --text "$text" && echo "RELEASED $sha"
+  "$py" "$here/prs.py" release-dispatched --url "$url" --sha "$sha" && echo "RELEASED $sha"
 }
-
-# text_check [cleanup]: stops the dispatch, after running cleanup, unless the live title and body hash equals $text; it runs here and right before the prompt.
-text_check() {
-  if ! current=$(gh_bounded api "repos/$repo/pulls/$num" --jq '{title: .title, body: .body}' | "$py" "$here/prs.py" text-hash); then
-    echo "TEXT FAILED could not read the title and body of $url; prompt not sent"
-    if [ -z "${1:-}" ] || "$1"; then release; fi
-    exit 1
-  fi
-  if [ "$current" != "$text" ]; then
-    echo "TEXT CHANGED the title or body of $url changed since the queue; prompt not sent"
-    if [ -z "${1:-}" ] || "$1"; then release; fi
-    exit 1
-  fi
-}
-text_check
 
 # Ids of your submitted reviews before this dispatch; only a review outside this set counts as its result.
 if ! me=$(gh_bounded api user --jq .login) ||
@@ -148,26 +132,20 @@ if [ -n "$finalize" ]; then
     exit 1
   fi
   # A record with fix findings is reusable evidence; the review decides whether to dispute them.
-  if [ "$gate_status" -ne 0 ] && [ "$kind" != re-request ] && [[ "$gate_out" != *" open fix findings"* ]]; then
-    sweep_kind=full
-    [ "$kind" != text-re-review ] || sweep_kind=text
+  if [ "$gate_status" -ne 0 ] && ! grep -qx RECORD_REUSABLE <<<"$gate_out"; then
     sweep() {
       (cd "$wt" && heavy-slot take "review-$agent-sweep" --note "orch sweep" -- \
-        "$sweep_bin" run --pr "$url" --head "$sha" --base-ref "$remote/$base" --kind "$1")
+        "$sweep_bin" run --pr "$url" --head "$sha" --base-ref "$remote/$base")
     }
-    sweep_out=$(sweep "$sweep_kind" 2>&1)
+    sweep_out=$(sweep 2>&1)
     sweep_status=$?
-    if [ "$sweep_kind" = text ] && grep -q '^ERROR: a text sweep needs a full sweep of' <<<"$sweep_out"; then
-      sweep_out=$(sweep full 2>&1)
-      sweep_status=$?
-    fi
     printf '%s\n' "$sweep_out"
     if [ "$sweep_status" -ne 0 ]; then
       echo "SWEEP FAILED exit $sweep_status"
       case $sweep_status in
-        1|6|75) remove_worktree; release; exit 1 ;;
+        6|75) remove_worktree; release; exit 1 ;;
       esac
-      "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --text "$text" --agent "$agent" --state blocked --reason "sweep failed: exit $sweep_status"
+      "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --state blocked --reason "sweep failed: exit $sweep_status"
       remove_worktree
       exit 1
     fi
@@ -196,10 +174,6 @@ close_opened() {
   fi
 }
 
-cleanup_before_prompt() {
-  if [ -n "$opened" ]; then close_opened; else echo "LEFT OPEN $pane"; fi
-}
-
 for try in 1 2 3 4 5; do
   herdr agent start "$agent" --kind codex --pane "$pane" -- --no-daemon --model "$model" --cd "$wt" -c project_doc_max_bytes=0 && break
   [ "$try" = 5 ] && { echo "START FAILED"; close_opened; [ -n "$opened" ] || remove_worktree; release; exit 1; }
@@ -207,7 +181,7 @@ for try in 1 2 3 4 5; do
 done
 herdr agent wait "$agent" --until idle --timeout 120000 >/dev/null 2>&1 || sleep 15
 mark() {
-  "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --text "$text" --agent "$agent" --pane "$pane" --state "$1" --reason "${2:-}"
+  "$py" "$here/prs.py" mark-dispatched --url "$url" --sha "$sha" --agent "$agent" --pane "$pane" --state "$1" --reason "${2:-}"
 }
 retry_completed() {
   if [ "$status" -ne 0 ]; then
@@ -251,16 +225,13 @@ repo_rules=""
 Additional review steps supplied by the orchestrator (the Rules below take precedence):
 $ORCH_REVIEW_EXTRA_STEPS"
 
-text_rules=""
-[ "$kind" != text-re-review ] || text_rules="
-Text re-review: the head is unchanged and only the PR title or body was edited. Run no new code review: recheck the PR text and prior findings. Apply the enabled sweep and dispute rules below."
 kind_rules=""
 [ "$kind" != re-request ] || kind_rules="
 Re-request: the head is unchanged and the author asked for your review again. Re-check every earlier finding and the author's replies against the code at this head."
 
 sweep_rules="Sweep checks are disabled by review.finalize_commands = []; do not run a sweep."
 if [ -n "$finalize" ]; then
-  sweep_rules="Sweep: reuse the newest acceptable orch-sweep comment by you or the PR author for $sha: ${sweep_comment:-read it on the PR} (open fixes: ${open_fix:-read the record}). This dispatch sweeps only when evidence is missing or stale, never on an unchanged-head re-request. Do not run another sweep or post a sweep comment. Weigh each kept fix against the code. To dispute one, put a visible line in the review body: Sweep dispute <sweep-comment-id>/<finding-id>: <specific code reason>. Only undisputed kept fixes block APPROVE; nits and dropped findings never block. Link the sweep comment in the review body."
+  sweep_rules="Sweep: reuse the newest acceptable orch-sweep comment by you or the PR author for $sha: ${sweep_comment:-read it on the PR} (open fixes: ${open_fix:-read the record}). This dispatch sweeps only when evidence is missing or stale. Do not run another sweep or post a sweep comment. Weigh each kept fix against the code. To dispute one, put a visible line in the review body: Sweep dispute <sweep-comment-id>/<finding-id>: <specific code reason>. Only undisputed kept fixes block APPROVE; nits and dropped findings never block. Link the sweep comment in the review body."
 fi
 
 prompt="Review this GitHub pull request that requested my review.
@@ -269,7 +240,7 @@ PR: $url
 Title: $title
 Author: $author
 Head SHA: $sha
-Mode: $kind$text_rules$kind_rules
+Mode: $kind$kind_rules
 $review_extra_steps
 
 Rules:
@@ -288,7 +259,6 @@ Rules:
 - When finished, reply with one line: APPROVE|COMMENT|REQUEST_CHANGES — $url
 - After posting the review, reply with that one line and end your turn. Do not poll, sleep, or wait for CI, other reviewers or replies."
 
-text_check cleanup_before_prompt
 prompt_out=$(herdr agent prompt "$agent" "$prompt" --wait --timeout 1800000 2>&1)
 status=$?
 [ -z "$prompt_out" ] || printf '%s\n' "$prompt_out"
