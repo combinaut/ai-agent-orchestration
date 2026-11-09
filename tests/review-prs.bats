@@ -16,10 +16,12 @@ stub_review_tools() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$TMP/review-herdr.calls"
 case "$1 $2" in
+  'pane close') [ -z "${PANE_CLOSE_FAILS:-}" ] || exit 1 ;;
   'pane split') printf '%s\n' '{"result":{"pane":{"pane_id":"w9-p2"}}}' ;;
   'agent prompt')
     if [ -n "${PROMPT_REJECTED:-}" ]; then echo '{"error":{"code":"agent_blocked"}}' >&2; exit 1; fi
     printf '%s' "$4" >"$TMP/review.prompt"
+    [ -z "${UNPOSTED_CODE_FINDING:-}" ] || printf '%s\n' "$UNPOSTED_CODE_FINDING"
     exit "${PROMPT_STATUS:-0}" ;;
   'agent read')
     [ -z "${AGENT_READ_FAILS:-}" ] || exit 1
@@ -43,7 +45,7 @@ case "$*" in
     printf '%s\t%s\t%s\n' "${HEAD_OWNER:-alexsavio}" "${HEAD_REPO:-ai-agent-orchestration}" "${HEAD_REF:-feat/usage-ledger}"
     ;;
   *'/reviews'*)
-    r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"%s","body":"%s","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "${REVIEW_STATE:-APPROVED}" "${REVIEW_BODY-}" "$2" "$1"; }
+    r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "$2" "$1"; }
     old=""
     [ -z "${GH_OLD_REVIEW:-}" ] || old=$(r 1 "${OLD_AT:-2020-01-01T00:00:00Z}")
     if [ ! -e "$TMP/review.prompt" ]; then
@@ -57,8 +59,38 @@ case "$*" in
     [ -z "${GH_REVIEWS_FAIL:-}" ] || exit 1 ;;
 esac
 EOF
-  chmod +x "$BIN/herdr-review" "$BIN/gh"
+  cat >"$BIN/heavy-slot" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TMP/heavy-slot.calls"
+while [ "$1" != -- ]; do shift; done
+shift
+exec "$@"
+EOF
+  cat >"$BIN/orch-sweep-stub" <<'EOF'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$(pwd -P)" "$*" >>"$TMP/sweep.calls"
+[ -z "${SWEEP_EXIT:-}" ] || { echo "ERROR: sweep exit $SWEEP_EXIT" >&2; exit "$SWEEP_EXIT"; }
+[ -z "${SWEEP_FAILS:-}" ] || { echo "ERROR: validator 1: exited 1" >&2; exit 4; }
+echo "COMMENT https://github.com/acme/app/pull/7#issuecomment-9"
+echo "OK open_fix=${SWEEP_OPEN_FIX:-0} kept=0 findings=0"
+EOF
+  cat >"$BIN/orch-sweep-record-stub" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TMP/gate.calls"
+if [ ! -e "$TMP/review.prompt" ]; then
+  [ -z "${GATE_PREFLIGHT_UNAVAILABLE:-}" ] || { echo "ERROR: cannot check the gate: gh timed out" >&2; exit 2; }
+  [ -z "${GATE_ACCEPTS:-}" ] || { echo "OK: existing record"; exit 0; }
+  [ -z "${GATE_PREFLIGHT_OPEN:-}" ] || { echo RECORD_REUSABLE; echo "ERROR: reviewer assessment needed" >&2; exit 1; }
+  echo "ERROR: no full orch-sweep comment for the exact head" >&2
+  exit 1
+fi
+[ -z "${GATE_UNAVAILABLE:-}" ] || { echo "ERROR: cannot check the gate: gh timed out" >&2; exit 2; }
+[ -z "${GATE_FAILS:-}" ] || { echo "ERROR: the full sweep of $SHA has 1 open fix findings" >&2; exit 1; }
+echo "OK: the sweep of $SHA allows APPROVE"
+EOF
+  chmod +x "$BIN/herdr-review" "$BIN/gh" "$BIN/heavy-slot" "$BIN/orch-sweep-stub" "$BIN/orch-sweep-record-stub"
   export HERDR_TEST_STUB="$BIN/herdr-review" HERDR_STUB_DIRECT=1
+  export ORCH_SWEEP_BIN="$BIN/orch-sweep-stub" ORCH_SWEEP_RECORD_BIN="$BIN/orch-sweep-record-stub"
   export ORCH_CODEX_WORKER_MODEL=test-worker-model ORCH_CLOSED_DIR="$TMP/closed"
   git init -q "$TMP/app"
   git -C "$TMP/app" -c user.email=test@example.invalid -c user.name=test commit -q --allow-empty -m pr
@@ -93,7 +125,7 @@ EOF
     export PATH="$TMP/fetch-ok:$PATH"
   fi
   run env ORCH_CONFIG="$TMP/none.toml" bash "$ROOT/$SKILL_DIR/scripts/dispatch.sh" \
-    https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" "${KIND:-review}" rev7 "$TMP/app" acme/app
+    https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" "${KIND:-review}" rev7 "$TMP/app" acme/app right
 }
 
 fork_head_missing_from_pull_ref() {
@@ -278,13 +310,122 @@ fork_head_missing_from_pull_ref() {
   : >"$TMP/none.toml"
   dispatch
   prompt=$(cat "$TMP/review.prompt")
-  contains "$prompt" '"event":"APPROVE|REQUEST_CHANGES|COMMENT"'
-  contains "$prompt" '"comments":[{"path":"...","line":123,"side":"RIGHT","body":"..."}]'
-  contains "$prompt" 'github_write.py --timeout 240 api -X POST repos/acme/app/pulls/7/reviews --input -'
+  contains "$prompt" "$BIN/orch-sweep-stub post-review --pr https://github.com/acme/app/pull/7 --head $SHA --event APPROVE|REQUEST_CHANGES|COMMENT --input -"
+  contains "$prompt" '{"body":"...","comments":[{"path":"...","line":123,"side":"RIGHT","body":"..."}]}'
+  not_contains "$prompt" 'repos/acme/app/pulls/7/reviews'
+  contains "$prompt" 'Exit 2 is a tool error'
+  contains "$prompt" 'do not retry or post another verdict'
   contains "$prompt" 'quoted heredoc'
   not_contains "$prompt" 'mktemp'
   not_contains "$prompt" 'review_dir'
   contains "$prompt" 'APPROVE|COMMENT|REQUEST_CHANGES'
+}
+
+@test "dispatch runs orch-sweep at the head in the review worktree before the prompt" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  SWEEP_OPEN_FIX=2 dispatch
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$TMP/sweep.calls")" == */review-prs/worktrees/rev7"|run --pr https://github.com/acme/app/pull/7 --head $SHA --base-ref origin/main" ]]
+  grep -qx "take review-rev7-sweep --note orch sweep -- $BIN/orch-sweep-stub run --pr https://github.com/acme/app/pull/7 --head $SHA --base-ref origin/main" "$TMP/heavy-slot.calls"
+  prompt=$(cat "$TMP/review.prompt")
+  contains "$prompt" 'Sweep dispute <sweep-comment-id>/<finding-id>: <specific code reason>'
+  contains "$prompt" 'Only undisputed kept fixes block APPROVE'
+  not_contains "$prompt" 'finalize-sweep/SKILL.md'
+  not_contains "$prompt" 'repos/acme/app/issues/7/comments'
+}
+
+@test "a failed sweep blocks the head, sends no prompt and removes the worktree" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  SWEEP_FAILS=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'ERROR: validator 1: exited 1'
+  contains "$output" 'SWEEP FAILED exit 4'
+  contains "$output" '"reason": "sweep failed: exit 4"'
+  [ ! -e "$TMP/review.prompt" ]
+  [ ! -e "$HOME/.cache/review-prs/worktrees/rev7" ]
+  [ "$(dispatch_state)" = 'False "blocked"' ]
+}
+
+@test "a sweep that fails for a transient cause releases the head, and a lasting one blocks it" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  SWEEP_EXIT=75 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'SWEEP FAILED exit 75'
+  contains "$output" "RELEASED $SHA"
+  [ ! -e "$TMP/review.prompt" ]
+  [ "$(dispatch_state)" = 'True null' ]
+  rm -f "$HOME/.cache/review-prs/dispatched.json"
+  SWEEP_EXIT=6 dispatch
+  contains "$output" "RELEASED $SHA"
+  [ "$(dispatch_state)" = 'True null' ]
+  rm -f "$HOME/.cache/review-prs/dispatched.json"
+  SWEEP_EXIT=3 dispatch
+  [ "$(dispatch_state)" = 'False "blocked"' ]
+}
+
+@test "an APPROVE with an unavailable gate stays retryable after cleanup" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GATE_UNAVAILABLE=1 dispatch
+  [ "$status" -eq 0 ]
+  contains "$output" "GATE UNAVAILABLE $SHA cannot check the gate: gh timed out"
+  [[ "$output" == *"CLOSED w9-p2"*"REMOVED "*"RETRYABLE $SHA"* ]]
+  contains "$output" "RETRYABLE $SHA"
+  [ "$(dispatch_state)" = 'True "retry"' ]
+}
+
+@test "a gate outage after a posted approval keeps a caller pane pending" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  PANE=w9-p5 GATE_UNAVAILABLE=1 dispatch
+  echo "$output"
+  [ "$status" -eq 0 ]
+  contains "$output" 'LASTREVIEW APPROVED'
+  contains "$output" 'LEFT OPEN w9-p5'
+  not_contains "$output" 'CLOSED '
+  not_contains "$output" 'REMOVED '
+  not_contains "$output" 'RETRYABLE'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "title": "", "body": "", "isDraft": False,
+      "mergeable": "MERGEABLE", "headRefOid": sys.argv[3], "commits": {"nodes": []}}
+ledger = json.load(open(sys.argv[2]))
+assert prs.needs_dispatch(pr, ledger) == (False, None), ledger
+' "$ROOT/$SKILL_DIR/scripts" "$HOME/.cache/review-prs/dispatched.json" "$SHA"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "an APPROVE that fails the sweep gate after the turn blocks the head" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GATE_FAILS=1 dispatch
+  [ "$status" -eq 0 ]
+  [ "$(tail -1 "$TMP/gate.calls")" = "gate --pr https://github.com/acme/app/pull/7 --head $SHA" ]
+  contains "$output" "GATE FAILED $SHA the full sweep of $SHA has 1 open fix findings"
+  contains "$output" "\"reason\": \"sweep gate failed: the full sweep of $SHA has 1 open fix findings\""
+  [ "$(dispatch_state)" = 'False "blocked"' ]
+}
+
+@test "an APPROVE that passes the sweep gate is done, and a REQUEST_CHANGES is not gated" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  dispatch
+  [ -s "$TMP/gate.calls" ]
+  [ "$(dispatch_state)" = 'False "done"' ]
+  rm -f "$TMP/gate.calls" "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
+  rm -rf "$HOME/.cache/review-prs/worktrees/rev7"
+  REVIEWS_JSON='[[{"id":2,"user":{"login":"reviewer"},"commit_id":"'"$SHA"'","state":"CHANGES_REQUESTED","submitted_at":"2099-01-01T00:00:00Z","html_url":"https://github.com/acme/app/pull/7#review-2"}]]' GATE_FAILS=1 dispatch
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$TMP/gate.calls" | tr -d ' ')" -eq 1 ]
+  [ "$(dispatch_state)" = 'False "done"' ]
 }
 
 @test "the skill closes panes only through close-pane.sh" {
@@ -733,13 +874,6 @@ print(prs.needs_dispatch(pr, data)[0], json.dumps(prs.heads(data.get(pr["url"], 
   PROMPT_STATUS=1 PROMPT_DELIVERED=1 GH_NO_REVIEW=1 dispatch
   not_contains "$output" 'RELEASED'
   [ "$(dispatch_state)" = 'False "pending"' ]
-}
-
-@test "a posted review marks the head done" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  dispatch
-  [ "$(dispatch_state)" = 'False "done"' ]
 }
 
 @test "install leaves unrelated skills in the agents folder alone" {
@@ -1268,7 +1402,6 @@ assert not prs.dispatched_done_on_other_head(pr, dispatched)
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
-  grep -qF 'A manual review of a moved head is re-queued once' "$ROOT/$SKILL_DIR/SKILL.md"
 }
 
 @test "dispatch uses the configured Herdr executable for every call" {
@@ -1506,7 +1639,7 @@ assert prs.changes(before, failing)[0] == ["changed: %s — t: review requested 
   [ "$status" -eq 0 ]
 }
 
-@test "claim --retake takes a done head again and never a pending or blocked one" {
+@test "claim --retake takes a done head again and rejects blocked heads" {
   prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@"; }
   retake_url=https://github.com/acme/app/pull/7
   prs claim-dispatched --url "$retake_url" --sha a >/dev/null
@@ -1573,59 +1706,6 @@ assert r["stuck"] == [{"url": old["url"], "sha": "A", "agent": "rev1", "pane": "
   [ "$status" -eq 0 ]
 }
 
-@test "last-review marks a review whose body carries the sweep marker of the head" {
-  marker='<!-- finalize-sweep {\"head\":\"'"$SHA"'\",\"dropped\":[]} -->'
-  swept() {
-    printf '[[{"id":2,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","body":"%s","submitted_at":"2099-01-01T00:00:00Z","html_url":"u"}]]' "$SHA" "$1" |
-      python3 "$ROOT/$SKILL_DIR/scripts/prs.py" last-review --login reviewer --sha "$SHA" --seen ""
-  }
-  [ "$(swept "$marker")" = 'LASTREVIEW APPROVED 2099-01-01T00:00:00Z u SWEPT' ]
-  [ "$(swept 'no marker')" = 'LASTREVIEW APPROVED 2099-01-01T00:00:00Z u' ]
-  [ "$(swept '<!-- finalize-sweep {\"head\":\"other\"} -->')" = 'LASTREVIEW APPROVED 2099-01-01T00:00:00Z u' ]
-}
-
-@test "dispatch prints SWEEP MISSING for an APPROVE or a first review without the marker, and not for a repo without a sweep" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  dispatch
-  contains "$output" 'SWEEP MISSING'
-  rm -f "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
-  REVIEW_BODY='<!-- finalize-sweep {\"head\":\"'"$SHA"'\",\"dropped\":[]} -->' dispatch
-  not_contains "$output" 'SWEEP MISSING'
-  rm -f "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
-  ORCH_REVIEW_FINALIZE_COMMANDS='' dispatch
-  not_contains "$output" 'SWEEP MISSING'
-  rm -f "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
-  KIND=re-review REVIEW_STATE=CHANGES_REQUESTED dispatch
-  not_contains "$output" 'SWEEP MISSING'
-}
-
-@test "the review prompt sweeps once, puts the table and marker in the review body and follows review.finalize_commands" {
-  stub_review_tools
-  : >"$TMP/none.toml"
-  dispatch
-  prompt=$(cat "$TMP/review.prompt")
-  contains "$prompt" 'Run finalize-sweep (~/.claude/skills/finalize-sweep/SKILL.md) in report-only mode'
-  contains "$prompt" "report-only pr=https://github.com/acme/app/pull/7 max-slices=25 and base ref origin/main"
-  contains "$prompt" 'on your first review of this PR, and on a head you would APPROVE'
-  contains "$prompt" 'one of your earlier submitted reviews already holds a marker'
-  not_contains "$prompt" 'a review or comment on the PR already holds a marker'
-  contains "$prompt" 'Put the findings table in the review body, one post per head'
-  contains "$prompt" '<!-- finalize-sweep {"head":"'"$SHA"'","dropped":'
-  contains "$prompt" 'redundant but not misleading'
-  not_contains "$prompt" 'issues/7/comments'
-  rm -f "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
-  ORCH_REVIEW_FINALIZE_COMMANDS='/finalize-code-comments|/lint-prs' dispatch
-  prompt=$(cat "$TMP/review.prompt")
-  contains "$prompt" '/finalize-code-comments, /lint-prs'
-  not_contains "$prompt" 'Run finalize-sweep'
-  rm -f "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
-  ORCH_REVIEW_FINALIZE_COMMANDS='' dispatch
-  prompt=$(cat "$TMP/review.prompt")
-  not_contains "$prompt" 'finalize'
-  contains "$prompt" 'Search code with rg or grep.'
-}
-
 @test "finalize-sweep has a report-only mode" {
   grep -qF '## Report-only mode' "$ROOT/skills/finalize-sweep/SKILL.md"
   grep -qF 'max-slices=<n>' "$ROOT/skills/finalize-sweep/SKILL.md"
@@ -1634,6 +1714,208 @@ assert r["stuck"] == [{"url": old["url"], "sha": "A", "agent": "rev1", "pane": "
 @test "the architect skill keeps /goal out of the default worker brief" {
   grep -qF 'is not part of the default worker brief' "$ROOT/skills/architect/SKILL.md"
   grep -qF 'joins the running turn' "$ROOT/skills/architect/SKILL.md"
+}
+
+@test "unposted findings stay pending without a redundant gate read" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GH_NO_REVIEW=1 UNPOSTED_CODE_FINDING='UNPOSTED CODE FINDING: app.rb:1 divides by zero' dispatch
+  echo "$output"
+  [ "$status" -eq 0 ]
+  contains "$output" 'UNPOSTED CODE FINDING: app.rb:1 divides by zero'
+  [ "$(wc -l <"$TMP/gate.calls" | tr -d ' ')" -eq 1 ]
+  local dispatch_output=$output
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "title": "",
+      "isDraft": False, "mergeable": "MERGEABLE", "headRefOid": sys.argv[3],
+      "commits": {"nodes": []}}
+ledger = json.load(open(sys.argv[2]))
+result = prs.needs_dispatch(pr, ledger)
+assert result == (False, None), result
+' "$ROOT/$SKILL_DIR/scripts" "$HOME/.cache/review-prs/dispatched.json" "$SHA"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  contains "$dispatch_output" 'LEFT OPEN w9-p2'
+  not_contains "$dispatch_output" 'CLOSED w9-p2'
+  not_contains "$dispatch_output" 'REMOVED '
+  not_contains "$dispatch_output" 'RETRYABLE'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "an incomplete failed reviewer keeps its claim and pane" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GH_NO_REVIEW=1 PROMPT_STATUS=1 dispatch
+  contains "$output" 'LEFT OPEN w9-p2'
+  not_contains "$output" 'RELEASED'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "a gate outage after a posted approval keeps an incomplete reviewer pending" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GATE_UNAVAILABLE=1 PROMPT_STATUS=1 dispatch
+  contains "$output" 'LASTREVIEW APPROVED'
+  contains "$output" 'LEFT OPEN w9-p2'
+  not_contains "$output" 'RELEASED'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "a gate outage keeps the claim when owned-pane cleanup fails" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GATE_UNAVAILABLE=1 PANE_CLOSE_FAILS=1 dispatch
+  contains "$output" 'LASTREVIEW APPROVED'
+  contains "$output" 'LEFT OPEN w9-p2'
+  not_contains "$output" 'RELEASED'
+  [ "$(dispatch_state)" = 'False "pending"' ]
+}
+
+@test "a gate retry remains discoverable after the personal request clears" {
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "number": 7, "title": "t", "body": "b", "isDraft": False,
+      "mergeable": "MERGEABLE", "headRefOid": "A", "commits": {"nodes": []},
+      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
+      "myReviews": {"nodes": [{"commit": {"oid": "A"}}]}}
+ledger = {url: {"heads": {"A": {"state": "retry"}}}}
+prs.viewer_login = lambda: "me"
+prs.search = lambda q, me: [pr] if "reviewed-by:@me" in q else []
+prs.load_dispatched = lambda: ledger
+assert prs.fetch("repo:acme/app")[0] == [pr]
+assert prs.needs_dispatch(pr, ledger, "me") == (True, "re-review")
+prs.read_dispatched = lambda: ledger
+prs.gh = lambda *args: json.dumps({"data": {"resource": {**pr, "state": "OPEN", "reviewRequests": {"nodes": []}}}})
+assert prs.departure(url, "me") is None
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a retry claim survives a transient failure before the prompt" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  mkdir -p "$HOME/.cache/review-prs"
+  printf '{"https://github.com/acme/app/pull/7":{"heads":{"%s":{"state":"retry"}}}}' "$SHA" >"$HOME/.cache/review-prs/dispatched.json"
+  GH_SNAPSHOT_FAIL=1 dispatch
+  contains "$output" 'SNAPSHOT FAILED'
+  contains "$output" 'RELEASED'
+  [ "$(dispatch_state)" = 'True "retry"' ]
+}
+
+@test "pending and blocked approvals stay visible after the personal request clears" {
+  run python3 -c '
+import contextlib, io, json, sys
+from types import SimpleNamespace
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url": url, "number": 7, "title": "t", "body": "b", "isDraft": False,
+      "mergeable": "MERGEABLE", "headRefOid": "A", "commits": {"nodes": []},
+      "author": {"login": "author"}, "repository": {"nameWithOwner": "acme/app"},
+      "myReviews": {"nodes": [{"commit": {"oid": "A"}}]}}
+prs.viewer_login = lambda: "me"
+prs.search = lambda q, me: [pr] if "reviewed-by:@me" in q else []
+prs.codex_enabled = lambda: True
+prs.worker_model = lambda: "test-model"
+prs.gh = lambda *args: json.dumps({"data": {"resource": {**pr, "state": "OPEN", "reviewRequests": {"nodes": []}}}})
+for state in ("pending", "blocked"):
+    record = {"state": state, "at": "2020-01-01T00:00:00Z",
+              "reason": "gate refused", "agent": "reviewer", "pane": "w1-p2"}
+    ledger = {url: {"heads": {"A": record}}}
+    prs.load_dispatched = lambda: ledger
+    prs.read_dispatched = lambda: ledger
+    assert prs.fetch("repo:acme/app")[0] == [pr], (state, "fetch")
+    assert prs.departure(url, "me") is None, (state, "departure")
+    assert prs.needs_dispatch(pr, ledger, "me") == (False, None)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        prs.cmd_dispatch_queue(SimpleNamespace(), "repo:acme/app", "app")
+    queue = json.loads(output.getvalue())
+    assert queue["queue"] == [], queue
+    if state == "pending":
+        assert queue["stuck"][0]["pane"] == "w1-p2", queue
+    else:
+        assert queue["blocked"][0]["reason"] == "gate refused", queue
+    ledger = {url: {"heads": {"OLD": record}}}
+    assert prs.fetch("repo:acme/app")[0] == [], (state, "old head")
+    assert prs.departure(url, "me") == "cleared", (state, "old head")
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "dispatch reuses an acceptable record without a sweep or heavy slot" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GATE_ACCEPTS=1 dispatch
+  [ "$status" -eq 0 ]
+  [ ! -e "$TMP/sweep.calls" ]
+  [ ! -e "$TMP/heavy-slot.calls" ]
+}
+
+@test "a re-request with missing evidence runs a sweep" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  KIND=re-request dispatch
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/sweep.calls" ]
+}
+
+@test "dispatch honors the finalize opt-out including its post-turn check" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  printf '[review]\nfinalize_commands = []\n' >"$TMP/app/.orchestration.toml"
+  git -C "$TMP/app" add .orchestration.toml
+  git -C "$TMP/app" -c user.name=t -c user.email=t@example.invalid commit -qm opt-out
+  SHA=$(git -C "$TMP/app" rev-parse HEAD)
+  export SHA
+  dispatch
+  [ "$status" -eq 0 ]
+  [ ! -e "$TMP/sweep.calls" ]
+  [ ! -e "$TMP/gate.calls" ]
+}
+
+@test "lasting sweep exit one blocks while preflight tool errors release" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  SWEEP_EXIT=1 dispatch
+  [ "$(dispatch_state)" = 'False "blocked"' ]
+  rm -f "$HOME/.cache/review-prs/dispatched.json" "$TMP/sweep.calls"
+  GATE_PREFLIGHT_UNAVAILABLE=1 dispatch
+  [ "$status" -ne 0 ]
+  [ ! -e "$TMP/sweep.calls" ]
+  [ "$(dispatch_state)" = 'True null' ]
+}
+
+@test "releasing a blocked retake restores the completed review" {
+  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
+  u=https://github.com/acme/app/pull/7
+  prs claim-dispatched --url "$u" --sha a
+  prs mark-dispatched --url "$u" --sha a --state "done"
+  prs claim-dispatched --url "$u" --sha a --retake
+  run prs claim-dispatched --url "$u" --sha a --retake
+  [ "$status" -eq 3 ]
+  prs mark-dispatched --url "$u" --sha a --state blocked
+  prs release-dispatched --url "$u" --sha a
+  run python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[sys.argv[2]]["heads"]["a"]["state"] == "done"' "$HOME/.cache/review-prs/dispatched.json" "$u"
+  [ "$status" -eq 0 ]
+}
+
+@test "a record with kept fixes is reused for independent assessment" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GATE_PREFLIGHT_OPEN=1 GH_NO_REVIEW=1 dispatch
+  [ "$status" -eq 0 ]
+  [ ! -e "$TMP/sweep.calls" ]
+  [ -s "$TMP/review.prompt" ]
 }
 
 @test "Claude worker and reviewer starts turn prompt suggestions off and architect starts do not" {
@@ -1651,4 +1933,18 @@ assert r["stuck"] == [{"url": old["url"], "sha": "A", "agent": "rev1", "pane": "
   for file in skills/architect/references/worker-close.md skills/architect/SKILL.md skills/coordinate/SKILL.md docs/architecture.md; do
     grep -qF 'composer-state.py' "$ROOT/$file"
   done
+}
+
+@test "body edits alone do not queue another review of a completed head" {
+  run python3 - "$ROOT/$SKILL_DIR/scripts" <<'PYTEST'
+import hashlib, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+pr = {"url":url, "title":"t", "body":"old", "headRefOid":"A", "isDraft":False, "mergeable":"MERGEABLE", "commits":{"nodes":[]}}
+prior = hashlib.sha1(b"t\0old").hexdigest()[:12]
+ledger = {url:{"heads":{"A":{"state":"done", "text":prior}}}}
+assert prs.needs_dispatch({**pr, "body":"new"}, ledger) == (False, None)
+PYTEST
+  [ "$status" -eq 0 ]
 }

@@ -4,12 +4,12 @@
   prs.py list          [scope] [--actionable]     markdown tables + snapshot for watch
   prs.py watch         [scope] [--interval S]     one line per change, forever
   prs.py dispatch-queue [scope]                   JSON: Ready PRs needing (re)review
-  prs.py mark-dispatched --url U --sha S [--state pending|blocked|done] [--reason R] [--agent N] [--pane P]
+  prs.py mark-dispatched --url U --sha S [--state pending|retry|blocked|done] [--reason R] [--agent N] [--pane P]
   prs.py claim-dispatched --url U --sha S [--agent N] [--retake]   marks S pending; exit 3 when S is already pending, blocked, or done (--retake claims a done S again)
   prs.py release-dispatched --url U --sha S       drops S while it is pending or blocked
   prs.py remote --cwd C --repo R                  the remote of clone C (origin or upstream) that is the GitHub repo R
   prs.py review-ids --login L                     stdin: gh api --paginate --slurp .../reviews; ids of L's submitted reviews
-  prs.py last-review --login L --sha S --seen IDS stdin: the same; L's newest submitted review of S not in IDS, marked SWEPT when its body carries the finalize-sweep marker of S
+  prs.py last-review --login L --sha S --seen IDS stdin: the same; L's newest submitted review of S not in IDS
 
 Scope: --repo owner/name | --org ORG | --all. Default: cwd's GitHub repo, else watchers.pr_scope, else --all.
 """
@@ -19,7 +19,6 @@ import fcntl
 import hashlib
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -201,6 +200,12 @@ def dispatched_records(pr, dispatched):
     return heads(entry)
 
 
+def dispatched_needs_tracking(pr, dispatched):
+    """Whether the current head has pending, blocked or retryable review state."""
+    record = dispatched_records(pr, dispatched).get(pr.get("headRefOid") or "", {})
+    return record.get("state") in ("pending", "blocked", "retry")
+
+
 def dispatched_current_head_done(pr, dispatched):
     """Whether a completed local dispatch already covers this PR head."""
     head = pr.get("headRefOid") or ""
@@ -227,7 +232,7 @@ def fetch(scope):
     requested = search(
         f"is:pr is:open review-requested:@me archived:false {scope}".strip(), login
     )
-    # PRs I reviewed whose head moved since, with no new review request.
+    # Include reviewed PRs that still need tracking without a new review request.
     reviewed = search(
         f"is:pr is:open reviewed-by:@me -review-requested:@me archived:false {scope}".strip(),
         login,
@@ -236,10 +241,13 @@ def fetch(scope):
     moved = [
         n
         for n in reviewed
-        if not dispatched_current_head_done(n, dispatched)
-        and (
-            (my_review_sha(n) and my_review_sha(n) != n.get("headRefOid"))
-            or dispatched_done_on_other_head(n, dispatched)
+        if dispatched_needs_tracking(n, dispatched)
+        or (
+            not dispatched_current_head_done(n, dispatched)
+            and (
+                (my_review_sha(n) and my_review_sha(n) != n.get("headRefOid"))
+                or dispatched_done_on_other_head(n, dispatched)
+            )
         )
     ]
     seen = set()
@@ -497,7 +505,7 @@ def needs_dispatch(pr, dispatched, me=None):
     sha = pr.get("headRefOid") or ""
     entry = dispatched.get(pr["url"]) if isinstance(dispatched, dict) else None
     known = heads(entry)
-    if sha and sha in known:
+    if sha and sha in known and known[sha].get("state") != "retry":
         if known[sha].get("state") == "done" and requested_after(
             pr, me, known[sha].get("at")
         ):
@@ -571,9 +579,12 @@ def departure(url, login):
         if request.get("slug") and not request.get("login"):
             return None
     dispatched = read_dispatched()
-    if not dispatched_current_head_done(pr, dispatched) and (
-        (my_review_sha(pr) and my_review_sha(pr) != pr.get("headRefOid"))
-        or dispatched_done_on_other_head(pr, dispatched)
+    if dispatched_needs_tracking(pr, dispatched) or (
+        not dispatched_current_head_done(pr, dispatched)
+        and (
+            (my_review_sha(pr) and my_review_sha(pr) != pr.get("headRefOid"))
+            or dispatched_done_on_other_head(pr, dispatched)
+        )
     ):
         return None
     return "cleared"
@@ -917,13 +928,17 @@ def cmd_claim_dispatched(args, _scope, _label):
 
     def claim(data):
         known = heads(data.get(args.url) or {})
-        if args.sha in known and not (
-            args.retake and known[args.sha].get("state") == "done"
+        if (
+            args.sha in known
+            and known[args.sha].get("state") != "retry"
+            and not (args.retake and known[args.sha].get("state") == "done")
         ):
             taken.append(True)
             return
         pending = head_record(args, "pending")
-        if args.retake and args.sha in known:
+        if args.sha in known and (
+            args.retake or known[args.sha].get("state") == "retry"
+        ):
             pending["previous"] = known[args.sha]
         set_head(data, args.url, args.sha, pending)
 
@@ -937,7 +952,15 @@ def cmd_mark_dispatched(args, _scope, _label):
     if not args.url or not args.sha:
         sys.exit("mark-dispatched needs --url and --sha")
     record = head_record(args, args.state)
-    update_dispatched(lambda data: set_head(data, args.url, args.sha, record))
+
+    def mark(data):
+        known = heads(data.get(args.url) or {})
+        previous = (known.get(args.sha) or {}).get("previous")
+        if args.state in ("pending", "blocked") and previous:
+            record["previous"] = previous
+        set_head(data, args.url, args.sha, record)
+
+    update_dispatched(mark)
     print(json.dumps(record))
 
 
@@ -975,20 +998,6 @@ def cmd_review_ids(args, _scope, _label):
     print(",".join(str(r["id"]) for r in submitted_reviews(args.login)))
 
 
-SWEEP_MARKER = re.compile(r"<!--\s*finalize-sweep\s*(\{.*?\})\s*-->", re.S)
-
-
-def swept_head(body, sha):
-    """Whether the body carries a finalize-sweep marker for this head."""
-    for found in SWEEP_MARKER.findall(body or ""):
-        try:
-            if json.loads(found).get("head") == sha:
-                return True
-        except ValueError:
-            continue
-    return False
-
-
 def cmd_last_review(args, _scope, _label):
     """Prints LASTREVIEW for the newest submitted review by --login of --sha whose id is not in --seen."""
     seen = set(filter(None, (args.seen or "").split(",")))
@@ -999,8 +1008,7 @@ def cmd_last_review(args, _scope, _label):
     ]
     if mine:
         r = max(mine, key=lambda r: r["submitted_at"])
-        swept = " SWEPT" if swept_head(r.get("body"), args.sha) else ""
-        print(f"LASTREVIEW {r['state']} {r['submitted_at']} {r['html_url']}{swept}")
+        print(f"LASTREVIEW {r['state']} {r['submitted_at']} {r['html_url']}")
 
 
 def main():
@@ -1042,7 +1050,7 @@ def main():
     parser.add_argument("--sha", help="mark-dispatched: head SHA that was dispatched")
     parser.add_argument(
         "--state",
-        choices=["pending", "blocked", "done"],
+        choices=["pending", "retry", "blocked", "done"],
         default="done",
         help="mark-dispatched: pending while the review runs, blocked when it cannot start, done once posted",
     )

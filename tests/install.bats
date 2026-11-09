@@ -1002,7 +1002,7 @@ CASES
 @test "the installer links the startup helpers into the managed bin" {
   fresh_install
   install_ok --env herdr
-  for helper in orch-agents orch-settings orch-sweep-record orch-usage; do
+  for helper in orch-agents orch-settings orch-sweep orch-sweep-record orch-usage; do
     [ -L "$HOME/.local/bin/$helper" ]
     [ "$HOME/.local/bin/$helper" -ef "$CLONE/$helper" ]
   done
