@@ -2185,10 +2185,10 @@ assert result == (False, None), result
   [ "$(dispatch_state)" = 'False "pending"' ]
 }
 
-@test "a gate outage after an incomplete reviewer keeps its claim and pane" {
+@test "an incomplete failed reviewer keeps its claim and pane" {
   stub_review_tools
   : >"$TMP/none.toml"
-  GH_NO_REVIEW=1 GATE_UNAVAILABLE=1 PROMPT_STATUS=1 dispatch
+  GH_NO_REVIEW=1 PROMPT_STATUS=1 dispatch
   contains "$output" 'LEFT OPEN w9-p2'
   not_contains "$output" 'RELEASED'
   [ "$(dispatch_state)" = 'False "pending"' ]
