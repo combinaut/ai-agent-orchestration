@@ -29,10 +29,11 @@ For each added or changed piece, ask:
    - ❌ `it "shows the empty state when there are no results"` beside a later `it "shows the empty state and hides the pagination when there are no results"`: the later one asserts everything the first does.
 2. **Leftovers from reverted or reworked approaches.** Imports, helpers, variables, styles, fixtures, or test setup that only the abandoned version used. Read the branch's commit list (`git log --oneline <base>..HEAD`) for reverts, fix-on-fix commits, and review-response commits, and check what each left behind.
    - ❌ an import or fixture that only a reverted commit used.
-3. **Machinery for cases nothing exercises.** Observers, listeners, guards, options, or fallbacks added during review for an input no current caller sends. Name the callers you checked. When none produces the case, recommend removing it and adding it when a caller needs it. This applies to internal code only: an input on a public surface (an API parameter, a CLI flag, a config key) or one the linked issue asks for stays, even with no caller in the repo.
+3. **Machinery for cases nothing exercises.** Observers, listeners, guards, options, or fallbacks added during review for an input no current caller sends. Name the callers you checked. When none produces the case, recommend removing it and adding it when a caller needs it. This applies to internal code only: an input the linked issue asks for stays, even with no caller in the repo.
    - ❌ an observer keeping a derived value in sync with content that every caller renders once and replaces wholesale to change.
-4. **Code the branch made dead, or found dead in the lines it touches.** Rules no element can match, classes no template uses, variables nothing reads, files nothing imports. Verify with a search (the class, the import path, the variable) before calling anything dead.
+4. **Code the branch made dead, or found dead in the lines it touches.** Rules no element can match, classes no template uses, variables, keys or settings nothing reads, a writer whose last reader the branch removed, files nothing imports. Verify with a search before calling anything dead, and make sure it would catch dynamic readers: indexed access such as `obj[name]`, built strings such as `"theme." + key`, and dynamic sends such as `send(:"#{x}")`. When a search comes back empty, run the same search over the same paths for a sibling name you know is read, and show it hits. Data the branch left with every entry equal to its fallback is dead too, once each reader (lookups, membership checks, iteration, and missing-key fallback) is shown to behave the same without it.
    - ❌ a style rule for an element's empty state when the template removes the element whenever it would be empty.
+   - ❌ a config payload still writes `legacyColors` after the only code reading that key was removed.
 5. **Churn that changes nothing.** Reformatting, reordering, or renames in lines the change does not otherwise need. Revert them to shrink the diff. A rename that makes code the change touches clearer is not churn.
    - ❌ re-wrapping a literal in a function the change otherwise leaves alone.
 6. **Repetition the branch introduced.** The same literal, fallback, or expression added several times where one variable or helper would do. Recommend it only when it reads better, not just to reduce a count.
@@ -45,6 +46,7 @@ For each added or changed piece, ask:
 - **Anything that changes behaviour.** This skill shrinks the diff; it does not redesign. A real fix stays even when it arrived late.
 - **Tests that pin distinct contracts.** Overlapping setup is not duplication; two tests are duplicates only when they share setup and inputs and one's assertions are a subset of the other's.
 - **Cheap, standard defensive code.** Say why it stays.
+- **Public surfaces.** An API parameter, CLI flag, config key, or payload field stays even with no reader in the repo. Name the contract that makes it public (docs, schema, route).
 - **Code outside the diff.** Pre-existing problems go in the report as follow-up candidates, not into the PR.
 
 ## Process
