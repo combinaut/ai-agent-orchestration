@@ -599,7 +599,7 @@ json.dump([[{"user": {"login": "reviewer"}, "author_association": "MEMBER", "bod
   cd "$REPO"
   python3 -c 'import json,sys
 record = {"tool": "orch-sweep", "items": [], "dropped": [{"id": "F9", "file": "lib/alpha.py", "line": 2, "category": "redundant", "class": "nit", "verdict": "RESPECT_DROP", "summary": "STRANGER-MARK"}]}
-body = "<!-- orch-sweep v1 -->\\n```json\\n" + json.dumps(record) + "\\n```\\n"
+body = "<!-- orch-sweep v1 -->\n```json\n" + json.dumps(record) + "\n```\n"
 json.dump([[{"user": {"login": "stranger"}, "author_association": "NONE", "body": body}]], open(sys.argv[1], "w"))' "$TMP/comments.json"
   FAKE_FINDINGS=1 run_sweep --no-comment
   [ "$status" -eq 0 ]
@@ -613,7 +613,7 @@ json.dump([[{"user": {"login": "stranger"}, "author_association": "NONE", "body"
 def body(n, record):
     return f"<!-- orch-sweep v1 -->\nMALFORMED-MARK-{n}\n```json\n{json.dumps(record)}\n```\n"
 records = [{"tool": "orch-sweep", "items": None, "dropped": []}, {"tool": "orch-sweep", "items": [], "dropped": 7}]
-json.dump([[{"user": {"login": "someone"}, "body": body(n, r)} for n, r in enumerate(records)]], open(sys.argv[1], "w"))' "$TMP/comments.json"
+json.dump([[{"user": {"login": "someone"}, "author_association": "MEMBER", "body": body(n, r)} for n, r in enumerate(records)]], open(sys.argv[1], "w"))' "$TMP/comments.json"
   FAKE_FINDINGS=1 run_sweep --no-comment
   [ "$status" -eq 0 ]
   grep -q "MALFORMED-MARK-0" "$TMP"/prompts/validator.*
@@ -790,7 +790,7 @@ good = {"id": "F1", "file": "lib/a.py", "line": 3, "category": "comment", "class
 records = [{"tool": "orch-sweep", "items": [7], "dropped": []}, {"tool": "orch-sweep", "items": [None], "dropped": []},
            {"tool": "orch-sweep", "items": ["bad"], "dropped": []}, {"tool": "orch-sweep", "items": [], "dropped": [{"id": "F2", "summary": "FABRICATED"}]},
            {"tool": "orch-sweep", "items": [], "dropped": [dict(good, verdict="MADE_UP")]}, {"tool": "orch-sweep", "items": [], "dropped": [dict(good, line="3")]}]
-json.dump([[{"user": {"login": "someone"}, "body": body(n, r)} for n, r in enumerate(records)]], open(sys.argv[1], "w"))' "$TMP/comments.json"
+json.dump([[{"user": {"login": "someone"}, "author_association": "MEMBER", "body": body(n, r)} for n, r in enumerate(records)]], open(sys.argv[1], "w"))' "$TMP/comments.json"
   FAKE_FINDINGS=1 run_sweep --no-comment
   [ "$status" -eq 0 ]
   for n in 0 1 2 3 4 5; do
