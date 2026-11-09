@@ -113,7 +113,7 @@ happening. Close only what you created.
 
 **Close what is no longer needed, automatically, without asking.** In the same step as the event that ends a pane's job: a merged or closed PR → close its pane with `close-pane.sh`, then its workspace if it is still there, and remove its worktree (if clean); a pane replaced by another (model change, budget out) → close the old pane; a reviewer or one-off pane → close once its report is dispatched. Keep a pane while it owns an open PR's review cycle.
 
-**A finished worker closes right away, without asking, once its report is read, it has no open work and nothing is typed in its composer. Close it with `~/.claude/coordinator/watchers/close-worker.sh <pane> --task <text> --report <path>`, which writes one recovery line in your status file and closes the pane; never pkill.** On `WORKER IDLE <pane> owner=<you>`, check the worker: close it the same way when its task is done, or keep it and do nothing else. Architects stay open. Read [`worker-close.md`](references/worker-close.md) before you close a worker.
+**A finished worker closes right away, without asking, once its report is read, it has no open work and `~/.claude/coordinator/composer-state.py <pane>` finds nothing typed in its composer. Close it with `~/.claude/coordinator/watchers/close-worker.sh <pane> --task <text> --report <path>`, which writes one recovery line in your status file and closes the pane; never pkill.** On `WORKER IDLE <pane> owner=<you>`, check the worker: close it the same way when its task is done, or keep it and do nothing else. Architects stay open. Read [`worker-close.md`](references/worker-close.md) before you close a worker.
 
 An author pane is the opposite: it lives as long as its PR is open, because it owns the review cycle.
 

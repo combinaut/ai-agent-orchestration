@@ -1635,3 +1635,20 @@ assert r["stuck"] == [{"url": old["url"], "sha": "A", "agent": "rev1", "pane": "
   grep -qF 'is not part of the default worker brief' "$ROOT/skills/architect/SKILL.md"
   grep -qF 'joins the running turn' "$ROOT/skills/architect/SKILL.md"
 }
+
+@test "Claude worker and reviewer starts turn prompt suggestions off and architect starts do not" {
+  export_line="export CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false"
+  run grep -cF "$export_line" "$ROOT/skills/architect/references/dispatch.md"
+  [ "$output" -eq 2 ]
+  for file in worker-recycle worker-close reviewer; do
+    grep -qF "$export_line" "$ROOT/skills/architect/references/$file.md"
+  done
+  run grep -rlF "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION" "$ROOT/skills/coordinate"
+  [ "$status" -eq 1 ]
+}
+
+@test "composer checks use the ANSI helper" {
+  for file in skills/architect/references/worker-close.md skills/architect/SKILL.md skills/coordinate/SKILL.md docs/architecture.md; do
+    grep -qF 'composer-state.py' "$ROOT/$file"
+  done
+}
