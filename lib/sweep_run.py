@@ -669,10 +669,21 @@ def review_rules(no_context=False):
     )
 
 
-def binding(head, session, nonce):
+def binding(head, session, nonce, **scope):
     return "Sweep binding: " + json.dumps(
-        {"worker_session": session, "head": head, "nonce": nonce}
+        {"worker_session": session, "head": head, "nonce": nonce, **scope}
     )
+
+
+def bind_jobs(jobs, head, session, nonce, base, pr, sweep=False):
+    for index, job in enumerate(jobs):
+        scope = {"base": base, "pr": pr}
+        if sweep:
+            scope.update(sweep_agents=len(jobs), sweep_index=index)
+        role, marker, _, body = job["prompt"].split("\n", 3)
+        job["prompt"] = "\n".join(
+            (role, marker, binding(head, session, nonce, **scope), body)
+        )
 
 
 def sweep_prompt(skill, chunk, base, head, diff, session, nonce):
@@ -1020,6 +1031,7 @@ def run(args):
             "check": findings_check,
         }
     )
+    bind_jobs(jobs, args.head, session, nonce, merge_base, args.pr, sweep=True)
     swept = runner.run(jobs)
     compare(before, "sweep agents")
     print(f"SWEPT {len(jobs)} agents")
@@ -1033,19 +1045,19 @@ def run(args):
     validators = min(MAX_VALIDATORS, math.ceil(len(found) / PER_VALIDATOR))
     chunks = [found[n::validators] for n in range(validators)]
     text = context(pr, comments, threads, reviews)
-    checked = runner.run(
-        [
-            {
-                "name": f"validator {n + 1}",
-                "prompt": validator_prompt(
-                    chunk, text, merge_base, args.head, pr_diff, session, nonce
-                ),
-                "schema": VERDICTS_SCHEMA,
-                "check": verdicts_check([f["id"] for f in chunk]),
-            }
-            for n, chunk in enumerate(chunks)
-        ]
-    )
+    validator_jobs = [
+        {
+            "name": f"validator {n + 1}",
+            "prompt": validator_prompt(
+                chunk, text, merge_base, args.head, pr_diff, session, nonce
+            ),
+            "schema": VERDICTS_SCHEMA,
+            "check": verdicts_check([f["id"] for f in chunk]),
+        }
+        for n, chunk in enumerate(chunks)
+    ]
+    bind_jobs(validator_jobs, args.head, session, nonce, merge_base, args.pr)
+    checked = runner.run(validator_jobs)
     compare(before, "validators")
     given = {}
     for result in checked:

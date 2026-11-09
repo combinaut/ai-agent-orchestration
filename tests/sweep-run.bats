@@ -1142,7 +1142,7 @@ json.dump([[{"user":{"login":"stranger"},"body":"Quoted diagnostic:\nSweep bindi
 root=pathlib.Path(sys.argv[1]);prompts=pathlib.Path(sys.argv[2])
 pr=next(p for p in prompts.glob("pr-text.*") if p.suffix!=".diff").read_text()
 sweep=next(p for p in prompts.glob("sweep-comments.*") if p.suffix!=".diff").read_text()
-validator=next(prompts.glob("validator.*")).read_text()
+validator=next(p for p in prompts.glob("validator.*") if p.suffix!=".diff").read_text()
 assert "Do not read any PR" not in pr
 assert "No plan or ticket excuses" in sweep and "This skips the footprint" in sweep
 assert "**Report only.**" in pr and "**Evidence.**" in pr
@@ -1196,4 +1196,107 @@ finally:
         try:os.kill(int(pidfile.read_text()),signal.SIGKILL)
         except ProcessLookupError:pass' "$ROOT" "$TMP" "$HEAD_SHA" "$PR"
   [ "$status" -eq 0 ]
+}
+
+@test "a record cannot omit an entire validator chunk without editing any transcript" {
+  FAKE_FINDINGS=21 FAKE_PERSIST=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  cp "$TMP/record.json" "$TMP/original.json"
+  for mutation in findings evidence; do
+    python3 -c 'import json,pathlib,sys
+r=json.load(open(sys.argv[1]));id=r["validator_ids"].pop(0)
+t=next(pathlib.Path(sys.argv[3]).rglob("rollout-"+id+".jsonl"))
+rows=[json.loads(l) for l in t.read_text().splitlines()]
+brief=next(x["payload"]["content"][0]["text"] for x in rows if x.get("type")=="response_item" and x["payload"].get("role")=="user" and "ROLE: validator" in json.dumps(x))
+ids={f["id"] for f in json.loads(brief.rsplit("\n--- Findings ---\n",1)[1])}
+if sys.argv[4]=="findings":
+    for bucket in ("items","dropped"):
+        for f in list(r[bucket]):
+            if f["id"] in ids:
+                r[bucket].remove(f);r["findings"]-=1;r["verdicts"][f["verdict"]]-=1
+r["validators"]-=1;r["open_fix"]=sum(f["class"]=="fix" for f in r["items"])
+pathlib.Path(sys.argv[2]).write_text(json.dumps(r))' "$TMP/original.json" "$TMP/record.json" "$CODEX_HOME" "$mutation"
+    run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+    [ "$status" -eq 1 ]
+    if [ "$mutation" = findings ]; then
+      [[ "$stderr" == *'sweep transcript findings do not match record findings'* ]]
+    else
+      [[ "$stderr" == *'transcript verdict ids do not cover every record finding'* ]]
+    fi
+  done
+}
+
+@test "persisted sweep answers must agree with the recorded findings" {
+  for runtime in codex claude; do
+    FAKE_FINDINGS=1 FAKE_PERSIST=1 run_sweep --no-comment --runtime "$runtime"
+    [ "$status" -eq 0 ]
+    for mutation in empty changed; do
+      python3 -c 'import json,os,pathlib,sys
+r=json.load(open(sys.argv[1]));runtime=sys.argv[2];mode=sys.argv[3];id=r["sweep_agent_ids"][0]
+root=pathlib.Path(os.environ["CODEX_HOME"] if runtime=="codex" else os.environ["CLAUDE_CONFIG_DIR"])
+p=next(root.rglob(("rollout-"+id if runtime=="codex" else id)+".jsonl"));b=p.with_suffix(".backup")
+if not b.exists():b.write_bytes(p.read_bytes())
+rows=[json.loads(l) for l in b.read_text().splitlines()]
+if runtime=="codex":answer=json.loads(rows[-1]["payload"]["content"][0]["text"])
+else:answer=rows[-1]["message"]["content"][0]["input"]
+if mode=="empty":answer["findings"]=[]
+else:answer["findings"][0]["summary"]="different sweep answer"
+if runtime=="codex":rows[-1]["payload"]["content"][0]["text"]=json.dumps(answer)
+p.write_text("\n".join(map(json.dumps,rows))+"\n")' "$TMP/record.json" "$runtime" "$mutation"
+      run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+      [ "$status" -eq 1 ]
+      [[ "$stderr" == *'sweep transcript findings do not match record findings'* ]]
+    done
+  done
+}
+
+@test "a record cannot shrink its sweep manifest to erase the PR-text finding" {
+  FAKE_PR_FINDINGS=1 FAKE_PERSIST=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys
+p=sys.argv[1];r=json.load(open(p));assert r["findings"]>0
+r["plan"]=r["plan"][:1];r["slices"]=1;r["sweep_agents"]=3;r["sweep_agent_ids"]=r["sweep_agent_ids"][:3]
+r["items"]=[];r["dropped"]=[];r["findings"]=0;r["validators"]=0;r["validator_ids"]=[];r["open_fix"]=0
+r["verdicts"]={k:0 for k in r["verdicts"]};json.dump(r,open(p,"w"))' "$TMP/record.json"
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *'sweep job manifest'* ]]
+}
+
+@test "persisted sweep evidence binds the base and PR as well as the head" {
+  prior_head=$HEAD_SHA
+  write lib/alpha.py 21
+  commit narrower
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  FAKE_PERSIST=1 run_sweep --no-comment --base-ref "$prior_head"
+  [ "$status" -eq 0 ]
+  cp "$TMP/record.json" "$TMP/original.json"
+  for field in base pr; do
+    python3 -c 'import json,sys
+r=json.load(open(sys.argv[1]));r[sys.argv[3]]=sys.argv[4] if sys.argv[3]=="base" else "https://github.com/acme/app/pull/8"
+json.dump(r,open(sys.argv[2],"w"))' "$TMP/original.json" "$TMP/record.json" "$field" "$BASE_SHA"
+    run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *'initial user message must bind'* ]]
+  done
+}
+
+@test "sweep job evidence may be reordered but cannot repeat a job index" {
+  FAKE_PERSIST=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys
+p=sys.argv[1];r=json.load(open(p));r["sweep_agent_ids"].reverse();json.dump(r,open(p,"w"))' "$TMP/record.json"
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,pathlib,sys
+r=json.load(open(sys.argv[1]));id=r["sweep_agent_ids"][0]
+p=next(pathlib.Path(sys.argv[2]).rglob("rollout-"+id+".jsonl"));rows=[json.loads(l) for l in p.read_text().splitlines()]
+for row in rows:
+    m=row.get("payload",{})
+    if m.get("role")=="user" and m["content"][0]["text"].startswith("ROLE:"):
+        text=m["content"][0]["text"];parts=text.split("\n",3);b=json.loads(parts[2].removeprefix("Sweep binding: "));b["sweep_index"]=0;parts[2]="Sweep binding: "+json.dumps(b);m["content"][0]["text"]="\n".join(parts)
+p.write_text("\n".join(map(json.dumps,rows))+"\n")' "$TMP/record.json" "$CODEX_HOME"
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *'sweep job manifest'* ]]
 }

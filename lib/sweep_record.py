@@ -32,6 +32,7 @@ VERDICTS = (
     "NOT_WORTH_IT",
 )
 KEEP = ("CONFIRMED_NEW", "CONFIRMED_REGRESSED", "DISPUTED_DROP")
+FINDING_KEYS = ("file", "line", "category", "summary")
 SLICE_LINES = 400
 SCRIPT_FIELDS = (
     "version",
@@ -159,6 +160,10 @@ def plan_problem(slices, paths=None):
         if extra:
             return f"{extra[0]} is not a changed file"
     return None
+
+
+def finding_keys(findings):
+    return {tuple(f[key] for key in FINDING_KEYS) for f in findings}
 
 
 def finding_problem(finding):
@@ -521,21 +526,43 @@ def standalone_evidence(found, family, swept, session, record, verified, kind):
             messages.append(row.get("message", {}))
     brief = initial_user_message(messages)
     header = brief.splitlines()[:3]
-    expected = {"worker_session": session, "head": swept, "nonce": record["run_nonce"]}
+    expected = {
+        "worker_session": session,
+        "head": swept,
+        "nonce": record["run_nonce"],
+        "base": record["base"],
+        "pr": record["pr"],
+    }
     marker = VALIDATOR_MARKER if kind == "validator" else SWEEP_MARKER
     if (
         len(header) != 3
         or header[1] != f"{marker} {swept}"
         or not header[2].startswith("Sweep binding: ")
-        or json.loads(header[2].removeprefix("Sweep binding: ")) != expected
     ):
         return f"initial user message must bind {kind} marker, head, worker session and run nonce"
+    bound = json.loads(header[2].removeprefix("Sweep binding: "))
+    if kind == "sweep agent":
+        count = bound.pop("sweep_agents", None)
+        index = bound.pop("sweep_index", None)
+        if (
+            type(count) is not int
+            or count != record["sweep_agents"]
+            or type(index) is not int
+            or not 0 <= index < count
+            or index in verified["jobs"]
+        ):
+            return "sweep job manifest does not cover the recorded jobs exactly once"
+    if bound != expected:
+        return f"initial user message must bind {kind} marker, head, base, PR, worker session and run nonce"
     answer = assistant_answer(messages, family)
     if kind == "sweep agent":
         if not isinstance(answer.get("findings"), list):
             return "transcript has no completed sweep findings answer"
         if answer["findings"] and not record["findings"]:
             return "sweep transcript has findings but record claims none"
+        keys = finding_keys(answer["findings"])
+        verified["findings"].update(keys)
+        verified["jobs"].add(index)
         return None
     given = answer.get("verdicts")
     if not isinstance(given, list) or not given:
@@ -553,8 +580,7 @@ def standalone_evidence(found, family, swept, session, record, verified, kind):
         if name in local or name in verified or name not in entries:
             return "transcript verdict ids do not match record findings"
         if name not in described or any(
-            described[name].get(k) != entries[name].get(k)
-            for k in ("file", "line", "category", "summary")
+            described[name].get(k) != entries[name].get(k) for k in FINDING_KEYS
         ):
             return f"record finding {name} differs from the initial validator brief"
         if any(
@@ -699,6 +725,7 @@ def main(argv):
         if not found and script is not None and len(verified) != record["findings"]:
             found = f"{args.record}: transcript verdict ids do not cover every record finding"
         if script is not None:
+            sources = {"findings": set(), "jobs": set()}
             for agent_id in script["sweep_agent_ids"]:
                 found = found or transcript_problem(
                     args.record,
@@ -706,8 +733,15 @@ def main(argv):
                     args.session,
                     agent_id,
                     script,
+                    sources,
                     kind="sweep agent",
                 )
+            if not found and (
+                len(sources["findings"]) != record["findings"]
+                or sources["findings"]
+                != finding_keys(script["items"] + script["dropped"])
+            ):
+                found = f"{args.record}: sweep transcript findings do not match record findings"
     if found:
         print(f"ERROR: {one_line(found)}", file=sys.stderr)
         return 1
