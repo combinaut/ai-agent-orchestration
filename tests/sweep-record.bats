@@ -479,6 +479,14 @@ PY
   [ "$status" -eq 0 ]
 }
 
+@test "an orch-sweep record with findings uses its explicit self-attestation" {
+  script_record
+  cd "$REPO" || return 1
+  run --separate-stderr "$ROOT/orch-sweep-record" check --record "$REC" --head "$HEAD_SHA"
+  [ "$status" -eq 0 ]
+  [ "$output" = "OK: $REC covers $HEAD_SHA; attestation only" ]
+}
+
 @test "the exact check fails a record for an ancestor of the head" {
   script_record 'r["head"] = sys.argv[2]; r["tree"]["head"] = r["head"]'
   sed -i.bak "s/$HEAD_SHA/$FIRST_SHA/g" "$REC"

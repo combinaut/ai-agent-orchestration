@@ -517,7 +517,12 @@ def main(argv):
     if not found:
         swept = record["head"]
         found, commits = since(args.record, swept, record["base"], args.head)
-    attestation = args.no_transcripts or not record or record["findings"] == 0
+    attestation = (
+        args.no_transcripts
+        or not record
+        or record["findings"] == 0
+        or record.get("tool") == "orch-sweep"
+    )
     if not found and not attestation:
         if not args.session or not TOKEN.fullmatch(args.session):
             found = f"{args.record}: --session <worker session id> is required"
@@ -528,7 +533,12 @@ def main(argv):
     if found:
         print(f"ERROR: {one_line(found)}", file=sys.stderr)
         return 1
-    note = "; attestation only" if args.no_transcripts and record["findings"] else ""
+    note = (
+        "; attestation only"
+        if record["findings"]
+        and (args.no_transcripts or record.get("tool") == "orch-sweep")
+        else ""
+    )
     if record.get("mode") == "serial":
         note = "; serial: no independent validator"
     if commits:
