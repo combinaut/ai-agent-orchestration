@@ -49,6 +49,7 @@ commit() {
 stub_gh() {
   cat >"$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TMP/gh.calls"
 [ -z "${GH_DOWN:-}" ] || { echo "gh down" >&2; exit 1; }
 case "$*" in
   'api repos/acme/app/pulls/7') printf '{"title":"Add alpha","body":"%s","base":{"ref":"%s"},"head":{"sha":"%s"}}\n' "$(cat "$TMP/pr_body" 2>/dev/null || echo 'Adds alpha and its test.')" "$(cat "$TMP/pr_base" 2>/dev/null || echo main)" "$(cat "$TMP/pr_head" 2>/dev/null)" ;;
@@ -1124,6 +1125,29 @@ sys.exit(os.waitstatus_to_exitcode(status))' "$answer" "$ROOT/orch-sweep" allow 
   [ "$status" -eq 1 ]
   [[ "$stderr" == "ERROR: APPROVE refused: no full orch-sweep comment by me for the exact head $HEAD_SHA" ]]
   [ ! -e "$TMP/review.json" ]
+}
+
+@test "post-review refuses an unswept newer head even when PR metadata lags" {
+  run_sweep
+  [ "$status" -eq 0 ]
+  as_comment
+  local swept=$HEAD_SHA
+  write lib/alpha.py 21
+  commit newer
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  [ "$swept" != "$HEAD_SHA" ]
+  [ ! -e "$(cache_file)" ]
+  for live in "$HEAD_SHA" "$swept"; do
+    printf %s "$live" >"$TMP/pr_head"
+    : >"$TMP/gh.calls"
+    review APPROVE
+    echo "$output" "$stderr"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == "ERROR: APPROVE refused: "* ]]
+    [ -s "$TMP/gh.calls" ]
+    ! grep -q '^api -X POST ' "$TMP/gh.calls"
+    [ ! -e "$TMP/review.json" ]
+  done
 }
 
 @test "post-review posts APPROVE at the head when the gate passes" {
