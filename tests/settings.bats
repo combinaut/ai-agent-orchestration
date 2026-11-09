@@ -426,6 +426,15 @@ pattern = "mine"' ]
   grep -qx 'author = "me"' "$ORCH_CONFIG"
 }
 
+@test "Python version probes ignore a checkout sitecustomize module" {
+  mkdir -p "$TMP/hostile"
+  printf 'from pathlib import Path\nPath("%s").touch()\n' "$TMP/probe-marker" >"$TMP/hostile/sitecustomize.py"
+  # shellcheck disable=SC2016 # The child shell expands its positional arguments.
+  run env PYTHONPATH=. ORCH_PYTHON3="$(command -v python3)" bash -c 'cd "$1"; . "$2/coordinator/watchers/coord-lib.sh"; orch_python' _ "$TMP/hostile" "$ROOT"
+  [ "$status" -eq 0 ]
+  [ ! -e "$TMP/probe-marker" ]
+}
+
 @test "watchers run on ORCH_PYTHON3 when it is 3.11 or newer, else on the loader's Python" {
   mkdir "$TMP/oldpy"
   printf '#!/bin/sh\nexit 1\n' >"$TMP/oldpy/old-python"

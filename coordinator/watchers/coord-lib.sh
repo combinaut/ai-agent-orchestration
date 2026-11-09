@@ -32,7 +32,7 @@ orch_python() {
   for candidate in ${ORCH_PYTHON3:+"$ORCH_PYTHON3"} python3 ${ORCH_PYTHON_FALLBACKS-/opt/homebrew/bin/python3 /usr/local/bin/python3} python3.14 python3.13 python3.12 python3.11; do
     tried="$tried $candidate"
     command -v "$candidate" >/dev/null 2>&1 || continue
-    if [ "$("$candidate" -c 'import sys; print(sys.version_info >= (3, 11))' 2>/dev/null)" = True ]; then
+    if [ "$("$candidate" -I -c 'import sys; print(sys.version_info >= (3, 11))' 2>/dev/null)" = True ]; then
       ORCH_LOADER_PYTHON=$(command -v "$candidate")
       printf '%s' "$ORCH_LOADER_PYTHON"
       return 0
@@ -45,7 +45,7 @@ orch_python() {
 # orch_watcher_python: ORCH_PYTHON3 when it is 3.11 or newer, else the loader's Python; sets ORCH_WATCHER_PYTHON.
 orch_watcher_python() {
   ORCH_WATCHER_PYTHON=${ORCH_PYTHON3:-python3}
-  [ "$("$ORCH_WATCHER_PYTHON" -c 'import sys; print(sys.version_info >= (3, 11))' 2>/dev/null)" != True ] || return 0
+  [ "$("$ORCH_WATCHER_PYTHON" -I -c 'import sys; print(sys.version_info >= (3, 11))' 2>/dev/null)" != True ] || return 0
   orch_python >/dev/null || exit 2
   ORCH_WATCHER_PYTHON=$ORCH_LOADER_PYTHON
 }

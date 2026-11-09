@@ -1,0 +1,1 @@
+Class each finding: fix (false, misleading, dead or duplicated code, comment, test, name or PR text, or a message that blames the wrong cause) or nit (style, taste, or redundant but not misleading).
