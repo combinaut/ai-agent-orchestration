@@ -49,6 +49,14 @@ codex_agent() {
   printf '%s\n' '{"type":"event_msg","payload":{"type":"agent_message","encrypted_content":"gAAAA..."}}' >>"$dir/rollout-2026-11-06T10-00-00-$thread_id.jsonl"
 }
 
+# codex_session <id>: a persisted standalone validator transcript.
+codex_session() {
+  local dir="$CODEX_HOME/sessions/2026/11/06"
+  mkdir -p "$dir"
+  printf '{"type":"session_meta","payload":{"session_id":"%s"}}\n' "$1" >"$dir/rollout-$1.jsonl"
+  printf 'finalize-sweep validator %s\n' "$HEAD_SHA" >>"$dir/rollout-$1.jsonl"
+}
+
 check() {
   cd "$REPO" || return 1
   local -a args=(check --record "$REC" --head "${PR_HEAD:-$HEAD_SHA}")
@@ -143,7 +151,7 @@ check() {
   BASE=$HEAD_SHA record 0 '[]' "$FIRST_SHA"
   check
   [ "$status" -eq 1 ]
-  [[ "$stderr" == *"is not an ancestor of $FIRST_SHA" ]]
+  [[ "$stderr" == *"is not an ancestor of the swept $FIRST_SHA" ]]
 }
 
 @test "head equal to base fails" {
@@ -180,6 +188,13 @@ check() {
 @test "a Codex encrypted child rollout validates by its task name" {
   codex_agent "/root/finalize_sweep_validator_${HEAD_SHA:0:12}" "$SESSION"
   record 2 "[\"/root/finalize_sweep_validator_${HEAD_SHA:0:12}\"]"
+  check
+  [ "$status" -eq 0 ]
+}
+
+@test "a persisted Codex validator session that names the head passes" {
+  codex_session 12345678-1234-1234-1234-123456789abc
+  record 2 '["12345678-1234-1234-1234-123456789abc"]'
   check
   [ "$status" -eq 0 ]
 }

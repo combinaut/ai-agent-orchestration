@@ -399,6 +399,13 @@ def claude_transcript(session, agent_id):
     return next(iter(glob.glob(pattern)), None)
 
 
+def claude_session_transcript(agent_id):
+    """A persisted standalone Claude validator session, keyed by its session id."""
+    root = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    pattern = os.path.join(glob.escape(root), "projects", "*", f"{agent_id}.jsonl")
+    return next(iter(glob.glob(pattern)), None)
+
+
 def codex_transcripts(session, agent_id):
     if not CODEX_PATH.fullmatch(agent_id):
         return []
@@ -423,6 +430,30 @@ def codex_transcripts(session, agent_id):
     return matches
 
 
+def codex_session_transcripts(agent_id):
+    """Persistent standalone Codex sessions written by orch-sweep validators."""
+    root = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+    matches = []
+    for candidate in glob.glob(
+        os.path.join(glob.escape(root), "sessions", "**", "rollout-*.jsonl"),
+        recursive=True,
+    ):
+        try:
+            with open(candidate, encoding="utf-8") as handle:
+                meta = json.loads(handle.readline())["payload"]
+            if meta.get("session_id") == agent_id:
+                matches.append(candidate)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue
+    return matches
+
+
+def transcript_text(found):
+    """Plaintext transcript lines that bind a persisted validator to its brief."""
+    with open(found, encoding="utf-8") as handle:
+        return "\n".join(line for line in handle if line.strip())
+
+
 def transcript_problem(path, swept, session, agent_id):
     if not TOKEN.fullmatch(agent_id) and not CODEX_PATH.fullmatch(agent_id):
         return f"{path}: validator id {agent_id!r} is not a plain id"
@@ -430,9 +461,15 @@ def transcript_problem(path, swept, session, agent_id):
     if TOKEN.fullmatch(agent_id):
         found = claude_transcript(session, agent_id)
         if found:
-            candidates.append(("Claude", found))
+            candidates.append(("Claude", found, False))
+        found = claude_session_transcript(agent_id)
+        if found:
+            candidates.append(("Claude", found, True))
     candidates.extend(
-        ("Codex", found) for found in codex_transcripts(session, agent_id)
+        ("Codex", found, False) for found in codex_transcripts(session, agent_id)
+    )
+    candidates.extend(
+        ("Codex", found, True) for found in codex_session_transcripts(agent_id)
     )
     if not candidates:
         return f"{path}: validator {agent_id} is no supported Claude or Codex subagent transcript of session {session}; Pi and Cursor validators are unsupported"
@@ -440,20 +477,27 @@ def transcript_problem(path, swept, session, agent_id):
     if committed is None:
         return f"{path}: git cannot read the commit time of {swept}"
     newest_problem, newest_mtime = None, float("-inf")
-    for family, found in candidates:
+    for family, found, persisted in candidates:
         try:
             mtime = os.path.getmtime(found)
             if mtime < int(committed):
                 issue = (
                     f"{path}: validator {agent_id} was written before commit {swept}"
                 )
-            elif family == "Codex":
+            elif family == "Codex" and not persisted and CODEX_PATH.fullmatch(agent_id):
                 issue = (
                     None
                     if agent_id.startswith(
                         f"/root/finalize_sweep_validator_{swept[:12]}"
                     )
                     else f"{path}: Codex validator {agent_id} must start with /root/finalize_sweep_validator_{swept[:12]}"
+                )
+            elif persisted:
+                text = transcript_text(found)
+                issue = (
+                    None
+                    if VALIDATOR_MARKER in text and swept in text
+                    else f"{path}: validator {agent_id} brief must include {VALIDATOR_MARKER} and name {swept}"
                 )
             else:
                 with open(found, encoding="utf-8") as handle:
@@ -517,12 +561,7 @@ def main(argv):
     if not found:
         swept = record["head"]
         found, commits = since(args.record, swept, record["base"], args.head)
-    attestation = (
-        args.no_transcripts
-        or not record
-        or record["findings"] == 0
-        or record.get("tool") == "orch-sweep"
-    )
+    attestation = args.no_transcripts or not record or record["findings"] == 0
     if not found and not attestation:
         if not args.session or not TOKEN.fullmatch(args.session):
             found = f"{args.record}: --session <worker session id> is required"
@@ -533,12 +572,7 @@ def main(argv):
     if found:
         print(f"ERROR: {one_line(found)}", file=sys.stderr)
         return 1
-    note = (
-        "; attestation only"
-        if record["findings"]
-        and (args.no_transcripts or record.get("tool") == "orch-sweep")
-        else ""
-    )
+    note = "; attestation only" if record["findings"] and args.no_transcripts else ""
     if record.get("mode") == "serial":
         note = "; serial: no independent validator"
     if commits:

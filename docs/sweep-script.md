@@ -18,8 +18,8 @@ Each slice starts one `finalize-code-comments` agent and one `finalize-change-fo
 
 | Runtime | Command |
 |---|---|
-| `codex` (default) | `codex exec -m <model> -C <checkout> -s read-only --ephemeral --ignore-user-config -c project_doc_max_bytes=0 --json --output-schema <file> -o <file> -` |
-| `claude` | `claude -p --model <model> --output-format json --json-schema <schema> --permission-mode dontAsk --setting-sources user --strict-mcp-config --no-session-persistence --tools Read,Grep,Glob --add-dir <diff folder> --allowedTools Read Grep Glob --disallowedTools Edit Write NotebookEdit` |
+| `codex` (default) | sweep agents use `codex exec -m <model> -C <checkout> -s read-only --ephemeral ...`; validators omit `--ephemeral` so their recorded thread ids have persisted transcripts |
+| `claude` | sweep agents use `claude -p ... --no-session-persistence ...`; validators keep session persistence so their recorded session ids have persisted transcripts |
 
 The script writes the PR diff and each slice's diff (`git diff --no-ext-diff --no-textconv`) to a temporary folder outside the checkout and names the file in each prompt; the folder is removed when the run ends. Claude agents have no shell. Codex agents have one inside the read-only sandbox: a command can run a program from the checkout (`rg --pre`), but it cannot write files or reach the network.
 
@@ -51,7 +51,7 @@ The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<numb
 | Bound | Value |
 |---|---|
 | Agents per sweep | `2 x slices + 1` sweep agents, then `ceil(findings / 40)` validators, at most 12; with the 25-slice cap, at most 63 agent jobs, and with retries at most 88 agent processes |
-| Agents at once | `--concurrency`, default 4, a bounded pool |
+| Agents at once | `--concurrency`, default 4, a bounded pool of at most 8 |
 | Per agent | `--agent-timeout`, default 900 s, cut to what is left of the sweep; when the agent exits or times out, its process group gets SIGTERM, then SIGKILL after at most 5 s for whatever is left |
 | Per sweep | `--timeout`, default 3600 s; no agent starts after it |
 | Retries | a failed first attempt retries once when the shared budget of `slices` retries has one left; the first job that fails for good (its retry failed, or no retry was left) stops new jobs, and the run exits 4 |

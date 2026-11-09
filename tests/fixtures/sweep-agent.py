@@ -88,6 +88,8 @@ if role == "validator":
             if i != drop
         ]
     }
+    if os.environ.get("FAKE_BAD_FINDING") == role:
+        answer["findings"][0]["file"] = ""
 else:
     count = int(
         os.environ.get(
@@ -110,6 +112,21 @@ else:
     }
 
 session = f"{kind}-{uuid.uuid4().hex[:12]}"
+if role == "validator" and os.environ.get("FAKE_PERSIST"):
+    if kind == "codex":
+        home = Path(os.environ["CODEX_HOME"])
+        path = home / "sessions" / "2026" / "11" / f"rollout-{session}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"type": "session_meta", "payload": {"session_id": session}})
+            + "\n"
+            + prompt
+        )
+    else:
+        home = Path(os.environ["CLAUDE_CONFIG_DIR"])
+        path = home / "projects" / "-repo" / f"{session}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(prompt)
 if kind == "codex":
     out = sys.argv[sys.argv.index("-o") + 1]
     Path(out).write_text(json.dumps(answer))

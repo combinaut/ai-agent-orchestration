@@ -89,10 +89,10 @@ AGENT_ENV_DROP = {
 FINDING = {
     "type": "object",
     "properties": {
-        "file": {"type": "string"},
-        "line": {"type": "integer"},
-        "category": {"type": "string"},
-        "summary": {"type": "string"},
+        "file": {"type": "string", "minLength": 1},
+        "line": {"type": "integer", "minimum": 0},
+        "category": {"type": "string", "minLength": 1},
+        "summary": {"type": "string", "minLength": 1},
         "evidence": {"type": "string"},
     },
     "required": ["file", "line", "category", "summary", "evidence"],
@@ -382,24 +382,30 @@ def model_for(runtime, given):
     return "sonnet" if "sonnet" in tiers or not tiers else tiers[0]
 
 
-def command(runtime, model, schema, out, diffs):
+def command(runtime, model, schema, out, diffs, persist=False):
     executable = shutil.which(runtime)
     if not executable:
         raise Failure(f"{runtime} is not on PATH")
     executable = os.path.abspath(executable)
     if runtime == "codex":
-        return [
+        argv = [
             executable, "exec", "-m", model, "-C", os.getcwd(), "-s", "read-only",
-            "--ephemeral", "--ignore-user-config", "-c", "project_doc_max_bytes=0",
+            "--ignore-user-config", "-c", "project_doc_max_bytes=0",
             "--json", "--output-schema", schema, "-o", out, "-",
         ]  # fmt: skip
-    return [
+        if not persist:
+            argv.insert(8, "--ephemeral")
+        return argv
+    argv = [
         executable, "-p", "--model", model, "--output-format", "json",
         "--json-schema", Path(schema).read_text(), "--permission-mode", "dontAsk",
-        "--setting-sources", "user", "--strict-mcp-config", "--no-session-persistence",
+        "--setting-sources", "user", "--strict-mcp-config",
         "--tools", ",".join(CLAUDE_TOOLS), "--add-dir", diffs,
         "--allowedTools", *CLAUDE_TOOLS, "--disallowedTools", "Edit", "Write", "NotebookEdit",
     ]  # fmt: skip
+    if not persist:
+        argv.insert(12, "--no-session-persistence")
+    return argv
 
 
 def agent_environment():
@@ -468,7 +474,14 @@ class Runner:
         with tempfile.TemporaryDirectory(prefix="orch-sweep-") as scratch:
             schema, out = Path(scratch, "schema.json"), Path(scratch, "answer.json")
             schema.write_text(json.dumps(job["schema"]))
-            argv = command(self.runtime, self.model, str(schema), str(out), self.diffs)
+            argv = command(
+                self.runtime,
+                self.model,
+                str(schema),
+                str(out),
+                self.diffs,
+                persist=job["name"].startswith("validator "),
+            )
             with self.lock:
                 if self.failed.is_set():
                     raise AgentError(
@@ -581,6 +594,19 @@ def findings_check(answer):
     found = answer["findings"]
     if not isinstance(found, list) or not all(isinstance(f, dict) for f in found):
         raise ValueError("findings is not a list of objects")
+    for finding in found:
+        if (
+            not isinstance(finding.get("file"), str)
+            or not finding["file"]
+            or not isinstance(finding.get("line"), int)
+            or isinstance(finding["line"], bool)
+            or finding["line"] < 0
+            or any(
+                not isinstance(finding.get(key), str) or not finding[key]
+                for key in ("category", "summary")
+            )
+        ):
+            raise ValueError("finding has an empty field or negative line")
     return [{k: f.get(k) for k in FINDING["properties"]} for f in found]
 
 
@@ -667,8 +693,9 @@ A real-bug finding must be traced to a concrete failure, otherwise it is FALSE o
 
 def validator_prompt(chunk, context, merge_base, head, diff):
     return f"""ROLE: validator
+finalize-sweep validator {head}
 Validate the sweep findings below for a pull request at commit {head} (merge base {merge_base}). The PR diff is in {diff}; the code at {head} is in the current directory. Report only: create, change or delete no file in the repository.
-For each finding check: is it true of the code, was it raised before and with what outcome (the PR comments below hold earlier sweeps; a finding rejected once on this PR is never raised again: RESPECT_DROP), and does the plan allow it or did this PR not cause it.
+For each finding check: is it true of the code, was it raised before and with what outcome (the PR comments below hold earlier sweeps), and does the plan allow it or did this PR not cause it. Use RESPECT_DROP when the earlier reason holds and DISPUTED_DROP when it does not.
 {VERDICT_TABLE}
 {CLASSES}
 Answer with one JSON object and nothing else: {{"verdicts": [{{"id", "verdict", "class", "reason"}}]}}, exactly one entry per finding id.
@@ -749,7 +776,12 @@ def context(pr, comments, threads, reviews):
     others, outcomes = [], []
     for c in comments:
         body = c.get("body") or ""
-        found = sweep_outcomes(body) if MARKER in body else None
+        trusted = c.get("author_association") in {
+            "OWNER",
+            "MEMBER",
+            "COLLABORATOR",
+        } or (c.get("user") or {}).get("login") == pr.get("user", {}).get("login")
+        found = sweep_outcomes(body) if trusted and MARKER in body else None
         if found is None:
             others.append(c)
         else:
@@ -888,7 +920,7 @@ def run(args):
     print(f"PLAN {len(slices)} slices, {len(files)} files")
     if len(slices) > MAX_SLICES:
         raise Failure(
-            f"{len(slices)} slices; the limit is {MAX_SLICES}; ask the user whether to continue or split the PR",
+            f"{len(slices)} slices; the limit is {MAX_SLICES}; split the PR",
             3,
         )
     diffs = tempfile.mkdtemp(prefix="orch-sweep-diffs-")
@@ -1063,6 +1095,8 @@ def main(argv):
             raise Failure(
                 "--concurrency, --agent-timeout and --timeout must be at least 1"
             )
+        if args.concurrency > 8:
+            raise Failure("--concurrency must be at most 8")
         return run(args)
     except Failure as error:
         print(f"ERROR: {sweep_record.one_line(str(error))}", file=sys.stderr)
