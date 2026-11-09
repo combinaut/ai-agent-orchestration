@@ -1253,6 +1253,36 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "cat <<'X' | gh pr review 7 --approve\nhi\nX",
             True,
         ),
+        (
+            "gh global repo option piped to sh",
+            "echo 'gh -R a/b pr review 7 --approve' | sh",
+            True,
+        ),
+        (
+            "gh global repo option in a piped heredoc",
+            "cat <<'EOF' | bash\ngh -R a/b pr review 7 --approve\nEOF",
+            True,
+        ),
+        (
+            "gh global long repo option inside Python",
+            "python3 -c \"import os; os.system('gh --repo a/b pr review 7 --approve')\"",
+            True,
+        ),
+        (
+            "gh equals repo option inside Python",
+            "python3 -c \"import os; os.system('gh pr --repo=a/b review 7 --approve')\"",
+            True,
+        ),
+        (
+            "gh attached repo option inside Python",
+            "python3 -c \"import os; os.system('gh pr -Ra/b review 7 --approve')\"",
+            True,
+        ),
+        (
+            "gh hostname and attached repo options inside Python",
+            "python3 -c \"import os; os.system('gh --hostname=github.com -Ra/b pr --repo=a/b review 7 --approve')\"",
+            True,
+        ),
         ("gh pr --repo review", "gh pr --repo a/b review 7 --approve", True),
         ("gh pr -R review", "gh pr -R a/b review 7 --approve", True),
         (
@@ -1268,11 +1298,6 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         (
             "API review after a heredoc opener in a quoted substitution",
             "x=\"$(cat <<'EOF' | gh api repos/a/b/pulls/7/reviews -f event=APPROVE\nbody\nEOF\n)\"",
-            True,
-        ),
-        (
-            "GraphQL query file in a cd and a nested shell",
-            f"cd {root}/sub && sh -c 'gh api graphql -F query=@q.graphql'",
             True,
         ),
         (
@@ -1653,6 +1678,12 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ),
     ]:
         case(name, command, deny)
+    case(
+        "GraphQL query file in a cd and a nested shell",
+        f"cd {root}/sub && sh -c 'gh api graphql -F query=@q.graphql'",
+        True,
+        root,
+    )
     case(
         "GraphQL read from a relative file",
         "gh api graphql -F query=@read-query.graphql",

@@ -439,8 +439,9 @@ REVIEW_REASON = "A pull-request review goes only through orch-sweep post-review,
 REVIEW_ENDPOINT = re.compile(r"pulls/[^/\s]+/reviews(?![\w-])")
 REVIEW_MUTATION = re.compile(r"\b(?:add|submit)PullRequestReview\b")
 REVIEW_CALL = re.compile(r"\bpr\s+review\b")
+GH_REVIEW_OPTION = r"(?:-R(?:=|\s+)?\S+|--(?:repo|hostname)(?:=|\s+)\S+)\s+"
 GH_REVIEW_CALL = re.compile(
-    r"\bgh\s+pr\s+(?:(?:-R|--repo|--hostname)\s+\S+\s+)*review\b"
+    rf"\bgh\s+(?:{GH_REVIEW_OPTION})*pr\s+(?:{GH_REVIEW_OPTION})*review\b"
 )
 GRAPHQL_ENDPOINT = re.compile(r"(?:^|/)graphql/?(?:[?#]|$)")
 EXPANDING_HEREDOC = re.compile(
