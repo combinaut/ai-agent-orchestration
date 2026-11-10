@@ -990,7 +990,10 @@ def post_review(args):
                 f"APPROVE refused: cannot check the gate: {error}", 2
             ) from error
         if why:
-            raise Failure(f"APPROVE refused: {why}")
+            raise Failure(
+                f"APPROVE refused: {why}",
+                3 if isinstance(why, sweep_record.OpenFix) else 1,
+            )
     review = {
         "commit_id": args.head,
         "event": args.event,

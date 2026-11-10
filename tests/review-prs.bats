@@ -39,6 +39,13 @@ EOF
 #!/usr/bin/env bash
 case "$*" in
   'api user --jq .login') echo reviewer ;;
+  'api user') echo '{"login":"reviewer"}' ;;
+  'api repos/acme/app/pulls/7') printf '{"user":{"login":"author"},"head":{"sha":"%s"},"base":{"ref":"main","sha":"%s"}}\n' "$SHA" "$SHA" ;;
+  'api --paginate --slurp repos/acme/app/issues/7/comments') echo '[[]]' ;;
+  'api -X POST repos/acme/app/pulls/7/reviews --input -')
+    cat >"$TMP/post-review.json"
+    echo '{"html_url":"https://github.com/acme/app/pull/7#review-posted"}' ;;
+
   'api repos/acme/app/pulls/7 --jq .base.ref') [ -z "${BASE_READ_FAILS:-}" ] || exit 1; echo main ;;
   'api repos/acme/app/pulls/7 --jq [.head.repo.owner.login // "-", .head.repo.name // "-", .head.ref // "-"] | @tsv')
     [ -z "${HEAD_READ_FAILS:-}" ] || exit 1
@@ -79,13 +86,13 @@ EOF
 printf '%s\n' "$*" >>"$TMP/gate.calls"
 if [ ! -e "$TMP/review.prompt" ]; then
   [ -z "${GATE_PREFLIGHT_UNAVAILABLE:-}" ] || { echo "ERROR: cannot check the gate: gh timed out" >&2; exit 2; }
-  [ -z "${GATE_ACCEPTS:-}" ] || { echo "OK: existing record"; exit 0; }
-  [ -z "${GATE_PREFLIGHT_OPEN:-}" ] || { echo RECORD_REUSABLE; echo "ERROR: reviewer assessment needed" >&2; exit 1; }
+  [ -z "${GATE_ACCEPTS:-}" ] || { echo "RECORD_COMMENT 41"; echo "OK: existing record"; exit 0; }
+  [ -z "${GATE_PREFLIGHT_OPEN:-}" ] || { echo "RECORD_COMMENT 42"; echo RECORD_REUSABLE; echo "ERROR: reviewer assessment needed" >&2; exit 1; }
   echo "ERROR: no full orch-sweep comment for the exact head" >&2
   exit 1
 fi
 [ -z "${GATE_UNAVAILABLE:-}" ] || { echo "ERROR: cannot check the gate: gh timed out" >&2; exit 2; }
-[ -z "${GATE_FAILS:-}" ] || { echo "ERROR: the full sweep of $SHA has 1 open fix findings" >&2; exit 1; }
+[ -z "${GATE_FAILS:-}" ] || { echo "RECORD_COMMENT 42"; echo RECORD_REUSABLE; echo "ERROR: the full sweep of $SHA has 1 open fix findings; disputes parsed: 0" >&2; exit 1; }
 echo "OK: the sweep of $SHA allows APPROVE"
 EOF
   chmod +x "$BIN/herdr-review" "$BIN/gh" "$BIN/heavy-slot" "$BIN/orch-sweep-stub" "$BIN/orch-sweep-record-stub"
@@ -329,7 +336,7 @@ fork_head_missing_from_pull_ref() {
   [[ "$(cat "$TMP/sweep.calls")" == */review-prs/worktrees/rev7"|run --pr https://github.com/acme/app/pull/7 --head $SHA --base-ref origin/main" ]]
   grep -qx "take review-rev7-sweep --note orch sweep -- $BIN/orch-sweep-stub run --pr https://github.com/acme/app/pull/7 --head $SHA --base-ref origin/main" "$TMP/heavy-slot.calls"
   prompt=$(cat "$TMP/review.prompt")
-  contains "$prompt" 'Sweep dispute <sweep-comment-id>/<finding-id>: <specific code reason>'
+  contains "$prompt" 'Sweep dispute 9/<finding-id>: <specific code reason>'
   contains "$prompt" 'Only undisputed kept fixes block APPROVE'
   not_contains "$prompt" 'finalize-sweep/SKILL.md'
   not_contains "$prompt" 'repos/acme/app/issues/7/comments'
@@ -410,7 +417,7 @@ assert prs.needs_dispatch(pr, ledger) == (False, None), ledger
   [ "$status" -eq 0 ]
   [ "$(tail -1 "$TMP/gate.calls")" = "gate --pr https://github.com/acme/app/pull/7 --head $SHA" ]
   contains "$output" "GATE FAILED $SHA the full sweep of $SHA has 1 open fix findings"
-  contains "$output" "\"reason\": \"sweep gate failed: the full sweep of $SHA has 1 open fix findings\""
+  contains "$output" "\"reason\": \"sweep gate failed: the full sweep of $SHA has 1 open fix findings; disputes parsed: 0\""
   [ "$(dispatch_state)" = 'False "blocked"' ]
 }
 
@@ -1947,4 +1954,51 @@ ledger = {url:{"heads":{"A":{"state":"done", "text":prior}}}}
 assert prs.needs_dispatch({**pr, "body":"new"}, ledger) == (False, None)
 PYTEST
   [ "$status" -eq 0 ]
+}
+
+@test "a personal opt-out reaches the actual post-review command without pane inheritance" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  echo .orchestration.local.toml >>"$TMP/app/.git/info/exclude"
+  printf '[review]\nfinalize_commands = []\n' >"$TMP/app/.orchestration.local.toml"
+  ORCH_SWEEP_BIN="$ROOT/orch-sweep" dispatch
+  [ "$status" -eq 0 ]
+  [ ! -e "$TMP/sweep.calls" ]
+  run python3 - "$TMP/review.prompt" "$TMP/app" "$ROOT/orch-sweep" <<'PYTEST'
+import json, os, re, shlex, subprocess, sys
+prompt, clone, helper = sys.argv[1:]
+head = subprocess.check_output(["git", "-C", clone, "rev-parse", "HEAD"], text=True).strip()
+command = re.search(r"no temp files or cleanup: (.*?) --pr ", open(prompt).read()).group(1)
+parts = shlex.split(command)
+setting, value = parts.pop(0).split("=", 1)
+assert setting == "ORCH_REVIEW_FINALIZE_COMMANDS" and value == "", command
+env = dict(os.environ)
+env.pop(setting, None)
+args = [helper, "post-review", "--pr", "https://github.com/acme/app/pull/7", "--head", head, "--event", "APPROVE", "--input", "-"]
+control = subprocess.run(args, cwd=clone, env=env, input=json.dumps({"body":"ready"}), text=True, capture_output=True)
+assert control.returncode == 1 and "no full orch-sweep comment" in control.stderr, control
+assert not os.path.exists(os.path.join(os.environ["TMP"], "post-review.json"))
+env[setting] = value
+posted = subprocess.run([*parts, *args[2:]], cwd=clone, env=env, input=json.dumps({"body":"ready"}), text=True, capture_output=True)
+assert posted.returncode == 0, posted
+assert json.load(open(os.path.join(os.environ["TMP"], "post-review.json")))["commit_id"] == head
+PYTEST
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "reuse prompt supplies the selected id accepted forms and refusal policy" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  GATE_PREFLIGHT_OPEN=1 GH_NO_REVIEW=1 dispatch
+  [ "$status" -eq 0 ]
+  prompt=$(cat "$TMP/review.prompt")
+  contains "$prompt" 'https://github.com/acme/app/pull/7#issuecomment-42'
+  contains "$prompt" 'Sweep dispute 42/<finding-id>:'
+  contains "$prompt" 'optionally indented or prefixed by -, +, *, 1. or 1)'
+  contains "$prompt" 'Do not bold/backtick the label'
+  contains "$prompt" 'letter or digit'
+  contains "$prompt" 'Exit 3 means undisputed open fix findings'
+  contains "$prompt" 'Exit 1 is a process refusal'
+  not_contains "$prompt" 'with exit 1, post REQUEST_CHANGES'
 }

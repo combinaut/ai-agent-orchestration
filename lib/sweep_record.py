@@ -486,7 +486,8 @@ def review_disputes(body):
         match = re.fullmatch(r"Sweep dispute ([0-9]+)/([^:\n]+):[ \t]+(.+)", line)
         if match:
             reason = re.sub(r"<[^>]*>", "", match[3]).strip(" \t*_`~")
-            if reason:
+            reason = re.sub(r"\[([^]]*)\]\([^)]*\)", r"\1", reason)
+            if any(char.isalnum() for char in reason):
                 disputes.add((int(match[1]), match[2].strip()))
     return disputes
 
@@ -495,8 +496,11 @@ class OpenFix(str):
     """A valid reusable record whose remaining fixes need reviewer assessment."""
 
 
-def gate(url, head, review_body=None):
-    """Why the PR at url may not be approved at head, else None; raises GateError when GitHub cannot be read."""
+def gate(url, head, review_body=None, record_info=None):
+    """Why the PR may not be approved, else None; raises GateError on a failed read.
+
+    record_info, when supplied, receives the validated comment id for CLI output.
+    """
     match = PR_URL.fullmatch(url)
     if not match:
         return f"--pr {url!r} is not a GitHub pull request URL"
@@ -545,6 +549,8 @@ def gate(url, head, review_body=None):
         return f"the PR base changed since the full sweep: it swept from {record['base']}, and {base_ref} gives {merge_base}; run orch-sweep run"
     if record.get("pr_text_sha256") != text_sha(pr):
         return f"the PR title or body changed since the full sweep of {head}; run orch-sweep run"
+    if record_info is not None:
+        record_info["comment_id"] = cid
     has_fixes = record["open_fix"]
     if review_body is None and has_fixes:
         reviews = gh_json(
@@ -761,16 +767,19 @@ def main(argv):
     approve.add_argument("--head", required=True)
     args = parser.parse_args(argv[1:])
     if args.command == "gate":
+        record_info = {}
         try:
-            found = gate(args.pr, args.head)
+            found = gate(args.pr, args.head, record_info=record_info)
         except GateError as error:
             print(
                 f"ERROR: cannot check the gate: {one_line(str(error))}", file=sys.stderr
             )
             return 2
+        if record_info.get("comment_id"):
+            print(f"RECORD_COMMENT {record_info['comment_id']}", flush=True)
         if found:
             if isinstance(found, OpenFix):
-                print("RECORD_REUSABLE")
+                print("RECORD_REUSABLE", flush=True)
             print(f"ERROR: {one_line(found)}", file=sys.stderr)
             return 1
         print(f"OK: the sweep of {args.head} allows APPROVE")

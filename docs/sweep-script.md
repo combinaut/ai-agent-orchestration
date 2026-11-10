@@ -66,12 +66,14 @@ Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- or
 
 `orch-sweep-record gate --pr <url> --head <sha>` checks the exact live PR head and the newest trusted published full record (reviewer or PR author). It validates schema, Git ancestry and the merge base using GitHub's live `base.sha`, current title/body hash and undisputed fix findings. Missing base objects or GitHub/Git failures exit 2; fetch the base and retry later. No local cache equality is required: collaborators are trusted to publish truthful full records. More than 25 slices are refused; split the PR.
 
-Disputes are visible review-body lines: `Sweep dispute <sweep-comment-id>/<finding-id>: <specific code reason>`. List markers and indentation are accepted; fenced code, blockquotes and HTML comments are skipped. Empty or invisible reasons, different sweep comments and reviews of other heads do not count. `post-review` evaluates its supplied body; later gate checks read the reviewer's latest submitted review at that head.
+The gate emits `RECORD_COMMENT <id>` for its selected validated comment, including when open fixes prevent approval. `RECORD_REUSABLE` distinguishes that refusal from missing or stale evidence. Both lines are flushed before the `ERROR:` diagnostic, so combined output keeps the reason last.
+
+Disputes are visible review-body lines: `Sweep dispute <sweep-comment-id>/<finding-id>: <specific code reason>`. List markers and indentation are accepted; fenced code, blockquotes and HTML comments are skipped. Reasons without a letter or digit, different sweep comments and reviews of other heads do not count. `post-review` evaluates its supplied body; later gate checks read the reviewer's latest submitted review at that head.
 
 `review.finalize_commands = []` from the base settings (or dispatch's resolved value) skips record checks, while review posting still pins and checks the requested head. Dispatch checks for reusable evidence before starting agents, does not rerun a sweep merely because its findings need assessment. The independent review supplies that assessment.
 
-`orch-sweep post-review` reads `{body, comments}` on stdin, gates APPROVE and pins `commit_id` to `--head`. Tool failures, including uncertain review-POST outcomes, exit 2; do not post a replacement verdict or replay an uncertain request.
+`orch-sweep post-review` reads `{body, comments}` on stdin, gates APPROVE and pins `commit_id` to `--head`. An undisputed-fix refusal exits 3; process/evidence refusals exit 1 and mean NOT POSTED, not REQUEST_CHANGES. Dispatch passes its resolved finalize setting in the post command. Tool failures, including uncertain review-POST outcomes, exit 2; do not post a replacement verdict or replay an uncertain request.
 
-## Exit codes
+## Run exit codes
 
 `0` record written (and the comment posted, unless `--no-comment`); `1` usage, checkout or validation failure; `2` the tree changed; `3` over 25 slices; `4` an agent failed after its retry; `5` the record does not fit in one comment; `6` a GitHub read failed or the sweep-comment POST failed (a later run can succeed); `128 + n` stopped by signal `n`.

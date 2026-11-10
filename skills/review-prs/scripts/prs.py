@@ -1052,7 +1052,7 @@ def main():
         "--state",
         choices=["pending", "retry", "blocked", "done"],
         default="done",
-        help="mark-dispatched: pending while the review runs, blocked when it cannot start, done once posted",
+        help="mark-dispatched: pending while running, retry after a completed turn and successful cleanup, blocked on a lasting refusal, done after a posted review passes checks",
     )
     parser.add_argument(
         "--reason", help="mark-dispatched: reason for a blocked dispatch"

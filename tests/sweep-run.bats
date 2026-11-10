@@ -890,7 +890,7 @@ assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$T
   as_comment
   gate
   [ "$status" -eq 0 ]
-  [ "$output" = "OK: the sweep of $HEAD_SHA allows APPROVE" ]
+  [ "$output" = "RECORD_COMMENT 1"$'\n'"OK: the sweep of $HEAD_SHA allows APPROVE" ]
 }
 
 @test "an open kept fix finding blocks the gate and a nit does not" {
@@ -1136,7 +1136,7 @@ for fault in ("timeout", "oserror", "nonzero"):
   as_comment author
   for body in 'Sweep dispute 1/F1: ' 'Sweep dispute 999/F1: false finding'; do
     review APPROVE "{\"body\":\"$body\"}"
-    [ "$status" -eq 1 ]
+    [ "$status" -eq 3 ]
     [ ! -e "$TMP/review.json" ]
   done
   review APPROVE '{"body":"Sweep dispute 1/F1: covered by the existing guard"}'
@@ -1215,11 +1215,11 @@ PYTEST
   FAKE_PR_FINDINGS=1 run_sweep
   as_comment author
   review APPROVE '{"body":"The fix stays open.\n```\nSweep dispute 1/F1: example only\n```"}'
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 3 ]
   [[ "$stderr" == *"disputes parsed: 0"* ]]
   [ ! -e "$TMP/review.json" ]
   review APPROVE '{"body":"- Sweep dispute 1/F99: different finding"}'
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 3 ]
   [[ "$stderr" == *"disputes parsed: 1"* ]]
   review APPROVE '{"body":"  1. Sweep dispute 1/F1: already covered by a guard"}'
   [ "$status" -eq 0 ]
@@ -1252,7 +1252,7 @@ PYTEST
   as_comment
   gate
   [ "$status" -eq 1 ]
-  [ "$output" = RECORD_REUSABLE ]
+  [ "$output" = "RECORD_COMMENT 1"$'\n'RECORD_REUSABLE ]
 }
 
 @test "the removed allow command is not accepted" {
@@ -1298,5 +1298,66 @@ PYTEST
   [ "$status" -eq 0 ]
   as_comment
   review APPROVE
+  [ "$status" -eq 0 ]
+}
+
+@test "post-review distinguishes open fixes from process refusals" {
+  review APPROVE
+  [ "$status" -eq 1 ]
+  [ ! -e "$TMP/review.json" ]
+  FAKE_PR_FINDINGS=1 run_sweep
+  as_comment author
+  review APPROVE
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"open fix findings; disputes parsed: 0"* ]]
+  [ ! -e "$TMP/review.json" ]
+  echo 'edited while reviewing' >"$TMP/pr_body"
+  review APPROVE
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"PR title or body changed"* ]]
+  [ ! -e "$TMP/review.json" ]
+}
+
+@test "the real gate keeps its diagnostic last when stdout is piped" {
+  run python3 - "$ROOT/lib" <<'PYTEST'
+import subprocess, sys
+code = '''import sys
+sys.path.insert(0, sys.argv[1])
+import sweep_record
+sweep_record.gate = lambda *args, **kwargs: sweep_record.OpenFix("has 1 open fix findings; disputes parsed: 0")
+sys.exit(sweep_record.main(["record", "gate", "--pr", "https://github.com/acme/app/pull/7", "--head", "a"*40]))
+'''
+done = subprocess.run([sys.executable, "-c", code, sys.argv[1]], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+assert done.returncode == 1, done.stdout
+assert done.stdout.splitlines()[-1] == "ERROR: has 1 open fix findings; disputes parsed: 0", done.stdout
+assert "RECORD_REUSABLE" in done.stdout, done.stdout
+PYTEST
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a dispute reason needs visible letters or digits" {
+  FAKE_PR_FINDINGS=1 run_sweep
+  as_comment author
+  for reason in '...' '---' '[]()' '[](https://example.invalid)'; do
+    review APPROVE "{\"body\":\"Sweep dispute 1/F1: $reason\"}"
+    [ "$status" -eq 3 ]
+    [ ! -e "$TMP/review.json" ]
+  done
+  for reason in 'handled at line 7' '7' 'é'; do
+    review APPROVE "{\"body\":\"Sweep dispute 1/F1: $reason\"}"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "the gate reports the exact reused comment id" {
+  FAKE_PR_FINDINGS=1 run_sweep
+  as_comment author
+  as_comment author
+  gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"RECORD_COMMENT 2"* ]]
+  [[ "$output" == *"RECORD_REUSABLE"* ]]
+  review APPROVE '{"body":"Sweep dispute 2/F1: covered by existing code"}'
   [ "$status" -eq 0 ]
 }

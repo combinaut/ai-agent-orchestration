@@ -15,7 +15,7 @@ Write <report path> as this table and nothing else before it:
 When sweep checks are enabled, first run: orch-sweep-record gate --pr <PR url> --head <sha>.
 Reuse valid author/reviewer evidence; an open fix needs assessment, not another sweep. Only if evidence is missing or stale, select the clone's origin/upstream that matches the PR repository and run: heavy-slot take review-<agent> -- orch-sweep run --pr <PR url> --head <sha> --base-ref <remote>/<base branch>. Do not run the sweep on every reviewer pass. review.finalize_commands = [] opts out.
 List undisputed kept fixes in the review. Dispute a false kept fix with a visible body line: Sweep dispute <sweep-comment-id>/<finding-id>: <specific code reason>. Nits and dropped findings never block.
-Post any review only through: orch-sweep post-review --pr <PR url> --head <sha> --event APPROVE|REQUEST_CHANGES|COMMENT --input - (JSON {"body": ..., "comments": [...]} on stdin). It refuses APPROVE unless the sweep gate passes for that exact head.
+Post any review only through: orch-sweep post-review --pr <PR url> --head <sha> --event APPROVE|REQUEST_CHANGES|COMMENT --input - (JSON {"body": ..., "comments": [...]} on stdin). It refuses APPROVE unless the sweep gate passes for that exact head. Exit 3 means undisputed open fixes; exit 1 is a process refusal and exit 2 a tool error. On 1 or 2, reply NOT POSTED with the ERROR line instead of posting a replacement verdict.
 Goal: APPROVE only with no undisputed kept fix finding, no other verified blocking finding, and every review claim confirmed. Mark missing evidence unresolved instead of inventing certainty.
 ```
 
