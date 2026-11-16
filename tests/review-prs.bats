@@ -76,6 +76,7 @@ EOF
   cat >"$BIN/orch-sweep-stub" <<'EOF'
 #!/usr/bin/env bash
 printf '%s|%s\n' "$(pwd -P)" "$*" >>"$TMP/sweep.calls"
+printf '%s\n' "${HERDR_PANE_ID:-}" >"$TMP/sweep.pane"
 [ -z "${SWEEP_EXIT:-}" ] || { echo "ERROR: sweep exit $SWEEP_EXIT" >&2; exit "$SWEEP_EXIT"; }
 [ -z "${SWEEP_FAILS:-}" ] || { echo "ERROR: validator 1: exited 1" >&2; exit 4; }
 echo "COMMENT https://github.com/acme/app/pull/7#issuecomment-9"
@@ -331,8 +332,9 @@ fork_head_missing_from_pull_ref() {
 @test "dispatch runs orch-sweep at the head in the review worktree before the prompt" {
   stub_review_tools
   : >"$TMP/none.toml"
-  SWEEP_OPEN_FIX=2 dispatch
+  HERDR_PANE_ID=owning-worker SWEEP_OPEN_FIX=2 dispatch
   [ "$status" -eq 0 ]
+  [ "$(cat "$TMP/sweep.pane")" = owning-worker ]
   [[ "$(cat "$TMP/sweep.calls")" == */review-prs/worktrees/rev7"|run --pr https://github.com/acme/app/pull/7 --head $SHA --base-ref origin/main" ]]
   grep -qx "take review-rev7-sweep --note orch sweep -- $BIN/orch-sweep-stub run --pr https://github.com/acme/app/pull/7 --head $SHA --base-ref origin/main" "$TMP/heavy-slot.calls"
   prompt=$(cat "$TMP/review.prompt")

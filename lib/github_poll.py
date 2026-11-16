@@ -375,6 +375,7 @@ def _run(argv, invoke, timeout, started, retry_base=60, retry_jitter=(1, 5)):
 def supervised(argv, env):
     return [
         sys.executable,
+        "-I",
         str(Path(__file__).resolve()),
         "--supervise",
         env.get("GITHUB_POLL_DEADLINE", str(time.monotonic() + 45)),
@@ -457,7 +458,7 @@ def capture(argv, *, env, pass_fds, timeout, input=None):
 
     handlers = {
         number: signal.signal(number, defer)
-        for number in (signal.SIGINT, signal.SIGALRM)
+        for number in (signal.SIGINT, signal.SIGALRM, signal.SIGTERM, signal.SIGHUP)
     }
     try:
         try:

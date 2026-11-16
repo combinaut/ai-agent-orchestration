@@ -5,14 +5,16 @@
 ```bash
 orch-sweep run --pr <url> --head <sha> --base-ref <remote>/<base branch> \
   [--runtime codex|claude] [--model <model>] [--concurrency 4] \
-  [--agent-timeout 900] [--timeout 3600] [--record <path>] [--no-comment]
+  [--agent-timeout 900] [--timeout 3600] [--record <path>] [--no-comment] [--no-transcripts]
 orch-sweep plan --base <rev> [--head <rev>]   # the slice plan as JSON
 orch-sweep tree                               # the five tree values and the untracked map's hash, as JSON
-orch-sweep post-review --pr <url> --head <sha> --event APPROVE|REQUEST_CHANGES|COMMENT --input -
-orch-sweep-record gate --pr <url> --head <sha>   # may this head be approved
 ```
 
 Run it inside a clean checkout whose `HEAD` is `--head`. It stops with one `ERROR:` line and exit 1 when `HEAD` differs, the tree is dirty, or `--record` or the record cache resolves inside the checkout.
+
+The transcript check catches skipped sweeps and evidence reused from another head, run or worker; it does not defend against a worker deliberately forging a CLI session, matching the legacy subagent path's trust boundary. At run time the script reads the live worker session from Herdr and puts that session, the swept SHA, base, PR URL and a fresh nonce in every sweep agent's and validator's initial real user message; the checker uses the architect-supplied `--session`, requires matching persisted transcripts newer than the commit for every sweep agent (including zero-finding records) and validator, checks the complete, indexed sweep job set and its aggregate findings, and compares every recorded finding with the initial brief and every verdict, class and reason with the validator's final answer. Without a live worker session the run fails unless `--no-transcripts` explicitly selects CI attestation, which cannot satisfy the transcript gate.
+
+An automated dispatcher inherits its invoking worker's Herdr pane context. Run `/review-prs` from a live Herdr worker so `run` can resolve that worker's session; a plain shell with no owning agent cannot supply transcript evidence. `--no-transcripts` remains CI attestation and cannot replace that session at the architect gate.
 
 ## Agents
 
@@ -20,8 +22,8 @@ Each slice starts one `finalize-code-comments` agent and one `finalize-change-fo
 
 | Runtime | Command |
 |---|---|
-| `codex` (default) | `codex exec -m <model> -C <checkout> -s read-only --ephemeral --ignore-user-config -c project_doc_max_bytes=0 --json --output-schema <file> -o <file> -` |
-| `claude` | `claude -p --model <model> --output-format json --json-schema <schema> --permission-mode dontAsk --setting-sources user --strict-mcp-config --no-session-persistence --tools Read,Grep,Glob --add-dir <diff folder> --allowedTools Read Grep Glob --disallowedTools Edit Write NotebookEdit` |
+| `codex` (default) | all agents use `codex exec -m <model> -C <checkout> -s read-only ...` with persistence so every recorded thread id has a transcript |
+| `claude` | all agents use `claude -p ...` with persistence so every recorded session id has a transcript; structured answers are read from the persisted `StructuredOutput` tool call |
 
 The script writes the PR diff and each slice's diff (`git diff --no-ext-diff --no-textconv`) to a temporary folder outside the checkout and names the file in each prompt; the folder is removed when the run ends. Claude agents have no shell. Codex agents have one inside the read-only sandbox: a command can run a program from the checkout (`rg --pre`), but it cannot write files or reach the network.
 
@@ -36,35 +38,23 @@ The model comes from the settings: `models.codex_worker`, else `models.codex_sma
 
 ## Tree state
 
-Before the agents start, after the sweep agents, after the validators, and immediately before publishing the staged record files, the script takes five values: `HEAD`, a hash of `git status --porcelain=v1 -z --untracked-files=all`, a hash of `git diff --binary HEAD`, a hash of `git diff --binary --cached HEAD`, and, per untracked file, `<octal mode>:<sha256 of the content>` (a symlink hashes its target path). Any difference stops the run with exit 2 and writes no record.
+Before the agents start, after the sweep agents, and after the validators, the script takes five values: `HEAD`, a hash of `git status --porcelain=v1 -z --untracked-files=all`, a hash of `git diff --binary HEAD`, a hash of `git diff --binary --cached HEAD`, and, per untracked file, `<octal mode>:<sha256 of the content>` (a symlink hashes its target path). Any difference stops the run with exit 2 and writes no record.
+
+Tree reads disable configured clean and process filters, including filters referenced by tracked `.gitattributes`, and read attributes from the empty tree. Hooks, fsmonitor, external diff and textconv are disabled for these reads.
 
 ## Every head
 
-Every run sweeps the whole PR diff from the merge base, also after a fix push. The validators get the findings and verdicts of the earlier sweep comments, to judge `RESPECT_DROP`: each distinct finding and verdict once, its author, file, category and summary cut to 40, 200, 60 and 300 characters, rejections first, at most 60000 characters in all with the notice of how many were left out; a finding that does not fit is skipped and later ones that fit are kept. The 60000 bound is for this history only. A sweep comment with a malformed finding counts as an ordinary comment. They also get the latest 50 other comments, review-thread comments and review summaries, each cut to 4000 characters. An earlier rejection is `RESPECT_DROP` only when its reason still holds; when the reason no longer holds, the validator uses `DISPUTED_DROP`. Nothing in the script itself stops a rejected finding from being raised again.
+Every run sweeps the whole PR diff from the merge base, also after a fix push. The validators get the findings and verdicts of the earlier sweep comments, to judge `RESPECT_DROP`: each distinct finding and verdict once, its author, file, category, summary and validator reason cut to 40, 200, 60, 300 and 500 characters, rejections first, at most 60000 characters in all with the notice of how many were left out; a finding that does not fit is skipped and later ones that fit are kept. The 60000 bound is for this history only. A sweep comment with a malformed finding counts as an ordinary comment. They also get the latest 50 other comments, review-thread comments and review summaries, each cut to 4000 characters. Nothing in the script itself stops a rejected finding from being raised again.
 
 ## Record and comment
 
-The record holds the fields `/finalize-sweep` names, plus `tool`, `version`, `pr`, `runtime`, `model`, `kind` (`full`), `tree`, `plan`, `pr_text`, `sweep_agent_ids` (the Codex thread or Claude session id of each sweep agent), `items` (the kept findings, each `fix` or `nit`), `dropped` (the other findings, with their verdicts), `open_fix` (the count of kept `fix` findings) and `deviation`. `orch-sweep-record check` checks those fields when `tool` is `orch-sweep` (`version` 1, `deviation` null, `pr` a pull request URL, every finding typed, with an id used once, no validator id equal to a sweep agent id, and `open_fix` an integer); `--exact` also requires the record's head to be the given head.
+The record holds the fields `/finalize-sweep` names, plus `tool`, `version`, `run_nonce`, `pr`, `runtime`, `model`, `kind` (`full`), `tree`, `plan`, `pr_text`, `sweep_agent_ids` (the Codex thread or Claude session id of each sweep agent), `items` (the kept findings, each `fix` or `nit`), `dropped` (the other findings, with their verdicts and reasons), `open_fix` (the count of kept `fix` findings) and `deviation`. `orch-sweep-record check` checks those fields when `tool` is `orch-sweep` (`version` 1, `deviation` null, `pr` a pull request URL, every finding typed, with an id used once, no validator id equal to a sweep agent id, and `open_fix` an integer); `--exact` also requires the record's head to be the given head.
 
 The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<number>/<head>.json` (and `--record`), and posts one comment through `lib/github_write.py`: the marker `<!-- orch-sweep v1 -->`, the full head SHA, a table of kept findings and one of dropped findings, the record in a fenced `json` block, and the runtime's attribution trailer. `--no-comment` skips the post. The comment stays within GitHub's 65536 characters: the record goes in compact when the indented one does not fit, then the dropped table and then the kept table are left out (the comment says so, and the record still holds every finding). When the record alone does not fit, the run exits 5 without posting and keeps the record file.
 
-## Capacity
-
-| Bound | Value |
-|---|---|
-| Agents per sweep | `2 x slices + 1` sweep agents, then `ceil(findings / 40)` validators, at most 12; with the 25-slice cap, at most 63 agent jobs, and with retries at most 88 agent processes |
-| Agents at once | `--concurrency`, default 4, a bounded pool |
-| Per agent | `--agent-timeout`, default 900 s, cut to what is left of the sweep; when the agent exits or times out, its process group gets SIGTERM, then SIGKILL after at most 5 s for whatever is left |
-| Per sweep | `--timeout`, default 3600 s; no agent starts after it |
-| Retries | a failed first attempt retries once when the shared budget of `slices` retries has one left; the first job that fails for good (its retry failed, or no retry was left) stops new jobs, and the run exits 4 |
-| GitHub reads | 45 s and 32 MiB each, with the deadline on the read itself; `gh` runs in its own process group, which is killed at the time limit and after the read; a child that leaves the group is not waited for; an oversized read stops the run with exit 1; a timed-out read exits 6 |
-| Stopping | SIGINT, SIGTERM or SIGHUP sends SIGTERM to every running agent's process group at once, then SIGKILL to what is left after 5 s, inside heavy-slot's 10 s grace; the run exits 128 + the signal |
-
-Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- orch-sweep run ...`.
-
 ## The gate
 
-`orch-sweep-record gate --pr <url> --head <sha>` checks the exact live PR head and the newest trusted published full record (reviewer or PR author). It validates schema, Git ancestry and the merge base using GitHub's live `base.sha`, current title/body hash and undisputed fix findings. Missing base objects or GitHub/Git failures exit 2; fetch the base and retry later. No local cache equality is required: collaborators are trusted to publish truthful full records. More than 25 slices are refused; split the PR.
+`orch-sweep-record gate --pr <url> --head <sha>` checks the exact live PR head and the newest trusted published full record (reviewer or PR author). It validates schema, Git ancestry and the merge base using GitHub's live `base.sha` and undisputed fix findings. Missing base objects or GitHub/Git failures exit 2; fetch the base and retry later. The reviewer reads the current PR title and body independently. No local cache equality is required: collaborators are trusted to publish truthful full records. More than 25 slices are refused; split the PR.
 
 The gate emits `RECORD_COMMENT <id>` for its selected validated comment, including when open fixes prevent approval. `RECORD_REUSABLE` distinguishes that refusal from missing or stale evidence. Both lines are flushed before the `ERROR:` diagnostic, so combined output keeps the reason last.
 
@@ -74,6 +64,20 @@ Disputes are visible review-body lines: `Sweep dispute <sweep-comment-id>/<findi
 
 `orch-sweep post-review` reads `{body, comments}` on stdin, gates APPROVE and pins `commit_id` to `--head`. An undisputed-fix refusal exits 3; process/evidence refusals exit 1 and mean NOT POSTED, not REQUEST_CHANGES. Dispatch passes its resolved finalize setting in the post command. Tool failures, including uncertain review-POST outcomes, exit 2; do not post a replacement verdict or replay an uncertain request.
 
-## Run exit codes
+## Capacity
 
-`0` record written (and the comment posted, unless `--no-comment`); `1` usage, checkout or validation failure; `2` the tree changed; `3` over 25 slices; `4` an agent failed after its retry; `5` the record does not fit in one comment; `6` a GitHub read failed or the sweep-comment POST failed (a later run can succeed); `128 + n` stopped by signal `n`.
+| Bound | Value |
+|---|---|
+| Agents per sweep | `2 x slices + 1` sweep agents, then `ceil(findings / 40)` validators, at most 12; with the 25-slice cap, at most 63 agent jobs, and with retries at most 88 agent processes |
+| Agents at once | `--concurrency`, default 4, a bounded pool of at most 8 |
+| Per agent | `--agent-timeout`, default 900 s, cut to what is left of the sweep; when the agent exits or times out, its process group gets SIGTERM, then SIGKILL after at most 5 s for whatever is left |
+| Per sweep | `--timeout`, default 3600 s; no agent starts after it |
+| Retries | a failed first attempt retries once when the shared budget of `slices` retries has one left; the first job that fails for good (its retry failed, or no retry was left) stops new jobs, and the run exits 4 |
+| GitHub reads | 45 s and 32 MiB each, with the deadline on the read itself; `gh` runs in its own process group, which is killed at the time limit and after the read; a child that leaves the group is not waited for; a larger or slower read stops the run with exit 1 |
+| Stopping | SIGINT, SIGTERM or SIGHUP sends SIGTERM to every running agent's process group at once, then SIGKILL to what is left after 5 s, inside heavy-slot's 10 s grace; the run exits 128 + the signal |
+
+Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- orch-sweep run ...`.
+
+## Exit codes
+
+`0` record written (and the comment posted, unless `--no-comment`); `1` usage, checkout or GitHub error; `2` the tree changed; `3` over 25 slices; `4` an agent failed after its retry; `5` the record does not fit in one comment; `128 + n` stopped by signal `n`.

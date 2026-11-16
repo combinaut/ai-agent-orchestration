@@ -18,7 +18,21 @@ kind = Path(sys.argv[0]).name
 prompt = sys.stdin.read()
 role = re.search(r"^ROLE: (\S+)", prompt, re.M).group(1)
 with (tmp / "agent.calls").open("a") as log:
-    log.write(json.dumps({"kind": kind, "role": role, "argv": sys.argv[1:]}) + "\n")
+    log.write(
+        json.dumps(
+            {
+                "kind": kind,
+                "role": role,
+                "argv": sys.argv[1:],
+                "executable": sys.argv[0],
+                "injected": {
+                    key: os.environ.get(key)
+                    for key in ("PYTHONPATH", "PYTHONHOME", "NODE_OPTIONS")
+                },
+            }
+        )
+        + "\n"
+    )
 prompts = tmp / "prompts"
 prompts.mkdir(exist_ok=True)
 (prompts / f"{role}.{os.getpid()}").write_text(prompt)
@@ -56,6 +70,8 @@ if os.environ.get("FAKE_HANG") == role:
 if os.environ.get("FAKE_WRITE") == role:
     target = Path(os.environ["FAKE_WRITE_PATH"])
     target.write_text(target.read_text() + "x\n" if target.exists() else "x\n")
+if os.environ.get("FAKE_FAIL") == role:
+    sys.exit(1)
 
 if role == "validator":
     ids = re.findall(r'"id": "([FP]\d+)"', prompt.split("--- Findings ---")[-1])
@@ -93,7 +109,90 @@ else:
         ]
     }
 
+    if os.environ.get("FAKE_BAD_FINDING") == role:
+        answer["findings"][0]["file"] = ""
+
 session = f"{kind}-{uuid.uuid4().hex[:12]}"
+if os.environ.get("FAKE_PERSIST"):
+    if kind == "codex":
+        home = Path(os.environ["CODEX_HOME"])
+        path = home / "sessions" / "2026" / "11" / f"rollout-{session}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [
+            {
+                "type": "session_meta",
+                "payload": {
+                    "id": session,
+                    "session_id": "unrelated-metadata-session",
+                    "source": "cli",
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "# AGENTS.md instructions\n<environment_context>runtime context</environment_context>",
+                        }
+                    ],
+                    "internal_chat_message_metadata_passthrough": {
+                        "content_item_kinds": [
+                            "agents_md.instructions",
+                            "environments.environment_context",
+                        ],
+                        "content_item_metadata": [
+                            {"provenance": {"type": "agents_md"}},
+                            {"provenance": {"type": "harness", "hook": False}},
+                        ],
+                    },
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                    "internal_chat_message_metadata_passthrough": {
+                        "content_item_kinds": ["user.text"],
+                        "content_item_metadata": [{"provenance": {"type": "user"}}],
+                    },
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "phase": "final_answer",
+                    "content": [{"type": "output_text", "text": json.dumps(answer)}],
+                },
+            },
+        ]
+    else:
+        home = Path(os.environ["CLAUDE_CONFIG_DIR"])
+        path = home / "projects" / "-repo" / f"{session}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [
+            {
+                "type": "user",
+                "sessionId": session,
+                "message": {"role": "user", "content": prompt},
+            },
+            json.loads(
+                Path(__file__)
+                .resolve()
+                .with_name("claude-structured-output.json")
+                .read_text()
+            ),
+        ]
+    if kind == "claude":
+        rows[-1]["sessionId"] = session
+        rows[-1]["message"]["content"][0]["input"] = answer
+    path.write_text("\n".join(map(json.dumps, rows)) + "\n")
 if kind == "codex":
     out = sys.argv[sys.argv.index("-o") + 1]
     Path(out).write_text(json.dumps(answer))

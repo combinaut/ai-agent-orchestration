@@ -1,6 +1,7 @@
 """GitHub write retry contracts, using a fake gh rather than the network."""
 
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -42,6 +43,56 @@ class GithubWriteTests(IsolatedTestCase):
 
     def calls(self):
         return int(self.count.read_text()) if self.count.exists() else 0
+
+    def test_capture_term_during_spawn_reaps_its_owned_supervisor(self):
+        real_spawn = subprocess.Popen
+        created = []
+
+        def stopped(number, _frame):
+            raise SystemExit(128 + number)
+
+        def interrupted(*args, **kwargs):
+            process = real_spawn(*args, **kwargs)
+            created.append(process)
+            signal.raise_signal(signal.SIGTERM)
+            return process
+
+        previous = signal.signal(signal.SIGTERM, stopped)
+        try:
+            with patch.object(subprocess, "Popen", side_effect=interrupted):
+                with self.assertRaises(SystemExit):
+                    github_poll.capture(
+                        [sys.executable, "-c", "import time;time.sleep(60)"],
+                        env=dict(os.environ),
+                        pass_fds=(),
+                        timeout=2,
+                    )
+            self.assertIsNotNone(created[0].poll())
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+            for process in created:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=2)
+
+    def test_isolated_writer_supervisor_ignores_checkout_pythonpath(self):
+        marker = self.root / "injected"
+        (self.root / "sitecustomize.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n"
+        )
+        self.fake_gh("printf ok\n")
+        helper = Path(__file__).resolve().parents[2] / "lib/github_write_isolated.py"
+        result = subprocess.run(
+            [sys.executable, "-I", str(helper), "--timeout", "5", "api", "fixture"],
+            cwd=self.root,
+            env=dict(os.environ, PYTHONPATH=str(self.root)),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "ok")
+        self.assertFalse(marker.exists(), "supervisor imported checkout sitecustomize")
 
     def test_secondary_limit_retries_once_after_the_configured_delay(self):
         self.fake_gh(

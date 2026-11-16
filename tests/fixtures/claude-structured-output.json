@@ -1,0 +1,18 @@
+{
+  "type": "assistant",
+  "sessionId": "fixture-session",
+  "message": {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_fixture",
+        "name": "StructuredOutput",
+        "input": {},
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ]
+  }
+}
