@@ -161,12 +161,16 @@ def call_deadline(seconds):
     started = time.time()
     inherited = 0 < previous_timer[0] <= seconds
     inherited_fired = False
-    expires = started + (previous_timer[0] if inherited else seconds)
+    duration = previous_timer[0] if inherited else seconds
+    expires = started + duration
+    monotonic_started = time.monotonic()
+    monotonic_expires = monotonic_started + duration
 
     def expired(signum, frame):
         nonlocal inherited_fired
-        if time.time() < expires:
+        if time.time() < expires and time.monotonic() < monotonic_expires:
             return
+        signal.setitimer(signal.ITIMER_REAL, 0)
         if inherited and callable(previous_handler):
             inherited_fired = True
             try:
@@ -193,13 +197,19 @@ def call_deadline(seconds):
             if previous_timer[0]:
                 signal.setitimer(
                     signal.ITIMER_REAL,
-                    max(0.001, previous_timer[0] - (time.time() - started)),
+                    max(
+                        0.001,
+                        previous_timer[0]
+                        - max(
+                            time.time() - started, time.monotonic() - monotonic_started
+                        ),
+                    ),
                     previous_timer[1],
                 )
 
     try:
         yield
-        if time.time() >= expires:
+        if time.time() >= expires or time.monotonic() >= monotonic_expires:
             expired(signal.SIGALRM, None)
     finally:
         try:
@@ -212,9 +222,18 @@ def call_deadline(seconds):
 def run(argv, invoke, timeout=45, retry_base=60, retry_jitter=(1, 5)):
     """Main-thread captured text invocation with one deadline and no retries."""
     started = time.time()
+    monotonic_deadline = time.monotonic() + timeout
     try:
         with call_deadline(timeout):
-            return _run(argv, invoke, timeout, started, retry_base, retry_jitter)
+            return _run(
+                argv,
+                invoke,
+                timeout,
+                started,
+                retry_base,
+                retry_jitter,
+                monotonic_deadline=monotonic_deadline,
+            )
     except _Expired as error:
         if isinstance(error.__cause__, TimeoutError):
             raise error.__cause__
@@ -223,7 +242,24 @@ def run(argv, invoke, timeout=45, retry_base=60, retry_jitter=(1, 5)):
         ) from None
 
 
-def _run(argv, invoke, timeout, started, retry_base=60, retry_jitter=(1, 5)):
+def _run(
+    argv,
+    invoke,
+    timeout,
+    started,
+    retry_base=60,
+    retry_jitter=(1, 5),
+    *,
+    monotonic_deadline=None,
+):
+    if monotonic_deadline is None:
+        monotonic_deadline = time.monotonic() + timeout
+
+    def remaining():
+        return min(
+            started + timeout - time.time(), monotonic_deadline - time.monotonic()
+        )
+
     directory = state_directory()
     path = directory / "github.json"
     try:
@@ -232,7 +268,9 @@ def _run(argv, invoke, timeout, started, retry_base=60, retry_jitter=(1, 5)):
     except OSError as error:
         raise OSError(f"GitHub poll state {directory}: {error}") from error
     with os.fdopen(lock, "r+") as stream:
-        end = started + min(WAIT, max(0, timeout - 0.25))
+        wait = min(WAIT, max(0, timeout - 0.25))
+        end = started + wait
+        monotonic_end = monotonic_deadline - timeout + wait
         while True:
             if active_cooldown(path):
                 raise Cooldown(
@@ -242,11 +280,16 @@ def _run(argv, invoke, timeout, started, retry_base=60, retry_jitter=(1, 5)):
                 fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
-                if time.time() >= end:
+                if time.time() >= end or time.monotonic() >= monotonic_end:
                     raise Busy(
                         f"GitHub poll busy; {holder_message(directory)}; read not attempted"
                     ) from None
-                time.sleep(max(0, min(0.05, end - time.time())))
+                time.sleep(
+                    max(
+                        0,
+                        min(0.05, end - time.time(), monotonic_end - time.monotonic()),
+                    )
+                )
         holder = directory / "holder.json"
         try:
             write_state(holder, {"pid": os.getpid(), "since": time.time()})
@@ -303,7 +346,7 @@ def _run(argv, invoke, timeout, started, retry_base=60, retry_jitter=(1, 5)):
             ) from None
         elapsed = time.monotonic() - previous
         spacing = max(0, SPACING - elapsed) if elapsed >= 0 else SPACING
-        if time.time() + spacing >= started + timeout:
+        if spacing >= remaining():
             raise Busy(
                 f"GitHub poll busy; {holder_message(directory)}; admission deadline exhausted"
             )
@@ -315,8 +358,7 @@ def _run(argv, invoke, timeout, started, retry_base=60, retry_jitter=(1, 5)):
             write_state(path, state)
         except OSError as error:
             raise OSError(f"GitHub poll state {path}: {error}") from error
-        remaining = timeout - (time.time() - started)
-        if remaining < 2:
+        if remaining() < 2:
             raise Busy(
                 f"GitHub poll busy; {holder_message(directory)}; admission deadline exhausted"
             )
@@ -325,6 +367,7 @@ def _run(argv, invoke, timeout, started, retry_base=60, retry_jitter=(1, 5)):
                 os.environ,
                 GH_DEBUG="api",
                 GITHUB_POLL_DEADLINE=str(started + timeout),
+                GITHUB_POLL_MONOTONIC_DEADLINE=str(monotonic_deadline),
                 GITHUB_POLL_HOLDER=str(holder),
                 GITHUB_POLL_STATE=str(path),
             ),
@@ -393,6 +436,12 @@ def supervised(argv, env):
 
 
 def supervise(deadline, argv):
+    monotonic_deadline = float(
+        os.environ.get(
+            "GITHUB_POLL_MONOTONIC_DEADLINE",
+            time.monotonic() + max(0, deadline - time.time()),
+        )
+    )
     process = None
     pending = set()
 
@@ -402,7 +451,11 @@ def supervise(deadline, argv):
     holder = os.environ.get("GITHUB_POLL_HOLDER")
 
     def expired(_signal, _frame):
-        if time.time() >= deadline - 0.1:
+        if (
+            time.time() >= deadline - 0.1
+            or time.monotonic() >= monotonic_deadline - 0.1
+        ):
+            signal.setitimer(signal.ITIMER_REAL, 0)
             raise subprocess.TimeoutExpired(argv, 0)
 
     def stopped(_signal, _frame):
@@ -413,7 +466,14 @@ def supervise(deadline, argv):
     previous_int = signal.signal(signal.SIGINT, defer)
     signal.setitimer(
         signal.ITIMER_REAL,
-        max(0.001, min(DEADLINE_TICK, deadline - time.time() - 0.1)),
+        max(
+            0.001,
+            min(
+                DEADLINE_TICK,
+                deadline - time.time() - 0.1,
+                monotonic_deadline - time.monotonic() - 0.1,
+            ),
+        ),
         DEADLINE_TICK,
     )
     try:

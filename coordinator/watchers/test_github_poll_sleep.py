@@ -36,7 +36,7 @@ class SleepDeadlineTests(IsolatedTestCase):
 
             with (
                 patch.dict(os.environ, GITHUB_POLL_STATE_DIR=directory),
-                patch.object(g.time, "monotonic", return_value=1000),
+                patch.object(g.time, "monotonic", return_value=started),
                 patch.object(g.time, "time", side_effect=sleeping_clock),
             ):
                 with self.assertRaises(g.Deadline):
@@ -95,7 +95,7 @@ class SleepDeadlineTests(IsolatedTestCase):
             try:
                 with (
                     patch.object(g.subprocess, "Popen", side_effect=bounded_spawn),
-                    patch.object(g.time, "monotonic", return_value=1000),
+                    patch.object(g.time, "monotonic", return_value=started),
                     patch.object(
                         g.time,
                         "time",
@@ -119,3 +119,60 @@ class SleepDeadlineTests(IsolatedTestCase):
                             os.kill(int(path.read_text()), signal.SIGKILL)
                         except ProcessLookupError:
                             pass
+
+    def test_backward_clock_cannot_extend_parent_or_supervisor_deadline(self):
+        real_time = time.time
+        for supervisor in (False, True):
+            with self.subTest(supervisor=supervisor):
+                started = time.monotonic()
+                wall = real_time()
+                command = [sys.executable, "-c", "import time; time.sleep(1)"]
+                with patch.object(
+                    g.time,
+                    "time",
+                    side_effect=lambda: (
+                        wall - (3600 if time.monotonic() - started > 0.03 else 0)
+                    ),
+                ):
+                    if supervisor:
+                        self.assertEqual(g.supervise(wall + 0.3, command), 124)
+                    else:
+                        with self.assertRaises(g._Expired):
+                            with g.call_deadline(0.15):
+                                time.sleep(1)
+                self.assertLess(time.monotonic() - started, 0.8)
+
+    def test_expiry_disarms_ticks_while_capture_reaps(self):
+        spawned, finished = [], []
+        real_spawn = subprocess.Popen
+        real_cleanup = g.kill_capture
+
+        def spawn(*args, **kwargs):
+            process = real_spawn(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        def slow_cleanup(process):
+            time.sleep(0.4)
+            real_cleanup(process)
+            finished.append(True)
+
+        try:
+            with (
+                patch.object(g.subprocess, "Popen", side_effect=spawn),
+                patch.object(g, "kill_capture", side_effect=slow_cleanup),
+            ):
+                with self.assertRaises(g._Expired):
+                    with g.call_deadline(0.1):
+                        g.capture(
+                            [sys.executable, "-c", "import time; time.sleep(60)"],
+                            env=None,
+                            pass_fds=(),
+                            timeout=10,
+                        )
+            self.assertEqual(finished, [True])
+            self.assertIsNotNone(spawned[0].poll())
+        finally:
+            for process in spawned:
+                real_cleanup(process)
+                process.wait(timeout=1)
