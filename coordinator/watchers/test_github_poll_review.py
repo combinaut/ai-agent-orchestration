@@ -181,7 +181,9 @@ class ReviewTests(IsolatedTestCase):
                 ):
                     with self.assertRaises(g.Deadline):
                         g.run(["gh"], invoke, timeout=timeout)
-                self.assertAlmostEqual(armed[0], timeout, delta=0.05)
+                self.assertAlmostEqual(
+                    armed[0], min(g.DEADLINE_TICK, timeout), delta=0.05
+                )
                 self.assertLess(time.monotonic() - started, timeout + 3)
 
     def test_parent_deadline_preserves_earlier_and_later_watcher_alarms(self):
@@ -229,6 +231,8 @@ class ReviewTests(IsolatedTestCase):
                 def interrupted(*args, **kwargs):
                     process = real_spawn(*args, **kwargs)
                     spawned.append(process)
+                    if number == signal.SIGALRM:
+                        time.sleep(5.1)
                     signal.raise_signal(number)
                     return process
 
@@ -437,6 +441,8 @@ class ReviewTests(IsolatedTestCase):
                     def interrupted(*args, **kwargs):
                         process = real_spawn(*args, **kwargs)
                         spawned.append(process)
+                        if number == signal.SIGALRM:
+                            time.sleep(2.1)
                         signal.raise_signal(number)
                         return process
 
@@ -451,11 +457,11 @@ class ReviewTests(IsolatedTestCase):
                             ]
                             if expected is None:
                                 self.assertEqual(
-                                    g.supervise(time.monotonic() + 2, command), 124
+                                    g.supervise(time.time() + 2, command), 124
                                 )
                             else:
                                 with self.assertRaises(expected):
-                                    g.supervise(time.monotonic() + 2, command)
+                                    g.supervise(time.time() + 2, command)
                         self.assertIsNotNone(spawned[0].poll())
                     finally:
                         for process in spawned:
@@ -500,7 +506,7 @@ class ReviewTests(IsolatedTestCase):
 
         with (
             patch.object(g.fcntl, "flock", side_effect=BlockingIOError),
-            patch.object(g.time, "monotonic", side_effect=[1000.74, 1000.76, 1000.76]),
+            patch.object(g.time, "time", side_effect=[1000.74, 1000.76, 1000.76]),
             patch.object(g.time, "sleep", side_effect=wait),
         ):
             with self.assertRaises(g.Busy):

@@ -523,7 +523,7 @@ class RuntimeTests(IsolatedTestCase):
         from types import SimpleNamespace
 
         with patch.object(w.runtime.os, "killpg", side_effect=PermissionError):
-            w.runtime.kill_command(SimpleNamespace(pid=123))
+            w.runtime.kill_command(SimpleNamespace(pid=123, args=[]))
 
     def test_c_backstop_runs_without_python_signal_handler(self):
         result = self.child(

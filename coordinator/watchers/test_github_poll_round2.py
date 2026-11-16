@@ -516,7 +516,7 @@ class RoundTwoTests(IsolatedTestCase):
             f"import os,time\nfrom pathlib import Path\nPath({str(pidfile)!r}).write_text(str(os.getpid()))\ntime.sleep(60)"
         )
         holder = Path(self.tmp.name) / "holder.json"
-        code = "import github_poll as g,time; g.write_state=lambda *a:time.sleep(3); raise SystemExit(g.supervise(time.monotonic()+0.8,['gh']))"
+        code = "import github_poll as g,time; g.write_state=lambda *a:time.sleep(3); raise SystemExit(g.supervise(time.time()+0.8,['gh']))"
         try:
             result = subprocess.run(
                 [sys.executable, "-c", code],

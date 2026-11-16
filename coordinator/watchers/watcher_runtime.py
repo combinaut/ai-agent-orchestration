@@ -24,7 +24,7 @@ _ACTIVE_PROCESS = None
 def kill_command(process):
     # Only the private process group created by run(), never a host job.
     try:
-        os.killpg(process.pid, signal.SIGKILL)
+        github_poll.kill_capture(process)
     except (ProcessLookupError, PermissionError):
         pass
 

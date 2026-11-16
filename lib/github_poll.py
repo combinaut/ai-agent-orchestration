@@ -18,6 +18,7 @@ from pathlib import Path
 SPACING = 3
 WAIT = 15
 MAX_DELAY = 3600
+DEADLINE_TICK = 0.25
 
 
 class Busy(OSError):
@@ -157,12 +158,15 @@ class _Expired(BaseException):
 def call_deadline(seconds):
     previous_handler = signal.getsignal(signal.SIGALRM)
     previous_timer = signal.getitimer(signal.ITIMER_REAL)
-    started = time.monotonic()
+    started = time.time()
     inherited = 0 < previous_timer[0] <= seconds
     inherited_fired = False
+    expires = started + (previous_timer[0] if inherited else seconds)
 
     def expired(signum, frame):
         nonlocal inherited_fired
+        if time.time() < expires:
+            return
         if inherited and callable(previous_handler):
             inherited_fired = True
             try:
@@ -173,12 +177,15 @@ def call_deadline(seconds):
 
     signal.signal(signal.SIGALRM, expired)
     signal.setitimer(
-        signal.ITIMER_REAL, max(0.001, previous_timer[0] if inherited else seconds)
+        signal.ITIMER_REAL,
+        max(0.001, min(DEADLINE_TICK, expires - started)),
+        DEADLINE_TICK,
     )
 
     def restore():
         if inherited_fired:
             if signal.getsignal(signal.SIGALRM) is expired:
+                signal.setitimer(signal.ITIMER_REAL, 0)
                 signal.signal(signal.SIGALRM, previous_handler)
         else:
             signal.setitimer(signal.ITIMER_REAL, 0)
@@ -186,12 +193,14 @@ def call_deadline(seconds):
             if previous_timer[0]:
                 signal.setitimer(
                     signal.ITIMER_REAL,
-                    max(0.001, previous_timer[0] - (time.monotonic() - started)),
+                    max(0.001, previous_timer[0] - (time.time() - started)),
                     previous_timer[1],
                 )
 
     try:
         yield
+        if time.time() >= expires:
+            expired(signal.SIGALRM, None)
     finally:
         try:
             restore()
@@ -202,7 +211,7 @@ def call_deadline(seconds):
 
 def run(argv, invoke, timeout=45, retry_base=60, retry_jitter=(1, 5)):
     """Main-thread captured text invocation with one deadline and no retries."""
-    started = time.monotonic()
+    started = time.time()
     try:
         with call_deadline(timeout):
             return _run(argv, invoke, timeout, started, retry_base, retry_jitter)
@@ -233,11 +242,11 @@ def _run(argv, invoke, timeout, started, retry_base=60, retry_jitter=(1, 5)):
                 fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
-                if time.monotonic() >= end:
+                if time.time() >= end:
                     raise Busy(
                         f"GitHub poll busy; {holder_message(directory)}; read not attempted"
                     ) from None
-                time.sleep(max(0, min(0.05, end - time.monotonic())))
+                time.sleep(max(0, min(0.05, end - time.time())))
         holder = directory / "holder.json"
         try:
             write_state(holder, {"pid": os.getpid(), "since": time.time()})
@@ -294,7 +303,7 @@ def _run(argv, invoke, timeout, started, retry_base=60, retry_jitter=(1, 5)):
             ) from None
         elapsed = time.monotonic() - previous
         spacing = max(0, SPACING - elapsed) if elapsed >= 0 else SPACING
-        if time.monotonic() + spacing >= started + timeout:
+        if time.time() + spacing >= started + timeout:
             raise Busy(
                 f"GitHub poll busy; {holder_message(directory)}; admission deadline exhausted"
             )
@@ -306,7 +315,7 @@ def _run(argv, invoke, timeout, started, retry_base=60, retry_jitter=(1, 5)):
             write_state(path, state)
         except OSError as error:
             raise OSError(f"GitHub poll state {path}: {error}") from error
-        remaining = timeout - (time.monotonic() - started)
+        remaining = timeout - (time.time() - started)
         if remaining < 2:
             raise Busy(
                 f"GitHub poll busy; {holder_message(directory)}; admission deadline exhausted"
@@ -378,7 +387,7 @@ def supervised(argv, env):
         "-I",
         str(Path(__file__).resolve()),
         "--supervise",
-        env.get("GITHUB_POLL_DEADLINE", str(time.monotonic() + 45)),
+        env.get("GITHUB_POLL_DEADLINE", str(time.time() + 45)),
         *argv,
     ]
 
@@ -393,7 +402,8 @@ def supervise(deadline, argv):
     holder = os.environ.get("GITHUB_POLL_HOLDER")
 
     def expired(_signal, _frame):
-        raise subprocess.TimeoutExpired(argv, 0)
+        if time.time() >= deadline - 0.1:
+            raise subprocess.TimeoutExpired(argv, 0)
 
     def stopped(_signal, _frame):
         raise SystemExit(1)
@@ -401,10 +411,14 @@ def supervise(deadline, argv):
     previous_alarm = signal.signal(signal.SIGALRM, defer)
     previous_term = signal.signal(signal.SIGTERM, defer)
     previous_int = signal.signal(signal.SIGINT, defer)
-    signal.setitimer(signal.ITIMER_REAL, max(0.001, deadline - time.monotonic() - 0.1))
+    signal.setitimer(
+        signal.ITIMER_REAL,
+        max(0.001, min(DEADLINE_TICK, deadline - time.time() - 0.1)),
+        DEADLINE_TICK,
+    )
     try:
         try:
-            process = subprocess.Popen(argv)
+            process = subprocess.Popen(argv, start_new_session=True)
         finally:
             signal.signal(signal.SIGALRM, expired)
             signal.signal(signal.SIGTERM, stopped)
@@ -438,8 +452,11 @@ def supervise(deadline, argv):
         return 1
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
-        if process is not None and process.poll() is None:
-            process.kill()
+        if process is not None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             try:
                 process.wait(timeout=1)
             except subprocess.TimeoutExpired:
@@ -447,6 +464,20 @@ def supervise(deadline, argv):
         signal.signal(signal.SIGALRM, previous_alarm)
         signal.signal(signal.SIGTERM, previous_term)
         signal.signal(signal.SIGINT, previous_int)
+
+
+def kill_capture(process):
+    """Let an owned supervisor reap its CLI group before killing the capture group."""
+    if process.args[3:4] == ["--supervise"]:
+        try:
+            process.terminate()
+            process.wait(timeout=1)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def capture(argv, *, env, pass_fds, timeout, input=None):
@@ -481,10 +512,7 @@ def capture(argv, *, env, pass_fds, timeout, input=None):
         return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
     except BaseException:
         if process is not None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            kill_capture(process)
             process.wait(timeout=1)
         raise
     finally:
