@@ -1446,7 +1446,6 @@ p.write_text("\n".join(map(json.dumps,rows))+"\n")' "$TMP/record.json" "$CODEX_H
     printf %s "$live" >"$TMP/pr_head"
     : >"$TMP/gh.calls"
     review APPROVE
-    echo "$output" "$stderr"
     [ "$status" -eq 1 ]
     [[ "$stderr" == "ERROR: APPROVE refused: "* ]]
     [ -s "$TMP/gh.calls" ]
@@ -1517,7 +1516,6 @@ for fault in ("timeout", "oserror", "nonzero"):
     assert sweep_run.main(["sweep", "post-review", "--pr", sys.argv[2], "--head", sys.argv[3], "--event", "APPROVE", "--input", "-"]) == 2, fault
     assert not os.path.exists(os.path.join(os.environ["TMP"], "review.json"))
 ' "$ROOT/lib" "$PR" "$HEAD_SHA"
-  echo "$output"
   [ "$status" -eq 0 ]
 }
 

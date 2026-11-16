@@ -939,7 +939,10 @@ def cmd_claim_dispatched(args, _scope, _label):
         if args.sha in known and (
             args.retake or known[args.sha].get("state") == "retry"
         ):
-            pending["previous"] = known[args.sha]
+            previous = known[args.sha]
+            if previous.get("state") == "retry":
+                previous = previous.get("previous") or previous
+            pending["previous"] = previous
         set_head(data, args.url, args.sha, pending)
 
     update_dispatched(claim)
@@ -956,7 +959,7 @@ def cmd_mark_dispatched(args, _scope, _label):
     def mark(data):
         known = heads(data.get(args.url) or {})
         previous = (known.get(args.sha) or {}).get("previous")
-        if args.state in ("pending", "blocked") and previous:
+        if args.state in ("pending", "blocked", "retry") and previous:
             record["previous"] = previous
         set_head(data, args.url, args.sha, record)
 

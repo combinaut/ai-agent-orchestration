@@ -1918,6 +1918,37 @@ for state in ("pending", "blocked"):
   [ "$status" -eq 0 ]
 }
 
+@test "repeated post-approval retries preserve a retake's completed review" {
+  prs() { python3 "$ROOT/$SKILL_DIR/scripts/prs.py" "$@" >/dev/null; }
+  u=https://github.com/acme/app/pull/7
+  state="$HOME/.cache/review-prs/dispatched.json"
+  prs claim-dispatched --url "$u" --sha a
+  prs mark-dispatched --url "$u" --sha a --state "done" --agent original
+  cp "$state" "$TMP/completed.json"
+  prs claim-dispatched --url "$u" --sha a --retake
+  for attempt in 1 2; do
+    prs mark-dispatched --url "$u" --sha a --state retry --reason "gate unavailable $attempt"
+    run python3 -c 'import json,sys
+current=json.load(open(sys.argv[1]))[sys.argv[3]]["heads"]["a"]
+completed=json.load(open(sys.argv[2]))[sys.argv[3]]["heads"]["a"]
+assert current.get("previous") == completed, current' "$state" "$TMP/completed.json" "$u"
+    [ "$status" -eq 0 ]
+    prs claim-dispatched --url "$u" --sha a
+    run python3 -c 'import json,sys
+current=json.load(open(sys.argv[1]))[sys.argv[3]]["heads"]["a"]
+completed=json.load(open(sys.argv[2]))[sys.argv[3]]["heads"]["a"]
+assert current.get("previous") == completed, current' "$state" "$TMP/completed.json" "$u"
+    [ "$status" -eq 0 ]
+  done
+  prs mark-dispatched --url "$u" --sha a --state blocked
+  prs release-dispatched --url "$u" --sha a
+  run python3 -c 'import json,sys
+current=json.load(open(sys.argv[1]))[sys.argv[3]]["heads"]["a"]
+completed=json.load(open(sys.argv[2]))[sys.argv[3]]["heads"]["a"]
+assert current == completed, current' "$state" "$TMP/completed.json" "$u"
+  [ "$status" -eq 0 ]
+}
+
 @test "a record with kept fixes is reused for independent assessment" {
   stub_review_tools
   : >"$TMP/none.toml"
