@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from test_support import IsolatedTestCase
 
@@ -39,17 +39,17 @@ class SleepDeadlineTests(IsolatedTestCase):
                 patch.object(g.time, "monotonic", return_value=started),
                 patch.object(g.time, "time", side_effect=sleeping_clock),
             ):
-                with self.assertRaises(g.Deadline):
-                    g.run(
-                        command,
-                        lambda env, fds: g.capture(
-                            g.supervised(command, env),
-                            env=env,
-                            pass_fds=fds,
-                            timeout=10,
-                        ),
-                        timeout=3,
+
+                def invoke(env, fds):
+                    self.assertEqual(
+                        float(env["GITHUB_POLL_MONOTONIC_DEADLINE"]), started + 3
                     )
+                    return g.capture(
+                        g.supervised(command, env), env=env, pass_fds=fds, timeout=10
+                    )
+
+                with self.assertRaises(g.Deadline):
+                    g.run(command, invoke, timeout=3)
                 self.assertLess(real_monotonic() - started, 1.5)
                 self.assertTrue(pidfile.exists())
                 with self.assertRaises(ProcessLookupError):
@@ -135,7 +135,12 @@ class SleepDeadlineTests(IsolatedTestCase):
                     ),
                 ):
                     if supervisor:
-                        self.assertEqual(g.supervise(wall + 0.3, command), 124)
+                        with patch.dict(
+                            os.environ,
+                            GITHUB_POLL_MONOTONIC_DEADLINE=str(started + 0.3),
+                        ):
+                            time.sleep(0.04)
+                            self.assertEqual(g.supervise(wall + 0.3, command), 124)
                     else:
                         with self.assertRaises(g._Expired):
                             with g.call_deadline(0.15):
@@ -176,3 +181,88 @@ class SleepDeadlineTests(IsolatedTestCase):
             for process in spawned:
                 real_cleanup(process)
                 process.wait(timeout=1)
+
+    def test_sigkill_supervisor_or_capture_group_still_cleans_cli_descendants(self):
+        import tempfile
+
+        for entire_group in (False, True):
+            with (
+                self.subTest(entire_group=entire_group),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                paths = [
+                    Path(directory) / name
+                    for name in ("gh.pid", "descendant.pid", "supervisor.pid")
+                ]
+                command = [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import os,signal,time; from pathlib import Path; "
+                        "signal.signal(signal.SIGTERM, signal.SIG_IGN); child=os.fork(); "
+                        f"Path({str(paths[0])!r} if child else {str(paths[1])!r}).write_text(str(os.getpid())); "
+                        "time.sleep(60)"
+                    ),
+                ]
+                env = dict(
+                    os.environ,
+                    GITHUB_POLL_DEADLINE=str(time.time() + 5),
+                    GITHUB_POLL_MONOTONIC_DEADLINE=str(time.monotonic() + 5),
+                )
+                process = subprocess.Popen(
+                    g.supervised(command, env),
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    start_new_session=True,
+                )
+                paths[2].write_text(str(process.pid))
+                try:
+                    until = time.monotonic() + 3
+                    while (
+                        not all(path.exists() for path in paths[:2])
+                        and time.monotonic() < until
+                    ):
+                        time.sleep(0.01)
+                    self.assertTrue(all(path.exists() for path in paths[:2]))
+                    kill = os.killpg if entire_group else os.kill
+                    kill(int(paths[2].read_text()), signal.SIGKILL)
+                    g.kill_capture(process)
+                    process.wait(timeout=1)
+                    self.assertTrue(
+                        select.select([process.stdout], [], [], 1)[0],
+                        "hung CLI descendants survived supervisor SIGKILL",
+                    )
+                    self.assertEqual(process.stdout.read(1), b"")
+                finally:
+                    for path in paths:
+                        if path.exists():
+                            try:
+                                os.kill(int(path.read_text()), signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+                    process.wait(timeout=1)
+                    process.stdout.close()
+                    process.stderr.close()
+
+    def test_successful_supervisor_does_not_signal_reaped_cli_pid(self):
+        process = Mock(returncode=0)
+        process.wait.return_value = 0
+        with (
+            patch.object(g.subprocess, "Popen", return_value=process),
+            patch.object(g.os, "killpg") as kill,
+        ):
+            self.assertEqual(g.supervise(time.time() + 5, ["gh"]), 0)
+        kill.assert_not_called()
+
+    def test_capture_permission_error_is_ignored_only_for_an_exited_child(self):
+        for returncode in (None, -signal.SIGKILL):
+            with self.subTest(returncode=returncode):
+                process = Mock()
+                process.poll.return_value = returncode
+                with patch.object(g.os, "killpg", side_effect=PermissionError):
+                    if returncode is None:
+                        with self.assertRaises(PermissionError):
+                            g.kill_capture(process)
+                    else:
+                        g.kill_capture(process)

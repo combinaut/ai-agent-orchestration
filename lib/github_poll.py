@@ -435,7 +435,8 @@ def supervised(argv, env):
     ]
 
 
-def supervise(deadline, argv):
+def supervise(deadline, argv, *, capture_group=False):
+    owns_group = capture_group and os.getpgrp() == os.getpid()
     monotonic_deadline = float(
         os.environ.get(
             "GITHUB_POLL_MONOTONIC_DEADLINE",
@@ -478,7 +479,7 @@ def supervise(deadline, argv):
     )
     try:
         try:
-            process = subprocess.Popen(argv, start_new_session=True)
+            process = subprocess.Popen(argv, start_new_session=not owns_group)
         finally:
             signal.signal(signal.SIGALRM, expired)
             signal.signal(signal.SIGTERM, stopped)
@@ -512,9 +513,9 @@ def supervise(deadline, argv):
         return 1
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
-        if process is not None:
+        if process is not None and process.returncode is None:
             try:
-                os.killpg(process.pid, signal.SIGKILL)
+                os.killpg(os.getpid() if owns_group else process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             try:
@@ -527,17 +528,14 @@ def supervise(deadline, argv):
 
 
 def kill_capture(process):
-    """Let an owned supervisor reap its CLI group before killing the capture group."""
-    if process.args[3:4] == ["--supervise"]:
-        try:
-            process.terminate()
-            process.wait(timeout=1)
-        except (ProcessLookupError, subprocess.TimeoutExpired):
-            pass
+    """Kill the private capture group, including a dead supervisor's CLI tree."""
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    except PermissionError:
+        if process.poll() is None:
+            raise
 
 
 def capture(argv, *, env, pass_fds, timeout, input=None):
@@ -604,5 +602,5 @@ def main():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--supervise":
-        sys.exit(supervise(float(sys.argv[2]), sys.argv[3:]))
+        sys.exit(supervise(float(sys.argv[2]), sys.argv[3:], capture_group=True))
     sys.exit(main())
