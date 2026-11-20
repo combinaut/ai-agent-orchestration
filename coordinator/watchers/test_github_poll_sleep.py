@@ -256,13 +256,21 @@ class SleepDeadlineTests(IsolatedTestCase):
         kill.assert_not_called()
 
     def test_capture_permission_error_is_ignored_only_for_an_exited_child(self):
-        for returncode in (None, -signal.SIGKILL):
-            with self.subTest(returncode=returncode):
+        for state in ("exited", "exiting", "live"):
+            with self.subTest(state=state):
                 process = Mock()
-                process.poll.return_value = returncode
-                with patch.object(g.os, "killpg", side_effect=PermissionError):
-                    if returncode is None:
-                        with self.assertRaises(PermissionError):
+                process.poll.return_value = (
+                    -signal.SIGKILL if state == "exited" else None
+                )
+                if state == "live":
+                    process.wait.side_effect = subprocess.TimeoutExpired(["child"], 1)
+                else:
+                    process.wait.return_value = -signal.SIGKILL
+                denied = PermissionError(1, "Operation not permitted")
+                with patch.object(g.os, "killpg", side_effect=denied):
+                    if state == "live":
+                        with self.assertRaises(PermissionError) as caught:
                             g.kill_capture(process)
+                        self.assertIs(caught.exception, denied)
                     else:
                         g.kill_capture(process)

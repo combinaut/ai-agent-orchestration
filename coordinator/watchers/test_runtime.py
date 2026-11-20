@@ -520,10 +520,12 @@ class RuntimeTests(IsolatedTestCase):
                     pass
 
     def test_group_permission_error_does_not_escape_cleanup(self):
-        from types import SimpleNamespace
+        from unittest.mock import Mock
 
+        process = Mock(pid=123)
+        process.wait.side_effect = subprocess.TimeoutExpired(["child"], 1)
         with patch.object(w.runtime.os, "killpg", side_effect=PermissionError):
-            w.runtime.kill_command(SimpleNamespace(pid=123, poll=lambda: None))
+            w.runtime.kill_command(process)
 
     def test_c_backstop_runs_without_python_signal_handler(self):
         result = self.child(

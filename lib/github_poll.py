@@ -533,9 +533,12 @@ def kill_capture(process):
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
-    except PermissionError:
-        if process.poll() is None:
-            raise
+    except PermissionError as error:
+        # SIGKILL can precede the child becoming waitable on macOS.
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            raise error from None
 
 
 def capture(argv, *, env, pass_fds, timeout, input=None):
