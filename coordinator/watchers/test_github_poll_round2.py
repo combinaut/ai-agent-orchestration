@@ -327,6 +327,32 @@ class RoundTwoTests(IsolatedTestCase):
         self.clock.stop()
         self.monotonic.stop()
 
+    def test_prs_legacy_caller_survives_supervisor_upgrade(self):
+        self.real_clock()
+        prs = load_prs()
+        env = self.fake_cli("import time; time.sleep(0.2); print('fixture-user')")
+
+        def legacy_run(argv, invoke, **kwargs):
+            child_env = dict(env, GITHUB_POLL_DEADLINE=str(time.monotonic() + 3))
+            child_env.pop("GITHUB_POLL_MONOTONIC_DEADLINE", None)
+            return invoke(child_env, ())
+
+        def legacy_supervised(argv, child_env):
+            return [
+                sys.executable,
+                "-I",
+                str(Path(g.__file__)),
+                "--supervise",
+                child_env["GITHUB_POLL_DEADLINE"],
+                *argv,
+            ]
+
+        with (
+            patch.object(g, "run", side_effect=legacy_run),
+            patch.object(g, "supervised", side_effect=legacy_supervised),
+        ):
+            self.assertEqual(prs.viewer_login(), "fixture-user")
+
     def test_contention_waits_for_release_within_call_timeout(self):
         self.real_clock()
         self.state.mkdir()
