@@ -106,6 +106,35 @@ class InboxTest(IsolatedTestCase):
             with self.assertRaises(ValueError):
                 inbox.send_to_socket(path, "test", "test")
 
+    def test_question_suffix_follows_whether_orch_signal_answer_applies(self):
+        import types
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bindings = Path(tmp)
+            (bindings / "architect-owner.json").write_text("{}")
+            args = types.SimpleNamespace(bindings_dir=bindings, binding=None)
+            head = "2026-10-14T00:00:00+0200 workers: WORKER QUESTION pane:1 owner=owner id=signal-1 workspace=w"
+            asked = inbox.native_messages(
+                args, [f"{head} question=Which? options=a,b"], False, []
+            )
+            lost = inbox.native_messages(
+                args,
+                [
+                    f"{head} question=UNDELIVERED: answer for signal-0 could not be typed options="
+                ],
+                False,
+                [],
+            )
+        self.assertTrue(
+            asked[0][1].endswith(". Answer with orch-signal answer <id> <text>.")
+        )
+        self.assertTrue(
+            lost[0][1].endswith(
+                ". Deliver it by hand; orch-signal answer does not apply."
+            )
+        )
+        self.assertNotIn("Answer with", lost[0][1])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

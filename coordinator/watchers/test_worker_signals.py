@@ -1,10 +1,12 @@
 import argparse
+import contextlib
 import importlib.util
 import io
 import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +15,8 @@ from test_support import IsolatedTestCase
 
 import watchers as w
 import worker_signals as s
+
+PARENT = 4242
 
 
 class SignalTests(IsolatedTestCase):
@@ -44,6 +48,9 @@ class SignalTests(IsolatedTestCase):
         opener = patch.object(s, "open_user_question", return_value=0)
         self.opener = opener.start()
         self.addCleanup(opener.stop)
+        parent = patch.object(s.os, "getppid", return_value=PARENT)
+        parent.start()
+        self.addCleanup(parent.stop)
 
     def record(self, **kw):
         return s.new_question(s.identity(), "Which?", "a,b", **kw)
@@ -112,6 +119,308 @@ class SignalTests(IsolatedTestCase):
             s.answer(q["id"], "a")
             with self.assertRaisesRegex(ValueError, "already answered"):
                 s.answer(q["id"], "b")
+
+    def owner_env(self):
+        return patch.dict(
+            os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
+        )
+
+    def pane_calls(self, composer=("empty\n", 0), prompt=0):
+        """Patch subprocess.run for composer-state.py and herdr; return the recorded argv list."""
+        calls, problems = [], []
+        self.addCleanup(lambda: self.assertEqual(problems, []))
+
+        def run(argv, *args, **kwargs):
+            calls.append(list(argv))
+            if "timeout" not in kwargs:
+                problems.append(f"no timeout: {argv[1:3]}")
+            try:
+                with s.answers_lock(timeout=0):
+                    pass
+            except TimeoutError:
+                problems.append(f"answers lock held during {argv[1:3]}")
+            if str(argv[1]).endswith("composer-state.py"):
+                return subprocess.CompletedProcess(argv, composer[1], composer[0], "")
+            return subprocess.CompletedProcess(argv, prompt, "", "prompt failed")
+
+        patcher = patch.object(s.subprocess, "run", side_effect=run)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return calls
+
+    def prompts(self, calls):
+        return [call for call in calls if call[1:3] == ["agent", "prompt"]]
+
+    def wait_for_answer_after_polls(self, q, parent_now, parent=PARENT):
+        """Answer on the first sleep; return the question record seen at that poll."""
+        seen = []
+
+        def sleep(seconds):
+            seen.append(s.read(s.question_path(q["id"])))
+            with self.owner_env():
+                s.answer(q["id"], "a")
+
+        with (
+            patch.object(s.os, "getppid", return_value=parent_now),
+            patch.object(s.time, "sleep", side_effect=sleep),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            text = s.wait_answer(q, 60, parent=parent)
+            s.deliver_answer(q, text)
+        return text, seen[0]
+
+    def test_waiter_is_detached_when_its_parent_changes_or_is_init(self):
+        for start, now in ((PARENT, 1), (PARENT, 77), (1, 1)):
+            with self.subTest(start=start, now=now):
+                self.pane_calls()
+                q = self.record(timeout=60)
+                _, seen = self.wait_for_answer_after_polls(q, now, parent=start)
+                self.assertTrue(seen["detached"])
+
+    def test_waiter_with_a_live_parent_is_not_detached(self):
+        calls = self.pane_calls()
+        q = self.record(timeout=60)
+        text, seen = self.wait_for_answer_after_polls(q, PARENT)
+        self.assertEqual(text, "a")
+        self.assertNotIn("detached", seen)
+        self.assertEqual(self.prompts(calls), [])
+
+    def test_detached_waiter_types_the_answer_into_its_pane(self):
+        calls = self.pane_calls()
+        q = self.record(timeout=60)
+        text, _ = self.wait_for_answer_after_polls(q, 1)
+        self.assertEqual(text, "a")
+        sent = self.prompts(calls)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0][3], "pane:1")
+        self.assertEqual(sent[0][4], f"Answer to {q['id']}: a")
+        self.assertEqual(s.collect(None, None, s.time.time())[1], [])
+
+    def test_detached_waiter_types_a_bridged_user_answer(self):
+        calls = self.pane_calls()
+        q = self.record(timeout=60)
+        with self.owner_env(), contextlib.redirect_stdout(io.StringIO()):
+            s.mark_detached(q)
+            s.answer(q["id"], None, to_user=True)
+        s.bridge_user_answer(q["id"], "user choice")
+        text = s.wait_answer(q, 60)
+        s.deliver_answer(q, text)
+        self.assertEqual(text, "user choice")
+        self.assertIn("user choice", self.prompts(calls)[0][4])
+
+    def test_failed_send_of_a_user_answer_reaches_the_owner_architect(self):
+        self.pane_calls(prompt=1)
+        q = self.record(timeout=60)
+        with self.owner_env(), contextlib.redirect_stdout(io.StringIO()):
+            s.mark_detached(q)
+            s.answer(q["id"], None, to_user=True)
+        s.bridge_user_answer(q["id"], "user choice")
+        s.deliver_answer(q, s.wait_answer(q, 60))
+        events = s.collect(None, None, s.time.time())[1]
+        self.assertEqual(len(events), 1)
+        self.assertIn("answer was: user choice", s.event_line(events[0]))
+
+    def test_failed_send_reaches_the_owner_architect(self):
+        for name, kwargs in {
+            "send": dict(prompt=1),
+            "typed": dict(composer=("typed: draft\n", 1)),
+            "unreadable": dict(composer=("unknown\n", 2)),
+        }.items():
+            with self.subTest(name):
+                calls = self.pane_calls(**kwargs)
+                q = self.record(timeout=60)
+                self.wait_for_answer_after_polls(q, 1)
+                if name != "send":
+                    self.assertEqual(self.prompts(calls), [])
+                events = s.collect(None, None, s.time.time())[1]
+                self.assertEqual(len(events), 1)
+                line = s.event_line(events[0])
+                self.assertTrue(
+                    line.startswith("WORKER QUESTION pane:1 owner=owner id=signal-"),
+                    line,
+                )
+                self.assertIn(
+                    f"answer for {q['id']} could not be typed into pane pane:1: ",
+                    line,
+                )
+                self.assertIn("a", line.rsplit("answer was: ", 1)[1])
+                self.assertNotEqual(events[0]["id"], q["id"])
+                self.assertEqual(events[0]["undelivered_for"], q["id"])
+                self.assertIn("question=UNDELIVERED: answer for", line)
+                self.assertIn("Deliver it by hand to pane pane:1", line)
+                s.remove_question(events[0])
+
+    def test_answer_tells_the_architect_when_the_asker_is_detached(self):
+        q = self.record(timeout=60)
+        out = io.StringIO()
+        with self.owner_env(), contextlib.redirect_stdout(out):
+            s.answer(q["id"], "a")
+        self.assertEqual(out.getvalue(), "")
+        s.answer_path(q["id"]).unlink()
+        s.write(s.question_path(q["id"]), dict(q, detached=True))
+        with self.owner_env(), contextlib.redirect_stdout(out):
+            s.answer(q["id"], "a")
+        self.assertEqual(
+            out.getvalue(),
+            f"orch-signal: asker of {q['id']} is detached; its waiter will type the answer into pane pane:1\n",
+        )
+
+    def test_answer_without_text_prints_no_detached_line(self):
+        q = self.record(timeout=60)
+        s.write(s.question_path(q["id"]), dict(q, detached=True))
+        out = io.StringIO()
+        with self.owner_env(), contextlib.redirect_stdout(out):
+            with self.assertRaisesRegex(ValueError, "answer text is required"):
+                s.answer(q["id"], None)
+        self.assertEqual(out.getvalue(), "")
+
+    def test_typed_answer_is_one_line_without_control_characters(self):
+        calls = self.pane_calls()
+        q = self.record(timeout=60)
+        s.mark_detached(q)
+        dirty = "x\r\ny\tz\x1b[Z\x1b[201~\x03w"
+        with self.owner_env(), contextlib.redirect_stdout(io.StringIO()):
+            s.answer(q["id"], dirty)
+        s.deliver_answer(q, s.wait_answer(q, 60))
+        sent = self.prompts(calls)[0][4]
+        self.assertEqual(sent.splitlines(), [sent])
+        for char in "\r\n\t\x1b\x03":
+            self.assertNotIn(char, sent)
+        self.assertIn("x y z", sent)
+
+    def failure_record(self):
+        found = [
+            record
+            for record in map(s.read, s.directory().glob("signal-*.json"))
+            if record.get("undelivered_for")
+        ]
+        self.assertEqual(len(found), 1)
+        return found[0]
+
+    def test_answer_to_an_undelivered_record_says_deliver_by_hand(self):
+        self.pane_calls(prompt=1)
+        q = self.record(timeout=60)
+        s.mark_detached(q)
+        s.deliver_answer(q, "a")
+        failure = self.failure_record()
+        with self.owner_env():
+            with self.assertRaisesRegex(ValueError, "deliver it by hand"):
+                s.answer(failure["id"], "a")
+
+    def test_a_new_ask_is_not_blocked_by_an_undelivered_record(self):
+        self.pane_calls(prompt=1)
+        q = self.record(timeout=60)
+        s.mark_detached(q)
+        s.deliver_answer(q, "a")
+        s.remove_question(q)
+        failure = self.failure_record()
+        fresh = self.record(timeout=60)
+        self.assertTrue(s.question_path(failure["id"]).exists())
+        self.assertNotEqual(fresh["id"], failure["id"])
+
+    def test_undelivered_record_is_not_listed_as_answerable(self):
+        self.pane_calls(prompt=1)
+        q = self.record(timeout=60)
+        s.mark_detached(q)
+        s.deliver_answer(q, "a")
+        out = io.StringIO()
+        with (
+            self.owner_env(),
+            patch.object(sys, "argv", ["orch-signal", "list"]),
+            contextlib.redirect_stdout(out),
+        ):
+            self.assertEqual(s.main(), 0)
+        self.assertNotIn("UNDELIVERED", out.getvalue())
+
+    def test_interrupt_during_the_send_reaches_the_architect(self):
+        def interrupted(argv, *args, **kwargs):
+            if str(argv[1]).endswith("composer-state.py"):
+                return subprocess.CompletedProcess(argv, 0, "empty\n", "")
+            raise KeyboardInterrupt
+
+        q = self.record(timeout=60)
+        s.mark_detached(q)
+        with patch.object(s.subprocess, "run", side_effect=interrupted):
+            try:
+                s.deliver_answer(q, "a")
+            except KeyboardInterrupt:
+                self.fail("the interrupt escaped the send")
+        self.assertIn("interrupted during the send", self.failure_record()["question"])
+
+    def run_ask(self, parents):
+        """Run `orch-signal ask` with a stubbed wait; return what wait_answer, deliver_answer and the deadline saw."""
+        import watcher_runtime as runtime
+
+        seen = {}
+
+        @contextlib.contextmanager
+        def guard(*args, **kwargs):
+            seen["inside"] = True
+            try:
+                yield
+            finally:
+                seen["inside"] = False
+
+        def wait(record, timeout, deadline, parent):
+            seen["parent"] = parent
+            return "a"
+
+        def deliver(record, text):
+            seen["deliver_inside_guard"] = seen["inside"]
+
+        ppids = iter(parents)
+        with (
+            patch.object(runtime, "deadline", guard),
+            patch.object(s, "wait_answer", wait),
+            patch.object(s, "deliver_answer", deliver),
+            patch.object(s.os, "getppid", side_effect=lambda: next(ppids)),
+            patch.object(sys, "argv", ["orch-signal", "ask", "--question", "q"]),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(s.main(), 0)
+        return seen
+
+    def test_ask_passes_the_parent_read_before_the_question_exists(self):
+        seen = self.run_ask([777, 888, 888])
+        self.assertEqual(seen["parent"], 777)
+
+    def ask_swallowing_the_alarm(self, detached):
+        """Real main with a short --timeout; the wait reads its answer, then swallows the soft alarm as wait_answer does."""
+
+        def wait(record, timeout, deadline, parent):
+            record["detached"] = detached
+            try:
+                s.time.sleep(5)
+            except TimeoutError:
+                pass
+            return "a"
+
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            patch.object(s, "wait_answer", wait),
+            patch.object(
+                sys,
+                "argv",
+                ["orch-signal", "ask", "--question", "q", "--timeout", "0.3"],
+            ),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            return s.main(), out.getvalue(), err.getvalue()
+
+    def test_an_answer_read_in_the_last_poll_is_printed_not_timed_out(self):
+        code, out, err = self.ask_swallowing_the_alarm(detached=False)
+        self.assertEqual((code, out), (0, "a\n"), err)
+
+    def test_an_answer_read_in_the_last_poll_is_still_typed_for_a_detached_waiter(self):
+        calls = self.pane_calls()
+        code, out, err = self.ask_swallowing_the_alarm(detached=True)
+        self.assertEqual((code, out), (0, "a\n"), err)
+        self.assertEqual(len(self.prompts(calls)), 1)
+
+    def test_ask_sends_after_the_deadline_guard_is_released(self):
+        seen = self.run_ask([777, 888, 888])
+        self.assertIs(seen["deliver_inside_guard"], False)
 
     def test_escalation_and_answers_watcher_bridge(self):
         q = self.record(timeout=60)
