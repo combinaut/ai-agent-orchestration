@@ -66,13 +66,35 @@ WORKTREES = "worktree /repo/product\nbranch refs/heads/main\n\nworktree /wt/prod
 
 class PullsTest(IsolatedTestCase):
     def setUp(self):
-        env = patch.dict(os.environ, {"ORCH_PR_AUTHOR": "author"})
+        env = patch.dict(
+            os.environ,
+            {
+                "ORCH_PR_AUTHOR": "author",
+                "ORCH_BOT_REVIEWER_LOGIN": "copilot-pull-request-reviewer",
+            },
+        )
         env.start()
         self.addCleanup(env.stop)
         work = open_work(PR["repository"]["nameWithOwner"] + " o/r")
         work.start()
         self.addCleanup(work.stop)
         self.calls = []
+
+    def test_empty_bot_reviewer_login_skips_copilot_state(self):
+        row = pr(7, decision="REVIEW_REQUIRED")
+        row["reviews"]["nodes"] = [
+            {
+                "id": "review-1",
+                "author": {"login": "copilot-pull-request-reviewer"},
+                "body": "Needs a closer look\nCheck it",
+            }
+        ]
+        with patch.dict(os.environ, {"ORCH_BOT_REVIEWER_LOGIN": ""}):
+            state, events = w.reduce_pulls(
+                None, w.collect_pulls(self.command([row]), None)
+            )
+        self.assertNotIn("COPILOT", state["prs"]["owner/product#7"]["lines"])
+        self.assertFalse(any(event.startswith("COPILOT ") for event in events))
 
     def command(self, prs, departed=None):
         def run(*argv):

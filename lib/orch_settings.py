@@ -126,8 +126,8 @@ SETTINGS = [
         "pr.bot_reviewer_login",
         "ORCH_BOT_REVIEWER_LOGIN",
         "str",
-        "copilot-pull-request-reviewer",
-        'Bot whose "Needs a closer look" review raises a COPILOT line',
+        "",
+        'Optional bot whose "Needs a closer look" review raises a COPILOT line; empty disables bot-review events',
     ),
     _g(
         "audit.packs_max",

@@ -9,8 +9,8 @@
 author = ""
 # Only PRs updated on or after this date (YYYY-MM-DD); empty means no date filter
 since = ""
-# Bot whose "Needs a closer look" review raises a COPILOT line
-bot_reviewer_login = "copilot-pull-request-reviewer"
+# Optional bot whose "Needs a closer look" review raises a COPILOT line; empty disables bot-review events
+bot_reviewer_login = ""
 
 [audit]
 # Pack files in a clone of the open work before a PACKS line

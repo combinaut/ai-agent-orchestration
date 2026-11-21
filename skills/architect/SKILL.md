@@ -38,7 +38,7 @@ Run `orch-settings` first: it prints every resolved setting as one `ORCH_NAME=va
 Reply with its path and stop. The Coordinator starts your successor in a fresh pane on `$ORCH_ARCHITECT_MODEL` with `<effort flag>` (architect: `ORCH_ARCHITECT_EFFORT`), with the same Claude session name, Herdr agent name, tab name, owner and role tags. The successor reads only the handoff, not the old transcript, takes over your workers by pane id, which it finds with `orch-agents`, closes your pane with `~/.claude/coordinator/watchers/close-pane.sh <old pane id>`; you never close yourself. Close any pane on purpose the same way: the script marks the pane as closed on purpose and removes the mark when the close fails.
 Workers never recycle themselves: for a worker in a workspace you own, the context watcher sends you `RECYCLE-WORKER-SOFT` / `RECYCLE-WORKER-HARD` at the worker thresholds; follow [references/worker-recycle.md](references/worker-recycle.md).
 
-**PR events come to you.** On start and after every recycle, run `python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/architect-<id>.json` with your own workspace id written out (read it once with `echo $HERDR_WORKSPACE_ID`, for example `architect-w2M.json`; Claude Code blocks a command that holds `$HERDR_WORKSPACE_ID`) from your own Bash environment, as one Bash call on its own (never chained with `&&`, `;` or a pipe; auto mode denies a chained call). `install.sh` installs the allow rule for exactly this command, so run it yourself and do not ask the user. If auto mode still blocks it, tell the user once. The pulls watcher then sends APPROVED, RED, CHANGES, THREADS, COPILOT, COMMENTED and MERGED for PRs whose branch is checked out in a workspace tagged `owner=$HERDR_WORKSPACE_ID` straight to you, within about 3 minutes. Do not poll for approvals.
+**PR events come to you.** On start and after every recycle, run `python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/architect-<id>.json` with your own workspace id written out (read it once with `echo $HERDR_WORKSPACE_ID`, for example `architect-w2M.json`; Claude Code blocks a command that holds `$HERDR_WORKSPACE_ID`) from your own Bash environment, as one Bash call on its own (never chained with `&&`, `;` or a pipe; auto mode denies a chained call). `install.sh` installs the allow rule for exactly this command, so run it yourself and do not ask the user. If auto mode still blocks it, tell the user once. The pulls watcher then sends APPROVED, RED, CHANGES, THREADS, COMMENTED and MERGED, plus COPILOT only when `pr.bot_reviewer_login` is set, for PRs whose branch is checked out in a workspace tagged `owner=$HERDR_WORKSPACE_ID` straight to you, within about 3 minutes. Do not poll for approvals.
 
 **Park when idle — opt in with `recycle.park_idle = true` (default off).** With this setting off, stay open. With it on and no open PR, running worker, or watcher, overwrite the same bounded handoff, tell the Coordinator its path in one line, and exit. The Coordinator restarts you from that handoff when work arrives, using the recycle start procedure.
 
@@ -212,10 +212,10 @@ and never leave a pane spinning.
 Each round the worker polls its PR for new threads and for CI; verifies every review-bot claim against the
 code before accepting it (a bot is the most skeptical source, and is wrong often enough to matter);
 fixes what is real and proves the fix; replies with file:line evidence to what is not; replies to and
-resolves every thread either way; fixes CI; and re-requests
-the bot review after each push. If the bot review is a Copilot error ("Copilot encountered an error
+resolves every thread either way; fixes CI; and, only when `pr.bot_reviewer_login` is set,
+re-requests that bot's review after each push. If its review is a Copilot error ("Copilot encountered an error
 and was unable to review this pull request. You can try again by re-requesting a review."), do **not**
-re-request it: treat that PR as having no Copilot review.
+re-request it: treat that PR as having no bot review.
 
 Two things workers miss unless told: **a human reviewer's blocker often arrives in the review body,
 not in a thread**, so the reviews themselves are read each round; and **merging, undrafting,

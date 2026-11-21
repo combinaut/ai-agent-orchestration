@@ -525,14 +525,17 @@ def pr_lines(pr, page_nodes=100, settings=None):
         emit("RED", ",".join(red))
     if count:
         emit("THREADS", f"{count} unresolved")
-    bot = os.environ.get("ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer")
-    reviews = [
-        r for r in pr["reviews"]["nodes"] if (r.get("author") or {}).get("login") == bot
-    ]
-    body = reviews[-1]["body"] if reviews else ""
-    if "Needs a closer look" in body:
-        summary = re.search(r"Needs a closer look\s*\n+([^\n]+)", body)
-        emit("COPILOT", summary[1] if summary else "see overview")
+    bot = os.environ.get("ORCH_BOT_REVIEWER_LOGIN", "")
+    if bot:
+        reviews = [
+            r
+            for r in pr["reviews"]["nodes"]
+            if (r.get("author") or {}).get("login") == bot
+        ]
+        body = reviews[-1]["body"] if reviews else ""
+        if "Needs a closer look" in body:
+            summary = re.search(r"Needs a closer look\s*\n+([^\n]+)", body)
+            emit("COPILOT", summary[1] if summary else "see overview")
     commented = commented_review(pr, bot)
     if commented:
         emit(
