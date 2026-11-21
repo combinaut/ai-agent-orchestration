@@ -136,7 +136,8 @@ It must create the runtime-only directories `bindings/` and `prod-context/` with
 linking state. It must make the files under the selected `service/<platform>/`
 directory available as templates, substituting installer settings and paths: `@ORCH_PYTHON3@`, `@ORCH_CLAUDE_DIR@`, `@ORCH_CONFIG@`, `@ORCH_HERDR_BIN@`,
 `@ORCH_HERDR_SOCKET@`, and `@ORCH_PATH@`. Every producer and notifier service
-carries the installer-selected config path as ORCH_CONFIG, including a custom
+carries `HERDR_BIN_PATH`, `HERDR_ENV=1` and `HERDR_SOCKET_PATH`. It also carries
+the installer-selected config path as ORCH_CONFIG, including a custom
 path outside ~/.claude. Relative selections become absolute so the service’s
 working directory does not change which file is read. The rendered files, never the
 templates, are registered as active jobs (see the top-level README, install step 7).

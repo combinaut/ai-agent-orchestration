@@ -95,8 +95,8 @@ def open_work(command, roots=True):
     )
 
 
-def architect_owners(command):
-    """Saved architect names to workspace IDs; ambiguous names are omitted."""
+def architect_owners(command, ambiguous_out=None):
+    """Saved architect names to workspace IDs; ambiguous names are omitted and added to `ambiguous_out` when given."""
     rows = result(command, "agent", "list")["agents"]
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         raise ValueError("agents is not a list of records")
@@ -114,4 +114,6 @@ def architect_owners(command):
             if label in owners and owners[label] != workspace:
                 ambiguous.add(label)
             owners[label] = workspace
+    if ambiguous_out is not None:
+        ambiguous_out.update(ambiguous)
     return {name: owner for name, owner in owners.items() if name not in ambiguous}

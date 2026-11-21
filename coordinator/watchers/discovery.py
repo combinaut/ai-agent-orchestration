@@ -1,6 +1,7 @@
 """Repos of the open work, read through the env adapter; the last discovered set when the adapter cannot answer."""
 
 import importlib.util
+import inspect
 import json
 import os
 import re
@@ -267,10 +268,18 @@ def repos(command, work=None):
     return found
 
 
-def architect_owners(command):
-    """Architect saved names to workspace IDs through the env adapter; no ambiguous routing."""
+def architect_owners(command, ambiguous_out=None):
+    """Architect saved names to workspace IDs through the env adapter; no ambiguous routing.
+
+    A set passed as ambiguous_out receives the names the adapter omitted as ambiguous."""
     try:
-        return adapter().architect_owners(command)
+        owners = adapter().architect_owners
+        if (
+            ambiguous_out is not None
+            and "ambiguous_out" in inspect.signature(owners).parameters
+        ):
+            return owners(command, ambiguous_out=ambiguous_out)
+        return owners(command)
     except READ_ERRORS as error:
         raise Unavailable(str(error)[:200]) from error
 

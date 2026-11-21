@@ -57,4 +57,4 @@ The native host calls `coordinator/watchers/discovery.branch_owners`, using the 
 
 Results are cached for 30 seconds in one identity-checked `owners.json`; retired per-config caches are removed. Failed scans return `owners: null` so Chrome retains its last good map; a successful empty map clears ownership. Failures are also cached for 30 seconds. An absent adapter uses repository groups.
 
-Adapters that support to-do answers also expose `architect_owners(command)`: saved architect names mapped to workspace IDs, omitting ambiguous names. The to-do producer uses this mapping for the existing native architect bindings.
+Adapters that support to-do answers also expose `architect_owners(command, ambiguous_out=None)`: saved architect names mapped to workspace IDs, omitting ambiguous names; a set passed as `ambiguous_out` receives the omitted names. The to-do producer uses this mapping for the existing native architect bindings.

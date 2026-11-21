@@ -79,6 +79,8 @@ to-do state and preserves records when that state is unreadable.
 Dropping an undelivered answer after a status-item change also removes its dismissal
 and emits one `TODO READFAIL answer discarded:` notice with the affected item and answer.
 Pending discard notices share the existing 200-record queue cap and leave the queue on collection.
+An answer that cannot be delivered stays queued with `failure` (one line, at most 200 characters: the Herdr error, `no live architect named <name>` or `ambiguous: …`) and `failed_at` (first failure) on its record; delivery clears both. The watcher writes `TODO READFAIL answer:<architect>: <reason>` once, repeats it as `… (repeat <n>)` every `ORCH_WAIT_REPEAT_S` (default 1800) seconds while the answer stays undelivered, and writes `TODO READ RECOVERED answer:<architect>: <reason>` when the answer stops failing (delivered, discarded or no longer listed). A reason that changes between repeats is not announced; the next `(repeat <n>)` line carries the current reason. Every watcher service runs with `HERDR_BIN_PATH`, `HERDR_ENV=1` and `HERDR_SOCKET_PATH` so it can find the live architects; re-run `install.sh` to apply this to installed services.
+
 Unavailable status files retain the answer. The legacy answer editor ignores whole CSI
 key sequences, including arrows, so they cannot cancel or insert text into an answer.
 Incomplete CSI sequences stay buffered across reads, including modifier sequences

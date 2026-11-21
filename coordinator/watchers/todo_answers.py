@@ -15,6 +15,7 @@ from worker_signals import read, write
 ANSWER_MAX = 512
 CHOICES_MAX = 9
 PENDING_MAX = 200
+REASON_MAX = 200
 KEEP_SECONDS = 3600
 LOCK_SECONDS = 2
 CHOICE = re.compile(r"\[([0-9]+): ([^\[\]\r\n]+)\]")
@@ -196,6 +197,8 @@ def mark_delivered(text, owner=None):
                 and not record.get("discarded")
             ):
                 record["delivered_at"] = time.time()
+                record.pop("failure", None)
+                record.pop("failed_at", None)
                 write(directory() / (record["key"] + ".json"), record)
 
 
@@ -246,9 +249,34 @@ def submit_locked(owner, text, answer, generation, existing):
     return record
 
 
+def reason_text(text):
+    return " ".join(str(text).split())[:REASON_MAX]
+
+
+def record_failures(reasons):
+    """Stores each failed answer's reason and first failure time; clears both for answers now ready."""
+    with queue_lock():
+        for record in records():
+            if record.get("delivered_at") or record.get("discarded"):
+                continue
+            reason = reasons.get(record["id"])
+            if reason is None:
+                update = {
+                    key: record.pop(key, None) for key in ("failure", "failed_at")
+                }
+                changed = any(value is not None for value in update.values())
+            else:
+                changed = record.get("failure") != reason or "failed_at" not in record
+                record["failure"] = reason
+                record.setdefault("failed_at", time.time())
+            if changed:
+                write(directory() / (record["key"] + ".json"), record)
+
+
 def collect(command):
+    """Returns (ready records, discard notices, failures); a failure is one architect's undelivered answers."""
     if not directory().exists():
-        return [], []
+        return [], [], []
     with queue_lock():
         pruned = prune(time.time())
         notices = []
@@ -264,19 +292,40 @@ def collect(command):
             if not record.get("delivered_at") and not record.get("discarded")
         ]
     if not current:
-        return [], notices
+        return [], notices, []
+    ambiguous = set()
     try:
-        owners = discovery.architect_owners(command)
-    except discovery.Unavailable:
-        return [], notices + ["answer:" + record["architect"] for record in current]
-    ready, failed = [], []
+        owners = discovery.architect_owners(command, ambiguous_out=ambiguous)
+    except discovery.Unavailable as error:
+        reason = reason_text(error) or "Herdr is unavailable"
+        owners = None
+    ready, reasons = [], {}
     for record in current:
-        owner = owners.get(record["architect"])
-        if owner and re.fullmatch(r"[A-Za-z0-9_-]+", owner):
+        name = record["architect"]
+        owner = owners.get(name) if owners is not None else None
+        if owners is None:
+            reasons[record["id"]] = reason
+        elif owner and re.fullmatch(r"[A-Za-z0-9_-]+", owner):
             ready.append(dict(record, owner=owner))
+        elif name in ambiguous:
+            reasons[record["id"]] = reason_text(
+                f"ambiguous: more than one live architect named {name}"
+            )
         else:
-            failed.append("answer:" + record["architect"])
-    return ready, notices + sorted(set(failed))
+            reasons[record["id"]] = reason_text(f"no live architect named {name}")
+    try:
+        record_failures(reasons)
+    except TimeoutError:
+        pass
+    failed = {}
+    for record in current:
+        if record["id"] in reasons:
+            failed.setdefault(record["architect"], reasons[record["id"]])
+    return (
+        ready,
+        notices,
+        [dict(architect=name, reason=failed[name]) for name in sorted(failed)],
+    )
 
 
 def event_line(record):
