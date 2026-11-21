@@ -1629,9 +1629,9 @@ TOML
   [ "$output" = "$HOME/.claude/ai-agent-orchestration" ]
 }
 
-@test "install links the finalize and pr-defend skills for Claude and the shared agents folder" {
+@test "install links the finalize, pr-defend and todo-panel skills for Claude and the shared agents folder" {
   fresh_install
-  for name in finalize-sweep finalize-change-footprint finalize-code-comments pr-defend; do
+  for name in finalize-sweep finalize-change-footprint finalize-code-comments pr-defend todo-panel; do
     skill="$(cd "$CLONE" && pwd -P)/skills/$name"
     [ -f "$skill/SKILL.md" ]
     [ "$(readlink "$HOME/.claude/skills/$name")" = "$skill" ]

@@ -11,4 +11,9 @@ else
   bats tests/
 fi
 python3 tests/guard-bash.test.py
+if command -v node >/dev/null 2>&1; then
+  node --test tests/todo-panel.test.js
+else
+  printf 'node not found; the to-do panel page logic tests did not run\n'
+fi
 (cd coordinator/watchers && python3 run_tests.py)

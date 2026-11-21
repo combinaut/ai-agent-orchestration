@@ -64,6 +64,7 @@ macOS or Linux, Bash 3.2 or newer; `git`, `jq`, `python3`, `curl`; `gh` for the 
 | `skills/finalize-change-footprint/` | `~/.claude/skills/finalize-change-footprint` (directory link) | `/finalize-change-footprint`: the PR diff swept for duplicated tests, leftovers and dead code |
 | `skills/finalize-code-comments/` | `~/.claude/skills/finalize-code-comments` (directory link) | `/finalize-code-comments`: the PR diff's comments swept for narration and noise |
 | `skills/pr-defend/` | `~/.claude/skills/pr-defend` (directory link) | `/pr-defend`: a PR explained from its code, with each soundness claim checked on the current head or listed as a gap |
+| `skills/todo-panel/` | `~/.claude/skills/todo-panel` (directory link) | `/todo-panel`: the to-do list published as a private claude.ai Artifact panel, the submitted answers queued through the same path as the terminal view, and the panel republished |
 | `coordinator/watchers/coord-audit-watch.sh` | `~/.claude/coordinator/watchers/` | PR problems, blocked workers, stale heavy slots, git pile-ups |
 | `coordinator/watchers/context-watch.sh` | `~/.claude/coordinator/watchers/` | Writes context alerts for the inbox notifier |
 | `coordinator/watchers/coord-host-watch.sh` | `~/.claude/coordinator/watchers/` | Host pressure: memory, swap, processes, open files, load (macOS and Linux) |

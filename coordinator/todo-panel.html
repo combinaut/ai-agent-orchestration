@@ -1,0 +1,284 @@
+<title>To-do panel</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  :root {
+    --bg: #f6f6f3;
+    --surface: #ffffff;
+    --fg: #1d2420;
+    --muted: #5d6862;
+    --line: #d9dcd5;
+    --accent: #1f6f5c;
+    --on-accent: #ffffff;
+    --pick: #dff0ea;
+    --error: #a3321f;
+    --notice: #fff3d6;
+    --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151a18;
+      --surface: #1e2522;
+      --fg: #e6ebe7;
+      --muted: #9aa69f;
+      --line: #333c37;
+      --accent: #4fb89c;
+      --on-accent: #0c1a15;
+      --pick: #23382f;
+      --error: #f0907e;
+      --notice: #3b3322;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #151a18;
+    --surface: #1e2522;
+    --fg: #e6ebe7;
+    --muted: #9aa69f;
+    --line: #333c37;
+    --accent: #4fb89c;
+    --on-accent: #0c1a15;
+    --pick: #23382f;
+    --error: #f0907e;
+    --notice: #3b3322;
+    color-scheme: dark;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.45 var(--font);
+    padding-block: 20px 96px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  main { max-width: 42rem; margin: 0 auto; display: grid; gap: 14px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+  h1 { font-size: 1.25rem; margin: 0; text-wrap: balance; }
+  #stamp { color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+  #notice { background: var(--notice); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 0; }
+  #list { display: grid; gap: 12px; padding: 0; margin: 0; list-style: none; }
+  .item { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 10px; min-width: 0; }
+  .owner { font: 0.75rem var(--mono); color: var(--muted); letter-spacing: 0.02em; overflow-wrap: anywhere; }
+  .text { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+  .error { margin: 0; color: var(--error); font-size: 0.85rem; overflow-wrap: anywhere; }
+  .choices { display: flex; flex-wrap: wrap; gap: 8px; }
+  button, textarea { font: inherit; color: inherit; }
+  .choice { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; min-height: 36px; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
+  .choice[aria-pressed="true"] { background: var(--pick); border-color: var(--accent); font-weight: 600; }
+  textarea { width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; resize: vertical; min-height: 4.5em; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  footer { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding-block: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  footer div { max-width: 42rem; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  #status { color: var(--muted); font-size: 0.85rem; min-width: 0; overflow-wrap: anywhere; }
+  #submit { background: var(--accent); color: var(--on-accent); border: 0; border-radius: 6px; padding: 10px 18px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  #submit:disabled { opacity: 0.45; cursor: default; }
+  #empty { color: var(--muted); text-align: center; padding: 28px 0; margin: 0; }
+</style>
+
+<main>
+  <header>
+    <h1 id="heading">To-do panel</h1>
+    <span id="stamp"></span>
+  </header>
+  <p id="notice" role="status" hidden></p>
+  <ul id="list"></ul>
+  <p id="empty" hidden>Nothing is waiting on you.</p>
+</main>
+<footer>
+  <div>
+    <span id="status" role="status"></span>
+    <button id="submit" type="button" disabled>Submit</button>
+  </div>
+</footer>
+
+<script src="todo-panel.js"></script>
+<script>
+  const STASH = "todo-panel-values";
+  const state = { items: [], pending: [], values: {}, readOnly: false, sending: false, artifact: null, wakeOff: false };
+  const $ = (id) => document.getElementById(id);
+
+  function stash(values) {
+    try {
+      if (values) sessionStorage.setItem(STASH, JSON.stringify(values));
+      else sessionStorage.removeItem(STASH);
+    } catch {}
+  }
+
+  function restore() {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(STASH) || "{}");
+      if (saved && typeof saved === "object") state.values = saved;
+    } catch {}
+  }
+
+  function say(message) {
+    $("status").textContent = message;
+  }
+
+  function lockNotice(message) {
+    state.readOnly = true;
+    $("notice").textContent = message;
+    $("notice").hidden = false;
+  }
+
+  function sendable() {
+    return collectAnswers(visibleItems(state.items, state.pending), state.values, () => "x");
+  }
+
+  function refreshBar() {
+    const count = sendable().length;
+    $("submit").disabled = state.sending || state.readOnly || count === 0;
+    $("submit").textContent = count > 1 ? "Submit " + count + " answers" : "Submit";
+  }
+
+  function itemNode(item) {
+    const node = document.createElement("li");
+    node.className = "item";
+    const owner = document.createElement("span");
+    owner.className = "owner";
+    owner.textContent = item.owner;
+    const text = document.createElement("p");
+    text.className = "text";
+    text.textContent = item.text;
+    node.append(owner, text);
+    if (item.error) {
+      const error = document.createElement("p");
+      error.className = "error";
+      error.textContent = item.error;
+      node.append(error);
+    }
+    if (item.choices.length) {
+      const row = document.createElement("div");
+      row.className = "choices";
+      for (const label of item.choices) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "choice";
+        button.textContent = label;
+        button.setAttribute("aria-pressed", String(state.values[item.key] === label));
+        button.addEventListener("click", () => {
+          state.values[item.key] = state.values[item.key] === label ? "" : label;
+          for (const other of row.children) other.setAttribute("aria-pressed", String(other === button && !!state.values[item.key]));
+          refreshBar();
+        });
+        row.append(button);
+      }
+      node.append(row);
+    } else {
+      const box = document.createElement("textarea");
+      box.maxLength = ANSWER_MAX;
+      box.rows = 2;
+      box.setAttribute("aria-label", "Answer for " + item.text);
+      box.value = state.values[item.key] || "";
+      box.addEventListener("input", () => {
+        state.values[item.key] = box.value;
+        refreshBar();
+      });
+      node.append(box);
+    }
+    return node;
+  }
+
+  function render() {
+    const shown = visibleItems(state.items, state.pending);
+    $("list").replaceChildren(...shown.map(itemNode));
+    $("empty").hidden = shown.length > 0;
+    refreshBar();
+  }
+
+  function makeId() {
+    return crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
+  }
+
+  async function submit() {
+    if (state.sending || state.readOnly || !state.artifact) return;
+    const entries = collectAnswers(visibleItems(state.items, state.pending), state.values, makeId);
+    if (!entries.length) return;
+    const merged = mergePending(state.pending, entries);
+    state.sending = true;
+    refreshBar();
+    stash(state.values);
+    const wake = await prepareWake(entries.length);
+    try {
+      await state.artifact.publish({ "answers.json": JSON.stringify({ answers: merged }) });
+    } catch (error) {
+      state.sending = false;
+      const kind = classifyError(error && error.code);
+      if (kind === "reload") return;
+      if (kind === "read-only") {
+        lockNotice("This view is read-only. Your answers stay here but cannot be sent.");
+      } else {
+        say("Not sent: " + ((error && error.message) || "unknown error") + ". Your answers are kept.");
+      }
+      refreshBar();
+      return;
+    }
+    state.pending = merged;
+    for (const entry of entries) delete state.values[entry.key];
+    stash(null);
+    state.sending = false;
+    say(await sendWake(wake));
+    render();
+  }
+
+  async function prepareWake(count) {
+    if (state.wakeOff) return { plan: wakePlan("off", count) };
+    try {
+      const comments = await claude.use("comments");
+      if (!comments) return { plan: wakePlan("off", count) };
+      const plan = wakePlan(await comments.canSendToClaude(), count);
+      if (!plan.send) return { plan };
+      return { plan, comments, anchor: await comments.anchorFor($("heading")) };
+    } catch {
+      return { plan: wakePlan("off", count) };
+    }
+  }
+
+  async function sendWake(wake) {
+    if (!wake.plan.send) return wake.plan.text;
+    try {
+      await wake.comments.sendToClaude({ anchor: wake.anchor, text: wake.plan.text });
+      return "Sent. Claude is applying your answers.";
+    } catch (error) {
+      const failure = wakeFailure(error && error.code);
+      if (failure.stop) state.wakeOff = true;
+      return failure.message;
+    }
+  }
+
+  async function fetchText(path) {
+    const response = await fetch(path, { cache: "no-store" });
+    if (!response.ok) throw new Error(path + " " + response.status);
+    return response.text();
+  }
+
+  async function start() {
+    restore();
+    $("submit").addEventListener("click", submit);
+    try {
+      const page = JSON.parse(await fetchText("items.json"));
+      state.items = page.items;
+      $("stamp").textContent = "Rendered " + new Date(page.rendered_at).toLocaleString();
+    } catch {
+      say("The list could not be loaded.");
+      $("empty").textContent = "No list yet. Ask Claude to run /todo-panel.";
+      $("empty").hidden = false;
+      return;
+    }
+    try {
+      state.pending = parseAnswers(await fetchText("answers.json"));
+    } catch {
+      state.pending = [];
+    }
+    try {
+      state.artifact = (await claude.use("artifact")) || null;
+    } catch {
+      state.artifact = null;
+    }
+    if (!state.artifact) lockNotice("Sending is not available in this view. You can read the list.");
+    if (state.pending.length) say(state.pending.length + (state.pending.length === 1 ? " answer waits" : " answers wait") + " for Claude to apply.");
+    render();
+  }
+
+  start();
+</script>
