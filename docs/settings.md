@@ -46,7 +46,7 @@ A family left out is never started: the installer does not ask for its models, a
 |---|---|---|---|
 | `pr.author` | `ORCH_PR_AUTHOR` | empty | GitHub login whose open PRs the audit watches in the repos of the open workspaces ("@me" works); required by the audit watcher |
 | `pr.since` | `ORCH_PR_SINCE` | empty | Only PRs updated on or after this date (YYYY-MM-DD); empty means no date filter |
-| `pr.bot_reviewer_login` | `ORCH_BOT_REVIEWER_LOGIN` | `"copilot-pull-request-reviewer"` | Bot whose "Needs a closer look" review raises a COPILOT line |
+| `pr.bot_reviewer_login` | `ORCH_BOT_REVIEWER_LOGIN` | empty | Optional bot whose "Needs a closer look" review raises a COPILOT line; empty disables bot-review events |
 | `audit.packs_max` | `ORCH_PACKS_MAX` | `50` | Pack files in a clone of the open work before a PACKS line |
 | `audit.worktrees_max` | `ORCH_WORKTREES_MAX` | `40` | Worktrees in a clone of the open work before a WORKTREES line |
 | `audit.page_prs` | `ORCH_AUDIT_PAGE_PRS` | `80` | PR search page size (1-100) |

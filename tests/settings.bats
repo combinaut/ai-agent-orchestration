@@ -56,6 +56,14 @@ ORCH_PARK_IDLE=1
 ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
 }
 
+@test "the bot reviewer is disabled by default" {
+  unset ORCH_CONFIG
+  run python3 "$SETTINGS" print
+
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qxF 'ORCH_BOT_REVIEWER_LOGIN='
+}
+
 @test "an exported variable wins over the global file for every global setting" {
   every_value global >"$ORCH_CONFIG"
   run load_settings global
