@@ -41,9 +41,10 @@ Architects can add consecutive numbered choices, from 1 to 9, before the target:
 - Deploy the release? [1: deploy now] [2: wait until tomorrow] -> Architect::Tooling
 ```
 
-Select that item with the existing number keys or arrows in the buttons view,
-then press **a** (or click **Answer**). In answer mode, press its choice number,
-or **t** to type a free-text answer and **Enter** to send. **Esc** cancels the
+Every item takes an answer. Select it with the existing number keys or arrows in
+the buttons view, then press **a** (or click **Answer**). An item with choices
+opens in choice mode: press its choice number, or **t** to type a free-text
+answer. An item without choices opens in text mode. **Enter** sends. **Esc** cancels the
 answer; in a popup it stays open. The simple `user-todo.py --follow` list also
 supports `a`: type the item number, press `a`, then choose or type. Outside answer
 mode, number/Enter jumps, n/p paging, mouse clicks, Dismiss and Reminder keep their
@@ -70,7 +71,15 @@ queued and raises a to-do read warning; it is never sent by typing into a pane.
 Runtime queue records live under `~/.claude/coordinator/todo-answers/`. Accepted
 delivered records are retained for the retention window to prevent a second stale view
 from submitting the same item again. The ordinary dismissal state preserves
-removal after that window. No choices means no new buttons or answer mode.
+removal after that window.
+
+An answer with no `delivered_at` shows in the buttons view as its own row: the
+architect, the item, your answer, "not delivered yet" with the queue time, and the
+`failure` reason when the record has one. It disappears once delivered. Select it
+and press **c** (or click **Cancel answer**) to remove the record and bring the
+item back unanswered; an answer delivered in the meantime stays. On that row
+**d**, **r**, **a** and **Enter** do not act; the status line points to **c**. The
+`--follow` list shows one line per undelivered answer, with no cancel.
 
 Undelivered answers retry through the same notifier after its outbox retention window.
 A status-item change includes a new `first_seen` generation when an identical line

@@ -5,6 +5,7 @@ to their owning architect and action lines while no feed Monitor is attached. To
 """
 
 import argparse
+import contextlib
 import fcntl
 import importlib.util
 import json
@@ -201,17 +202,20 @@ def batch_written(path, inode, offset, data):
 
 
 def send_line(binding_path, text):
+    answers = "TODO ANSWER " in text
     try:
-        if "TODO ANSWER " in text:
-            text = w.todo_answers.filter_canceled(text)
-            if not text:
-                return True
-        path, token = binding(binding_path)
-        send_to_socket(path, token, text)
-        if binding_path.name.startswith("architect-"):
-            w.todo_answers.mark_delivered(
-                text, binding_path.stem.removeprefix("architect-")
-            )
+        # A cancel takes the same lock, so it cannot land between the filter and the delivery mark.
+        with w.todo_answers.queue_lock() if answers else contextlib.nullcontext():
+            if answers:
+                text = w.todo_answers.filter_canceled(text)
+                if not text:
+                    return True
+            path, token = binding(binding_path)
+            send_to_socket(path, token, text)
+            if answers and binding_path.name.startswith("architect-"):
+                w.todo_answers.mark_delivered_locked(
+                    text, binding_path.stem.removeprefix("architect-")
+                )
         return True
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(
