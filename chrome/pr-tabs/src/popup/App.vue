@@ -73,36 +73,50 @@ const openingProgress = computed(() => ({
   active: workerProgress.value.active || localBusy.value,
 }));
 const isOpeningBatch = computed(() => openingProgress.value.active);
-const actionMenuItems = computed(() => [
-  {
-    id: "open-all",
-    label: openAllButton,
-    hint: openAllHint,
-    busy: isOpeningBatch.value,
-    run: handleOpenAllRun,
-  },
-  {
-    id: "open-reviews",
-    label: openReviewsButton,
-    hint: openReviewsHint,
-    busy: isOpeningBatch.value,
-    run: handleOpenReviewsRun,
-  },
-  {
-    id: "check-now",
-    label: checkNowButton,
-    hint: checkNowHint,
-    busy: isCheckingNow.value,
-    run: handleCheckNowRun,
-  },
-  {
-    id: "close-duplicates",
-    label: closeDuplicatesButton,
-    hint: closeDuplicatesHint,
-    busy: isClosingDuplicates.value,
-    run: handleCloseDuplicatesRun,
-  },
-]);
+
+function openingActionMenuItems() {
+  return [
+    {
+      id: "open-all",
+      label: openAllButton,
+      hint: openAllHint,
+      icon: "open" as const,
+      busy: isOpeningBatch.value,
+      run: handleOpenAllRun,
+    },
+    {
+      id: "open-reviews",
+      label: openReviewsButton,
+      hint: openReviewsHint,
+      icon: "review" as const,
+      busy: isOpeningBatch.value,
+      run: handleOpenReviewsRun,
+    },
+  ];
+}
+
+function closeActionMenuItems() {
+  return [
+    {
+      id: "check-now",
+      label: checkNowButton,
+      hint: checkNowHint,
+      icon: "merge" as const,
+      busy: isCheckingNow.value || !hasPrTabs.value,
+      run: handleCheckNowRun,
+    },
+    {
+      id: "close-duplicates",
+      label: closeDuplicatesButton,
+      hint: closeDuplicatesHint,
+      icon: "copy" as const,
+      busy: isClosingDuplicates.value || !hasPrTabs.value,
+      run: handleCloseDuplicatesRun,
+    },
+  ];
+}
+
+const actionMenuItems = computed(() => [...openingActionMenuItems(), ...closeActionMenuItems()]);
 
 function handleSearchNext(): void {
   groupList.value?.focusFirst();

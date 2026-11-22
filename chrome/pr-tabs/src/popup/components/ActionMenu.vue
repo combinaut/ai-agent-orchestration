@@ -3,11 +3,13 @@ import Button from "primevue/button";
 import Menu from "primevue/menu";
 import { computed, nextTick, ref } from "vue";
 import { useActionMenu } from "#/composables/useActionMenu";
+import ActionIcon from "./ActionIcon.vue";
 
 interface Action {
   id: string;
   label: string;
   hint: string;
+  icon: "open" | "review" | "merge" | "copy";
   busy: boolean;
   run: () => void;
 }
@@ -19,6 +21,7 @@ const model = computed(() =>
   props.actions.map((action) => ({
     id: action.id,
     label: action.label,
+    icon: action.icon,
     disabled: action.busy,
     command: action.run,
   })),
@@ -40,19 +43,26 @@ function handleEscape(event: KeyboardEvent): void {
   close();
   void nextTick(() => document.getElementById("actions-menu")?.focus());
 }
+
+function iconOf(icon: unknown): Action["icon"] {
+  return icon === "open" || icon === "review" || icon === "merge" || icon === "copy"
+    ? icon
+    : "copy";
+}
 </script>
 
 <template>
   <Button
     id="actions-menu"
-    icon="pi pi-bars"
     severity="secondary"
     text
     size="small"
     :aria-label="label"
     :aria-expanded="open"
     @click="handleToggle"
-  />
+  >
+    <ActionIcon name="menu" />
+  </Button>
   <Menu
     ref="menu"
     popup
@@ -61,5 +71,12 @@ function handleEscape(event: KeyboardEvent): void {
     class="origin-top-right"
     @hide="handleHide"
     @keydown.esc="handleEscape"
-  />
+  >
+    <template #item="{ item, props: itemProps }">
+      <a v-bind="itemProps.action" :aria-disabled="Boolean(item.disabled)">
+        <ActionIcon :name="iconOf(item.icon)" />
+        <span>{{ item.label }}</span>
+      </a>
+    </template>
+  </Menu>
 </template>

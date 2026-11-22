@@ -25,13 +25,17 @@ function withoutPolls(sent: Request[]): Request[] {
 async function runMenuAction(wrapper: ReturnType<typeof mountPopup>, label: string): Promise<void> {
   await wrapper.find("#actions-menu").trigger("click");
   await flushPromises();
-  const item = [...document.body.querySelectorAll<HTMLElement>(".p-menu-item-link")].find(
-    (element) => element.textContent?.trim() === label,
-  );
+  const item = menuItem(label);
 
   assert.ok(item, label);
   item.click();
   await flushPromises();
+}
+
+function menuItem(label: string): HTMLElement | undefined {
+  return [...document.body.querySelectorAll<HTMLElement>(".p-menu-item-link")].find(
+    (element) => element.textContent?.trim() === label,
+  );
 }
 
 const SUMMARY: Summary = {
@@ -317,16 +321,56 @@ test("reopening the popup displays the active batch and disables both opening ac
 test("actions live in the burger menu", async () => {
   const { wrapper } = await popup([]);
   assert.equal(wrapper.find("#actions-menu").attributes("aria-expanded"), "false");
+  assert.ok(wrapper.find("#actions-menu svg").exists());
   await wrapper.find("#actions-menu").trigger("click");
   await flushPromises();
   assert.equal(wrapper.find("#actions-menu").attributes("aria-expanded"), "true");
+  const items = [...document.body.querySelectorAll<HTMLElement>(".p-menu-item-link")];
   assert.deepEqual(
-    [...document.body.querySelectorAll(".p-menu-item-link")].map((item) =>
-      item.textContent?.trim(),
-    ),
+    items.map((item) => item.textContent?.trim()),
     ["Open all", "Open reviews", "Close merged", "Close duplicates"],
   );
+  assert.equal(
+    items.every((item) => item.querySelector("svg") !== null),
+    true,
+  );
   wrapper.unmount();
+});
+
+test("close actions stay visible but disabled without PR tabs", async () => {
+  const { wrapper, sent } = await popup([], { summary: { prs: 0, groups: [] } });
+  await wrapper.find("#actions-menu").trigger("click");
+  await flushPromises();
+
+  const closeMerged = menuItem("Close merged");
+  const closeDuplicates = menuItem("Close duplicates");
+  assert.equal(closeMerged?.getAttribute("aria-disabled"), "true");
+  assert.equal(closeDuplicates?.getAttribute("aria-disabled"), "true");
+  closeMerged?.click();
+  await flushPromises();
+  assert.deepEqual(sent, []);
+  wrapper.unmount();
+});
+
+test("close actions are enabled when PR tabs exist", async () => {
+  const { wrapper } = await popup([]);
+  await wrapper.find("#actions-menu").trigger("click");
+  await flushPromises();
+
+  assert.equal(menuItem("Close merged")?.getAttribute("aria-disabled"), "false");
+  assert.equal(menuItem("Close duplicates")?.getAttribute("aria-disabled"), "false");
+  wrapper.unmount();
+});
+
+test("search is hidden without PR tabs and shown when a PR tab exists", async () => {
+  const empty = await popup([], { summary: { prs: 0, groups: [] } });
+  assert.equal(empty.wrapper.find("#pr-search").exists(), false);
+  assert.ok(empty.wrapper.text().includes("No PR tabs open"));
+  empty.wrapper.unmount();
+
+  const populated = await popup([]);
+  assert.equal(populated.wrapper.find("#pr-search").exists(), true);
+  populated.wrapper.unmount();
 });
 
 for (const result of [{ opened: 3, remaining: 0, estimated: false }, { error: "offline" }]) {
