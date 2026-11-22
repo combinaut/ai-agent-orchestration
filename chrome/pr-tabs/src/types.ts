@@ -28,6 +28,7 @@ export interface Rules {
 }
 
 export type RepoRules = Pick<Rules, "defaultRepo" | "repos">;
+export type RepoNumbers = Partial<Record<RepoName, PrNumber>>;
 
 export interface PrRef {
   owner: OrgName;
@@ -265,6 +266,7 @@ export interface RepoChoices {
   readonly repos: readonly RepoName[];
   readonly selected: RepoName;
   readonly show: boolean;
+  readonly newest: RepoNumbers;
 }
 
 export interface Opening {
@@ -341,8 +343,19 @@ export interface FocusPaneHostRequest extends BranchRef {
   type: "focusPane";
 }
 
+export interface RepoNumbersRequest {
+  type: "repoNumbers";
+  org: OrgName;
+  repos: RepoName[];
+}
+
 export type HostRequest =
-  SettingsRequest | StatesRequest | SearchRequest | PanesHostRequest | FocusPaneHostRequest;
+  | SettingsRequest
+  | StatesRequest
+  | SearchRequest
+  | PanesHostRequest
+  | FocusPaneHostRequest
+  | RepoNumbersRequest;
 
 export interface Ownership {
   owners?: Owners | null;
@@ -361,12 +374,17 @@ export interface PanesReply {
   panes: PaneLookup;
 }
 
+export interface RepoNumbersReply {
+  newest: RepoNumbers;
+}
+
 export interface HostReplies {
   settings: Partial<Rules>;
   states: StatesReply;
   search: SearchReply;
   panes: PanesReply;
   focusPane: FocusedPane;
+  repoNumbers: RepoNumbersReply;
 }
 
 export type HostOk<T> = { ok: true } & T;
@@ -378,6 +396,11 @@ export interface HostFailure {
 
 export type HostReply<T> = HostOk<T> | HostFailure;
 
+export interface RepoNumbersCache {
+  newest: RepoNumbers;
+  refreshedAt: number;
+}
+
 export interface StoredState {
   prTabsSettings: HostOk<Partial<Rules>> | null;
   owners: Owners;
@@ -385,6 +408,7 @@ export interface StoredState {
   failures: number;
   cursor: number;
   prTabsRepo: RepoName;
+  prTabsRepoNumbers: RepoNumbersCache;
 }
 
 export interface FetchedStates {
@@ -533,6 +557,7 @@ export interface PrInputProps {
 
 export interface RepoSelectProps {
   repos: RepoName[];
+  open: boolean;
 }
 
 export interface StatusLineProps {

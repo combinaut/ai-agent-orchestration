@@ -39,7 +39,9 @@ test("the input placeholder and the Enter hint come from chrome.i18n", () => {
 test("the repo dropdown label comes from chrome.i18n", () => {
   speakGerman();
 
-  const wrapper = mountPopup(RepoSelect, { props: { repos: ["a", "b"], modelValue: "a" } });
+  const wrapper = mountPopup(RepoSelect, {
+    props: { repos: ["a", "b"], open: false, modelValue: "a" },
+  });
 
   assert.equal(
     wrapper.find("[aria-label]").attributes("aria-label"),
@@ -50,7 +52,9 @@ test("the repo dropdown label comes from chrome.i18n", () => {
 test("the dropdown live-region messages come from chrome.i18n", async () => {
   speakGerman();
 
-  const wrapper = mountPopup(RepoSelect, { props: { repos: ["a", "b"], modelValue: "a" } });
+  const wrapper = mountPopup(RepoSelect, {
+    props: { repos: ["a", "b"], open: false, modelValue: "a" },
+  });
 
   await wrapper.find(".p-select").trigger("click");
 

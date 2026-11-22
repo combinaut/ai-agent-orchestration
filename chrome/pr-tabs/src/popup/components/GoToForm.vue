@@ -25,6 +25,6 @@ function handleRepoPick(): void {
   <form id="go" @submit.prevent="handleFormSubmit">
     <label for="target" class="mb-1.5 block font-label">{{ goToLabel }}</label>
     <PrInput v-model="input" :readonly="busy" />
-    <RepoSelect v-if="showRepo" v-model="repo" :repos="repos" @pick="handleRepoPick" />
+    <RepoSelect v-if="showRepo" v-model="repo" :repos="repos" open @pick="handleRepoPick" />
   </form>
 </template>

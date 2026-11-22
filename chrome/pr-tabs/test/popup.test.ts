@@ -26,18 +26,23 @@ const SUMMARY: Summary = {
   groups: [{ id: "1", title: "Finder", color: "yellow", count: 2, prs: [] }],
 };
 
+function choicesFor(repos: RepoName[]) {
+  const rules: Rules = { org: "acme", defaultRepo: "", openAll: "", repos };
+
+  return {
+    repos: effectiveRepos(rules),
+    selected: pickedRepo(rules),
+    show: showRepoPicker(rules),
+    newest: {},
+  };
+}
+
 async function popup(
   repos: RepoName[],
   replies: FakeReplies = {},
   pending: PendingOpeningReplies = {},
 ) {
-  const rules: Rules = { org: "acme", defaultRepo: "", openAll: "", repos };
-  const choices = {
-    repos: effectiveRepos(rules),
-    selected: pickedRepo(rules),
-    show: showRepoPicker(rules),
-  };
-  const answers: FakeReplies = { repos: choices, summary: SUMMARY, ...replies };
+  const answers: FakeReplies = { repos: choicesFor(repos), summary: SUMMARY, ...replies };
   const sent: Request[] = [];
 
   async function handleSendMessage(message: Request): Promise<unknown> {
@@ -170,7 +175,7 @@ test("the repo dropdown shows only while the input is a bare PR number", async (
     ["76", true],
     ["https://github.com/acme/webapp/pull/76", false],
     ["webapp#76", false],
-    ["#76", false],
+    ["#76", true],
     ["76a", false],
     [" 76 ", true],
   ] as const) {
@@ -178,6 +183,29 @@ test("the repo dropdown shows only while the input is a bare PR number", async (
     assert.equal(wrapper.findComponent(Select).exists(), shown, JSON.stringify(text));
   }
 
+  wrapper.unmount();
+});
+
+test("a bare number preselects its likely repo and Enter opens it", async () => {
+  const close = vi.spyOn(window, "close").mockImplementation(noop);
+  const { wrapper, sent } = await popup(["webapp", "api", "docs"], {
+    repos: {
+      repos: ["webapp", "api", "docs"],
+      selected: "api",
+      show: true,
+      newest: { webapp: 520, api: 2000, docs: 34400 },
+    },
+    goTo: { opened: "acme/webapp#505" },
+  });
+
+  await wrapper.find("#target").setValue("505");
+  assert.ok(document.querySelector(".p-select-overlay"));
+  await wrapper.find("form").trigger("submit");
+  await flushPromises();
+
+  assert.equal(wrapper.findComponent(Select).props("modelValue"), "webapp");
+  assert.deepEqual(withoutPolls(sent), [{ type: "goTo", input: "505", repo: "webapp" }]);
+  assert.equal(close.mock.calls.length, 1);
   wrapper.unmount();
 });
 

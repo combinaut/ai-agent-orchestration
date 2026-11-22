@@ -62,6 +62,7 @@ import type {
   PrStateName,
   RepoChoices,
   RepoName,
+  RepoNumbersCache,
   Reply,
   RequestOf,
   Rules,
@@ -83,6 +84,7 @@ const STORED_DEFAULTS: StoredState = {
   failures: 0,
   cursor: 0,
   prTabsRepo: "",
+  prTabsRepoNumbers: { newest: {}, refreshedAt: 0 },
 };
 
 const HOST = "orch.pr_tabs";
@@ -92,6 +94,7 @@ const GROUP_DEBOUNCE_MS = 400;
 const POLL_SOON_MS = 5000;
 const SEARCH_LIMIT = 100;
 const SETTINGS_RETRY_MS = 60000;
+const REPO_NUMBERS_TTL_MS = 300000;
 const FINISHED: ReadonlySet<PrStateName> = new Set(["MERGED", "CLOSED"]);
 
 async function readStored<K extends keyof StoredState>(key: K): Promise<StoredState[K]> {
@@ -795,16 +798,51 @@ export function closePr(key: PrKey, tabId: TabId): Promise<Reply<"closePr">> {
   return serial(() => closeKnownPr(key, tabId));
 }
 
-// What the popup needs for the repo dropdown: the listed repos, the selected one, and whether to
-// show it.
+let repoNumbersRefresh: Promise<void> | undefined;
+
+async function refreshRepoNumbers(rules: Rules): Promise<void> {
+  const repos = effectiveRepos(rules);
+
+  if (!rules.org || !repos.length) {
+    return;
+  }
+
+  try {
+    const { newest } = await askHost({ type: "repoNumbers", org: rules.org, repos });
+
+    if (newest && typeof newest === "object") {
+      await writeStored({ prTabsRepoNumbers: { newest, refreshedAt: Date.now() } });
+    }
+  } catch (error) {
+    warn(error);
+  }
+}
+
+function refreshRepoNumbersSoon(rules: Rules, cache: RepoNumbersCache): void {
+  if (Date.now() - cache.refreshedAt < REPO_NUMBERS_TTL_MS || repoNumbersRefresh) {
+    return;
+  }
+
+  repoNumbersRefresh = refreshRepoNumbers(rules).finally(() => {
+    repoNumbersRefresh = undefined;
+  });
+}
+
+// What the popup needs for the repo dropdown: listed repos, the selected one, and cached newest
+// numbers. A stale cache refreshes in the background so typing never waits for GitHub.
 export async function repoChoices(): Promise<RepoChoices> {
   const rules = await loadRules();
-  const stored = await readStored("prTabsRepo");
+  const [stored, cache] = await Promise.all([
+    readStored("prTabsRepo"),
+    readStored("prTabsRepoNumbers"),
+  ]);
+  refreshRepoNumbersSoon(rules, cache);
 
   return {
     repos: effectiveRepos(rules),
     selected: pickedRepo(rules, stored),
     show: showRepoPicker(rules),
+    newest: cache.newest,
   };
 }
 

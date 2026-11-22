@@ -27,6 +27,7 @@ import type {
   PrState,
   PrStateName,
   RepoName,
+  RepoNumbers,
   RepoRules,
   Rules,
   SearchResult,
@@ -147,8 +148,43 @@ export function pickedRepo(rules: RepoRules, stored?: RepoName): RepoName {
   return listedRepo(rules, stored) || effectiveRepos(rules)[0] || "";
 }
 
+const BARE_NUMBER = /^#?(\d{1,9})$/;
+
+export function bareNumber(input: string): PrNumber | null {
+  const match = BARE_NUMBER.exec(input.trim());
+  const number = Number(match?.[1]);
+
+  return number > 0 ? number : null;
+}
+
 export function isBareNumber(input: string): boolean {
-  return /^\d+$/.test(input.trim());
+  return bareNumber(input) !== null;
+}
+
+// Chooses the listed repo whose newest issue number is nearest at or above the target.
+export interface RepoSuggestion {
+  fallback: RepoName;
+  newest: RepoNumbers;
+}
+
+export function suggestedRepo(
+  repos: readonly RepoName[],
+  target: PrNumber,
+  { fallback, newest }: RepoSuggestion,
+): RepoName {
+  let choice: RepoName | undefined;
+  let closest: PrNumber | undefined;
+
+  for (const repo of repos) {
+    const number = newest[repo];
+
+    if (number !== undefined && number >= target && (closest === undefined || number < closest)) {
+      choice = repo;
+      closest = number;
+    }
+  }
+
+  return choice || fallback;
 }
 
 export const MAX_TARGETS = 20;
@@ -160,7 +196,7 @@ export function splitTargets(input: string | undefined): string[] {
 }
 
 export function hasBareNumber(input: string): boolean {
-  return splitTargets(input).some(isBareNumber);
+  return bareNumber(input) !== null || splitTargets(input).some((target) => /^\d+$/.test(target));
 }
 
 // The popup shows a repo dropdown only when there is a choice.
@@ -168,7 +204,6 @@ export function showRepoPicker(rules: RepoRules): boolean {
   return effectiveRepos(rules).length >= 2;
 }
 
-const BARE_NUMBER = /^#?(\d{1,9})$/;
 const REPO_NUMBER = /^([A-Za-z0-9_.-]{1,100})#(\d{1,9})$/;
 
 function prIn(org: OrgName, repo: RepoName | null, digits: string | undefined): Pr | null {

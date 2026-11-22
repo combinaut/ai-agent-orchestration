@@ -586,12 +586,22 @@ async function multiRepoWorker(tag: string) {
 test("the dropdown lists the repos and selects the remembered listed pick", async () => {
   const multi = await multiRepoWorker("multi-repo-choices");
 
-  assert.deepEqual(await multi.repoChoices(), { repos: REPOS, selected: "webapp", show: true });
+  assert.deepEqual(await multi.repoChoices(), {
+    repos: REPOS,
+    selected: "webapp",
+    show: true,
+    newest: {},
+  });
 
   await multi.pickRepo("api");
 
   assert.equal(world.store.prTabsRepo, "api");
-  assert.deepEqual(await multi.repoChoices(), { repos: REPOS, selected: "api", show: true });
+  assert.deepEqual(await multi.repoChoices(), {
+    repos: REPOS,
+    selected: "api",
+    show: true,
+    newest: {},
+  });
 
   await multi.pickRepo("docs");
 

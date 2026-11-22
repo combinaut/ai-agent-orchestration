@@ -7,7 +7,7 @@ import { mountPopup } from "./mountPopup";
 
 test("the dropdown offers the repos with the model selected, and a change is a pick", async () => {
   const wrapper = mountPopup(RepoSelect, {
-    props: { repos: ["webapp", "api"], modelValue: "api" },
+    props: { repos: ["webapp", "api"], open: false, modelValue: "api" },
   });
 
   const select = wrapper.findComponent(Select);

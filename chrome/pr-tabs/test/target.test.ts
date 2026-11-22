@@ -18,6 +18,7 @@ import {
   MAX_PANE_LOOKUPS,
   effectiveRepos,
   pickedRepo,
+  suggestedRepo,
   showRepoPicker,
   duplicateTabIds,
   findOpenTab,
@@ -358,6 +359,22 @@ test("the selected repo is the last pick while listed, else defaultRepo", () => 
   assert.equal(pickedRepo(multi, "docs"), "docs");
   assert.equal(pickedRepo(multi, "gone"), "webapp");
   assert.equal(pickedRepo(multi, ""), "webapp");
+});
+
+test("a bare PR number picks the closest repo whose newest number reaches it", () => {
+  const newest = { webapp: 520, api: 2000, docs: 34400 };
+
+  const repos = effectiveRepos(multi);
+  assert.equal(suggestedRepo(repos, 505, { fallback: "webapp", newest }), "webapp");
+  assert.equal(suggestedRepo(repos, 1500, { fallback: "webapp", newest }), "api");
+  assert.equal(suggestedRepo(repos, 34330, { fallback: "webapp", newest }), "docs");
+  assert.equal(suggestedRepo(repos, 99999, { fallback: "api", newest }), "api");
+  assert.equal(suggestedRepo(repos, 505, { fallback: "api", newest: {} }), "api");
+  assert.equal(suggestedRepo(repos, 505, { fallback: "api", newest: { webapp: 500 } }), "api");
+  assert.equal(
+    suggestedRepo(repos, 505, { fallback: "api", newest: { webapp: 520, api: 520 } }),
+    "webapp",
+  );
 });
 
 test("a bare number goes to the picked repo", () => {

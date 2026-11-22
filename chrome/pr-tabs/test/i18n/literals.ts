@@ -57,7 +57,7 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
     "unchecked",
     "idle",
   ],
-  "composables/useRepoPicker.ts": ["repos"],
+  "composables/useRepoPicker.ts": ["repos", "sync"],
   "composables/useStatus.ts": ["info", "error"],
   "composables/useSummary.ts": ["summary"],
   "core.ts": [
@@ -84,7 +84,7 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   "popup/components/GroupList.vue": ["go", "close", "list"],
   "popup/components/PrItem.vue": ["go", "close"],
   "popup/components/PrInput.vue": ["field"],
-  "popup/components/RepoSelect.vue": ["pick"],
+  "popup/components/RepoSelect.vue": ["select", "pick"],
   "popup/primevue.ts": ["none"],
   "texts.ts": ["MERGED"],
 };

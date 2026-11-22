@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import Select from "primevue/select";
+import { nextTick, useTemplateRef, watch } from "vue";
 import { useMessages } from "#/composables/useMessages";
 import type { RepoName, RepoSelectEmits, RepoSelectProps } from "#/types";
 
-defineProps<RepoSelectProps>();
+const props = defineProps<RepoSelectProps>();
 
 const { repoSelectLabel, repoSelectedMessage, repoNoneSelectedMessage, repoEmptyMessage } =
   useMessages([
@@ -15,6 +16,21 @@ const { repoSelectLabel, repoSelectedMessage, repoNoneSelectedMessage, repoEmpty
 
 const repo = defineModel<RepoName>({ required: true });
 const emit = defineEmits<RepoSelectEmits>();
+const select = useTemplateRef<{ show: () => void }>("select");
+
+function show(): void {
+  select.value?.show();
+}
+
+watch(
+  () => props.open,
+  (open) => {
+    if (open) {
+      void nextTick(show);
+    }
+  },
+  { immediate: true },
+);
 
 function handleRepoChange(): void {
   emit("pick");
@@ -24,6 +40,7 @@ function handleRepoChange(): void {
 <template>
   <Select
     id="repo"
+    ref="select"
     v-model="repo"
     :options="repos"
     size="small"
