@@ -123,7 +123,7 @@ function handlePrGo(key: PrKey): void {
 }
 
 function handleGoToSubmit(): void {
-  if (bareNumber(input.value) && picker.available.value && !isRepoPickerOpen.value) {
+  if (bareNumber(input.value) && !isRepoPickerOpen.value) {
     picker.suggest();
     isRepoPickerOpen.value = true;
 

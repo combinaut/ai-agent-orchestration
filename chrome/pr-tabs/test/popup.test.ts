@@ -201,6 +201,30 @@ test("Enter opens a preselected bare-number dropdown and the next Enter opens th
   wrapper.unmount();
 });
 
+test("Enter always opens a bare-number picker before opening its PR", async () => {
+  const close = vi.spyOn(window, "close").mockImplementation(noop);
+  const { wrapper, sent } = await popup(["infra", "big", "orch", "hub"], {
+    repos: {
+      repos: ["infra", "big", "orch", "hub"],
+      selected: "big",
+      show: true,
+      newest: { infra: 515, big: 34352, orch: 198, hub: 111 },
+    },
+    goTo: { opened: "acme/infra#515" },
+  });
+
+  await wrapper.find("#target").setValue("515");
+  await wrapper.find("form").trigger("submit");
+  await flushPromises();
+  assert.equal(wrapper.findComponent(Select).props("modelValue"), "infra");
+  assert.deepEqual(withoutPolls(sent), []);
+  wrapper.findComponent(RepoSelect).vm.$emit("accept");
+  await flushPromises();
+  assert.deepEqual(withoutPolls(sent), [{ type: "goTo", input: "515", repo: "infra" }]);
+  assert.equal(close.mock.calls.length, 1);
+  wrapper.unmount();
+});
+
 test("Escape keeps the popup open, closes the dropdown, and returns focus to the input", async () => {
   const close = vi.spyOn(window, "close").mockImplementation(noop);
   const { wrapper } = await popup(["webapp", "api"]);

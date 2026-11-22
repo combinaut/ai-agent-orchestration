@@ -24,6 +24,7 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPi
   function handleChoicesLoaded(loaded: RepoChoices | null): void {
     if (loaded) {
       repo.value = loaded.selected;
+      preselectRepo();
     }
   }
 
