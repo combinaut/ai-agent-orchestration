@@ -1509,9 +1509,9 @@ def forbidden_search_root(word, cwd):
     """Whether one literal search root is broad enough to traverse the machine."""
     if word in ("/", "~", "~/", "$HOME", "${HOME}", "/tmp", "/private/tmp"):
         return True
-    return word == str(Path.home()) or (not word and str(cwd) in {
-        "/", str(Path.home()), "/tmp", "/private/tmp"
-    })
+    return word == str(Path.home()) or (
+        not word and str(cwd) in {"/", str(Path.home()), "/tmp", "/private/tmp"}
+    )
 
 
 def search_operands(executable, args):
@@ -1525,15 +1525,48 @@ def search_operands(executable, args):
         return roots
     value_options = {
         "fd": {
-            "-e", "-E", "-g", "-t", "--extension", "--exclude", "--glob", "--type",
-            "--max-depth", "--min-depth", "--size", "--changed-within",
-            "--changed-before", "--owner", "--exec",
+            "-e",
+            "-E",
+            "-g",
+            "-t",
+            "--extension",
+            "--exclude",
+            "--glob",
+            "--type",
+            "--max-depth",
+            "--min-depth",
+            "--size",
+            "--changed-within",
+            "--changed-before",
+            "--owner",
+            "--exec",
         },
         "rg": {
-            "-e", "-f", "-g", "-t", "-T", "-m", "-A", "-B", "-C", "-j",
-            "--regexp", "--file", "--glob", "--iglob", "--type", "--type-not",
-            "--max-count", "--after-context", "--before-context", "--context",
-            "--threads", "--max-filesize", "--pre", "--pre-glob", "--replace",
+            "-e",
+            "-f",
+            "-g",
+            "-t",
+            "-T",
+            "-m",
+            "-A",
+            "-B",
+            "-C",
+            "-j",
+            "--regexp",
+            "--file",
+            "--glob",
+            "--iglob",
+            "--type",
+            "--type-not",
+            "--max-count",
+            "--after-context",
+            "--before-context",
+            "--context",
+            "--threads",
+            "--max-filesize",
+            "--pre",
+            "--pre-glob",
+            "--replace",
         },
     }
     operands = []
