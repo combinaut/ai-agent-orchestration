@@ -35,6 +35,14 @@ watch(
 function handleRepoChange(): void {
   emit("pick");
 }
+
+function handleEscape(): void {
+  emit("close");
+}
+
+function handleEnter(): void {
+  emit("accept");
+}
 </script>
 
 <template>
@@ -50,5 +58,7 @@ function handleRepoChange(): void {
     :empty-selection-message="repoNoneSelectedMessage"
     :empty-message="repoEmptyMessage"
     @change="handleRepoChange"
+    @keydown.enter.prevent.stop="handleEnter"
+    @keydown.esc.stop="handleEscape"
   />
 </template>

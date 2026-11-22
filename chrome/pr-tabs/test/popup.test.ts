@@ -7,6 +7,7 @@ import type { RepoName, Replies, Request, Rules, Summary } from "#/types";
 import type { ActionCase, FakeReplies, PendingOpeningReplies } from "#test/types";
 import { effectiveRepos, pickedRepo, showRepoPicker } from "#/core";
 import App from "#popup/App.vue";
+import RepoSelect from "#popup/components/RepoSelect.vue";
 import { mountPopup } from "#test/components/mountPopup";
 import { createI18n } from "#test/i18n/catalog";
 
@@ -122,26 +123,21 @@ test("each button sends its own request, refreshes the summary and shows the res
   }
 });
 
-test("submitting the form sends the input with the picked repo and closes the popup", async () => {
+test("a named repo opens directly with the picked repo and closes the popup", async () => {
   const close = vi.spyOn(window, "close").mockImplementation(noop);
   const { wrapper, sent } = await popup(["webapp", "api"], { goTo: { opened: "acme/api#76" } });
 
-  await wrapper.find("#target").setValue("76");
-  wrapper.findComponent(Select).vm.$emit("update:modelValue", "api");
-  wrapper.findComponent(Select).vm.$emit("change", { value: "api" });
+  await wrapper.find("#target").setValue("api#76");
   await wrapper.find("form").trigger("submit");
   await flushPromises();
 
-  assert.deepEqual(withoutPolls(sent), [
-    { type: "pickRepo", repo: "api" },
-    { type: "goTo", input: "76", repo: "api" },
-  ]);
+  assert.deepEqual(withoutPolls(sent), [{ type: "goTo", input: "api#76", repo: "webapp" }]);
   assert.equal(close.mock.calls.length, 1);
 
   wrapper.unmount();
 });
 
-test("the repo dropdown shows only with two or more repos", async () => {
+test("typing a bare number keeps focus in the input and leaves the dropdown closed", async () => {
   for (const repos of [[], ["webapp"], ["webapp", "Webapp"]]) {
     const { wrapper } = await popup(repos);
 
@@ -154,39 +150,17 @@ test("the repo dropdown shows only with two or more repos", async () => {
   }
 
   const { wrapper } = await popup(["webapp", "api"]);
-
-  await wrapper.find("#target").setValue("76");
-
-  const select = wrapper.findComponent(Select);
-
-  assert.equal(select.exists(), true);
-  assert.deepEqual(select.props("options"), ["webapp", "api"]);
-  assert.equal(select.props("modelValue"), "webapp");
-
-  wrapper.unmount();
-});
-
-test("the repo dropdown shows only while the input is a bare PR number", async () => {
-  const { wrapper } = await popup(["webapp", "api"]);
   const field = wrapper.find("#target");
 
-  for (const [text, shown] of [
-    ["", false],
-    ["76", true],
-    ["https://github.com/acme/webapp/pull/76", false],
-    ["webapp#76", false],
-    ["#76", true],
-    ["76a", false],
-    [" 76 ", true],
-  ] as const) {
-    await field.setValue(text);
-    assert.equal(wrapper.findComponent(Select).exists(), shown, JSON.stringify(text));
-  }
+  await field.setValue("505");
+
+  assert.equal(document.activeElement, field.element);
+  assert.equal(wrapper.findComponent(Select).exists(), false);
 
   wrapper.unmount();
 });
 
-test("a bare number preselects its likely repo and Enter opens it", async () => {
+test("Enter opens a preselected bare-number dropdown and the next Enter opens the PR", async () => {
   const close = vi.spyOn(window, "close").mockImplementation(noop);
   const { wrapper, sent } = await popup(["webapp", "api", "docs"], {
     repos: {
@@ -199,11 +173,14 @@ test("a bare number preselects its likely repo and Enter opens it", async () => 
   });
 
   await wrapper.find("#target").setValue("505");
-  assert.ok(document.querySelector(".p-select-overlay"));
   await wrapper.find("form").trigger("submit");
   await flushPromises();
 
   assert.equal(wrapper.findComponent(Select).props("modelValue"), "webapp");
+  assert.ok(document.querySelector(".p-select-overlay"));
+  assert.deepEqual(withoutPolls(sent), []);
+  wrapper.findComponent(RepoSelect).vm.$emit("accept");
+  await flushPromises();
   assert.deepEqual(withoutPolls(sent), [{ type: "goTo", input: "505", repo: "webapp" }]);
   assert.equal(close.mock.calls.length, 1);
   wrapper.unmount();

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, useTemplateRef } from "vue";
+import { bareNumber } from "#/core";
 import type { GroupListControl, PrKey, TabId } from "#/types";
 import { useFuzzyFilter } from "#/composables/useFuzzyFilter";
 import { usePrClose } from "#/composables/usePrClose";
@@ -54,7 +55,8 @@ const groupList = useTemplateRef<GroupListControl>("groupList");
 const closing = usePrClose({ ask, status, refresh });
 const input = ref("");
 const picker = useRepoPicker(ask, input);
-const { repos, repo, visible: isRepoPickerVisible } = picker;
+const { repos, repo } = picker;
+const isRepoPickerOpen = ref(false);
 const { busy: isGoToBusy, go, focusPr } = useGoTo({ ask, status, picker, refresh }, input);
 const { openAll, openReviews, checkNow, closeDuplicates } = useTabActions({ ask, status, refresh });
 const { busy: isOpeningAll } = openAll;
@@ -88,11 +90,27 @@ function handlePrGo(key: PrKey): void {
 }
 
 function handleGoToSubmit(): void {
+  if (bareNumber(input.value) && picker.available.value && !isRepoPickerOpen.value) {
+    picker.suggest();
+    isRepoPickerOpen.value = true;
+
+    return;
+  }
+
   void go();
 }
 
 function handleRepoPick(): void {
   picker.pick();
+}
+
+function handleRepoClose(): void {
+  isRepoPickerOpen.value = false;
+}
+
+function handleRepoAccept(): void {
+  isRepoPickerOpen.value = false;
+  void go();
 }
 
 function handleOpenAllRun(): void {
@@ -129,7 +147,9 @@ onMounted(handlePopupMounted);
       v-model:repo="repo"
       :busy="isGoToBusy"
       :repos="repos"
-      :show-repo="isRepoPickerVisible"
+      :show-repo="isRepoPickerOpen"
+      @accept-repo="handleRepoAccept"
+      @close-repo="handleRepoClose"
       @go="handleGoToSubmit"
       @pick="handleRepoPick"
     />

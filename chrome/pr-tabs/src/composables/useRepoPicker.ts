@@ -1,5 +1,5 @@
 import { useAsyncState } from "@vueuse/core";
-import { computed, ref, toValue, watch, type MaybeRefOrGetter } from "vue";
+import { computed, ref, toValue, type MaybeRefOrGetter } from "vue";
 import { bareNumber, hasBareNumber, suggestedRepo } from "#/core";
 import { failed } from "#/messages";
 import type { Ask, RepoChoices, RepoName, RepoPicker } from "#/types";
@@ -24,7 +24,6 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPi
   function handleChoicesLoaded(loaded: RepoChoices | null): void {
     if (loaded) {
       repo.value = loaded.selected;
-      preselectRepo();
     }
   }
 
@@ -45,8 +44,6 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPi
     }
   }
 
-  watch(() => toValue(input), preselectRepo, { flush: "sync" });
-
   async function load(): Promise<void> {
     await executeImmediate();
   }
@@ -55,5 +52,5 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPi
     void ask({ type: "pickRepo", repo: repo.value });
   }
 
-  return { repos, repo, available, visible, load, pick };
+  return { repos, repo, available, visible, load, suggest: preselectRepo, pick };
 }

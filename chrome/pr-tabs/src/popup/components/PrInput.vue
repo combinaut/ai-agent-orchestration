@@ -2,8 +2,7 @@
 import IconField from "primevue/iconfield";
 import InputIcon from "primevue/inputicon";
 import InputText from "primevue/inputtext";
-import { useFocus } from "@vueuse/core";
-import { computed, useTemplateRef } from "vue";
+import { computed, onMounted, useTemplateRef } from "vue";
 import { useMessages } from "#/composables/useMessages";
 import SearchIcon from "./SearchIcon.vue";
 import type { PrInputProps } from "#/types";
@@ -15,7 +14,22 @@ const { goToPlaceholder, submitHintLabel } = useMessages(["goToPlaceholder", "su
 const text = defineModel<string>({ required: true });
 const isSubmitHintVisible = computed(() => text.value.trim() !== "");
 
-useFocus(useTemplateRef("field"), { initialValue: true });
+const field = useTemplateRef("field");
+
+function focus(): void {
+  const component = field.value;
+
+  if (component && typeof component === "object" && "$el" in component) {
+    const element = component.$el;
+
+    if (element instanceof HTMLInputElement) {
+      element.focus();
+    }
+  }
+}
+
+defineExpose({ focus });
+onMounted(focus);
 </script>
 
 <template>

@@ -446,6 +446,7 @@ export interface RepoPicker {
   available: ComputedRef<boolean>;
   visible: ComputedRef<boolean>;
   load: () => Promise<void>;
+  suggest: () => void;
   pick: () => void;
 }
 
@@ -589,10 +590,14 @@ export interface ActionButtonEmits {
 export interface GoToFormEmits {
   go: [];
   pick: [];
+  closeRepo: [];
+  acceptRepo: [];
 }
 
 export interface RepoSelectEmits {
   pick: [];
+  close: [];
+  accept: [];
 }
 
 // Chrome i18n: keys and placeholders come from the English catalog.
