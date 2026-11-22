@@ -161,7 +161,7 @@ export function isBareNumber(input: string): boolean {
   return bareNumber(input) !== null;
 }
 
-// Chooses the listed repo whose newest issue number is nearest at or above the target.
+// Chooses the listed repo whose newest issue or PR number is nearest to the target.
 export interface RepoSuggestion {
   fallback: RepoName;
   newest: RepoNumbers;
@@ -173,14 +173,20 @@ export function suggestedRepo(
   { fallback, newest }: RepoSuggestion,
 ): RepoName {
   let choice: RepoName | undefined;
-  let closest: PrNumber | undefined;
+  let distance: number | undefined;
 
   for (const repo of repos) {
     const number = newest[repo];
 
-    if (number !== undefined && number >= target && (closest === undefined || number < closest)) {
+    if (number === undefined) {
+      continue;
+    }
+
+    const nextDistance = Math.abs(number - target);
+
+    if (distance === undefined || nextDistance < distance) {
       choice = repo;
-      closest = number;
+      distance = nextDistance;
     }
   }
 

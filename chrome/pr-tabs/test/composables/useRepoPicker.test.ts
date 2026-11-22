@@ -82,7 +82,7 @@ test("a bare number preselects the closest matching repo without saving it", asy
   assert.equal(picker.repo.value, "docs");
   input.value = "99999";
   picker.suggest();
-  assert.equal(picker.repo.value, "api");
+  assert.equal(picker.repo.value, "docs");
   assert.deepEqual(sent, [{ type: "repos" }]);
 });
 

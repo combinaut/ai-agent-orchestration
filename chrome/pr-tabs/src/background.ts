@@ -94,7 +94,6 @@ const GROUP_DEBOUNCE_MS = 400;
 const POLL_SOON_MS = 5000;
 const SEARCH_LIMIT = 100;
 const SETTINGS_RETRY_MS = 60000;
-const REPO_NUMBERS_TTL_MS = 300000;
 const FINISHED: ReadonlySet<PrStateName> = new Set(["MERGED", "CLOSED"]);
 
 async function readStored<K extends keyof StoredState>(key: K): Promise<StoredState[K]> {
@@ -798,51 +797,54 @@ export function closePr(key: PrKey, tabId: TabId): Promise<Reply<"closePr">> {
   return serial(() => closeKnownPr(key, tabId));
 }
 
-let repoNumbersRefresh: Promise<void> | undefined;
+let repoNumbersRefresh: Promise<RepoNumbersCache | null> | undefined;
 
-async function refreshRepoNumbers(rules: Rules): Promise<void> {
+async function refreshRepoNumbers(rules: Rules): Promise<RepoNumbersCache | null> {
   const repos = effectiveRepos(rules);
 
   if (!rules.org || !repos.length) {
-    return;
+    return null;
   }
 
   try {
     const { newest } = await askHost({ type: "repoNumbers", org: rules.org, repos });
 
     if (newest && typeof newest === "object") {
-      await writeStored({ prTabsRepoNumbers: { newest, refreshedAt: Date.now() } });
+      const cache = { newest, refreshedAt: Date.now() };
+      await writeStored({ prTabsRepoNumbers: cache });
+
+      return cache;
     }
   } catch (error) {
     warn(error);
   }
+
+  return null;
 }
 
-function refreshRepoNumbersSoon(rules: Rules, cache: RepoNumbersCache): void {
-  if (Date.now() - cache.refreshedAt < REPO_NUMBERS_TTL_MS || repoNumbersRefresh) {
-    return;
-  }
-
-  repoNumbersRefresh = refreshRepoNumbers(rules).finally(() => {
+function refreshRepoNumbersNow(rules: Rules): Promise<RepoNumbersCache | null> {
+  const refresh = (repoNumbersRefresh ??= refreshRepoNumbers(rules).finally(() => {
     repoNumbersRefresh = undefined;
-  });
+  }));
+
+  return refresh;
 }
 
-// What the popup needs for the repo dropdown: listed repos, the selected one, and cached newest
-// numbers. A stale cache refreshes in the background so typing never waits for GitHub.
+// What the popup needs for the repo dropdown: listed repos, the selected one, and refreshed newest
+// numbers. Each popup open asks GitHub; the previous cache is only a failure fallback.
 export async function repoChoices(): Promise<RepoChoices> {
   const rules = await loadRules();
   const [stored, cache] = await Promise.all([
     readStored("prTabsRepo"),
     readStored("prTabsRepoNumbers"),
   ]);
-  refreshRepoNumbersSoon(rules, cache);
+  const refreshed = await refreshRepoNumbersNow(rules);
 
   return {
     repos: effectiveRepos(rules),
     selected: pickedRepo(rules, stored),
     show: showRepoPicker(rules),
-    newest: cache.newest,
+    newest: refreshed?.newest || cache.newest,
   };
 }
 

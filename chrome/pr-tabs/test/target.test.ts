@@ -361,19 +361,32 @@ test("the selected repo is the last pick while listed, else defaultRepo", () => 
   assert.equal(pickedRepo(multi, ""), "webapp");
 });
 
-test("a bare PR number picks the closest repo whose newest number reaches it", () => {
+test("a bare PR number picks the closest newest issue or PR number", () => {
   const newest = { webapp: 520, api: 2000, docs: 34400 };
 
   const repos = effectiveRepos(multi);
   assert.equal(suggestedRepo(repos, 505, { fallback: "webapp", newest }), "webapp");
   assert.equal(suggestedRepo(repos, 1500, { fallback: "webapp", newest }), "api");
   assert.equal(suggestedRepo(repos, 34330, { fallback: "webapp", newest }), "docs");
-  assert.equal(suggestedRepo(repos, 99999, { fallback: "api", newest }), "api");
+  assert.equal(suggestedRepo(repos, 99999, { fallback: "api", newest }), "docs");
   assert.equal(suggestedRepo(repos, 505, { fallback: "api", newest: {} }), "api");
-  assert.equal(suggestedRepo(repos, 505, { fallback: "api", newest: { webapp: 500 } }), "api");
+  assert.equal(suggestedRepo(repos, 505, { fallback: "api", newest: { webapp: 500 } }), "webapp");
   assert.equal(
     suggestedRepo(repos, 505, { fallback: "api", newest: { webapp: 520, api: 520 } }),
     "webapp",
+  );
+  const current = { infra: 515, big: 34352, orch: 198, hub: 111 };
+  assert.equal(
+    suggestedRepo(["infra", "big", "orch", "hub"], 515, { fallback: "big", newest: current }),
+    "infra",
+  );
+  assert.equal(
+    suggestedRepo(["infra", "big", "orch", "hub"], 520, { fallback: "big", newest: current }),
+    "infra",
+  );
+  assert.equal(
+    suggestedRepo(["infra", "big", "orch", "hub"], 34330, { fallback: "infra", newest: current }),
+    "big",
   );
 });
 
