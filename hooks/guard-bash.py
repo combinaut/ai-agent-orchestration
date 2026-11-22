@@ -1384,26 +1384,28 @@ def guard_script_kill(raw, cwd, disabled):
 
 
 def guard_script_search_roots(raw, cwd, disabled):
-    """Checks shell programs the command runs, including bash -c and shell stdin."""
+    """Checks inline shell programs such as bash -c without rereading script input."""
     if "guard_search_roots" in disabled:
         return None
     try:
         entries = command_entries(raw, cwd)
     except (ValueError, OSError):
         return None
-    for _, code, where, _ in runs(entries, disabled):
-        reason = evaluate(
-            code,
-            where,
-            disabled=(
-                *disabled,
-                "guard_inline_shell",
-                "guard_disk_script",
-                "guard_written_script",
-            ),
-        )
-        if reason == SEARCH_ROOT_REASON:
-            return reason
+    for words, where, _, _ in entries:
+        words, _ = unwrap(list(words))
+        for code in shell_programs(words):
+            reason = evaluate(
+                code,
+                where,
+                disabled=(
+                    *disabled,
+                    "guard_inline_shell",
+                    "guard_disk_script",
+                    "guard_written_script",
+                ),
+            )
+            if reason == SEARCH_ROOT_REASON:
+                return reason
     return None
 
 
