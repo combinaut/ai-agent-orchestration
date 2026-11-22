@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, useTemplateRef } from "vue";
 import { bareNumber, isPrUrl } from "#/core";
+import { getPluralMessage } from "#/i18n";
 import type { GroupListControl, PrKey, TabId } from "#/types";
 import { useFuzzyFilter } from "#/composables/useFuzzyFilter";
 import { usePrClose } from "#/composables/usePrClose";
@@ -85,7 +86,7 @@ const totalPrs = computed(() => groups.value.reduce((total, group) => total + gr
 const footerSummary = computed(() =>
   isFiltering.value
     ? `${matchCount.value} of ${totalPrs.value} PRs`
-    : `${totalPrs.value} PRs in ${groups.value.length} groups`,
+    : `${getPluralMessage("prCount", totalPrs.value)} in ${getPluralMessage("groupCount", groups.value.length)}`,
 );
 const footerHint = computed(() =>
   mode.value === "goto" ? "↵ open · ↑↓ repository · esc close" : "↑↓ select · ↵ open · esc clear",
@@ -212,7 +213,7 @@ onMounted(handlePopupMounted);
       @clear="handleFieldClear"
     />
     <OpeningProgress :progress="openingProgress" />
-    <StatusLine :text="statusText" :error="isStatusError" />
+    <StatusLine v-if="isStatusError" :text="statusText" error />
     <section
       v-if="isRepoPickerOpen && mode === 'goto' && repos.length"
       class="px-3 pt-3"

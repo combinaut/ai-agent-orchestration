@@ -79,13 +79,12 @@ test("the agent state shows as a tag with an aria label; none without an agent",
   );
 });
 
-test("a PR row has an Aura hover background for pointer and keyboard interaction", () => {
+test("a PR row follows the compact group row hover and focus treatment", () => {
   const row = item({}).wrapper.find("li");
 
-  assert.equal(row.classes().includes("hover:bg-row-hover"), true);
-  assert.equal(row.classes().includes("focus-within:bg-row-hover"), true);
-  assert.equal(row.classes().includes("-mx-popup-padding"), true);
-  assert.equal(row.classes().includes("px-popup-padding"), true);
+  assert.equal(row.classes().includes("h-7"), true);
+  assert.equal(row.classes().includes("hover:bg-[var(--hover)]"), true);
+  assert.equal(row.classes().includes("pl-3"), true);
 });
 
 test("the go-to-pane icon uses the Aura icon size inside the small button target", () => {
@@ -97,10 +96,10 @@ test("the go-to-pane icon uses the Aura icon size inside the small button target
   assert.equal(button.find(".size-pane-icon").exists(), true);
 });
 
-test("every row has a shared minimum height and pointer cursor", () => {
+test("every row has the specified compact height and pointer cursor", () => {
   const row = item({}).wrapper.find("li");
 
-  assert.equal(row.classes().includes("min-h-pr-row"), true);
+  assert.equal(row.classes().includes("h-7"), true);
   assert.equal(row.classes().includes("cursor-pointer"), true);
 });
 
@@ -177,6 +176,6 @@ test("grouped rows highlight a matching PR number", () => {
 test("the close control shares the grouped header's right column", () => {
   const close = item({}).wrapper.find("button[data-pr-close]");
 
-  assert.equal(close.classes().includes("mr-2"), true);
+  assert.equal(close.classes().includes("mr-0"), true);
   assert.equal(close.classes().includes("flex-none"), true);
 });

@@ -1,13 +1,11 @@
 // @vitest-environment happy-dom
 import assert from "node:assert/strict";
 import { flushPromises } from "@vue/test-utils";
-import Select from "primevue/select";
 import { afterEach, test, vi } from "vitest";
 import type { RepoName, Replies, Request, Rules, Summary } from "#/types";
 import type { ActionCase, FakeReplies, PendingOpeningReplies } from "#test/types";
 import { effectiveRepos, pickedRepo, showRepoPicker } from "#/core";
 import App from "#popup/App.vue";
-import RepoSelect from "#popup/components/RepoSelect.vue";
 import { mountPopup, popupStubs } from "#test/components/mountPopup";
 import { createI18n } from "#test/i18n/catalog";
 
@@ -158,7 +156,7 @@ test("a named repo opens directly with the picked repo and closes the popup", as
   const { wrapper, sent } = await popup(["webapp", "api"], { goTo: { opened: "acme/api#76" } });
 
   await wrapper.find("#target").setValue("api#76");
-  await wrapper.find("form").trigger("submit");
+  await wrapper.find("#target").trigger("keydown", { key: "Enter" });
   await flushPromises();
 
   assert.deepEqual(withoutPolls(sent), [{ type: "goTo", input: "api#76", repo: "webapp" }]);
@@ -167,13 +165,13 @@ test("a named repo opens directly with the picked repo and closes the popup", as
   wrapper.unmount();
 });
 
-test("typing a bare number keeps focus in the input and leaves the dropdown closed", async () => {
+test("the unified field detects a bare number without opening suggestions", async () => {
   for (const repos of [[], ["webapp"], ["webapp", "Webapp"]]) {
     const { wrapper } = await popup(repos);
 
     await wrapper.find("#target").setValue("76");
 
-    assert.equal(wrapper.findComponent(Select).exists(), false, JSON.stringify(repos));
+    assert.equal(wrapper.find("[role=listbox]").exists(), false, JSON.stringify(repos));
     assert.equal(wrapper.find("#status").text(), "2 PRs in 1 group");
 
     wrapper.unmount();
@@ -185,12 +183,13 @@ test("typing a bare number keeps focus in the input and leaves the dropdown clos
   await field.setValue("505");
 
   assert.equal(document.activeElement, field.element);
-  assert.equal(wrapper.findComponent(Select).exists(), false);
+  assert.equal(field.attributes("role"), "combobox");
+  assert.equal(field.attributes("aria-expanded"), "false");
 
   wrapper.unmount();
 });
 
-test("Enter opens a preselected bare-number dropdown and the next Enter opens the PR", async () => {
+test("Enter opens inline preselected repository suggestions and the next Enter opens the PR", async () => {
   const close = vi.spyOn(window, "close").mockImplementation(noop);
   const { wrapper, sent } = await popup(["webapp", "api", "docs"], {
     repos: {
@@ -203,13 +202,14 @@ test("Enter opens a preselected bare-number dropdown and the next Enter opens th
   });
 
   await wrapper.find("#target").setValue("505");
-  await wrapper.find("form").trigger("submit");
+  const field = wrapper.find("#target");
+  await field.trigger("keydown", { key: "Enter" });
   await flushPromises();
 
-  assert.equal(wrapper.findComponent(Select).props("modelValue"), "webapp");
-  assert.ok(document.querySelector(".p-select-overlay"));
+  const selected = wrapper.find("[role=option][aria-selected=true]");
+  assert.equal(selected.text(), "webapp↵");
   assert.deepEqual(withoutPolls(sent), []);
-  wrapper.findComponent(RepoSelect).vm.$emit("accept");
+  await field.trigger("keydown", { key: "Enter" });
   await flushPromises();
   assert.deepEqual(withoutPolls(sent), [{ type: "goTo", input: "505", repo: "webapp" }]);
   assert.equal(close.mock.calls.length, 1);
@@ -229,44 +229,48 @@ test("Enter always opens a bare-number picker before opening its PR", async () =
   });
 
   await wrapper.find("#target").setValue("515");
-  await wrapper.find("form").trigger("submit");
+  const field = wrapper.find("#target");
+  await field.trigger("keydown", { key: "Enter" });
   await flushPromises();
-  assert.equal(wrapper.findComponent(Select).props("modelValue"), "infra");
+  assert.equal(wrapper.find("[role=option][aria-selected=true]").text(), "infra↵");
   assert.deepEqual(withoutPolls(sent), []);
-  wrapper.findComponent(RepoSelect).vm.$emit("accept");
+  await field.trigger("keydown", { key: "Enter" });
   await flushPromises();
   assert.deepEqual(withoutPolls(sent), [{ type: "goTo", input: "515", repo: "infra" }]);
   assert.equal(close.mock.calls.length, 1);
   wrapper.unmount();
 });
 
-test("Escape keeps the popup open, closes the dropdown, and returns focus to the input", async () => {
+test("Escape closes suggestions before clearing the field and keeps the popup open", async () => {
   const close = vi.spyOn(window, "close").mockImplementation(noop);
   const { wrapper } = await popup(["webapp", "api"]);
   const field = wrapper.find("#target");
 
   await field.setValue("76");
-  await wrapper.find("form").trigger("submit");
+  await field.trigger("keydown", { key: "Enter" });
   await flushPromises();
   const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
-  document.dispatchEvent(event);
+  field.element.dispatchEvent(event);
   await flushPromises();
 
   assert.equal(event.defaultPrevented, true);
-  assert.equal(wrapper.findComponent(Select).exists(), false);
+  assert.equal(wrapper.find("[role=listbox]").exists(), false);
+  assert.equal((field.element as HTMLInputElement).value, "76");
   assert.equal(document.activeElement, field.element);
+  await field.trigger("keydown", { key: "Escape" });
+  assert.equal((field.element as HTMLInputElement).value, "");
   assert.equal(close.mock.calls.length, 0);
   wrapper.unmount();
 });
 
-test("popup content is the capped stable-gutter scroller", async () => {
+test("popup content is a fixed frame whose list is the only scroller", async () => {
   const { wrapper } = await popup([]);
   const content = wrapper.find("#popup-content");
 
   assert.equal(content.element.tagName, "MAIN");
-  assert.equal(content.classes().includes("scrollbar-gutter-both-edges"), true);
-  assert.equal(content.classes().includes("max-h-popup-content"), true);
-  assert.equal(content.classes().includes("overflow-y-auto"), true);
+  assert.equal(content.classes().includes("overflow-y-auto"), false);
+  assert.equal(wrapper.find("#popup-list").classes().includes("overflow-y-auto"), true);
+  assert.equal(wrapper.find("footer").exists(), true);
 
   wrapper.unmount();
 });
@@ -350,13 +354,13 @@ test("actions live in the burger menu", async () => {
 
 test("action menu keeps the header geometry fixed and opens below its trigger", async () => {
   const { wrapper } = await popup([]);
-  const header = wrapper.find("#go > div");
+  const header = wrapper.find("header");
   const input = wrapper.find("#target");
   const trigger = wrapper.find<HTMLButtonElement>("#actions-menu");
   const headerClasses = header.attributes("class");
   const inputClasses = input.attributes("class");
 
-  assert.ok(header.classes().includes("h-6"));
+  assert.ok(header.classes().includes("h-7"));
   assert.ok(trigger.classes().includes("size-6"));
   assert.ok(trigger.classes().includes("p-0"));
   await trigger.trigger("click");
@@ -392,18 +396,18 @@ test("close actions are enabled when PR tabs exist", async () => {
   wrapper.unmount();
 });
 
-test("search is hidden without PR tabs and shown when a PR tab exists", async () => {
+test("the empty state replaces the list and footer until a PR tab exists", async () => {
   const empty = await popup([], { summary: { prs: 0, groups: [] } });
-  assert.ok(empty.wrapper.find("#popup-content").classes().includes("p-popup-padding"));
-  assert.equal(empty.wrapper.find("#pr-search").exists(), false);
+  assert.equal(empty.wrapper.find("#target").exists(), true);
   assert.equal(empty.wrapper.find("#groups").exists(), false);
+  assert.equal(empty.wrapper.find("footer").exists(), false);
   assert.ok(empty.wrapper.text().includes("No PR tabs open"));
   empty.wrapper.unmount();
 
   const populated = await popup([]);
-  assert.ok(populated.wrapper.find("#popup-content").classes().includes("p-popup-padding"));
-  assert.equal(populated.wrapper.find("#pr-search").exists(), true);
+  assert.equal(populated.wrapper.find("#target").exists(), true);
   assert.equal(populated.wrapper.find("#groups").exists(), true);
+  assert.equal(populated.wrapper.find("footer").text(), "2 PRs in 1 groups↑↓ select · ↵ open · esc clear");
   populated.wrapper.unmount();
 });
 
@@ -650,13 +654,18 @@ test("search expands matches, restores expansion, moves down and Enter focuses t
   const { wrapper, sent } = await searchablePopup();
   try {
     await wrapper.findAll("button[aria-expanded]:not(#actions-menu)")[1]?.trigger("click");
-    const search = wrapper.find<HTMLInputElement>("#pr-search");
+    const search = wrapper.find<HTMLInputElement>("#target");
     await search.setValue("Amber");
     await flushPromises();
     assert.equal(wrapper.findAll("button[aria-expanded]:not(#actions-menu)").length, 1);
     assert.equal(
       wrapper.find("button[aria-expanded]:not(#actions-menu)").attributes("aria-expanded"),
       "true",
+    );
+    assert.equal(wrapper.find("footer").text(), "1 of 2 PRs↑↓ select · ↵ open · esc clear");
+    assert.deepEqual(
+      wrapper.findAll("mark").map((mark) => mark.text()),
+      ["Amber"],
     );
     await search.trigger("keydown", { key: "ArrowDown" });
     assert.equal(document.activeElement?.getAttribute("aria-label"), "webapp#7 Amber Zeppelin");
@@ -678,14 +687,14 @@ test("closing the only filtered match refreshes counts and focuses search withou
   const closeWindow = vi.spyOn(window, "close").mockImplementation(noop);
   const { wrapper, answers, sent } = await searchablePopup();
   try {
-    await wrapper.find("#pr-search").setValue("Amber");
+    await wrapper.find("#target").setValue("Amber");
     await flushPromises();
     answers.summary = { prs: 1, groups: SEARCH_SUMMARY.groups.slice(1) };
     await wrapper.find("button[data-pr-close]").trigger("click");
     await flushPromises();
     assert.equal(wrapper.findAll("button[aria-expanded]:not(#actions-menu)").length, 0);
     assert.ok(wrapper.text().includes("No matching PRs"));
-    assert.equal(document.activeElement?.id, "pr-search");
+    assert.equal(document.activeElement?.id, "target");
     assert.equal(closeWindow.mock.calls.length, 0);
     assert.deepEqual(
       sent.filter((message) => message.type === "closePr" || message.type === "focusPr"),

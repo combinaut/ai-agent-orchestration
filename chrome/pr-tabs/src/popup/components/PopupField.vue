@@ -3,7 +3,6 @@ import IconField from "primevue/iconfield";
 import InputIcon from "primevue/inputicon";
 import InputText from "primevue/inputtext";
 import { computed, onMounted, useTemplateRef } from "vue";
-import SearchIcon from "./SearchIcon.vue";
 
 const props = defineProps<{ mode: "idle" | "goto" | "search"; matches: number; busy: boolean }>();
 const emit = defineEmits<{ go: []; next: []; clear: [] }>();
@@ -45,7 +44,7 @@ onMounted(focus);
 
 <template>
   <IconField class="popup-field mx-3 mt-2">
-    <InputIcon><SearchIcon /></InputIcon>
+    <InputIcon><i class="pi pi-search popup-search-icon" aria-hidden="true" /></InputIcon>
     <InputText
       id="target"
       ref="input"
