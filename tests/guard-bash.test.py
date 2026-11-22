@@ -2366,6 +2366,17 @@ pkill -f vite
     case("PID kill before pgrep full", "kill -TERM 12345; pgrep -f rails")
     case("nonserver killall", "killall ExampleScratchApp")
     case("normal status", "git status")
+    for name, command, deny in [
+        ("rg files home pipeline", "rg --files ~ | rg x", True),
+        ("rg content HOME", "rg foo $HOME", True),
+        ("find filesystem root", "find / -name x", True),
+        ("fd private tmp root", "fd x /private/tmp", True),
+        ("rg project directory", "rg foo src/", False),
+        ("rg private tmp child", "rg foo /private/tmp/sub/file", False),
+        ("find current directory", "find . -name x", False),
+        ("shell search HOME", "bash -c 'rg foo $HOME'", True),
+    ]:
+        case(name, command, deny)
     case("ps grep kill count", "ps aux | grep node | grep -c kill")
     case(
         "quoted broad kill text",
@@ -3563,6 +3574,7 @@ pkill -f vite
         ("guard_disk_script", "disk script via bash"),
         ("guard_inline_shell", "inline bash -c pkill"),
         ("guard_big_repo_reads", "webapp batch all objects"),
+        ("guard_search_roots", "rg files home pipeline"),
         ("guard_pi", "herdr pi start on DeepSeek"),
     ]:
         caught = [
