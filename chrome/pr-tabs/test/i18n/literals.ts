@@ -83,7 +83,7 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   "popup/components/GroupItem.vue": ["go", "close", "-mx-popup-padding px-popup-padding"],
   "popup/components/GroupList.vue": ["go", "close", "list"],
   "popup/components/PrItem.vue": ["go", "close"],
-  "popup/components/PrInput.vue": ["field"],
+  "popup/components/PrInput.vue": ["field", "object"],
   "popup/components/RepoSelect.vue": ["select", "pick", "close", "accept"],
   "popup/primevue.ts": ["none"],
   "texts.ts": ["MERGED"],
