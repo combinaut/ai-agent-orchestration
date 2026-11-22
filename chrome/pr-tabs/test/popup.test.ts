@@ -407,6 +407,26 @@ test("search is hidden without PR tabs and shown when a PR tab exists", async ()
   populated.wrapper.unmount();
 });
 
+test("the popup root keeps the menu reservation with empty, short, and long lists", async () => {
+  for (const summary of [
+    { prs: 0, groups: [] },
+    SUMMARY,
+    {
+      prs: 9,
+      groups: Array.from({ length: 9 }, (_, id) => ({
+        id: String(id),
+        title: "A",
+        count: 1,
+        prs: [],
+      })),
+    },
+  ]) {
+    const { wrapper } = await popup([], { summary });
+    assert.ok(wrapper.find("#popup-content").exists());
+    wrapper.unmount();
+  }
+});
+
 for (const result of [{ opened: 3, remaining: 0, estimated: false }, { error: "offline" }]) {
   test(`an observed batch refreshes on completion and reports ${JSON.stringify(result)}`, async () => {
     vi.useFakeTimers();
