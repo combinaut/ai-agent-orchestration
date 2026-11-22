@@ -197,7 +197,11 @@ def repo_numbers(request):
         numbers = []
         for connection in (repository.get("issues"), repository.get("pullRequests")):
             nodes = connection.get("nodes") if isinstance(connection, dict) else []
-            number = (nodes[0] or {}).get("number") if isinstance(nodes, list) and nodes else None
+            number = (
+                (nodes[0] or {}).get("number")
+                if isinstance(nodes, list) and nodes
+                else None
+            )
             if is_count(number, 10**9):
                 numbers.append(number)
         if numbers:
