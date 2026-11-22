@@ -6,13 +6,19 @@ import type { RepoName, RepoSelectEmits, RepoSelectProps } from "#/types";
 
 const props = defineProps<RepoSelectProps>();
 
-const { repoSelectLabel, repoSelectedMessage, repoNoneSelectedMessage, repoEmptyMessage } =
-  useMessages([
-    "repoSelectLabel",
-    "repoSelectedMessage",
-    "repoNoneSelectedMessage",
-    "repoEmptyMessage",
-  ]);
+const {
+  repoSelectLabel,
+  repoSelectedMessage,
+  repoNoneSelectedMessage,
+  repoEmptyMessage,
+  repoGuessUnavailable,
+} = useMessages([
+  "repoSelectLabel",
+  "repoSelectedMessage",
+  "repoNoneSelectedMessage",
+  "repoEmptyMessage",
+  "repoGuessUnavailable",
+]);
 
 const repo = defineModel<RepoName>({ required: true });
 const emit = defineEmits<RepoSelectEmits>();
@@ -64,7 +70,6 @@ onBeforeUnmount(() => document.removeEventListener("keydown", captureEscape, tru
     :options="repos"
     size="small"
     class="mt-2 w-full"
-    append-to="self"
     :aria-label="repoSelectLabel"
     :selection-message="repoSelectedMessage"
     :empty-selection-message="repoNoneSelectedMessage"
@@ -74,6 +79,6 @@ onBeforeUnmount(() => document.removeEventListener("keydown", captureEscape, tru
     @keydown.esc.stop="handleEscape"
   />
   <small v-if="guessUnavailable" class="mt-1 block text-muted-color">
-    Repo guess unavailable: update the host
+    {{ repoGuessUnavailable }}
   </small>
 </template>

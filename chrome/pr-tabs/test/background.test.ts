@@ -591,6 +591,7 @@ test("the dropdown lists the repos and selects the remembered listed pick", asyn
     selected: "webapp",
     show: true,
     newest: {},
+    guessUnavailable: true,
   });
 
   await multi.pickRepo("api");
@@ -601,6 +602,7 @@ test("the dropdown lists the repos and selects the remembered listed pick", asyn
     selected: "api",
     show: true,
     newest: {},
+    guessUnavailable: true,
   });
 
   await multi.pickRepo("docs");
@@ -610,6 +612,20 @@ test("the dropdown lists the repos and selects the remembered listed pick", asyn
   await multi.pickRepo("unlisted");
 
   assert.equal(world.store.prTabsRepo, "docs");
+});
+
+test("an old host that rejects repo numbers preserves the pick and reports an unavailable guess", async () => {
+  const multi = await multiRepoWorker("old-repo-number-host");
+  world.store.prTabsRepo = "api";
+  world.nativeHandler = async () => ({ ok: false, error: "unknown request type: 'repoNumbers'" });
+
+  assert.deepEqual(await multi.repoChoices(), {
+    repos: REPOS,
+    selected: "api",
+    show: true,
+    newest: {},
+    guessUnavailable: true,
+  });
 });
 
 test("goTo opens a bare number in the picked repo, else the remembered pick", async () => {

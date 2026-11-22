@@ -29,6 +29,7 @@
   "repoEmptyMessage": {
     "message": "Aucun dépôt disponible"
   },
+  "repoGuessUnavailable": { "message": "Repo guess unavailable: update the host" },
   "openAllButton": {
     "message": "Tout ouvrir"
   },

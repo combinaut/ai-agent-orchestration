@@ -186,6 +186,25 @@ test("Enter opens a preselected bare-number dropdown and the next Enter opens th
   wrapper.unmount();
 });
 
+test("Escape keeps the popup open, closes the dropdown, and returns focus to the input", async () => {
+  const close = vi.spyOn(window, "close").mockImplementation(noop);
+  const { wrapper } = await popup(["webapp", "api"]);
+  const field = wrapper.find("#target");
+
+  await field.setValue("76");
+  await wrapper.find("form").trigger("submit");
+  await flushPromises();
+  const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  document.dispatchEvent(event);
+  await flushPromises();
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(wrapper.findComponent(Select).exists(), false);
+  assert.equal(document.activeElement, field.element);
+  assert.equal(close.mock.calls.length, 0);
+  wrapper.unmount();
+});
+
 test("popup content is the capped stable-gutter scroller", async () => {
   const { wrapper } = await popup([]);
   const content = wrapper.find("#popup-content");

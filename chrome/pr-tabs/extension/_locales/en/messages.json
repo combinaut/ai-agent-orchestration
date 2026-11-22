@@ -29,6 +29,7 @@
   "repoEmptyMessage": {
     "message": "No repositories available"
   },
+  "repoGuessUnavailable": { "message": "Repo guess unavailable: update the host" },
   "openAllButton": {
     "message": "Open all"
   },

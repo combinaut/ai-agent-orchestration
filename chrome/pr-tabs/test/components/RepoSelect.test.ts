@@ -21,3 +21,11 @@ test("the dropdown offers the repos with the model selected, and a change is a p
   assert.deepEqual(wrapper.emitted("update:modelValue")?.at(-1), ["webapp"]);
   assert.equal(wrapper.emitted("pick")?.length, 1);
 });
+
+test("an unavailable guess shows the host-update hint", () => {
+  const wrapper = mountPopup(RepoSelect, {
+    props: { repos: ["webapp", "api"], open: false, guessUnavailable: true, modelValue: "api" },
+  });
+
+  assert.match(wrapper.text(), /Repo guess unavailable: update the host/);
+});
