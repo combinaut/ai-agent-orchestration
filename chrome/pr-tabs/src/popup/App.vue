@@ -55,7 +55,7 @@ const groupList = useTemplateRef<GroupListControl>("groupList");
 const closing = usePrClose({ ask, status, refresh });
 const input = ref("");
 const picker = useRepoPicker(ask, input);
-const { repos, repo } = picker;
+const { repos, repo, guessUnavailable } = picker;
 const isRepoPickerOpen = ref(false);
 const { busy: isGoToBusy, go, focusPr } = useGoTo({ ask, status, picker, refresh }, input);
 const { openAll, openReviews, checkNow, closeDuplicates } = useTabActions({ ask, status, refresh });
@@ -148,6 +148,7 @@ onMounted(handlePopupMounted);
       :busy="isGoToBusy"
       :repos="repos"
       :show-repo="isRepoPickerOpen"
+      :guess-unavailable="guessUnavailable"
       @accept-repo="handleRepoAccept"
       @close-repo="handleRepoClose"
       @go="handleGoToSubmit"

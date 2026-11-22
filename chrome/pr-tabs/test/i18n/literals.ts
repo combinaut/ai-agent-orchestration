@@ -84,7 +84,15 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   "popup/components/GroupList.vue": ["go", "close", "list"],
   "popup/components/PrItem.vue": ["go", "close"],
   "popup/components/PrInput.vue": ["field", "object"],
-  "popup/components/RepoSelect.vue": ["select", "pick", "close", "accept"],
+  "popup/components/RepoSelect.vue": [
+    "select",
+    "pick",
+    "close",
+    "accept",
+    "Escape",
+    "keydown",
+    "Repo guess unavailable: update the host",
+  ],
   "popup/primevue.ts": ["none"],
   "texts.ts": ["MERGED"],
 };

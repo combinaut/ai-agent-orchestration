@@ -40,6 +40,7 @@ function handleRepoAccept(): void {
       v-if="showRepo"
       v-model="repo"
       :repos="repos"
+      :guess-unavailable="guessUnavailable"
       open
       @accept="handleRepoAccept"
       @close="handleRepoClose"

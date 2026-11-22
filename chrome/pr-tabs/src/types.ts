@@ -267,6 +267,7 @@ export interface RepoChoices {
   readonly selected: RepoName;
   readonly show: boolean;
   readonly newest: RepoNumbers;
+  readonly guessUnavailable?: boolean;
 }
 
 export interface Opening {
@@ -445,6 +446,7 @@ export interface RepoPicker {
   repo: Ref<RepoName>;
   available: ComputedRef<boolean>;
   visible: ComputedRef<boolean>;
+  guessUnavailable: ComputedRef<boolean>;
   load: () => Promise<void>;
   suggest: () => void;
   pick: () => void;
@@ -550,6 +552,7 @@ export interface GoToFormProps {
   busy: boolean;
   repos: RepoName[];
   showRepo: boolean;
+  guessUnavailable?: boolean;
 }
 
 export interface PrInputProps {
@@ -559,6 +562,7 @@ export interface PrInputProps {
 export interface RepoSelectProps {
   repos: RepoName[];
   open: boolean;
+  guessUnavailable?: boolean;
 }
 
 export interface StatusLineProps {

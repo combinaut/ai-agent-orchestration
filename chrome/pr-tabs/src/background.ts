@@ -797,13 +797,15 @@ export function closePr(key: PrKey, tabId: TabId): Promise<Reply<"closePr">> {
   return serial(() => closeKnownPr(key, tabId));
 }
 
-let repoNumbersRefresh: Promise<RepoNumbersCache | null> | undefined;
+let repoNumbersRefresh: Promise<{ cache: RepoNumbersCache | null; failed: boolean }> | undefined;
 
-async function refreshRepoNumbers(rules: Rules): Promise<RepoNumbersCache | null> {
+async function refreshRepoNumbers(
+  rules: Rules,
+): Promise<{ cache: RepoNumbersCache | null; failed: boolean }> {
   const repos = effectiveRepos(rules);
 
   if (!rules.org || !repos.length) {
-    return null;
+    return { cache: null, failed: false };
   }
 
   try {
@@ -813,16 +815,18 @@ async function refreshRepoNumbers(rules: Rules): Promise<RepoNumbersCache | null
       const cache = { newest, refreshedAt: Date.now() };
       await writeStored({ prTabsRepoNumbers: cache });
 
-      return cache;
+      return { cache, failed: false };
     }
   } catch (error) {
     warn(error);
   }
 
-  return null;
+  return { cache: null, failed: true };
 }
 
-function refreshRepoNumbersNow(rules: Rules): Promise<RepoNumbersCache | null> {
+function refreshRepoNumbersNow(
+  rules: Rules,
+): Promise<{ cache: RepoNumbersCache | null; failed: boolean }> {
   const refresh = (repoNumbersRefresh ??= refreshRepoNumbers(rules).finally(() => {
     repoNumbersRefresh = undefined;
   }));
@@ -844,7 +848,8 @@ export async function repoChoices(): Promise<RepoChoices> {
     repos: effectiveRepos(rules),
     selected: pickedRepo(rules, stored),
     show: showRepoPicker(rules),
-    newest: refreshed?.newest || cache.newest,
+    newest: refreshed.cache?.newest || cache.newest,
+    guessUnavailable: refreshed.failed,
   };
 }
 

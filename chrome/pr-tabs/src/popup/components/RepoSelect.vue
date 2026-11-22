@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Select from "primevue/select";
-import { nextTick, useTemplateRef, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, useTemplateRef, watch } from "vue";
 import { useMessages } from "#/composables/useMessages";
 import type { RepoName, RepoSelectEmits, RepoSelectProps } from "#/types";
 
@@ -43,6 +43,17 @@ function handleEscape(): void {
 function handleEnter(): void {
   emit("accept");
 }
+
+function captureEscape(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    emit("close");
+  }
+}
+
+onMounted(() => document.addEventListener("keydown", captureEscape, true));
+onBeforeUnmount(() => document.removeEventListener("keydown", captureEscape, true));
 </script>
 
 <template>
@@ -53,6 +64,7 @@ function handleEnter(): void {
     :options="repos"
     size="small"
     class="mt-2 w-full"
+    append-to="self"
     :aria-label="repoSelectLabel"
     :selection-message="repoSelectedMessage"
     :empty-selection-message="repoNoneSelectedMessage"
@@ -61,4 +73,7 @@ function handleEnter(): void {
     @keydown.enter.prevent.stop="handleEnter"
     @keydown.esc.stop="handleEscape"
   />
+  <small v-if="guessUnavailable" class="mt-1 block text-muted-color">
+    Repo guess unavailable: update the host
+  </small>
 </template>

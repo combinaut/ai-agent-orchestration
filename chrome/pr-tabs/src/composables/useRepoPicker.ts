@@ -35,6 +35,7 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPi
   const repos = computed(() => [...(choices.value?.repos ?? [])]);
   const available = computed(() => choices.value !== null);
   const visible = computed(() => available.value && hasBareNumber(toValue(input)));
+  const guessUnavailable = computed(() => choices.value?.guessUnavailable ?? false);
 
   function preselectRepo(value = toValue(input)): void {
     const selected = preselectedRepo(choices.value, value);
@@ -52,5 +53,5 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPi
     void ask({ type: "pickRepo", repo: repo.value });
   }
 
-  return { repos, repo, available, visible, load, suggest: preselectRepo, pick };
+  return { repos, repo, available, visible, guessUnavailable, load, suggest: preselectRepo, pick };
 }
