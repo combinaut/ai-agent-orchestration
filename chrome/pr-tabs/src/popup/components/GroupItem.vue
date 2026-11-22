@@ -39,7 +39,7 @@ function handlePrClose(key: PrKey, tabId: TabId): void {
 <template>
   <AccordionPanel :value="value" :class="railClass">
     <AccordionHeader :pt="accordionHeaderPassThrough">
-      <span class="flex flex-auto items-center">
+      <span class="flex w-full min-w-0 flex-auto items-center">
         <span class="min-w-0 truncate font-semibold">{{ title }}</span>
         <Badge
           class="mr-2 ml-auto h-[18px] min-w-5 rounded-full bg-[var(--badge)] px-1.5 font-mono text-[11px] leading-[18px] text-[var(--muted)]"

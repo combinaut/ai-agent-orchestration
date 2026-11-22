@@ -68,6 +68,11 @@
   line-height: 20px;
 }
 
+html,
+body {
+  margin: 0;
+}
+
 #groups .p-accordionpanel {
   position: relative;
   display: block;
@@ -75,6 +80,7 @@
   padding-left: 8px;
   border: 0;
   background: transparent;
+  width: 100%;
 }
 
 #groups .p-accordionpanel::before {
@@ -99,6 +105,7 @@
 #groups .p-accordionheader:focus-visible {
   box-sizing: border-box;
   display: flex;
+  width: 100%;
   height: 32px;
   min-height: 32px;
   padding: 0 4px 0 12px;
@@ -124,13 +131,24 @@
   background: transparent;
 }
 
+#groups .p-accordionheader > * {
+  min-width: 0;
+}
+
 .popup-search-icon {
+  position: absolute;
+  inset-inline-start: 10px;
+  top: 50%;
   display: block;
   width: 12px;
   height: 12px;
+  transform: translateY(-50%);
   color: var(--muted);
-  font-size: 12px;
-  line-height: 12px;
+}
+
+.popup-search-icon svg {
+  width: 12px;
+  height: 12px;
 }
 
 .group-grey {

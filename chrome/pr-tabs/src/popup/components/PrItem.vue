@@ -91,18 +91,18 @@ function handleGoClick(): void {
     </span>
     <Tag
       v-if="isStateVisible"
-      class="text-hint pointer-events-none flex-none"
+      class="pointer-events-none h-[18px] flex-none rounded-full px-1.5 text-[11px] leading-[18px] font-semibold"
       :severity="stateSeverity"
       :value="stateText"
       :aria-label="stateLabel"
     />
-    <span v-if="isGoVisible" class="relative flex-none" :title="goLabel">
+    <span v-if="isGoVisible" class="relative size-6 flex-none" :title="goLabel">
       <Button
         data-pr-pane
         size="small"
         severity="secondary"
         text
-        rounded
+        class="size-6 rounded p-0"
         :aria-label="goLabel"
         :disabled="isGoDisabled"
         :loading="isChecking"
@@ -116,11 +116,10 @@ function handleGoClick(): void {
       </Button>
     </span>
     <Button
-      class="relative mr-0 flex-none opacity-0 group-hover:opacity-100 focus:opacity-100"
+      class="relative mr-0 size-6 flex-none rounded p-0 opacity-0 group-hover:opacity-100 focus:opacity-100"
       size="small"
       severity="secondary"
       text
-      rounded
       :data-pr-close="key"
       :data-pr-close-id="tabId"
       :aria-label="closeLabel"
