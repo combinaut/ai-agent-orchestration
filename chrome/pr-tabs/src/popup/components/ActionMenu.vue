@@ -3,9 +3,7 @@ import Button from "primevue/button";
 import Menu from "primevue/menu";
 import { computed, nextTick, ref } from "vue";
 import { useActionMenu } from "#/composables/useActionMenu";
-import { MENU_LEFT, MENU_RIGHT, MENU_TOP } from "#popup/menuPosition";
 import ActionIcon from "./ActionIcon.vue";
-
 interface Action {
   id: string;
   label: string;
@@ -14,7 +12,6 @@ interface Action {
   busy: boolean;
   run: () => void;
 }
-
 const props = defineProps<{ actions: Action[]; label: string }>();
 const menu = ref<InstanceType<typeof Menu>>();
 const { open, toggle, close } = useActionMenu();
@@ -27,33 +24,13 @@ const model = computed(() =>
     command: action.run,
   })),
 );
-
 function handleToggle(event: Event): void {
   toggle();
   menu.value?.toggle(event);
-  void nextTick(handleMenuPosition);
 }
-
 function handleHide(): void {
   close();
 }
-
-function handleMenuPosition(): void {
-  const popup = document.getElementById("actions-menu-popup");
-
-  if (!popup) {
-    return;
-  }
-
-  popup.style.top = MENU_TOP;
-  popup.style.right = MENU_RIGHT;
-  popup.style.left = MENU_LEFT;
-}
-
-function handleMenuShow(): void {
-  handleMenuPosition();
-}
-
 function handleEscape(event: KeyboardEvent): void {
   event.preventDefault();
   event.stopPropagation();
@@ -61,45 +38,47 @@ function handleEscape(event: KeyboardEvent): void {
   close();
   void nextTick(() => document.getElementById("actions-menu")?.focus());
 }
-
 function iconOf(icon: unknown): Action["icon"] {
   return icon === "open" || icon === "review" || icon === "merge" || icon === "copy"
     ? icon
     : "copy";
 }
 </script>
-
 <template>
-  <div class="relative size-6">
-    <Button
-      id="actions-menu"
-      severity="secondary"
-      text
-      size="small"
-      class="size-full p-0"
-      :aria-label="label"
-      :aria-expanded="open"
-      @click="handleToggle"
-    >
-      <ActionIcon name="menu" />
-    </Button>
-    <Menu
-      ref="menu"
-      id="actions-menu-popup"
-      popup
-      append-to="self"
-      :model="model"
-      class="origin-top-right"
-      @show="handleMenuShow"
-      @hide="handleHide"
-      @keydown.esc="handleEscape"
-    >
-      <template #item="{ item, props: itemProps }">
-        <a v-bind="itemProps.action" :aria-disabled="Boolean(item.disabled)">
-          <ActionIcon :name="iconOf(item.icon)" />
-          <span>{{ item.label }}</span>
-        </a>
-      </template>
-    </Menu>
-  </div>
+  <Button
+    id="actions-menu"
+    severity="secondary"
+    text
+    size="small"
+    class="size-6 p-0"
+    :aria-label="label"
+    :aria-expanded="open"
+    @click="handleToggle"
+  >
+    <ActionIcon name="menu" />
+  </Button>
+  <Menu
+    ref="menu"
+    id="actions-menu-popup"
+    popup
+    append-to="self"
+    :model="model"
+    class="action-menu-overlay origin-top-right"
+    @hide="handleHide"
+    @keydown.esc="handleEscape"
+  >
+    <template #item="{ item, props: itemProps }">
+      <a v-bind="itemProps.action" :aria-disabled="Boolean(item.disabled)">
+        <ActionIcon :name="iconOf(item.icon)" />
+        <span>{{ item.label }}</span>
+      </a>
+    </template>
+  </Menu>
 </template>
+
+<style scoped>
+:deep(.action-menu-overlay) {
+  margin-top: var(--p-anchor-gutter);
+  transform-origin: top right;
+}
+</style>

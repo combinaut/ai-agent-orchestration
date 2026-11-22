@@ -88,7 +88,6 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   ],
   "popup/components/ActionIcon.vue": ["menu", "open", "review", "merge"],
   "popup/components/ActionMenu.vue": ["open", "review", "merge", "copy"],
-  "popup/menuPosition.ts": ["calc(100% + 4px)", "auto"],
   "popup/components/GoToForm.vue": ["input", "repo", "go", "pick"],
   "popup/components/OpeningProgress.vue": ["determinate", "indeterminate"],
   "popup/components/GroupItem.vue": ["go", "close", "-mx-popup-padding px-popup-padding"],

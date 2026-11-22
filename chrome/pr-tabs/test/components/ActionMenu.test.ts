@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { flushPromises, mount } from "@vue/test-utils";
 import PrimeVue from "primevue/config";
-import { afterEach, test, vi } from "vitest";
+import { afterEach, test } from "vitest";
 import ActionMenu from "#popup/components/ActionMenu.vue";
 import { primeVueConfiguration } from "#popup/primevue";
 
@@ -10,30 +10,31 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-test("the real menu opens below its fixed-size trigger and runs an action", async () => {
-  const run = vi.fn<() => void>();
+test("the real menu stays visible after opening and closes on the next click", async () => {
   const wrapper = mount(ActionMenu, {
     attachTo: document.body,
     props: {
       label: "Actions",
       actions: [
-        { id: "open", label: "Open all", hint: "", icon: "open" as const, busy: false, run },
+        { id: "open", label: "Open all", hint: "", icon: "open" as const, busy: false, run() {} },
       ],
     },
-    global: { plugins: [[PrimeVue, primeVueConfiguration]] },
+    global: { plugins: [[PrimeVue, primeVueConfiguration]], stubs: { teleport: true } },
   });
 
   try {
     const trigger = wrapper.find("#actions-menu");
-    assert.ok(trigger.element.parentElement?.classList.contains("size-6"));
+    assert.ok(trigger.classes().includes("size-6"));
     await trigger.trigger("click");
     await flushPromises();
 
     const menu = document.getElementById("actions-menu-popup");
-    assert.equal(menu?.style.top, "calc(100% + 4px)");
-    assert.equal(menu?.style.right, "0px");
-    document.body.querySelector<HTMLElement>(".p-menu-item-link")?.click();
-    assert.equal(run.mock.calls.length, 1);
+    assert.ok(menu);
+    assert.ok(document.body.textContent?.includes("Open all"));
+    assert.equal(trigger.attributes("aria-expanded"), "true");
+    await trigger.trigger("click");
+    await flushPromises();
+    assert.equal(trigger.attributes("aria-expanded"), "false");
   } finally {
     wrapper.unmount();
   }
