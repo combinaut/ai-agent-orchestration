@@ -85,6 +85,7 @@ const STORED_DEFAULTS: StoredState = {
   cursor: 0,
   prTabsRepo: "",
   prTabsRepoNumbers: { newest: {}, refreshedAt: 0 },
+  prTabsCollapsed: [],
 };
 
 const HOST = "orch.pr_tabs";

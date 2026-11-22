@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, useTemplateRef } from "vue";
-import { bareNumber, isPrUrl } from "#/core";
-import { getPluralMessage } from "#/i18n";
-import type { GroupListControl, PrKey, TabId } from "#/types";
-import { useFuzzyFilter } from "#/composables/useFuzzyFilter";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { bareNumber, isGoToInput } from "#/core";
+import { getMessage, getPluralMessage } from "#/i18n";
+import type { ActionMenuItem, PrKey, RepoOption, SearchQuery, Selectable, TabId } from "#/types";
+import { useCollapsed } from "#/composables/useCollapsed";
 import { usePrClose } from "#/composables/usePrClose";
 import { useOpeningProgress } from "#/composables/useOpeningProgress";
 import { useMessages } from "#/composables/useMessages";
 import { usePanes } from "#/composables/usePanes";
 import { useGoTo } from "#/composables/useGoTo";
+import { useRepoOptions } from "#/composables/useRepoOptions";
 import { useRepoPicker } from "#/composables/useRepoPicker";
+import { useSearchFilter } from "#/composables/useSearchFilter";
 import { useServiceWorker } from "#/composables/useServiceWorker";
 import { useStatus } from "#/composables/useStatus";
 import { useSummary } from "#/composables/useSummary";
@@ -18,33 +20,43 @@ import ActionMenu from "./components/ActionMenu.vue";
 import GroupList from "./components/GroupList.vue";
 import OpeningProgress from "./components/OpeningProgress.vue";
 import PopupField from "./components/PopupField.vue";
+import RepoOptionItem from "./components/RepoOptionItem.vue";
 import StatusLine from "./components/StatusLine.vue";
 
 const {
+  goToLabel,
   openReviewsButton,
-  openReviewsHint,
   openAllButton,
-  openAllHint,
   checkNowButton,
-  checkNowHint,
   closeDuplicatesButton,
-  closeDuplicatesHint,
   actionMenuLabel,
+  repoSelectLabel,
+  repoGuessUnavailable,
+  noPrTabs,
+  emptyHint,
+  footerListHint,
+  footerGoToHint,
 } = useMessages([
+  "goToLabel",
   "openReviewsButton",
-  "openReviewsHint",
   "openAllButton",
-  "openAllHint",
   "checkNowButton",
-  "checkNowHint",
   "closeDuplicatesButton",
-  "closeDuplicatesHint",
   "actionMenuLabel",
+  "repoSelectLabel",
+  "repoGuessUnavailable",
+  "noPrTabs",
+  "emptyHint",
+  "footerListHint",
+  "footerGoToHint",
 ]);
 const { ask } = useServiceWorker();
 const status = useStatus();
 const { statusText, isStatusError } = status;
-const { groups, refresh } = useSummary(ask, status);
+const { groups, text: summaryLine, refresh } = useSummary(ask, status);
+const isStatusShown = computed(
+  () => isStatusError.value || (statusText.value !== "" && statusText.value !== summaryLine.value),
+);
 const hasPrTabs = computed(() => groups.value.length > 0);
 const panes = usePanes(ask, status);
 const input = ref("");
@@ -55,20 +67,29 @@ const mode = computed<"idle" | "goto" | "search">(() => {
     return "idle";
   }
 
-  return bareNumber(value) || isPrUrl(value) ? "goto" : "search";
+  return isGoToInput(value) ? "goto" : "search";
 });
-const query = computed(() => (mode.value === "search" ? input.value : ""));
+const number = computed(() => (mode.value === "goto" ? bareNumber(input.value) : null));
+const query = computed<SearchQuery>(() => {
+  if (mode.value === "search") {
+    return { text: input.value, numberOnly: false };
+  }
+
+  return { text: number.value === null ? "" : String(number.value), numberOnly: true };
+});
 const {
   groups: visibleGroups,
   active: isFiltering,
   count: matchCount,
-  best: bestMatch,
-} = useFuzzyFilter(groups, query);
-const groupList = useTemplateRef<GroupListControl>("groupList");
+} = useSearchFilter(groups, query);
 const closing = usePrClose({ ask, status, refresh });
 const picker = useRepoPicker(ask, input);
 const { repos, repo, guessUnavailable } = picker;
 const isRepoPickerOpen = ref(false);
+const repoOptions = useRepoOptions({ groups, repos, guessed: repo, number });
+const shownRepoOptions = computed(() =>
+  isRepoPickerOpen.value && mode.value === "goto" ? repoOptions.value : [],
+);
 const { busy: isGoToBusy, go, focusPr } = useGoTo({ ask, status, picker, refresh }, input);
 const { openAll, openReviews, checkNow, closeDuplicates } = useTabActions({ ask, status, refresh });
 const { busy: isOpeningAll } = openAll;
@@ -82,62 +103,118 @@ const openingProgress = computed(() => ({
   active: workerProgress.value.active || localBusy.value,
 }));
 const isOpeningBatch = computed(() => openingProgress.value.active);
+const { collapsed: storedCollapsed, load: loadCollapsed, set: setStoredCollapsed } = useCollapsed();
+const searchCollapsed = ref<ReadonlySet<string>>(new Set());
+const collapsed = computed(() =>
+  isFiltering.value ? searchCollapsed.value : storedCollapsed.value,
+);
+const selectables = computed<Selectable[]>(() => [
+  ...shownRepoOptions.value.map((option) => ({ kind: "repo" as const, id: option.id, option })),
+  ...visibleGroups.value
+    .filter((group) => !collapsed.value.has(group.id))
+    .flatMap((group) =>
+      group.prs.map((row) => ({ kind: "pr" as const, id: `pr-${row.tabId}`, row })),
+    ),
+]);
+const activeIndex = ref(-1);
+const active = computed(() => selectables.value[activeIndex.value] ?? null);
+const activeId = computed(() => active.value?.id ?? null);
 const totalPrs = computed(() => groups.value.reduce((total, group) => total + group.prs.length, 0));
 const footerSummary = computed(() =>
   isFiltering.value
-    ? `${matchCount.value} of ${totalPrs.value} PRs`
-    : `${getPluralMessage("prCount", totalPrs.value)} in ${getPluralMessage("groupCount", groups.value.length)}`,
+    ? getMessage("footerFiltered", { matches: matchCount.value, total: totalPrs.value })
+    : summaryLine.value,
 );
-const footerHint = computed(() =>
-  mode.value === "goto" ? "↵ open · ↑↓ repository · esc close" : "↑↓ select · ↵ open · esc clear",
+const footerHint = computed(() => (mode.value === "goto" ? footerGoToHint : footerListHint));
+const openInLabel = computed(() => getMessage("goToOpenIn", { number: number.value ?? "" }));
+const matchingLabel = computed(() => getMessage("goToMatching", { number: number.value ?? "" }));
+const hasRepoOptions = computed(() => shownRepoOptions.value.length > 0);
+const repoOptionRows = computed<Record<string, RepoOption>>(() =>
+  Object.fromEntries(shownRepoOptions.value.map((option) => [option.id, option])),
 );
+const isMatchingLabelShown = computed(() => hasRepoOptions.value && visibleGroups.value.length > 0);
+const isListShown = computed(() => hasPrTabs.value || hasRepoOptions.value);
 
-function openingActionMenuItems() {
-  return [
-    {
-      id: "open-all",
-      label: openAllButton,
-      hint: openAllHint,
-      icon: "open" as const,
-      busy: isOpeningBatch.value,
-      run: handleOpenAllRun,
-    },
-    {
-      id: "open-reviews",
-      label: openReviewsButton,
-      hint: openReviewsHint,
-      icon: "review" as const,
-      busy: isOpeningBatch.value,
-      run: handleOpenReviewsRun,
-    },
-  ];
+const openingMenuItems = computed<ActionMenuItem[]>(() => [
+  {
+    id: "open-all",
+    label: openAllButton,
+    icon: "pi-external-link",
+    busy: isOpeningBatch.value,
+    run: handleOpenAllRun,
+  },
+  {
+    id: "open-reviews",
+    label: openReviewsButton,
+    icon: "pi-eye",
+    busy: isOpeningBatch.value,
+    run: handleOpenReviewsRun,
+  },
+]);
+const closingMenuItems = computed<ActionMenuItem[]>(() => [
+  {
+    id: "check-now",
+    label: checkNowButton,
+    icon: "pi-check-circle",
+    busy: isCheckingNow.value || !hasPrTabs.value,
+    separated: true,
+    run: handleCheckNowRun,
+  },
+  {
+    id: "close-duplicates",
+    label: closeDuplicatesButton,
+    icon: "pi-clone",
+    busy: isClosingDuplicates.value || !hasPrTabs.value,
+    run: handleCloseDuplicatesRun,
+  },
+]);
+const actionMenuItems = computed(() => [...openingMenuItems.value, ...closingMenuItems.value]);
+
+function resetSelection(): void {
+  const selectsFirst = mode.value === "search" || shownRepoOptions.value.length > 0;
+
+  activeIndex.value = selectsFirst && selectables.value.length > 0 ? 0 : -1;
 }
 
-function closeActionMenuItems() {
-  return [
-    {
-      id: "check-now",
-      label: checkNowButton,
-      hint: checkNowHint,
-      icon: "merge" as const,
-      busy: isCheckingNow.value || !hasPrTabs.value,
-      run: handleCheckNowRun,
-    },
-    {
-      id: "close-duplicates",
-      label: closeDuplicatesButton,
-      hint: closeDuplicatesHint,
-      icon: "copy" as const,
-      busy: isClosingDuplicates.value || !hasPrTabs.value,
-      run: handleCloseDuplicatesRun,
-    },
-  ];
+function handleQueryChanged(): void {
+  searchCollapsed.value = new Set();
+  resetSelection();
 }
 
-const actionMenuItems = computed(() => [...openingActionMenuItems(), ...closeActionMenuItems()]);
+function handleSelectablesChanged(): void {
+  if (activeIndex.value >= selectables.value.length) {
+    activeIndex.value = selectables.value.length - 1;
+  }
+}
 
-function handleSearchNext(): void {
-  groupList.value?.focusFirst();
+function handleActiveChanged(id: string | null): void {
+  if (id) {
+    void nextTick(() => document.getElementById(id)?.scrollIntoView({ block: "nearest" }));
+  }
+}
+
+function handleSelectNext(): void {
+  activeIndex.value = Math.min(activeIndex.value + 1, selectables.value.length - 1);
+}
+
+function handleSelectPrevious(): void {
+  activeIndex.value = Math.max(activeIndex.value - 1, 0);
+}
+
+function handleCollapse(id: string, isCollapsed: boolean): void {
+  if (isFiltering.value) {
+    const next = new Set(searchCollapsed.value);
+
+    if (isCollapsed) {
+      next.add(id);
+    } else {
+      next.delete(id);
+    }
+
+    searchCollapsed.value = next;
+  } else {
+    setStoredCollapsed(id, isCollapsed);
+  }
 }
 
 function handlePrClose(key: PrKey, tabId: TabId): void {
@@ -148,15 +225,43 @@ function handlePrGo(key: PrKey): void {
   void focusPr(key);
 }
 
-function handleGoToSubmit(): void {
-  if (bareNumber(input.value) && !isRepoPickerOpen.value) {
-    picker.suggest();
-    isRepoPickerOpen.value = true;
+function openRepo(option: RepoOption): void {
+  if (option.open) {
+    void focusPr(option.open);
 
     return;
   }
 
+  repo.value = option.repo;
+  picker.pick();
   void go();
+}
+
+function handleRepoPick(option: RepoOption): void {
+  openRepo(option);
+}
+
+function handleRepoHover(option: RepoOption): void {
+  activeIndex.value = selectables.value.findIndex((item) => item.id === option.id);
+}
+
+function openSelected(selected: Selectable): void {
+  if (selected.kind === "repo") {
+    openRepo(selected.option);
+  } else {
+    void focusPr(selected.row.key);
+  }
+}
+
+function handleFieldGo(): void {
+  if (active.value) {
+    openSelected(active.value);
+  } else if (number.value !== null && !isRepoPickerOpen.value && repos.value.length > 0) {
+    picker.suggest();
+    isRepoPickerOpen.value = true;
+  } else if (mode.value === "goto") {
+    void go();
+  }
 }
 
 function handleFieldClear(): void {
@@ -169,8 +274,8 @@ function handleFieldClear(): void {
   input.value = "";
 }
 
-function handleRepoPick(): void {
-  picker.pick();
+function handleInputChanged(): void {
+  isRepoPickerOpen.value = false;
 }
 
 function handleOpenAllRun(): void {
@@ -192,15 +297,20 @@ function handleCloseDuplicatesRun(): void {
 function handlePopupMounted(): void {
   void refresh();
   void picker.load();
+  void loadCollapsed();
 }
 
+watch(input, handleInputChanged);
+watch([() => query.value.text, isRepoPickerOpen, mode], handleQueryChanged);
+watch(selectables, handleSelectablesChanged);
+watch(activeId, handleActiveChanged);
 onMounted(handlePopupMounted);
 </script>
 
 <template>
   <main id="popup-content">
-    <header class="flex h-7 items-center justify-between px-3 pt-3">
-      <h1 class="text-[13px] leading-5 font-semibold">Go to a PR</h1>
+    <header class="popup-title">
+      <h1>{{ goToLabel }}</h1>
       <ActionMenu :actions="actionMenuItems" :label="actionMenuLabel" />
     </header>
     <PopupField
@@ -208,68 +318,46 @@ onMounted(handlePopupMounted);
       :mode="mode"
       :matches="matchCount"
       :busy="isGoToBusy"
-      @go="handleGoToSubmit"
-      @next="handleSearchNext"
+      :expanded="isListShown"
+      :active="activeId"
+      @go="handleFieldGo"
+      @next="handleSelectNext"
+      @previous="handleSelectPrevious"
       @clear="handleFieldClear"
     />
     <OpeningProgress :progress="openingProgress" />
-    <StatusLine v-if="isStatusError" :text="statusText" error />
-    <section
-      v-if="isRepoPickerOpen && mode === 'goto' && repos.length"
-      class="px-3 pt-3"
-      aria-label="Repository suggestions"
-    >
-      <p class="pl-2 text-[12px] leading-4 text-[var(--muted)]">Open #{{ bareNumber(input) }} in</p>
-      <div class="mt-1" role="listbox">
-        <button
-          v-for="name in repos"
-          :key="name"
-          type="button"
-          class="flex h-8 w-full items-center gap-2 rounded-md px-3 text-left hover:bg-[var(--hover)]"
-          :class="name === repo ? 'bg-[var(--sel)]' : ''"
-          role="option"
-          :aria-selected="name === repo"
-          @click="
-            repo = name;
-            handleRepoPick();
-          "
-        >
-          <span class="h-4 w-[3px] rounded-sm bg-[var(--pr-tabs-group-blue)]" />
-          <span class="font-semibold">{{ name }}</span>
-          <span class="ml-auto text-[12px] text-[var(--muted)]">↵</span>
-        </button>
+    <StatusLine v-if="isStatusShown" :text="statusText" :error="isStatusError" />
+    <section v-if="isListShown" id="popup-list" role="listbox">
+      <div v-if="hasRepoOptions" role="group" :aria-label="repoSelectLabel">
+        <p class="goto-label">{{ openInLabel }}</p>
+        <div class="repo-options">
+          <RepoOptionItem
+            v-for="(option, id) in repoOptionRows"
+            :key="id"
+            :option="option"
+            :selected="activeId"
+            @pick="handleRepoPick"
+            @hover="handleRepoHover"
+          />
+        </div>
+        <p v-if="guessUnavailable" class="goto-label">{{ repoGuessUnavailable }}</p>
       </div>
-      <small v-if="guessUnavailable" class="mt-1 block text-[var(--muted)]">
-        repo guess unavailable: update the host
-      </small>
-    </section>
-    <section v-if="hasPrTabs" id="popup-list" class="min-h-0 flex-1 overflow-y-auto px-2 pt-3 pb-2">
-      <p
-        v-if="isRepoPickerOpen && mode === 'goto'"
-        class="px-3 pt-4 pb-1 text-[12px] leading-4 text-[var(--muted)]"
-      >
-        Open tabs matching {{ bareNumber(input) }}
-      </p>
+      <p v-if="isMatchingLabelShown" class="goto-label goto-matching">{{ matchingLabel }}</p>
       <GroupList
-        ref="groupList"
         :groups="visibleGroups"
         :panes="panes"
-        :filtering="isFiltering"
+        :collapsed="collapsed"
+        :selected="activeId"
+        @collapse="handleCollapse"
         @go="handlePrGo"
         @close="handlePrClose"
       />
     </section>
-    <section v-else class="px-3 py-6">
-      <p class="font-medium">No PR tabs open</p>
-      <p class="mt-1 max-w-[360px] text-[12px] leading-[18px] text-[var(--muted)]">
-        Type a PR number like 2972 or paste a PR link. Enter picks the repository, Enter again opens
-        it.
-      </p>
+    <section v-else class="empty-state">
+      <p class="empty-title">{{ noPrTabs }}</p>
+      <p class="empty-hint">{{ emptyHint }}</p>
     </section>
-    <footer
-      v-if="hasPrTabs"
-      class="flex h-8 shrink-0 items-center justify-between border-t border-[var(--line)] px-3 text-[12px] leading-4 text-[var(--muted)]"
-    >
+    <footer v-if="hasPrTabs" class="popup-footer">
       <span>{{ footerSummary }}</span>
       <span>{{ footerHint }}</span>
     </footer>

@@ -1,10 +1,9 @@
 // @vitest-environment happy-dom
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
-import GoToForm from "#popup/components/GoToForm.vue";
 import GroupList from "#popup/components/GroupList.vue";
-import PrInput from "#popup/components/PrInput.vue";
-import RepoSelect from "#popup/components/RepoSelect.vue";
+import PopupField from "#popup/components/PopupField.vue";
+import RepoOptionItem from "#popup/components/RepoOptionItem.vue";
 import { createI18n } from "#test/i18n/catalog";
 import { fakePanes } from "./fakePanes";
 import { mountPopup } from "./mountPopup";
@@ -17,62 +16,46 @@ function speakGerman(): void {
   vi.stubGlobal("chrome", { i18n: createI18n("de") });
 }
 
-test("the form label comes from chrome.i18n", () => {
-  speakGerman();
-
-  const wrapper = mountPopup(GoToForm, {
-    props: { busy: false, repos: [], showRepo: false, input: "", repo: "" },
+function field(mode: "idle" | "goto" | "search", matches = 0) {
+  return mountPopup(PopupField, {
+    props: { mode, matches, busy: false, expanded: false, active: null, modelValue: "" },
   });
+}
 
-  assert.equal(wrapper.find("label").text(), "Zu einem PR gehen");
-});
-
-test("the input placeholder and the Enter hint come from chrome.i18n", () => {
+test("the field placeholder and trailing hints come from chrome.i18n", () => {
   speakGerman();
-
-  const wrapper = mountPopup(PrInput, { props: { readonly: false, modelValue: "76" } });
-
-  assert.equal(wrapper.find("input").attributes("placeholder"), "2972 oder eine PR-URL");
-  assert.equal(wrapper.find("kbd").attributes("aria-label"), "Eingabetaste drücken");
-});
-
-test("the repo dropdown label comes from chrome.i18n", () => {
-  speakGerman();
-
-  const wrapper = mountPopup(RepoSelect, {
-    props: { repos: ["a", "b"], open: false, modelValue: "a" },
-  });
 
   assert.equal(
-    wrapper.find("[aria-label]").attributes("aria-label"),
-    "Repository für eine einzelne Nummer",
+    field("idle").find("input").attributes("placeholder"),
+    "PR-Nummer, Link oder offene Tabs durchsuchen",
   );
+  assert.equal(field("goto").find(".popup-field-trailing").text(), "PR-Nummer");
+  assert.equal(field("search", 6).find(".popup-field-trailing").text(), "6 Treffer");
 });
 
-test("the dropdown live-region messages come from chrome.i18n", async () => {
+test("the already-open hint comes from chrome.i18n", () => {
   speakGerman();
 
-  const wrapper = mountPopup(RepoSelect, {
-    props: { repos: ["a", "b"], open: false, modelValue: "a" },
+  const option = mountPopup(RepoOptionItem, {
+    props: {
+      option: { id: "repo-a", repo: "a", color: "blue", open: "acme/a#1" },
+      selected: null,
+    },
   });
 
-  await wrapper.find(".p-select").trigger("click");
-
-  const regions = [...document.body.querySelectorAll("[role=status]")];
-
-  assert.deepEqual(
-    regions.map((region) => region.textContent?.trim()),
-    ["1 Repository ausgewählt"],
-  );
-
-  wrapper.unmount();
+  assert.equal(option.find(".repo-option-hint").text(), "bereits offen · ↵ wechseln");
 });
 
 test("the group list label and the count label come from chrome.i18n", () => {
   speakGerman();
 
   const list = mountPopup(GroupList, {
-    props: { groups: [{ id: "1", title: "Finder", count: 1, prs: [] }], panes: fakePanes() },
+    props: {
+      groups: [{ id: "1", title: "Finder", count: 1, prs: [] }],
+      panes: fakePanes(),
+      collapsed: new Set<string>(),
+      selected: null,
+    },
   });
 
   assert.equal(list.attributes("aria-label"), "PR-Tab-Gruppen");

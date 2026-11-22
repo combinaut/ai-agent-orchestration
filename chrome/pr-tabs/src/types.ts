@@ -1,5 +1,5 @@
 // Every PR tabs type: domain, chrome messages, native host, storage and popup.
-import type { ComputedRef, Ref } from "vue";
+import type { ComputedRef, MaybeRefOrGetter, Ref } from "vue";
 import type en from "#locales/en/messages.json";
 
 export type OrgName = string;
@@ -147,6 +147,9 @@ export interface GroupSummary {
   color?: GroupColor;
   count: number;
   prs: PrRow[];
+  // Set while a search filters the group: its PR count before filtering and matched title ranges.
+  total?: number;
+  titleMatches?: readonly MatchRange[];
 }
 
 export type GroupRows = Record<string, GroupSummary>;
@@ -410,6 +413,7 @@ export interface StoredState {
   cursor: number;
   prTabsRepo: RepoName;
   prTabsRepoNumbers: RepoNumbersCache;
+  prTabsCollapsed: string[];
 }
 
 export interface FetchedStates {
@@ -496,6 +500,8 @@ export type TagSeverity = "success" | "info" | "secondary" | "warn";
 
 export interface SummaryList {
   groups: Ref<GroupSummary[]>;
+  // The summary line of the last refresh.
+  text: Readonly<Ref<string>>;
   refresh: () => Promise<void>;
 }
 
@@ -530,7 +536,7 @@ export type TabActions = Record<TabActionType, TabAction>;
 export interface GroupRow {
   title: ComputedRef<GroupTitle>;
   count: ComputedRef<number>;
-  dotClass: ComputedRef<string>;
+  colorClass: ComputedRef<string>;
   countLabel: ComputedRef<string>;
 }
 
@@ -541,68 +547,59 @@ export interface OpeningProgressProps {
   progress: OpeningProgress;
 }
 
-export interface ActionButtonProps {
-  label: string;
-  hint: string;
-  busy: boolean;
-  primary?: boolean;
-}
-
-export interface GoToFormProps {
-  busy: boolean;
-  repos: RepoName[];
-  showRepo: boolean;
-  guessUnavailable?: boolean;
-}
-
-export interface PrInputProps {
-  readonly: boolean;
-}
-
-export interface RepoSelectProps {
-  repos: RepoName[];
-  open: boolean;
-  guessUnavailable?: boolean;
-}
-
 export interface StatusLineProps {
   text: string;
   error: boolean;
 }
 
 export interface GroupListProps {
-  filtering?: boolean;
   groups: GroupSummary[];
   panes: Panes;
+  collapsed: ReadonlySet<string>;
+  selected: string | null;
 }
 
 export interface GroupItemProps {
   group: GroupSummary;
   panes: Panes;
+  collapsed: ReadonlySet<string>;
+  selected: string | null;
 }
 
 export interface PrItemProps {
   pr: PrRow;
   panes: Panes;
-  grouped?: boolean;
+  selected: string | null;
+}
+
+export interface RepoOptionProps {
+  option: RepoOption;
+  selected: string | null;
+}
+
+export interface PopupFieldProps {
+  mode: "idle" | "goto" | "search";
+  matches: number;
+  busy: boolean;
+  expanded: boolean;
+  active: string | null;
+}
+
+export interface ActionMenuItem {
+  id: string;
+  label: string;
+  icon: string;
+  busy: boolean;
+  separated?: boolean;
+  run: () => void;
 }
 
 // Component events.
-export interface ActionButtonEmits {
-  run: [];
-}
-
-export interface GoToFormEmits {
+export interface PopupFieldEmits {
   go: [];
-  pick: [];
-  closeRepo: [];
-  acceptRepo: [];
-}
-
-export interface RepoSelectEmits {
-  pick: [];
-  close: [];
-  accept: [];
+  next: [];
+  previous: [];
+  clear: [];
 }
 
 // Chrome i18n: keys and placeholders come from the English catalog.
@@ -651,38 +648,16 @@ export interface CatalogEntry {
 
 export type Labels<K extends PlainMessageKey> = Readonly<Record<K, string>>;
 
-export interface SearchPr {
-  label: string;
-  row: PrRow;
-  group: GroupSummary;
-  title: string;
-  repo: RepoName;
-  number: PrNumber;
-  branch: BranchName;
-  groupName: GroupTitle;
-}
-
-export interface FuzzyFilter {
-  groups: ComputedRef<GroupSummary[]>;
-  active: ComputedRef<boolean>;
-  count: ComputedRef<number>;
-  best: ComputedRef<PrKey | null>;
-}
-
-export interface PrSearchProps {
-  count: number;
-  active: boolean;
-}
-export interface PrSearchCommands {
-  go: [];
-  next: [];
-}
 export interface PrRowEvents {
   go: [key: PrKey];
   close: [key: PrKey, tabId: TabId];
 }
-export interface GroupListControl {
-  focusFirst: () => void;
+export interface RepoOptionEvents {
+  pick: [option: RepoOption];
+  hover: [option: RepoOption];
+}
+export interface GroupEvents extends PrRowEvents {
+  collapse: [id: string, collapsed: boolean];
 }
 export type CloseFocus = () => void;
 export interface PrCloseContext {
@@ -700,10 +675,45 @@ export interface Segment {
   matched: boolean;
 }
 export interface PrHighlights {
-  label: readonly MatchRange[];
+  number: readonly MatchRange[];
   title: readonly MatchRange[];
-  queryLength: number;
 }
+
+export interface SearchQuery {
+  text: string;
+  numberOnly: boolean;
+}
+
+export interface SearchFilter {
+  groups: ComputedRef<GroupSummary[]>;
+  active: ComputedRef<boolean>;
+  count: ComputedRef<number>;
+}
+
+export interface Collapsed {
+  collapsed: Readonly<Ref<ReadonlySet<string>>>;
+  load: () => Promise<void>;
+  set: (id: string, collapsed: boolean) => void;
+  toggle: (id: string) => void;
+}
+
+export interface RepoOption {
+  readonly id: string;
+  readonly repo: RepoName;
+  readonly color: GroupColor;
+  readonly open: PrKey | null;
+}
+
+export interface RepoOptionSources {
+  groups: MaybeRefOrGetter<GroupSummary[]>;
+  repos: MaybeRefOrGetter<readonly RepoName[]>;
+  guessed: MaybeRefOrGetter<RepoName>;
+  number: MaybeRefOrGetter<PrNumber | null>;
+}
+
+export type Selectable =
+  | { readonly kind: "repo"; readonly id: string; readonly option: RepoOption }
+  | { readonly kind: "pr"; readonly id: string; readonly row: PrRow };
 export interface TextSegmentProps {
   segment: Segment;
 }

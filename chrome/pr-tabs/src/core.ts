@@ -218,6 +218,17 @@ function prIn(org: OrgName, repo: RepoName | null, digits: string | undefined): 
   return repo && number > 0 ? makePr(org, repo, number) : null;
 }
 
+function isTarget(text: string): boolean {
+  return BARE_NUMBER.test(text) || REPO_NUMBER.test(text) || isPrUrl(text);
+}
+
+// Input the popup opens rather than searches: PR numbers, <repo>#<number> or PR URLs.
+export function isGoToInput(input: string): boolean {
+  const targets = splitTargets(input);
+
+  return targets.length > 0 && targets.every(isTarget);
+}
+
 // The PR named by popup input: a number (#123 or 123) in the picked repo (default: pickedRepo),
 // <repo>#<number> for a listed repo, or a PR URL.
 export function parseTarget(

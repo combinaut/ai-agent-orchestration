@@ -8,8 +8,6 @@ const matched = computed(() => props.segment.matched);
 </script>
 
 <template>
-  <mark v-if="matched" class="bg-search-match font-semibold text-search-match-text">
-    {{ text }}
-  </mark>
+  <mark v-if="matched">{{ text }}</mark>
   <template v-else>{{ text }}</template>
 </template>

@@ -28,7 +28,7 @@ const showValue = false;
 </script>
 
 <template>
-  <div v-if="active" id="opening-progress" class="mt-3">
+  <div v-if="active" id="opening-progress" class="mx-3 mt-3">
     <ProgressBar :mode="mode" :value="value" :show-value="showValue" :aria-label="text" />
     <p class="mt-1 text-muted-color" aria-live="polite">{{ text }}</p>
   </div>

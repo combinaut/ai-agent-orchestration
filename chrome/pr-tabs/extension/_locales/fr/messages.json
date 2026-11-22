@@ -11,43 +11,23 @@
   "goToLabel": {
     "message": "Aller à une PR"
   },
-  "goToPlaceholder": {
-    "message": "2972 ou une URL de PR"
-  },
-  "submitHintLabel": {
-    "message": "Appuyez sur Entrée"
-  },
   "repoSelectLabel": {
     "message": "Dépôt pour un numéro seul"
   },
-  "repoSelectedMessage": {
-    "message": "1 dépôt sélectionné"
+  "repoGuessUnavailable": {
+    "message": "Repo guess unavailable: update the host"
   },
-  "repoNoneSelectedMessage": {
-    "message": "Aucun dépôt sélectionné"
+  "actionMenuLabel": {
+    "message": "Actions"
   },
-  "repoEmptyMessage": {
-    "message": "Aucun dépôt disponible"
-  },
-  "repoGuessUnavailable": { "message": "Repo guess unavailable: update the host" },
-  "actionMenuLabel": { "message": "Actions" },
   "openAllButton": {
     "message": "Tout ouvrir"
-  },
-  "openAllHint": {
-    "message": "Ouvrir toutes mes PR ouvertes"
   },
   "checkNowButton": {
     "message": "Fermer fusionnées"
   },
-  "checkNowHint": {
-    "message": "Fermer les PR fusionnées"
-  },
   "closeDuplicatesButton": {
     "message": "Fermer doublons"
-  },
-  "closeDuplicatesHint": {
-    "message": "Fermer les onglets en double"
   },
   "groupsLabel": {
     "message": "Groupes d'onglets de PR"
@@ -347,9 +327,6 @@
   "openReviewsButton": {
     "message": "Ouvrir revues"
   },
-  "openReviewsHint": {
-    "message": "Ouvrir les PR dont ma revue est demandée"
-  },
   "openingProgress": {
     "message": "$OPENED$ sur $PLANNED$ ouvertes",
     "placeholders": {
@@ -367,28 +344,6 @@
   "errPrTabGone": {
     "message": "L’onglet de cette PR n’est plus ouvert."
   },
-  "prSearchLabel": {
-    "message": "Rechercher un onglet PR"
-  },
-  "prSearchEmpty": {
-    "message": "Aucune PR correspondante"
-  },
-  "prSearchCount_one": {
-    "message": "$COUNT$ PR correspondante",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
-  "prSearchCount_other": {
-    "message": "$COUNT$ PR correspondantes",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
   "closePrTab": {
     "message": "Fermer l’onglet $PR$",
     "placeholders": {
@@ -396,5 +351,66 @@
         "content": "$1"
       }
     }
+  },
+  "fieldPlaceholder": {
+    "message": "Numéro de PR, lien ou recherche dans les onglets ouverts"
+  },
+  "fieldNumberHint": {
+    "message": "Numéro de PR"
+  },
+  "fieldMatches_one": {
+    "message": "$COUNT$ résultat",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "fieldMatches_other": {
+    "message": "$COUNT$ résultats",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "footerFiltered": {
+    "message": "$MATCHES$ sur $TOTAL$ PR",
+    "placeholders": {
+      "matches": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "footerListHint": {
+    "message": "↑↓ choisir · ↵ ouvrir · esc effacer"
+  },
+  "footerGoToHint": {
+    "message": "↵ ouvrir · ↑↓ dépôt · esc fermer"
+  },
+  "emptyHint": {
+    "message": "Saisissez un numéro de PR comme 2972 ou collez un lien de PR. Entrée choisit le dépôt, une seconde Entrée l’ouvre."
+  },
+  "goToOpenIn": {
+    "message": "Ouvrir #$NUMBER$ dans",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "goToMatching": {
+    "message": "Onglets ouverts avec $NUMBER$",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "alreadyOpen": {
+    "message": "déjà ouvert · ↵ basculer"
   }
 }

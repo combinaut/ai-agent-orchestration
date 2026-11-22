@@ -138,25 +138,14 @@ test("no two @theme tokens claim the same Tailwind utility", () => {
   assert.deepEqual(duplicates(utilities("--color-popup: a; --text-popup: b;")), ["text-popup"]);
 });
 
-test("the popup content owns a stable scrollbar gutter before groups expand", () => {
-  const tailwind = readFileSync(join(SRC, "popup/tailwind.css"), "utf8");
-
-  assert.match(
-    tailwind,
-    /@utility scrollbar-gutter-both-edges\s*\{\s*scrollbar-gutter: stable both-edges;/,
-  );
-  assert.doesNotMatch(tailwind, /@layer base\s*\{\s*html\s*\{/);
-});
-
-test("PR rows use Aura's hover colour for pointer and keyboard interaction", () => {
-  const tailwind = readFileSync(join(SRC, "popup/tailwind.css"), "utf8");
+test("rows and headers use the design's hover and selection tokens", () => {
   const tokens = readFileSync(join(SRC, TOKENS), "utf8");
 
-  assert.match(tailwind, /--color-row-hover: var\(--p-content-hover-background\);/);
-  assert.match(tailwind, /--spacing-popup-content: var\(--pr-tabs-popup-max-height\);/);
-  assert.match(tailwind, /--spacing-popup-padding: var\(--pr-tabs-popup-padding\);/);
-  assert.match(tailwind, /--spacing-pane-icon: var\(--pr-tabs-pane-icon-size\);/);
-  assert.match(tokens, /--pr-tabs-pane-icon-size: var\(--p-icon-size\);/);
-  assert.match(tailwind, /--spacing-pr-row: var\(--pr-tabs-pr-row-min-height\);/);
-  assert.match(tokens, /--pr-tabs-pr-row-min-height: calc\(/);
+  assert.match(tokens, /\.pr-row:hover \{\s*background: var\(--hover\);/);
+  assert.match(tokens, /\.pr-row\.pr-row-selected \{\s*background: var\(--sel\);/);
+  assert.match(
+    tokens,
+    /#groups \.group-header:not\(\.p-disabled\):hover \{\s*background: var\(--hover\);/,
+  );
+  assert.match(tokens, /\.repo-option\.repo-option-selected \{\s*background: var\(--sel\);/);
 });

@@ -5,36 +5,69 @@ import PrimeVue from "primevue/config";
 import { afterEach, test } from "vitest";
 import ActionMenu from "#popup/components/ActionMenu.vue";
 import { primeVueConfiguration } from "#popup/primevue";
+import type { ActionMenuItem } from "#/types";
 
 afterEach(() => {
   document.body.replaceChildren();
 });
 
-test("the real menu stays visible after opening and closes on the next click", async () => {
-  const wrapper = mount(ActionMenu, {
+const ACTIONS: ActionMenuItem[] = [
+  { id: "open", label: "Open all", icon: "pi-external-link", busy: false, run() {} },
+  {
+    id: "merged",
+    label: "Close merged",
+    icon: "pi-check-circle",
+    busy: true,
+    separated: true,
+    run() {},
+  },
+];
+
+function menu() {
+  return mount(ActionMenu, {
     attachTo: document.body,
-    props: {
-      label: "Actions",
-      actions: [
-        { id: "open", label: "Open all", hint: "", icon: "open" as const, busy: false, run() {} },
-      ],
-    },
+    props: { label: "Actions", actions: ACTIONS },
     global: { plugins: [[PrimeVue, primeVueConfiguration]], stubs: { teleport: true } },
   });
+}
+
+test("the real menu stays visible after opening and closes on the next click", async () => {
+  const wrapper = menu();
 
   try {
     const trigger = wrapper.find("#actions-menu");
-    assert.ok(trigger.classes().includes("size-6"));
+    assert.ok(trigger.find(".pi-bars").exists());
     await trigger.trigger("click");
     await flushPromises();
 
-    const menu = document.getElementById("actions-menu-popup");
-    assert.ok(menu);
+    assert.ok(document.getElementById("actions-menu-popup"));
     assert.ok(document.body.textContent?.includes("Open all"));
     assert.equal(trigger.attributes("aria-expanded"), "true");
+    assert.ok(trigger.classes().includes("menu-button-open"));
     await trigger.trigger("click");
     await flushPromises();
     assert.equal(trigger.attributes("aria-expanded"), "false");
+    assert.equal(trigger.classes().includes("menu-button-open"), false);
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("items show PrimeIcons, a separator before a separated item, and disabled busy items", async () => {
+  const wrapper = menu();
+
+  try {
+    await wrapper.find("#actions-menu").trigger("click");
+    await flushPromises();
+
+    const popup = document.getElementById("actions-menu-popup");
+    assert.ok(popup?.querySelector(".pi-external-link"));
+    assert.ok(popup?.querySelector(".pi-check-circle"));
+    assert.equal(popup?.querySelectorAll(".p-menu-separator").length, 1);
+    assert.deepEqual(
+      [...(popup?.querySelectorAll("a") ?? [])].map((link) => link.getAttribute("aria-disabled")),
+      ["false", "true"],
+    );
   } finally {
     wrapper.unmount();
   }

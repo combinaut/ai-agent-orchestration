@@ -23,7 +23,7 @@ const IDENTIFIER_CHARACTERS = /[/:#.@*_\-$%<>=[\]{}()?&|\\~+^,;!]/;
 const CAMEL_CASE = /^[a-z]+(?:[A-Z][a-z0-9]*)+$/;
 
 // Plain words a file uses as codes (message types, states, colours, option names), by file. A word
-// is a code only in the files listed, so "search" in PrInput.vue is still text.
+// is a code only in the files listed, so "search" in another file is still text.
 const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   "background.ts": [
     "MERGED",
@@ -41,9 +41,7 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
     "panes",
     "opened",
   ],
-  "composables/useFuzzyFilter.ts": ["title", "label", "repo", "number", "branch"],
   "highlight.ts": ["label", "title"],
-  "popup/components/PrSearch.vue": ["next", "go", "ArrowDown", "Enter", "Escape"],
   "composables/useOpeningProgress.ts": ["sync"],
   "composables/usePanes.ts": ["panes"],
   "composables/usePrPane.ts": [
@@ -77,32 +75,28 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   ],
   "i18n.ts": ["one", "other", "conjunction"],
   "messages.ts": ["error", "object", "message", "string", "type", "reply"],
-  "popup/components/ActionButton.vue": ["secondary", "run"],
-  "popup/App.vue": ["Actions", "open", "review", "merge", "copy"],
-  "popup/icons.ts": [
-    "M2 3.5h12v1.5H2zm0 3.75h12v1.5H2zM2 11h12v1.5H2z",
-    "M8 2h6v6h-1.5V4.56L7.03 10.03 5.97 8.97 11.44 3.5H8zM3 4h3v1.5H4.5v7h7V11H13v3H3z",
-    "M8 3a7 7 0 0 1 6.5 4.5A7 7 0 0 1 8 12 7 7 0 0 1 1.5 7.5 7 7 0 0 1 8 3m0 1.5a3 3 0 1 0 0 6 3 3 0 0 0 0-6m0 1.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3",
-    "M4 2.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4m0 7a2 2 0 1 1 0 4 2 2 0 0 1 0-4m1-6v6h3.5V7H12l-2.5-2.5L12 2v2H7v5.5h1.5V7H12l-2.5 2.5L12 12v-2H5",
-    "M5 2h7v8H5zm-2 3h1.5v6.5h6.5V13H3zM6.5 3.5v5h4v-5z",
-  ],
-  "popup/components/ActionIcon.vue": ["menu", "open", "review", "merge"],
-  "popup/components/ActionMenu.vue": ["open", "review", "merge", "copy"],
-  "popup/components/GoToForm.vue": ["input", "repo", "go", "pick"],
-  "popup/components/OpeningProgress.vue": ["determinate", "indeterminate"],
-  "popup/components/GroupItem.vue": ["go", "close", "-mx-popup-padding px-popup-padding"],
-  "popup/components/GroupList.vue": ["go", "close", "list"],
-  "popup/components/PrItem.vue": ["go", "close"],
-  "popup/components/PrInput.vue": ["field", "object"],
-  "popup/components/RepoSelect.vue": [
-    "select",
-    "pick",
-    "close",
-    "accept",
+  "popup/App.vue": ["idle", "goto", "search", "repo", "pr", "nearest"],
+  "composables/useGroupItem.ts": ["grey"],
+  "composables/useRepoOptions.ts": ["grey"],
+  "popup/components/PopupField.vue": [
+    "input",
+    "idle",
+    "goto",
+    "search",
+    "Enter",
+    "go",
+    "ArrowDown",
+    "next",
+    "ArrowUp",
+    "previous",
     "Escape",
-    "keydown",
-    "Repo guess unavailable: update the host",
+    "clear",
   ],
+  "popup/components/RepoOptionItem.vue": ["pick", "hover"],
+  "popup/components/OpeningProgress.vue": ["determinate", "indeterminate"],
+  "popup/components/GroupItem.vue": ["go", "close", "collapse", "ArrowLeft", "ArrowRight"],
+  "popup/components/GroupList.vue": ["go", "close", "collapse"],
+  "popup/components/PrItem.vue": ["go", "close", "Delete", "Backspace"],
   "popup/primevue.ts": ["none"],
   "texts.ts": ["MERGED"],
 };

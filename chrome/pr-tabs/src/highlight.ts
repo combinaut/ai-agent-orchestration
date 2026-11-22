@@ -1,5 +1,4 @@
-import type { FuseResult } from "fuse.js";
-import type { MatchRange, PrRow, SearchPr, Segment } from "#/types";
+import type { MatchRange, Segment } from "#/types";
 
 function mergedRanges(indices: readonly MatchRange[], length: number): MatchRange[] {
   const sorted = indices
@@ -20,23 +19,11 @@ function mergedRanges(indices: readonly MatchRange[], length: number): MatchRang
   return merged;
 }
 
-export function highlightSegments(
-  text: string,
-  indices: readonly MatchRange[],
-  queryLength: number,
-): Segment[] {
-  if (queryLength === 0 || indices.length === 0) {
-    return text ? [{ text, matched: false }] : [];
-  }
-
-  const minimum = queryLength === 1 ? 1 : 2;
-  const ranges = mergedRanges(indices, text.length).filter(
-    (range) => range[1] - range[0] + 1 >= minimum,
-  );
+export function highlightSegments(text: string, indices: readonly MatchRange[] = []): Segment[] {
   const segments: Segment[] = [];
   let cursor = 0;
 
-  for (const range of ranges) {
+  for (const range of mergedRanges(indices, text.length)) {
     if (range[0] > cursor) {
       segments.push({ text: text.slice(cursor, range[0]), matched: false });
     }
@@ -49,26 +36,4 @@ export function highlightSegments(
   }
 
   return segments;
-}
-
-export function highlightedRow(result: FuseResult<SearchPr>, queryLength: number): PrRow {
-  const matches = result.matches ?? [];
-  const label = matches.find((match) => match.key === "label")?.indices ?? [];
-  const title = matches.find((match) => match.key === "title")?.indices ?? [];
-
-  return { ...result.item.row, highlights: { label, title, queryLength } };
-}
-
-export function rowSegments(row: PrRow): Segment[] {
-  const highlights = row.highlights;
-  const offset = row.label.length + 1;
-  const title =
-    highlights?.title.map((range): MatchRange => [range[0] + offset, range[1] + offset]) ?? [];
-  const indices = [...(highlights?.label ?? []), ...title];
-
-  return highlightSegments(
-    `${row.label} ${row.title}`.trim(),
-    indices,
-    highlights?.queryLength ?? 0,
-  );
 }

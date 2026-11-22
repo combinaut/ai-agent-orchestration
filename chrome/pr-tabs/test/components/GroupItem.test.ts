@@ -1,82 +1,64 @@
 // @vitest-environment happy-dom
 import assert from "node:assert/strict";
 import Badge from "primevue/badge";
-import AccordionContent from "primevue/accordioncontent";
-import AccordionHeader from "primevue/accordionheader";
 import { test } from "vitest";
 import GroupList from "#popup/components/GroupList.vue";
-import type { GroupSummary, PrRow } from "#/types";
+import type { GroupSummary } from "#/types";
 import { fakePanes } from "./fakePanes";
 import { mountPopup } from "./mountPopup";
 
-interface AccordionContentPassThrough {
-  readonly content: {
-    readonly class: string;
-  };
+function list(groups: GroupSummary[], collapsed: ReadonlySet<string> = new Set()) {
+  return mountPopup(GroupList, {
+    props: { groups, panes: fakePanes(), collapsed, selected: null },
+  });
 }
 
-interface AccordionHeaderPassThrough {
-  readonly root: {
-    readonly class: string;
-  };
-}
-
-function hasContentClass(value: unknown): value is AccordionContentPassThrough {
-  if (typeof value !== "object" || value === null || !("content" in value)) {
-    return false;
-  }
-
-  const { content } = value;
-
-  return (
-    typeof content === "object" &&
-    content !== null &&
-    "class" in content &&
-    typeof content.class === "string"
-  );
-}
-
-function hasHeaderClass(value: unknown): value is AccordionHeaderPassThrough {
-  if (typeof value !== "object" || value === null || !("root" in value)) {
-    return false;
-  }
-
-  const { root } = value;
-
-  return (
-    typeof root === "object" && root !== null && "class" in root && typeof root.class === "string"
-  );
-}
-
-test("a row shows the group's colour rail, title and PR count", () => {
-  const groups: GroupSummary[] = [{ id: "1", title: "Finder", color: "yellow", count: 2, prs: [] }];
-  const wrapper = mountPopup(GroupList, { props: { groups, panes: fakePanes() } });
-
-  assert.ok(wrapper.find(".p-accordionpanel").classes().includes("group-yellow"));
-  assert.match(wrapper.text(), /Finder/);
-
+test("a header shows the colour rail class, name, count badge and an open chevron", () => {
+  const wrapper = list([{ id: "1", title: "Finder", color: "yellow", count: 2, prs: [] }]);
   const badge = wrapper.findComponent(Badge);
-  const passThrough = wrapper.findComponent(AccordionHeader).props("pt");
 
-  assert.equal(badge.props("value"), 2);
+  assert.ok(wrapper.find(".group-panel").classes().includes("group-yellow"));
+  assert.equal(wrapper.find(".group-name").text(), "Finder");
+  assert.equal(badge.props("value"), "2");
   assert.equal(badge.attributes("aria-label"), "2 PRs");
-  assert.ok(hasHeaderClass(passThrough));
-  assert.match(passThrough.root.class, /h-8/);
-  assert.match(passThrough.root.class, /pl-3/);
+  assert.ok(wrapper.find(".group-chevron .pi-chevron-down").exists());
 });
 
-test("the expanded content is a shrinkable grid column, so a long PR title cannot widen the popup", async () => {
-  const prs: PrRow[] = [
-    { tabId: 1, key: "acme/webapp#1", label: "webapp#1", title: "T".repeat(200), head: null },
-  ];
-  const groups: GroupSummary[] = [{ id: "2", title: "Finder", count: 1, prs }];
-  const wrapper = mountPopup(GroupList, { props: { groups, panes: fakePanes() } });
+test("an unknown group colour falls back to the grey rail", () => {
+  const wrapper = list([
+    { id: "1", title: "Finder", color: "magenta" as "grey", count: 1, prs: [] },
+  ]);
 
-  await wrapper.find("button[aria-expanded]").trigger("click");
+  assert.ok(wrapper.find(".group-panel").classes().includes("group-grey"));
+});
 
-  assert.ok(wrapper.find("[data-pc-name=accordioncontent]").classes().includes("grid-cols-1"));
-  const passThrough = wrapper.findComponent(AccordionContent).props("pt");
+test("a collapsed group shows a right chevron and keeps its badge", () => {
+  const wrapper = list([{ id: "1", title: "Finder", count: 3, prs: [] }], new Set(["1"]));
 
-  assert.ok(hasContentClass(passThrough));
-  assert.equal(passThrough.content.class, "p-0");
+  assert.ok(wrapper.find(".group-chevron .pi-chevron-right").exists());
+  assert.equal(wrapper.find("button[aria-expanded]").attributes("aria-expanded"), "false");
+  assert.equal(wrapper.findComponent(Badge).props("value"), "3");
+});
+
+test("a filtered group shows matches/total and marks the matched name", () => {
+  const wrapper = list([
+    { id: "1", title: "deploy-tools", count: 2, total: 5, titleMatches: [[0, 5]], prs: [] },
+  ]);
+
+  assert.equal(wrapper.findComponent(Badge).props("value"), "2/5");
+  assert.equal(wrapper.find(".group-name mark").text(), "deploy");
+});
+
+test("← and → on a header ask to collapse and expand the group", async () => {
+  const wrapper = list([{ id: "1", title: "Finder", count: 1, prs: [] }]);
+  const header = wrapper.find("button[aria-expanded]");
+
+  await header.trigger("keydown", { key: "ArrowLeft" });
+  await header.trigger("keydown", { key: "ArrowRight" });
+  await header.trigger("keydown", { key: "ArrowUp" });
+
+  assert.deepEqual(wrapper.emitted("collapse"), [
+    ["1", true],
+    ["1", false],
+  ]);
 });

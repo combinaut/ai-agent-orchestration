@@ -65,9 +65,10 @@ test("empty storage restores open PR titles, heads, architect groups and pane co
     return worker.panes("heads" in message ? message.heads : []) as Promise<Reply<M["type"]>>;
   }
   const panes = usePanes(ask, useStatus());
-  const wrapper = mountPopup(GroupList, { props: { groups: summary.groups, panes } });
+  const wrapper = mountPopup(GroupList, {
+    props: { groups: summary.groups, panes, collapsed: new Set<string>(), selected: null },
+  });
   try {
-    await wrapper.find("button[aria-expanded]").trigger("click");
     await flushPromises();
     assert.equal(wrapper.findAll("li [data-pr-pane]").length, 1);
     assert.ok(wrapper.text().includes("Restored title"));

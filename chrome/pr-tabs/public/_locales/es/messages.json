@@ -11,43 +11,23 @@
   "goToLabel": {
     "message": "Ir a un PR"
   },
-  "goToPlaceholder": {
-    "message": "2972 o la URL de un PR"
-  },
-  "submitHintLabel": {
-    "message": "Pulsa Intro"
-  },
   "repoSelectLabel": {
     "message": "Repositorio para un número solo"
   },
-  "repoSelectedMessage": {
-    "message": "1 repositorio seleccionado"
+  "repoGuessUnavailable": {
+    "message": "Repo guess unavailable: update the host"
   },
-  "repoNoneSelectedMessage": {
-    "message": "Ningún repositorio seleccionado"
+  "actionMenuLabel": {
+    "message": "Actions"
   },
-  "repoEmptyMessage": {
-    "message": "No hay repositorios disponibles"
-  },
-  "repoGuessUnavailable": { "message": "Repo guess unavailable: update the host" },
-  "actionMenuLabel": { "message": "Actions" },
   "openAllButton": {
     "message": "Abrir todos"
-  },
-  "openAllHint": {
-    "message": "Abrir todos mis PR abiertos"
   },
   "checkNowButton": {
     "message": "Cerrar fusionados"
   },
-  "checkNowHint": {
-    "message": "Cerrar PR fusionados"
-  },
   "closeDuplicatesButton": {
     "message": "Cerrar duplicadas"
-  },
-  "closeDuplicatesHint": {
-    "message": "Cerrar pestañas duplicadas"
   },
   "groupsLabel": {
     "message": "Grupos de pestañas de PR"
@@ -347,9 +327,6 @@
   "openReviewsButton": {
     "message": "Abrir revisiones"
   },
-  "openReviewsHint": {
-    "message": "Abrir las PR con mi revisión solicitada"
-  },
   "openingProgress": {
     "message": "Abiertas $OPENED$ de $PLANNED$",
     "placeholders": {
@@ -367,28 +344,6 @@
   "errPrTabGone": {
     "message": "La pestaña de esa PR ya no está abierta."
   },
-  "prSearchLabel": {
-    "message": "Buscar pestañas de PR"
-  },
-  "prSearchEmpty": {
-    "message": "No hay PR coincidentes"
-  },
-  "prSearchCount_one": {
-    "message": "$COUNT$ PR coincidente",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
-  "prSearchCount_other": {
-    "message": "$COUNT$ PR coincidentes",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
   "closePrTab": {
     "message": "Cerrar pestaña $PR$",
     "placeholders": {
@@ -396,5 +351,66 @@
         "content": "$1"
       }
     }
+  },
+  "fieldPlaceholder": {
+    "message": "Número de PR, enlace o buscar pestañas abiertas"
+  },
+  "fieldNumberHint": {
+    "message": "Número de PR"
+  },
+  "fieldMatches_one": {
+    "message": "$COUNT$ resultado",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "fieldMatches_other": {
+    "message": "$COUNT$ resultados",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "footerFiltered": {
+    "message": "$MATCHES$ de $TOTAL$ PR",
+    "placeholders": {
+      "matches": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "footerListHint": {
+    "message": "↑↓ elegir · ↵ abrir · esc borrar"
+  },
+  "footerGoToHint": {
+    "message": "↵ abrir · ↑↓ repositorio · esc cerrar"
+  },
+  "emptyHint": {
+    "message": "Escribe un número de PR como 2972 o pega un enlace de PR. Enter elige el repositorio y otro Enter lo abre."
+  },
+  "goToOpenIn": {
+    "message": "Abrir #$NUMBER$ en",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "goToMatching": {
+    "message": "Pestañas abiertas con $NUMBER$",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "alreadyOpen": {
+    "message": "ya abierto · ↵ cambiar"
   }
 }

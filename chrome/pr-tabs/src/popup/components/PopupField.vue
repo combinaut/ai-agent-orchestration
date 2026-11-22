@@ -3,18 +3,22 @@ import IconField from "primevue/iconfield";
 import InputIcon from "primevue/inputicon";
 import InputText from "primevue/inputtext";
 import { computed, onMounted, useTemplateRef } from "vue";
-import SearchIcon from "./SearchIcon.vue";
+import { getPlainMessage, getPluralMessage } from "#/i18n";
+import type { PopupFieldEmits, PopupFieldProps } from "#/types";
 
-const props = defineProps<{ mode: "idle" | "goto" | "search"; matches: number; busy: boolean }>();
-const emit = defineEmits<{ go: []; next: []; clear: [] }>();
+const props = defineProps<PopupFieldProps>();
+const emit = defineEmits<PopupFieldEmits>();
 const value = defineModel<string>({ required: true });
 const input = useTemplateRef<{ $el: HTMLInputElement }>("input");
+const placeholder = getPlainMessage("fieldPlaceholder");
+const fieldClass = computed(() => ({ "popup-field-goto": props.mode === "goto" }));
+const activeDescendant = computed(() => props.active ?? undefined);
 const trailing = computed(() => {
   if (props.mode === "goto") {
-    return "PR number";
+    return getPlainMessage("fieldNumberHint");
   }
 
-  return props.mode === "search" ? `${props.matches} matches` : "";
+  return props.mode === "search" ? getPluralMessage("fieldMatches", props.matches) : "";
 });
 
 function focus(): void {
@@ -32,6 +36,9 @@ function handleKeydown(event: KeyboardEvent): void {
   } else if (event.key === "ArrowDown") {
     event.preventDefault();
     emit("next");
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    emit("previous");
   } else if (event.key === "Escape" && value.value) {
     event.preventDefault();
     event.stopPropagation();
@@ -44,22 +51,22 @@ onMounted(focus);
 </script>
 
 <template>
-  <IconField class="popup-field mx-3 mt-2">
-    <InputIcon class="popup-search-icon"><SearchIcon /></InputIcon>
+  <IconField class="popup-field" :class="fieldClass">
+    <InputIcon class="pi pi-search" />
     <InputText
       id="target"
       ref="input"
       v-model="value"
-      class="w-full"
       autocomplete="off"
       spellcheck="false"
       role="combobox"
       aria-controls="popup-list"
-      :aria-expanded="mode === 'goto'"
-      :placeholder="'PR number, link, or search open tabs'"
+      :aria-expanded="expanded"
+      :aria-activedescendant="activeDescendant"
+      :placeholder="placeholder"
       :readonly="busy"
       @keydown="handleKeydown"
     />
-    <InputIcon v-if="trailing" class="text-[12px] text-[var(--muted)]">{{ trailing }}</InputIcon>
+    <span v-if="trailing" class="popup-field-trailing">{{ trailing }}</span>
   </IconField>
 </template>

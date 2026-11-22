@@ -1,32 +1,30 @@
 <script setup lang="ts">
-import AccordionContent, {
-  type AccordionContentPassThroughOptions,
-} from "primevue/accordioncontent";
-import AccordionHeader, { type AccordionHeaderPassThroughOptions } from "primevue/accordionheader";
+import AccordionContent from "primevue/accordioncontent";
+import AccordionHeader from "primevue/accordionheader";
 import AccordionPanel from "primevue/accordionpanel";
 import Badge from "primevue/badge";
 import { computed } from "vue";
-import type { GroupItemProps, PrKey, TabId, PrRowEvents, PrRows } from "#/types";
+import { highlightSegments } from "#/highlight";
+import type { GroupEvents, GroupItemProps, PrKey, PrRows, TabId } from "#/types";
 import { useGroupItem } from "#/composables/useGroupItem";
 import PrItem from "./PrItem.vue";
+import PrTextSegment from "./PrTextSegment.vue";
 
 const props = defineProps<GroupItemProps>();
-const emit = defineEmits<PrRowEvents>();
-const { title, count, countLabel } = useGroupItem(() => props.group);
+const emit = defineEmits<GroupEvents>();
+const { title, count, colorClass, countLabel } = useGroupItem(() => props.group);
 const value = computed(() => props.group.id);
+const badge = computed(() =>
+  props.group.total === undefined ? String(count.value) : `${count.value}/${props.group.total}`,
+);
+const chevronClass = computed(() =>
+  props.collapsed.has(props.group.id) ? "pi-chevron-right" : "pi-chevron-down",
+);
+const titleSegments = computed(() => highlightSegments(title.value, props.group.titleMatches));
 const prRows = computed<PrRows>(() =>
   Object.fromEntries(props.group.prs.map((row) => [row.key, row])),
 );
-const accordionContentPassThrough: AccordionContentPassThroughOptions = {
-  content: { class: "p-0" },
-};
-const accordionHeaderPassThrough: AccordionHeaderPassThroughOptions = {
-  root: {
-    class:
-      "h-8 rounded-md px-1 pl-3 text-[var(--fg)] hover:bg-[var(--hover)] focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]",
-  },
-};
-const railClass = computed(() => `group-${props.group.color ?? "grey"}`);
+
 function handlePrGo(key: PrKey): void {
   emit("go", key);
 }
@@ -34,29 +32,37 @@ function handlePrGo(key: PrKey): void {
 function handlePrClose(key: PrKey, tabId: TabId): void {
   emit("close", key, tabId);
 }
+
+function handleHeaderKeydown(event: KeyboardEvent): void {
+  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+    event.preventDefault();
+    emit("collapse", props.group.id, event.key === "ArrowLeft");
+  }
+}
 </script>
 
 <template>
-  <AccordionPanel :value="value" :class="railClass">
-    <AccordionHeader :pt="accordionHeaderPassThrough">
-      <span class="flex w-full min-w-0 flex-auto items-center">
-        <span class="min-w-0 truncate font-semibold">{{ title }}</span>
-        <Badge
-          class="mr-2 ml-auto h-[18px] min-w-5 rounded-full bg-[var(--badge)] px-1.5 font-mono text-[11px] leading-[18px] text-[var(--muted)]"
-          severity="secondary"
-          :value="count"
-          :aria-label="countLabel"
-        />
+  <AccordionPanel :value="value" class="group-panel" :class="colorClass">
+    <AccordionHeader class="group-header" @keydown="handleHeaderKeydown">
+      <span class="group-name">
+        <PrTextSegment v-for="(segment, index) in titleSegments" :key="index" :segment="segment" />
       </span>
+      <span class="group-spacer" />
+      <Badge class="group-badge" :value="badge" :aria-label="countLabel" />
+      <template #toggleicon>
+        <span class="group-chevron">
+          <i class="pi" :class="chevronClass" aria-hidden="true" />
+        </span>
+      </template>
     </AccordionHeader>
-    <AccordionContent class="grid-cols-1" :pt="accordionContentPassThrough">
-      <ul class="list-none p-0">
+    <AccordionContent>
+      <ul class="group-rows" role="group">
         <PrItem
           v-for="(row, key) in prRows"
           :key="key"
           :pr="row"
           :panes="panes"
-          grouped
+          :selected="selected"
           @go="handlePrGo"
           @close="handlePrClose"
         />

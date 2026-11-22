@@ -11,43 +11,23 @@
   "goToLabel": {
     "message": "Zu einem PR gehen"
   },
-  "goToPlaceholder": {
-    "message": "2972 oder eine PR-URL"
-  },
-  "submitHintLabel": {
-    "message": "Eingabetaste drücken"
-  },
   "repoSelectLabel": {
     "message": "Repository für eine einzelne Nummer"
   },
-  "repoSelectedMessage": {
-    "message": "1 Repository ausgewählt"
+  "repoGuessUnavailable": {
+    "message": "Repo guess unavailable: update the host"
   },
-  "repoNoneSelectedMessage": {
-    "message": "Kein Repository ausgewählt"
+  "actionMenuLabel": {
+    "message": "Actions"
   },
-  "repoEmptyMessage": {
-    "message": "Keine Repositories verfügbar"
-  },
-  "repoGuessUnavailable": { "message": "Repo guess unavailable: update the host" },
-  "actionMenuLabel": { "message": "Actions" },
   "openAllButton": {
     "message": "Alle öffnen"
-  },
-  "openAllHint": {
-    "message": "Alle meine offenen PRs öffnen"
   },
   "checkNowButton": {
     "message": "Gemergte schließen"
   },
-  "checkNowHint": {
-    "message": "Gemergte PRs schließen"
-  },
   "closeDuplicatesButton": {
     "message": "Duplikate schließen"
-  },
-  "closeDuplicatesHint": {
-    "message": "Doppelte Tabs schließen"
   },
   "groupsLabel": {
     "message": "PR-Tab-Gruppen"
@@ -347,9 +327,6 @@
   "openReviewsButton": {
     "message": "Reviews öffnen"
   },
-  "openReviewsHint": {
-    "message": "PRs öffnen, für die meine Review angefordert wurde"
-  },
   "openingProgress": {
     "message": "$OPENED$ von $PLANNED$ geöffnet",
     "placeholders": {
@@ -367,28 +344,6 @@
   "errPrTabGone": {
     "message": "Dieser PR-Tab ist nicht mehr geöffnet."
   },
-  "prSearchLabel": {
-    "message": "PR-Tabs durchsuchen"
-  },
-  "prSearchEmpty": {
-    "message": "Keine passenden PRs"
-  },
-  "prSearchCount_one": {
-    "message": "$COUNT$ passende PR",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
-  "prSearchCount_other": {
-    "message": "$COUNT$ passende PRs",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
   "closePrTab": {
     "message": "Tab $PR$ schließen",
     "placeholders": {
@@ -396,5 +351,66 @@
         "content": "$1"
       }
     }
+  },
+  "fieldPlaceholder": {
+    "message": "PR-Nummer, Link oder offene Tabs durchsuchen"
+  },
+  "fieldNumberHint": {
+    "message": "PR-Nummer"
+  },
+  "fieldMatches_one": {
+    "message": "$COUNT$ Treffer",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "fieldMatches_other": {
+    "message": "$COUNT$ Treffer",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "footerFiltered": {
+    "message": "$MATCHES$ von $TOTAL$ PRs",
+    "placeholders": {
+      "matches": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "footerListHint": {
+    "message": "↑↓ auswählen · ↵ öffnen · esc leeren"
+  },
+  "footerGoToHint": {
+    "message": "↵ öffnen · ↑↓ Repository · esc schließen"
+  },
+  "emptyHint": {
+    "message": "Gib eine PR-Nummer wie 2972 ein oder füge einen PR-Link ein. Enter wählt das Repository, ein zweites Enter öffnet den PR."
+  },
+  "goToOpenIn": {
+    "message": "#$NUMBER$ öffnen in",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "goToMatching": {
+    "message": "Offene Tabs mit $NUMBER$",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "alreadyOpen": {
+    "message": "bereits offen · ↵ wechseln"
   }
 }

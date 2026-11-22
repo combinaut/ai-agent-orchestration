@@ -5,12 +5,17 @@ import { primeVueConfiguration } from "#popup/primevue";
 import type { PopupWrapper } from "#test/types";
 
 interface MenuItem {
+  separator?: boolean;
   disabled?: boolean;
   label?: string;
   command?: () => void;
 }
 
 function menuItemSlot(item: MenuItem, slots: Slots) {
+  if (item.separator) {
+    return h("li", { class: "p-menu-separator", role: "separator" });
+  }
+
   return slots.item?.({
     item,
     props: {

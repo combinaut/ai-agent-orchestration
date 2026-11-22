@@ -19,18 +19,19 @@ const ROW: PrRow = {
 function item(
   answer: PaneLookup,
   checking = false,
-  { row = ROW, grouped = false }: { row?: PrRow; grouped?: boolean } = {},
+  { row = ROW, selected = null }: { row?: PrRow; selected?: string | null } = {},
 ) {
   const panes = fakePanes(answer, checking);
 
-  return { wrapper: mountPopup(PrItem, { props: { pr: row, panes, grouped } }), panes };
+  return { wrapper: mountPopup(PrItem, { props: { pr: row, panes, selected } }), panes };
 }
 
 test("a found pane without an agent state still enables focus", async () => {
   const { wrapper, panes } = item({ "acme/webapp:feature": { state: null } });
   const button = wrapper.findComponent(Button);
 
-  assert.match(wrapper.text(), /webapp#7Fix the thing/);
+  assert.match(wrapper.text(), /#7\s*Fix the thing/);
+  assert.equal(wrapper.text().includes("webapp"), false);
   assert.equal(button.find("button").element.disabled, false);
   assert.equal(button.attributes("aria-label"), "Go to the Herdr pane for webapp#7");
 
@@ -79,28 +80,47 @@ test("the agent state shows as a tag with an aria label; none without an agent",
   );
 });
 
-test("a PR row follows the compact group row hover and focus treatment", () => {
-  const row = item({}).wrapper.find("li");
+test("a row is an option with a stable id, selected only when its id is the active one", async () => {
+  const { wrapper } = item({});
+  const row = wrapper.find("li");
 
-  assert.equal(row.classes().includes("h-7"), true);
-  assert.equal(row.classes().includes("hover:bg-[var(--hover)]"), true);
-  assert.equal(row.classes().includes("pl-3"), true);
+  assert.equal(row.attributes("id"), "pr-7");
+  assert.equal(row.attributes("role"), "option");
+  assert.equal(row.attributes("aria-selected"), "false");
+  assert.equal(wrapper.find(".pr-key-hint").exists(), false);
+
+  await wrapper.setProps({ selected: "pr-7" });
+
+  assert.equal(row.attributes("aria-selected"), "true");
+  assert.ok(row.classes().includes("pr-row-selected"));
+  assert.equal(wrapper.find(".pr-key-hint").text(), "↵");
+  assert.equal(
+    wrapper.find(".pr-key-hint").element.nextElementSibling,
+    wrapper.find("button[data-pr-close]").element,
+  );
 });
 
-test("the go-to-pane icon uses the Aura icon size inside the small button target", () => {
+test("the go-to-pane icon sits in the small button target", () => {
   const button = item({ "acme/webapp:feature": { state: "working" } }).wrapper.findComponent(
     Button,
   );
 
   assert.equal(button.props("size"), "small");
-  assert.equal(button.find(".size-pane-icon").exists(), true);
+  assert.equal(button.find(".pr-pane-icon").exists(), true);
 });
 
-test("every row has the specified compact height and pointer cursor", () => {
-  const row = item({}).wrapper.find("li");
+test("Delete or Backspace on a focused row closes its tab", async () => {
+  const { wrapper } = item({});
+  const row = wrapper.find("button[data-pr-tab]");
 
-  assert.equal(row.classes().includes("h-7"), true);
-  assert.equal(row.classes().includes("cursor-pointer"), true);
+  await row.trigger("keydown", { key: "Delete" });
+  await row.trigger("keydown", { key: "Backspace" });
+  await row.trigger("keydown", { key: "a" });
+
+  assert.deepEqual(wrapper.emitted("close"), [
+    [ROW.key, ROW.tabId],
+    [ROW.key, ROW.tabId],
+  ]);
 });
 
 test("a named native row button selects its PR; terminal focus remains separate", async () => {
@@ -125,8 +145,9 @@ test("close is a named sibling control after the terminal and never selects the 
   }
   wrapper.find("li").element.addEventListener("click", handleBubble);
   try {
-    assert.equal(close.attributes("aria-label"), "Close tab webapp#7");
-    assert.equal(close.attributes("title"), "Close tab webapp#7");
+    assert.equal(close.attributes("aria-label"), "Close tab #7");
+    assert.equal(close.attributes("title"), "Close tab #7");
+    assert.ok(close.find(".pi-times").exists());
     assert.equal(close.element.parentElement, wrapper.find("li").element);
     await close.trigger("click");
     assert.deepEqual(wrapper.emitted("close"), [[ROW.key, ROW.tabId]]);
@@ -138,44 +159,24 @@ test("close is a named sibling control after the terminal and never selects the 
   }
 });
 
-test("grouped rows hide the repo prefix while retaining label matches for search", async () => {
+test("rows mark matched number and title ranges and render titles as text", async () => {
   const pr = {
     ...ROW,
     title: "<img> Fix",
-    highlights: { label: [[0, 5]] as const, title: [[6, 8]] as const, queryLength: 3 },
+    highlights: { number: [[1, 1]] as const, title: [[6, 8]] as const },
   };
-  const { wrapper } = item({}, false, { row: pr, grouped: true });
+  const { wrapper } = item({}, false, { row: pr });
   try {
     assert.deepEqual(
       wrapper.findAll("mark").map((mark) => mark.text()),
-      ["Fix"],
+      ["7", "Fix"],
     );
-    assert.match(wrapper.text(), /#7<img> Fix/);
-    assert.equal(wrapper.text().includes("webapp"), false);
+    assert.equal(wrapper.find(".pr-number").text(), "#7");
+    assert.equal(wrapper.find(".pr-title").text(), "<img> Fix");
     assert.equal(wrapper.find("img").exists(), false);
-    assert.ok(wrapper.find(".truncate").text().includes("<img>"));
     await wrapper.setProps({ pr: ROW });
     assert.equal(wrapper.find("mark").exists(), false);
   } finally {
     wrapper.unmount();
   }
-});
-
-test("grouped rows highlight a matching PR number", () => {
-  const { wrapper } = item({}, false, {
-    row: { ...ROW, highlights: { label: [[6, 7]], title: [], queryLength: 2 } },
-    grouped: true,
-  });
-
-  assert.deepEqual(
-    wrapper.findAll("mark").map((mark) => mark.text()),
-    ["#7"],
-  );
-});
-
-test("the close control shares the grouped header's right column", () => {
-  const close = item({}).wrapper.find("button[data-pr-close]");
-
-  assert.equal(close.classes().includes("mr-0"), true);
-  assert.equal(close.classes().includes("flex-none"), true);
 });

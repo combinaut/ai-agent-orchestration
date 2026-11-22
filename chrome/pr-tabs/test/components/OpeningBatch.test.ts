@@ -61,15 +61,16 @@ async function liveGroups(): Promise<GroupSummary[]> {
   return summarize(entries, groups, world.store.meta ?? {}).groups;
 }
 
-test("expanding a group before opening finishes looks up the already opened PR head", async () => {
+test("a group listed before opening finishes looks up the already opened PR head", async () => {
   const batch = beginBatch();
   const panes = fakePanes();
   let wrapper: PopupWrapper<typeof GroupList> | undefined;
 
   try {
     await batch.firstOpened;
-    wrapper = mountPopup(GroupList, { props: { groups: await liveGroups(), panes } });
-    await wrapper.find("button[aria-expanded]").trigger("click");
+    wrapper = mountPopup(GroupList, {
+      props: { groups: await liveGroups(), panes, collapsed: new Set<string>(), selected: null },
+    });
     await flushPromises();
 
     assert.equal(background.openingProgress().active, true);
