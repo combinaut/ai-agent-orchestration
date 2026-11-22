@@ -21,21 +21,28 @@ const groups: GroupSummary[] = [
     count: 3,
     prs: [
       row("web-app", 2972, "Add saved carts"),
-      row("web-app", 2968, "Fix Deploy preview"),
-      row("web-app", 2941, "deploy banner"),
+      row("web-app", 2968, "Fix Amber Zeppelin preview"),
+      {
+        ...row("web-app", 2941, "Quarterly banner"),
+        head: { repo: "acme/web-app", branch: "velvetorbit" },
+      },
     ],
   },
   {
     id: "2",
-    title: "deploy-tools",
+    title: "CobaltArchitect",
     count: 2,
-    prs: [row("deploy-tools", 47, "Upload"), row("deploy-tools", 52, "Retry")],
+    prs: [row("tools", 47, "Upload"), row("tools", 52, "Retry")],
   },
   { id: "3", title: "docs", count: 1, prs: [row("docs", 301, "Shortcuts")] },
 ];
 
 function filter(query: SearchQuery) {
   return useSearchFilter(ref(groups), ref(query));
+}
+
+function search(text: string) {
+  return filter({ text, numberOnly: false });
 }
 
 test("matchRanges finds every case-insensitive occurrence", () => {
@@ -48,45 +55,61 @@ test("matchRanges finds every case-insensitive occurrence", () => {
 });
 
 test("an empty query keeps every group untouched", () => {
-  const result = filter({ text: "  ", numberOnly: false });
+  const result = search("  ");
 
   assert.equal(result.active.value, false);
   assert.deepEqual(result.groups.value, groups);
   assert.equal(result.count.value, 6);
 });
 
-test("search keeps matching rows, all rows of a matching repo, and reports matches/total", () => {
-  const result = filter({ text: " deploy ", numberOnly: false });
-  const [web, tools] = result.groups.value;
+test("a typo still finds the row, marked and counted as matches/total", () => {
+  const result = search("AMBER ZEPELIN");
+  const [web] = result.groups.value;
 
-  assert.equal(result.active.value, true);
-  assert.equal(result.count.value, 4);
+  assert.equal(result.count.value, 1);
   assert.deepEqual(
     result.groups.value.map((group) => group.title),
-    ["web-app", "deploy-tools"],
+    ["web-app"],
   );
-  assert.deepEqual(
-    web?.prs.map((pr) => pr.tabId),
-    [2968, 2941],
-  );
+  assert.equal(web?.prs[0]?.tabId, 2968);
   assert.equal(web?.total, 3);
-  assert.deepEqual(web?.prs[0]?.highlights, { number: [], title: [[4, 9]] });
-  assert.deepEqual(tools?.titleMatches, [[0, 5]]);
-  assert.equal(tools?.count, 2);
-  assert.equal(tools?.total, 2);
+  assert.ok((web?.prs[0]?.highlights?.title.length ?? 0) > 0);
 });
 
-test("a number query matches the PR number, with or without #", () => {
-  assert.deepEqual(
-    filter({ text: "#301", numberOnly: false }).groups.value.map((group) => group.title),
-    ["docs"],
-  );
+for (const [query, tabId] of [
+  ["velvetorbit", 2941],
+  ["#301", 301],
+  ["Shortcuts", 301],
+] as const) {
+  test(`Fuse indexes ${query}`, () => {
+    const result = search(query);
+
+    assert.ok(
+      result.groups.value.some((group) => group.prs.some((pr) => pr.tabId === tabId)),
+      query,
+    );
+  });
+}
+
+test("a matching group name shows all its rows and marks the name", () => {
+  const result = search("CobaltArchitect");
+  const cobalt = result.groups.value.find((group) => group.id === "2");
+
+  assert.equal(cobalt?.count, 2);
+  assert.equal(cobalt?.total, 2);
+  assert.ok((cobalt?.titleMatches?.length ?? 0) > 0);
+});
+
+test("a number match is marked on the shown #number", () => {
+  const docs = search("301").groups.value.find((group) => group.id === "3");
+
+  assert.deepEqual(docs?.prs[0]?.highlights?.number, [[1, 3]]);
+});
+
+test("number-only queries match PR numbers only, as a substring", () => {
   const result = filter({ text: "2972", numberOnly: true });
 
   assert.equal(result.count.value, 1);
   assert.deepEqual(result.groups.value[0]?.prs[0]?.highlights, { number: [[1, 4]], title: [] });
-});
-
-test("number-only queries ignore titles and repo names", () => {
-  assert.equal(filter({ text: "deploy", numberOnly: true }).count.value, 0);
+  assert.equal(filter({ text: "amber", numberOnly: true }).count.value, 0);
 });

@@ -1,5 +1,14 @@
+import Fuse, { type FuseResult, type IFuseOptions } from "fuse.js";
 import { computed, toValue, type MaybeRefOrGetter } from "vue";
-import type { GroupSummary, MatchRange, PrRow, SearchFilter, SearchQuery } from "#/types";
+import type { GroupSummary, MatchRange, PrRow, SearchFilter, SearchPr, SearchQuery } from "#/types";
+
+const FUSE_OPTIONS: IFuseOptions<SearchPr> = {
+  keys: ["title", "label", "repo", "number", "branch", "groupName"],
+  threshold: 0.35,
+  includeScore: true,
+  includeMatches: true,
+  ignoreLocation: true,
+};
 
 export function prNumberText(row: Pick<PrRow, "key">): string {
   return `#${row.key.split("#").at(-1) ?? ""}`;
@@ -21,42 +30,113 @@ export function matchRanges(text: string, needle: string): MatchRange[] {
   return found;
 }
 
-function matchedRow(row: PrRow, query: SearchQuery): PrRow {
-  const title = query.numberOnly ? [] : matchRanges(row.title, query.text);
+function searchablePr(row: PrRow, group: GroupSummary): SearchPr {
+  const [repository, number] = row.key.split("#");
 
   return {
-    ...row,
-    highlights: { number: matchRanges(prNumberText(row), query.text), title },
+    row,
+    group,
+    label: row.label,
+    title: row.title,
+    repo: repository?.split("/").at(-1) ?? "",
+    number: Number(number),
+    branch: row.head?.branch ?? "",
+    groupName: group.title,
   };
 }
 
-function hasMatch(row: PrRow): boolean {
-  return Boolean(row.highlights?.number.length || row.highlights?.title.length);
+// Fuse also reports scattered short fragments; marks keep ranges of at least this length.
+function shortest(queryLength: number): number {
+  return Math.min(queryLength, 3);
 }
 
-function matchedGroup(group: GroupSummary, query: SearchQuery): GroupSummary | null {
-  const titleMatches = query.numberOnly ? [] : matchRanges(group.title, query.text);
-  const rows = group.prs.map((row) => matchedRow(row, query));
-  const prs = titleMatches.length > 0 ? rows : rows.filter(hasMatch);
+function indicesOf(
+  result: FuseResult<SearchPr>,
+  key: keyof SearchPr,
+  queryLength: number,
+): MatchRange[] {
+  const indices = result.matches?.find((match) => match.key === key)?.indices ?? [];
 
-  return prs.length > 0
-    ? { ...group, prs, count: prs.length, total: group.prs.length, titleMatches }
-    : null;
+  return indices.filter((range) => range[1] - range[0] + 1 >= shortest(queryLength));
 }
 
-// Case-insensitive substring filter over PR number, title and group (repository) name.
+// Label ranges after the "#" of repo#number, moved onto the shown "#number".
+function numberRanges(label: string, ranges: readonly MatchRange[]): MatchRange[] {
+  const hash = label.lastIndexOf("#");
+
+  return hash < 0
+    ? []
+    : ranges
+        .filter((range) => range[1] >= hash)
+        .map((range): MatchRange => [Math.max(range[0], hash) - hash, range[1] - hash]);
+}
+
+function groupFuzzyResults(results: FuseResult<SearchPr>[], queryLength: number): GroupSummary[] {
+  const groups = new Map<string, GroupSummary>();
+
+  for (const result of results) {
+    const { group, row } = result.item;
+    const highlights = {
+      number: numberRanges(row.label, indicesOf(result, "label", queryLength)),
+      title: indicesOf(result, "title", queryLength),
+    };
+    const matched = groups.get(group.id) ?? {
+      ...group,
+      prs: [],
+      count: 0,
+      total: group.prs.length,
+      titleMatches: [],
+    };
+
+    matched.prs.push({ ...row, highlights });
+    matched.count++;
+    if (!matched.titleMatches?.length) {
+      matched.titleMatches = indicesOf(result, "groupName", queryLength);
+    }
+
+    groups.set(group.id, matched);
+  }
+
+  return [...groups.values()];
+}
+
+function numberRow(row: PrRow, digits: string): PrRow {
+  return { ...row, highlights: { number: matchRanges(prNumberText(row), digits), title: [] } };
+}
+
+function numberGroup(group: GroupSummary, digits: string): GroupSummary | null {
+  const prs = group.prs
+    .map((row) => numberRow(row, digits))
+    .filter((row) => row.highlights?.number.length);
+
+  return prs.length > 0 ? { ...group, prs, count: prs.length, total: group.prs.length } : null;
+}
+
+// Fuzzy search over PR title, label, repository, number, branch and group; number-only queries
+// keep the PRs whose number contains the digits.
 export function useSearchFilter(
   groups: MaybeRefOrGetter<GroupSummary[]>,
   query: MaybeRefOrGetter<SearchQuery>,
 ): SearchFilter {
-  const active = computed(() => toValue(query).text.trim().length > 0);
+  const text = computed(() => toValue(query).text.trim());
+  const active = computed(() => text.value.length > 0);
+  const fuse = computed(
+    () =>
+      new Fuse(
+        toValue(groups).flatMap((group) => group.prs.map((row) => searchablePr(row, group))),
+        FUSE_OPTIONS,
+      ),
+  );
   const filtered = computed(() => {
-    const current = toValue(query);
-    const trimmed = { ...current, text: current.text.trim() };
+    if (!active.value) {
+      return toValue(groups);
+    }
 
-    return active.value
-      ? toValue(groups).flatMap((group) => matchedGroup(group, trimmed) ?? [])
-      : toValue(groups);
+    if (toValue(query).numberOnly) {
+      return toValue(groups).flatMap((group) => numberGroup(group, text.value) ?? []);
+    }
+
+    return groupFuzzyResults(fuse.value.search(text.value), text.value.length);
   });
   const count = computed(() => filtered.value.reduce((total, group) => total + group.count, 0));
 

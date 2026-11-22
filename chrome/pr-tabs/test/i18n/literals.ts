@@ -78,6 +78,7 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   "popup/App.vue": ["idle", "goto", "search", "repo", "pr", "nearest"],
   "composables/useGroupItem.ts": ["grey"],
   "composables/useRepoOptions.ts": ["grey"],
+  "composables/useSearchFilter.ts": ["title", "label", "repo", "number", "branch", "groupName"],
   "popup/components/PopupField.vue": [
     "input",
     "idle",

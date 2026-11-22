@@ -679,6 +679,17 @@ export interface PrHighlights {
   title: readonly MatchRange[];
 }
 
+export interface SearchPr {
+  label: string;
+  row: PrRow;
+  group: GroupSummary;
+  title: string;
+  repo: RepoName;
+  number: PrNumber;
+  branch: BranchName;
+  groupName: GroupTitle;
+}
+
 export interface SearchQuery {
   text: string;
   numberOnly: boolean;
