@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, useTemplateRef } from "vue";
-import { bareNumber } from "#/core";
+import { bareNumber, isPrUrl } from "#/core";
 import type { GroupListControl, PrKey, TabId } from "#/types";
 import { useFuzzyFilter } from "#/composables/useFuzzyFilter";
 import { usePrClose } from "#/composables/usePrClose";
-import PrSearch from "./components/PrSearch.vue";
 import { useOpeningProgress } from "#/composables/useOpeningProgress";
 import { useMessages } from "#/composables/useMessages";
 import { usePanes } from "#/composables/usePanes";
@@ -15,9 +14,9 @@ import { useStatus } from "#/composables/useStatus";
 import { useSummary } from "#/composables/useSummary";
 import { useTabActions } from "#/composables/useTabActions";
 import ActionMenu from "./components/ActionMenu.vue";
-import GoToForm from "./components/GoToForm.vue";
 import GroupList from "./components/GroupList.vue";
 import OpeningProgress from "./components/OpeningProgress.vue";
+import PopupField from "./components/PopupField.vue";
 import StatusLine from "./components/StatusLine.vue";
 
 const {
@@ -47,7 +46,17 @@ const { statusText, isStatusError } = status;
 const { groups, refresh } = useSummary(ask, status);
 const hasPrTabs = computed(() => groups.value.length > 0);
 const panes = usePanes(ask, status);
-const query = ref("");
+const input = ref("");
+const mode = computed<"idle" | "goto" | "search">(() => {
+  const value = input.value.trim();
+
+  if (!value) {
+    return "idle";
+  }
+
+  return bareNumber(value) || isPrUrl(value) ? "goto" : "search";
+});
+const query = computed(() => (mode.value === "search" ? input.value : ""));
 const {
   groups: visibleGroups,
   active: isFiltering,
@@ -56,7 +65,6 @@ const {
 } = useFuzzyFilter(groups, query);
 const groupList = useTemplateRef<GroupListControl>("groupList");
 const closing = usePrClose({ ask, status, refresh });
-const input = ref("");
 const picker = useRepoPicker(ask, input);
 const { repos, repo, guessUnavailable } = picker;
 const isRepoPickerOpen = ref(false);
@@ -73,6 +81,15 @@ const openingProgress = computed(() => ({
   active: workerProgress.value.active || localBusy.value,
 }));
 const isOpeningBatch = computed(() => openingProgress.value.active);
+const totalPrs = computed(() => groups.value.reduce((total, group) => total + group.prs.length, 0));
+const footerSummary = computed(() =>
+  isFiltering.value
+    ? `${matchCount.value} of ${totalPrs.value} PRs`
+    : `${totalPrs.value} PRs in ${groups.value.length} groups`,
+);
+const footerHint = computed(() =>
+  mode.value === "goto" ? "↵ open · ↑↓ repository · esc close" : "↑↓ select · ↵ open · esc clear",
+);
 
 function openingActionMenuItems() {
   return [
@@ -122,12 +139,6 @@ function handleSearchNext(): void {
   groupList.value?.focusFirst();
 }
 
-function handleSearchGo(): void {
-  if (bestMatch.value) {
-    void focusPr(bestMatch.value);
-  }
-}
-
 function handlePrClose(key: PrKey, tabId: TabId): void {
   void closing.close(key, tabId);
 }
@@ -147,17 +158,18 @@ function handleGoToSubmit(): void {
   void go();
 }
 
+function handleFieldClear(): void {
+  if (isRepoPickerOpen.value) {
+    isRepoPickerOpen.value = false;
+
+    return;
+  }
+
+  input.value = "";
+}
+
 function handleRepoPick(): void {
   picker.pick();
-}
-
-function handleRepoClose(): void {
-  isRepoPickerOpen.value = false;
-}
-
-function handleRepoAccept(): void {
-  isRepoPickerOpen.value = false;
-  void go();
 }
 
 function handleOpenAllRun(): void {
@@ -185,44 +197,80 @@ onMounted(handlePopupMounted);
 </script>
 
 <template>
-  <main
-    id="popup-content"
-    class="box-border max-h-popup-content w-popup scrollbar-gutter-both-edges overflow-y-auto p-popup-padding"
-  >
-    <GoToForm
-      v-model:input="input"
-      v-model:repo="repo"
+  <main id="popup-content">
+    <header class="flex h-7 items-center justify-between px-3 pt-3">
+      <h1 class="text-[13px] leading-5 font-semibold">Go to a PR</h1>
+      <ActionMenu :actions="actionMenuItems" :label="actionMenuLabel" />
+    </header>
+    <PopupField
+      v-model="input"
+      :mode="mode"
+      :matches="matchCount"
       :busy="isGoToBusy"
-      :repos="repos"
-      :show-repo="isRepoPickerOpen"
-      :guess-unavailable="guessUnavailable"
-      @accept-repo="handleRepoAccept"
-      @close-repo="handleRepoClose"
       @go="handleGoToSubmit"
-      @pick="handleRepoPick"
-    >
-      <template #actions>
-        <ActionMenu :actions="actionMenuItems" :label="actionMenuLabel" />
-      </template>
-    </GoToForm>
+      @next="handleSearchNext"
+      @clear="handleFieldClear"
+    />
     <OpeningProgress :progress="openingProgress" />
     <StatusLine :text="statusText" :error="isStatusError" />
-    <PrSearch
+    <section
+      v-if="isRepoPickerOpen && mode === 'goto' && repos.length"
+      class="px-3 pt-3"
+      aria-label="Repository suggestions"
+    >
+      <p class="pl-2 text-[12px] leading-4 text-[var(--muted)]">Open #{{ bareNumber(input) }} in</p>
+      <div class="mt-1" role="listbox">
+        <button
+          v-for="name in repos"
+          :key="name"
+          type="button"
+          class="flex h-8 w-full items-center gap-2 rounded-md px-3 text-left hover:bg-[var(--hover)]"
+          :class="name === repo ? 'bg-[var(--sel)]' : ''"
+          role="option"
+          :aria-selected="name === repo"
+          @click="
+            repo = name;
+            handleRepoPick();
+          "
+        >
+          <span class="h-4 w-[3px] rounded-sm bg-[var(--pr-tabs-group-blue)]" />
+          <span class="font-semibold">{{ name }}</span>
+          <span class="ml-auto text-[12px] text-[var(--muted)]">↵</span>
+        </button>
+      </div>
+      <small v-if="guessUnavailable" class="mt-1 block text-[var(--muted)]">
+        repo guess unavailable: update the host
+      </small>
+    </section>
+    <section v-if="hasPrTabs" id="popup-list" class="min-h-0 flex-1 overflow-y-auto px-2 pt-3 pb-2">
+      <p
+        v-if="isRepoPickerOpen && mode === 'goto'"
+        class="px-3 pt-4 pb-1 text-[12px] leading-4 text-[var(--muted)]"
+      >
+        Open tabs matching {{ bareNumber(input) }}
+      </p>
+      <GroupList
+        ref="groupList"
+        :groups="visibleGroups"
+        :panes="panes"
+        :filtering="isFiltering"
+        @go="handlePrGo"
+        @close="handlePrClose"
+      />
+    </section>
+    <section v-else class="px-3 py-6">
+      <p class="font-medium">No PR tabs open</p>
+      <p class="mt-1 max-w-[360px] text-[12px] leading-[18px] text-[var(--muted)]">
+        Type a PR number like 2972 or paste a PR link. Enter picks the repository, Enter again opens
+        it.
+      </p>
+    </section>
+    <footer
       v-if="hasPrTabs"
-      v-model="query"
-      :active="isFiltering"
-      :count="matchCount"
-      @next="handleSearchNext"
-      @go="handleSearchGo"
-    />
-    <GroupList
-      v-if="hasPrTabs"
-      ref="groupList"
-      :groups="visibleGroups"
-      :panes="panes"
-      :filtering="isFiltering"
-      @go="handlePrGo"
-      @close="handlePrClose"
-    />
+      class="flex h-8 shrink-0 items-center justify-between border-t border-[var(--line)] px-3 text-[12px] leading-4 text-[var(--muted)]"
+    >
+      <span>{{ footerSummary }}</span>
+      <span>{{ footerHint }}</span>
+    </footer>
   </main>
 </template>

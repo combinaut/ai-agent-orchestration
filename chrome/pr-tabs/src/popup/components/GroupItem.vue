@@ -21,9 +21,12 @@ const accordionContentPassThrough: AccordionContentPassThroughOptions = {
   content: { class: "p-0" },
 };
 const accordionHeaderPassThrough: AccordionHeaderPassThroughOptions = {
-  root: { class: "-mx-popup-padding border-b-2 px-popup-padding" },
+  root: {
+    class:
+      "h-8 rounded-md px-1 pl-3 text-[var(--fg)] hover:bg-[var(--hover)] focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]",
+  },
 };
-const borderClass = computed(() => `border-group-${props.group.color ?? "grey"}`);
+const railClass = computed(() => `group-${props.group.color ?? "grey"}`);
 function handlePrGo(key: PrKey): void {
   emit("go", key);
 }
@@ -34,11 +37,16 @@ function handlePrClose(key: PrKey, tabId: TabId): void {
 </script>
 
 <template>
-  <AccordionPanel :value="value">
-    <AccordionHeader :pt="accordionHeaderPassThrough" :class="borderClass">
+  <AccordionPanel :value="value" :class="railClass">
+    <AccordionHeader :pt="accordionHeaderPassThrough">
       <span class="flex flex-auto items-center">
-        <span>{{ title }}</span>
-        <Badge class="mr-2 ml-auto" severity="secondary" :value="count" :aria-label="countLabel" />
+        <span class="min-w-0 truncate font-semibold">{{ title }}</span>
+        <Badge
+          class="mr-2 ml-auto h-[18px] min-w-5 rounded-full bg-[var(--badge)] px-1.5 font-mono text-[11px] leading-[18px] text-[var(--muted)]"
+          severity="secondary"
+          :value="count"
+          :aria-label="countLabel"
+        />
       </span>
     </AccordionHeader>
     <AccordionContent class="grid-cols-1" :pt="accordionContentPassThrough">

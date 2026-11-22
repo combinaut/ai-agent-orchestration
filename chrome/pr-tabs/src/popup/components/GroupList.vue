@@ -71,7 +71,7 @@ defineExpose({ focusFirst });
     id="groups"
     ref="list"
     v-model:value="accordionValue"
-    class="mt-2"
+    class="m-0"
     multiple
     :aria-label="groupsLabel"
     @update:value="handleGroupsUpdate"

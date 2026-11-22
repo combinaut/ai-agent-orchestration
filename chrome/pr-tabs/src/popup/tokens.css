@@ -1,89 +1,140 @@
-/* The popup's own design tokens, for what the Aura preset (--p-*) lacks. */
+/* High-fidelity popup tokens. PrimeVue components inherit these through the popup root. */
 :root {
-  --pr-tabs-match-background: var(--p-highlight-background);
-  --pr-tabs-match-text: var(--p-highlight-color);
-  --p-progressbar-height: 0.5rem;
+  --bg: #ffffff;
+  --surface: #f3f4f6;
+  --pop: #ffffff;
+  --hover: #f0f2f5;
+  --sel: #e7effd;
+  --line: #d9dce1;
+  --fg: #1f2328;
+  --muted: #59606a;
+  --badge: #eceef1;
+  --accent: #1a73e8;
+  --hl: #fde9a6;
+  --shadow: rgb(16 24 40 / 0.12);
   --pr-tabs-popup-width: 480px;
-  --pr-tabs-popup-max-height: 584px;
-  --pr-tabs-popup-min-height: 216px;
-  --pr-tabs-popup-padding: 1rem;
-  --p-button-sm-padding-x: 0.25rem;
-  --pr-tabs-font-family: ui-sans-serif, system-ui, sans-serif;
-  --pr-tabs-font-size: 13px;
-  --pr-tabs-label-font-weight: 600;
-  --pr-tabs-line-height: 1.4;
-  --pr-tabs-hint-font-size: 11px;
-  --pr-tabs-status-min-height: 1.4em;
-  --pr-tabs-group-row-padding: 3px;
-  --pr-tabs-dot-size: 10px;
-  --pr-tabs-pane-icon-size: var(--p-icon-size);
-  --pr-tabs-pr-row-min-height: calc(
-    var(--p-button-sm-icon-only-width) + var(--pr-tabs-group-row-padding) * 2
-  );
-  --pr-tabs-dot-radius: 50%;
-  --pr-tabs-dot-ring: inset 0 0 0 1px rgb(0 0 0 / 0.3);
+  --pr-tabs-popup-min-height: 320px;
+  --pr-tabs-popup-max-height: 600px;
   --pr-tabs-group-grey: #5f6368;
   --pr-tabs-group-blue: #1a73e8;
   --pr-tabs-group-red: #d93025;
-  --pr-tabs-group-yellow: #f9ab00;
+  --pr-tabs-group-yellow: #e8a600;
   --pr-tabs-group-green: #1e8e3e;
   --pr-tabs-group-pink: #d01884;
-  --pr-tabs-group-purple: #a142f4;
+  --pr-tabs-group-purple: #9334e6;
   --pr-tabs-group-cyan: #007b83;
   --pr-tabs-group-orange: #fa903e;
 }
 
-#popup-content {
-  min-height: var(--pr-tabs-popup-min-height);
-}
-
-#groups .p-accordionpanel {
-  border-bottom: 0;
-}
-
-#groups .p-accordionpanel:not(:last-child) {
-  border-bottom: 1px solid var(--p-content-border-color);
-}
-
-.border-group-grey {
-  border-color: var(--pr-tabs-group-grey);
-}
-.border-group-blue {
-  border-color: var(--pr-tabs-group-blue);
-}
-.border-group-red {
-  border-color: var(--pr-tabs-group-red);
-}
-.border-group-yellow {
-  border-color: var(--pr-tabs-group-yellow);
-}
-.border-group-green {
-  border-color: var(--pr-tabs-group-green);
-}
-.border-group-pink {
-  border-color: var(--pr-tabs-group-pink);
-}
-.border-group-purple {
-  border-color: var(--pr-tabs-group-purple);
-}
-.border-group-cyan {
-  border-color: var(--pr-tabs-group-cyan);
-}
-.border-group-orange {
-  border-color: var(--pr-tabs-group-orange);
-}
-
 @media (prefers-color-scheme: dark) {
   :root {
-    --pr-tabs-dot-ring: inset 0 0 0 0 transparent;
+    --bg: #1c1d20;
+    --surface: #25272b;
+    --pop: #2a2c31;
+    --hover: #2c2e33;
+    --sel: #263552;
+    --line: #383b41;
+    --fg: #e8e9eb;
+    --muted: #a3a6ad;
+    --badge: #33363b;
+    --accent: #8ab4f8;
+    --hl: #5c4b10;
+    --shadow: rgb(0 0 0 / 0.45);
     --pr-tabs-group-grey: #dadce0;
     --pr-tabs-group-blue: #8ab4f8;
     --pr-tabs-group-red: #f28b82;
     --pr-tabs-group-yellow: #fdd663;
     --pr-tabs-group-green: #81c995;
     --pr-tabs-group-pink: #ff8bcb;
-    --pr-tabs-group-purple: #d7aefb;
+    --pr-tabs-group-purple: #c58af9;
     --pr-tabs-group-cyan: #78d9ec;
     --pr-tabs-group-orange: #fcad70;
   }
+}
+
+#popup-content {
+  box-sizing: border-box;
+  display: flex;
+  width: var(--pr-tabs-popup-width);
+  min-width: 320px;
+  min-height: var(--pr-tabs-popup-min-height);
+  max-height: var(--pr-tabs-popup-max-height);
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+#groups .p-accordionpanel {
+  position: relative;
+  margin-bottom: 8px;
+  padding-left: 8px;
+  border: 0;
+}
+
+#groups .p-accordionpanel::before {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--group-color, var(--pr-tabs-group-grey));
+  content: "";
+}
+
+#groups .p-accordionpanel:has([aria-expanded="false"])::before {
+  bottom: auto;
+  height: 24px;
+}
+
+.group-grey {
+  --group-color: var(--pr-tabs-group-grey);
+}
+.group-blue {
+  --group-color: var(--pr-tabs-group-blue);
+}
+.group-red {
+  --group-color: var(--pr-tabs-group-red);
+}
+.group-yellow {
+  --group-color: var(--pr-tabs-group-yellow);
+}
+.group-green {
+  --group-color: var(--pr-tabs-group-green);
+}
+.group-pink {
+  --group-color: var(--pr-tabs-group-pink);
+}
+.group-purple {
+  --group-color: var(--pr-tabs-group-purple);
+}
+.group-cyan {
+  --group-color: var(--pr-tabs-group-cyan);
+}
+.group-orange {
+  --group-color: var(--pr-tabs-group-orange);
+}
+
+.popup-field input {
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: none;
+}
+
+.popup-field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+mark {
+  border-radius: 2px;
+  background: var(--hl);
+  color: inherit;
 }

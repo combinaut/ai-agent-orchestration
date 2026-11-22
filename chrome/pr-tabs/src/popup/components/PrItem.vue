@@ -66,7 +66,7 @@ function handleGoClick(): void {
 
 <template>
   <li
-    class="relative -mx-popup-padding flex min-h-pr-row cursor-pointer items-center gap-2 px-popup-padding py-group-row focus-within:bg-row-hover hover:bg-row-hover"
+    class="group relative flex h-7 cursor-pointer items-center gap-2 rounded-md px-1 pr-1 pl-3 focus-within:bg-[var(--hover)] focus-within:shadow-[inset_0_0_0_2px_var(--accent)] hover:bg-[var(--hover)]"
   >
     <button
       data-pr-tab
@@ -78,7 +78,7 @@ function handleGoClick(): void {
     />
     <span class="pointer-events-none min-w-0 flex-auto truncate" :title="rowLabel">
       <template v-if="grouped">
-        <span class="mr-2 font-mono text-muted-color tabular-nums">
+        <span class="mr-2 inline-block w-11 font-mono text-[12px] text-[var(--muted)] tabular-nums">
           <PrTextSegment
             v-for="(segment, index) in numberSegments"
             :key="index"
@@ -86,12 +86,12 @@ function handleGoClick(): void {
           />
         </span>
       </template>
-      <span v-else class="mr-2 text-muted-color">{{ pr.label }}</span>
+      <span v-else class="mr-2 text-[var(--muted)]">{{ pr.label }}</span>
       <PrTextSegment v-for="(segment, index) in titleSegments" :key="index" :segment="segment" />
     </span>
     <Tag
       v-if="isStateVisible"
-      class="pointer-events-none flex-none text-hint"
+      class="text-hint pointer-events-none flex-none"
       :severity="stateSeverity"
       :value="stateText"
       :aria-label="stateLabel"
@@ -116,7 +116,7 @@ function handleGoClick(): void {
       </Button>
     </span>
     <Button
-      class="relative mr-2 flex-none"
+      class="relative mr-0 flex-none opacity-0 group-hover:opacity-100 focus:opacity-100"
       size="small"
       severity="secondary"
       text
