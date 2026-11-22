@@ -412,5 +412,8 @@
   },
   "alreadyOpen": {
     "message": "já aberto · ↵ alternar"
+  },
+  "closeStatus": {
+    "message": "Fechar mensagem"
   }
 }

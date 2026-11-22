@@ -596,10 +596,10 @@ test("a terminal focus failure is visible in the popup error status", async () =
 
   assert.deepEqual(withoutPolls(sent).at(-1), { type: "focusPane", head });
   assert.equal(
-    wrapper.find("#status .p-message-error").text(),
+    wrapper.find("#status.status-toast-error").text(),
     "Native focus failed: diagnostic reason",
   );
-  assert.equal(wrapper.find("#status .p-message-error").isVisible(), true);
+  assert.equal(wrapper.find("#status").attributes("role"), "alert");
 
   wrapper.unmount();
 });

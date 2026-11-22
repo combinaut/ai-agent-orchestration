@@ -21,7 +21,7 @@ import GroupList from "./components/GroupList.vue";
 import OpeningProgress from "./components/OpeningProgress.vue";
 import PopupField from "./components/PopupField.vue";
 import RepoOptionItem from "./components/RepoOptionItem.vue";
-import StatusLine from "./components/StatusLine.vue";
+import StatusToast from "./components/StatusToast.vue";
 
 const {
   goToLabel,
@@ -52,7 +52,7 @@ const {
 ]);
 const { ask } = useServiceWorker();
 const status = useStatus();
-const { statusText, isStatusError } = status;
+const { statusText, isStatusError, revision: statusRevision } = status;
 const { groups, text: summaryLine, refresh } = useSummary(ask, status);
 const isStatusShown = computed(
   () => isStatusError.value || (statusText.value !== "" && statusText.value !== summaryLine.value),
@@ -326,7 +326,6 @@ onMounted(handlePopupMounted);
       @clear="handleFieldClear"
     />
     <OpeningProgress :progress="openingProgress" />
-    <StatusLine v-if="isStatusShown" :text="statusText" :error="isStatusError" />
     <section v-if="isListShown" id="popup-list" role="listbox">
       <div v-if="hasRepoOptions" role="group" :aria-label="repoSelectLabel">
         <p class="goto-label">{{ openInLabel }}</p>
@@ -357,6 +356,13 @@ onMounted(handlePopupMounted);
       <p class="empty-title">{{ noPrTabs }}</p>
       <p class="empty-hint">{{ emptyHint }}</p>
     </section>
+    <StatusToast
+      :text="statusText"
+      :error="isStatusError"
+      :shown="isStatusShown"
+      :revision="statusRevision"
+      :raised="hasPrTabs"
+    />
     <footer v-if="hasPrTabs" class="popup-footer">
       <span>{{ footerSummary }}</span>
       <span>{{ footerHint }}</span>

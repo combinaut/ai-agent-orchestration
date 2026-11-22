@@ -412,5 +412,8 @@
   },
   "alreadyOpen": {
     "message": "déjà ouvert · ↵ basculer"
+  },
+  "closeStatus": {
+    "message": "Fermer le message"
   }
 }

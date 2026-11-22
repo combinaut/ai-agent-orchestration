@@ -38,6 +38,9 @@
 .pi-check-circle::before {
   content: "\e90a";
 }
+.pi-exclamation-circle::before {
+  content: "\e989";
+}
 .pi-clone::before {
   content: "\e955";
 }

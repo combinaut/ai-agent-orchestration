@@ -547,9 +547,12 @@ export interface OpeningProgressProps {
   progress: OpeningProgress;
 }
 
-export interface StatusLineProps {
+export interface StatusToastProps {
   text: string;
   error: boolean;
+  shown: boolean;
+  revision: number;
+  raised: boolean;
 }
 
 export interface GroupListProps {

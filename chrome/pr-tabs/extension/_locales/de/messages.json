@@ -412,5 +412,8 @@
   },
   "alreadyOpen": {
     "message": "bereits offen · ↵ wechseln"
+  },
+  "closeStatus": {
+    "message": "Meldung schließen"
   }
 }

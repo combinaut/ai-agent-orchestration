@@ -94,6 +94,7 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
     "clear",
   ],
   "popup/components/RepoOptionItem.vue": ["pick", "hover"],
+  "popup/components/StatusToast.vue": ["alert", "status"],
   "popup/components/OpeningProgress.vue": ["determinate", "indeterminate"],
   "popup/components/GroupItem.vue": ["go", "close", "collapse", "ArrowLeft", "ArrowRight"],
   "popup/components/GroupList.vue": ["go", "close", "collapse"],
