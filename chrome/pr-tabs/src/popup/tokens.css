@@ -45,6 +45,34 @@
   border-bottom: 1px solid var(--p-content-border-color);
 }
 
+.border-group-grey {
+  border-color: var(--pr-tabs-group-grey);
+}
+.border-group-blue {
+  border-color: var(--pr-tabs-group-blue);
+}
+.border-group-red {
+  border-color: var(--pr-tabs-group-red);
+}
+.border-group-yellow {
+  border-color: var(--pr-tabs-group-yellow);
+}
+.border-group-green {
+  border-color: var(--pr-tabs-group-green);
+}
+.border-group-pink {
+  border-color: var(--pr-tabs-group-pink);
+}
+.border-group-purple {
+  border-color: var(--pr-tabs-group-purple);
+}
+.border-group-cyan {
+  border-color: var(--pr-tabs-group-cyan);
+}
+.border-group-orange {
+  border-color: var(--pr-tabs-group-orange);
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --pr-tabs-dot-ring: inset 0 0 0 0 transparent;

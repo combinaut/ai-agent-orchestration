@@ -1,23 +1,43 @@
 <script setup lang="ts">
 import Button from "primevue/button";
 import Tag from "primevue/tag";
-import { rowSegments } from "#/highlight";
-import PrTextSegment from "./PrTextSegment.vue";
 import { computed } from "vue";
 import { usePrPane } from "#/composables/usePrPane";
+import { highlightSegments } from "#/highlight";
 import type { PrItemProps, PrRowEvents } from "#/types";
 import { getMessage } from "#/i18n";
 import CloseIcon from "./CloseIcon.vue";
 import PaneIcon from "./PaneIcon.vue";
+import PrTextSegment from "./PrTextSegment.vue";
 
 const props = defineProps<PrItemProps>();
 const emit = defineEmits<PrRowEvents>();
 const key = computed(() => props.pr.key);
 const tabId = computed(() => props.pr.tabId);
 const closeLabel = computed(() => getMessage("closePrTab", { pr: props.pr.label }));
-const segments = computed(() => rowSegments(props.pr));
 const title = computed(() => props.pr.title);
+const number = computed(() => `#${props.pr.key.split("#").at(-1) ?? ""}`);
 const rowLabel = computed(() => `${props.pr.label} ${props.pr.title}`.trim());
+const numberSegments = computed(() => {
+  const hash = props.pr.label.lastIndexOf("#");
+  const labelMatches = props.pr.highlights?.label ?? [];
+  const matches = labelMatches.flatMap((range) => {
+    if (hash < 0 || range[1] < hash) {
+      return [];
+    }
+
+    return [[Math.max(range[0], hash) - hash, range[1] - hash] as const];
+  });
+
+  return highlightSegments(number.value, matches, props.pr.highlights?.queryLength ?? 0);
+});
+const titleSegments = computed(() =>
+  highlightSegments(
+    title.value,
+    props.pr.highlights?.title ?? [],
+    props.pr.highlights?.queryLength ?? 0,
+  ),
+);
 const {
   isGoVisible,
   isGoDisabled,
@@ -56,8 +76,18 @@ function handleGoClick(): void {
       :title="title"
       @click="handleRowClick"
     />
-    <span class="pointer-events-none min-w-0 flex-auto truncate">
-      <PrTextSegment v-for="(segment, index) in segments" :key="index" :segment="segment" />
+    <span class="pointer-events-none min-w-0 flex-auto truncate" :title="rowLabel">
+      <template v-if="grouped">
+        <span class="mr-2 font-mono text-muted-color tabular-nums">
+          <PrTextSegment
+            v-for="(segment, index) in numberSegments"
+            :key="index"
+            :segment="segment"
+          />
+        </span>
+      </template>
+      <span v-else class="mr-2 text-muted-color">{{ pr.label }}</span>
+      <PrTextSegment v-for="(segment, index) in titleSegments" :key="index" :segment="segment" />
     </span>
     <Tag
       v-if="isStateVisible"
@@ -86,7 +116,7 @@ function handleGoClick(): void {
       </Button>
     </span>
     <Button
-      class="relative flex-none"
+      class="relative mr-2 flex-none"
       size="small"
       severity="secondary"
       text

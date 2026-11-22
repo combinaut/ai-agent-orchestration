@@ -48,11 +48,11 @@ function hasHeaderClass(value: unknown): value is AccordionHeaderPassThrough {
   );
 }
 
-test("a row shows the group's colour dot, title and PR count", () => {
+test("a row shows the group's underline, title and PR count", () => {
   const groups: GroupSummary[] = [{ id: "1", title: "Finder", color: "yellow", count: 2, prs: [] }];
   const wrapper = mountPopup(GroupList, { props: { groups, panes: fakePanes() } });
 
-  assert.ok(wrapper.find("[aria-hidden=true]").classes().includes("bg-group-yellow"));
+  assert.ok(wrapper.find("button[aria-expanded]").classes().includes("border-group-yellow"));
   assert.match(wrapper.text(), /Finder/);
 
   const badge = wrapper.findComponent(Badge);
@@ -61,7 +61,7 @@ test("a row shows the group's colour dot, title and PR count", () => {
   assert.equal(badge.props("value"), 2);
   assert.equal(badge.attributes("aria-label"), "2 PRs");
   assert.ok(hasHeaderClass(passThrough));
-  assert.equal(passThrough.root.class, "-mx-popup-padding px-popup-padding");
+  assert.equal(passThrough.root.class, "-mx-popup-padding border-b-2 px-popup-padding");
 });
 
 test("the expanded content is a shrinkable grid column, so a long PR title cannot widen the popup", async () => {

@@ -584,6 +584,7 @@ export interface GroupItemProps {
 export interface PrItemProps {
   pr: PrRow;
   panes: Panes;
+  grouped?: boolean;
 }
 
 // Component events.

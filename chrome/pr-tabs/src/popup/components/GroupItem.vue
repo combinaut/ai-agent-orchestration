@@ -12,7 +12,7 @@ import PrItem from "./PrItem.vue";
 
 const props = defineProps<GroupItemProps>();
 const emit = defineEmits<PrRowEvents>();
-const { title, count, dotClass, countLabel } = useGroupItem(() => props.group);
+const { title, count, countLabel } = useGroupItem(() => props.group);
 const value = computed(() => props.group.id);
 const prRows = computed<PrRows>(() =>
   Object.fromEntries(props.group.prs.map((row) => [row.key, row])),
@@ -21,8 +21,9 @@ const accordionContentPassThrough: AccordionContentPassThroughOptions = {
   content: { class: "p-0" },
 };
 const accordionHeaderPassThrough: AccordionHeaderPassThroughOptions = {
-  root: { class: "-mx-popup-padding px-popup-padding" },
+  root: { class: "-mx-popup-padding border-b-2 px-popup-padding" },
 };
+const borderClass = computed(() => `border-group-${props.group.color ?? "grey"}`);
 function handlePrGo(key: PrKey): void {
   emit("go", key);
 }
@@ -34,13 +35,8 @@ function handlePrClose(key: PrKey, tabId: TabId): void {
 
 <template>
   <AccordionPanel :value="value">
-    <AccordionHeader :pt="accordionHeaderPassThrough">
-      <span class="flex flex-auto items-center gap-2">
-        <span
-          class="size-dot flex-none rounded-dot shadow-dot-ring"
-          :class="dotClass"
-          aria-hidden="true"
-        />
+    <AccordionHeader :pt="accordionHeaderPassThrough" :class="borderClass">
+      <span class="flex flex-auto items-center">
         <span>{{ title }}</span>
         <Badge class="mr-2 ml-auto" severity="secondary" :value="count" :aria-label="countLabel" />
       </span>
@@ -52,6 +48,7 @@ function handlePrClose(key: PrKey, tabId: TabId): void {
           :key="key"
           :pr="row"
           :panes="panes"
+          grouped
           @go="handlePrGo"
           @close="handlePrClose"
         />

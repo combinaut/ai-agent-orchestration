@@ -16,17 +16,21 @@ const ROW: PrRow = {
   head: { repo: "acme/webapp", branch: "feature" },
 };
 
-function item(answer: PaneLookup, checking = false, row: PrRow = ROW) {
+function item(
+  answer: PaneLookup,
+  checking = false,
+  { row = ROW, grouped = false }: { row?: PrRow; grouped?: boolean } = {},
+) {
   const panes = fakePanes(answer, checking);
 
-  return { wrapper: mountPopup(PrItem, { props: { pr: row, panes } }), panes };
+  return { wrapper: mountPopup(PrItem, { props: { pr: row, panes, grouped } }), panes };
 }
 
 test("a found pane without an agent state still enables focus", async () => {
   const { wrapper, panes } = item({ "acme/webapp:feature": { state: null } });
   const button = wrapper.findComponent(Button);
 
-  assert.match(wrapper.text(), /webapp#7 Fix the thing/);
+  assert.match(wrapper.text(), /webapp#7Fix the thing/);
   assert.equal(button.find("button").element.disabled, false);
   assert.equal(button.attributes("aria-label"), "Go to the Herdr pane for webapp#7");
 
@@ -41,7 +45,7 @@ test("missing panes hide the button; checking keeps the loading spinner", () => 
   assert.equal(missing.find("[data-pr-pane]").exists(), false);
   assert.equal(item({}).wrapper.find("[data-pr-pane]").exists(), false);
   assert.equal(
-    item({}, false, { ...ROW, head: null })
+    item({}, false, { row: { ...ROW, head: null } })
       .wrapper.find("[data-pr-pane]")
       .exists(),
     false,
@@ -135,18 +139,20 @@ test("close is a named sibling control after the terminal and never selects the 
   }
 });
 
-test("Fuse label/title highlights render marks safely and clear with the query", async () => {
+test("grouped rows hide the repo prefix while retaining label matches for search", async () => {
   const pr = {
     ...ROW,
     title: "<img> Fix",
     highlights: { label: [[0, 5]] as const, title: [[6, 8]] as const, queryLength: 3 },
   };
-  const { wrapper } = item({}, false, pr);
+  const { wrapper } = item({}, false, { row: pr, grouped: true });
   try {
     assert.deepEqual(
       wrapper.findAll("mark").map((mark) => mark.text()),
-      ["webapp", "Fix"],
+      ["Fix"],
     );
+    assert.match(wrapper.text(), /#7<img> Fix/);
+    assert.equal(wrapper.text().includes("webapp"), false);
     assert.equal(wrapper.find("img").exists(), false);
     assert.ok(wrapper.find(".truncate").text().includes("<img>"));
     await wrapper.setProps({ pr: ROW });
@@ -154,4 +160,23 @@ test("Fuse label/title highlights render marks safely and clear with the query",
   } finally {
     wrapper.unmount();
   }
+});
+
+test("grouped rows highlight a matching PR number", () => {
+  const { wrapper } = item({}, false, {
+    row: { ...ROW, highlights: { label: [[6, 7]], title: [], queryLength: 2 } },
+    grouped: true,
+  });
+
+  assert.deepEqual(
+    wrapper.findAll("mark").map((mark) => mark.text()),
+    ["#7"],
+  );
+});
+
+test("the close control shares the grouped header's right column", () => {
+  const close = item({}).wrapper.find("button[data-pr-close]");
+
+  assert.equal(close.classes().includes("mr-2"), true);
+  assert.equal(close.classes().includes("flex-none"), true);
 });
