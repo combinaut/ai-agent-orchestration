@@ -3,6 +3,7 @@ import Button from "primevue/button";
 import Menu from "primevue/menu";
 import { computed, nextTick, ref } from "vue";
 import { useActionMenu } from "#/composables/useActionMenu";
+import { MENU_LEFT, MENU_RIGHT, MENU_TOP } from "#popup/menuPosition";
 import ActionIcon from "./ActionIcon.vue";
 
 interface Action {
@@ -30,10 +31,27 @@ const model = computed(() =>
 function handleToggle(event: Event): void {
   toggle();
   menu.value?.toggle(event);
+  void nextTick(handleMenuPosition);
 }
 
 function handleHide(): void {
   close();
+}
+
+function handleMenuPosition(): void {
+  const popup = document.getElementById("actions-menu-popup");
+
+  if (!popup) {
+    return;
+  }
+
+  popup.style.top = MENU_TOP;
+  popup.style.right = MENU_RIGHT;
+  popup.style.left = MENU_LEFT;
+}
+
+function handleMenuShow(): void {
+  handleMenuPosition();
 }
 
 function handleEscape(event: KeyboardEvent): void {
@@ -52,31 +70,36 @@ function iconOf(icon: unknown): Action["icon"] {
 </script>
 
 <template>
-  <Button
-    id="actions-menu"
-    severity="secondary"
-    text
-    size="small"
-    :aria-label="label"
-    :aria-expanded="open"
-    @click="handleToggle"
-  >
-    <ActionIcon name="menu" />
-  </Button>
-  <Menu
-    ref="menu"
-    popup
-    append-to="self"
-    :model="model"
-    class="origin-top-right"
-    @hide="handleHide"
-    @keydown.esc="handleEscape"
-  >
-    <template #item="{ item, props: itemProps }">
-      <a v-bind="itemProps.action" :aria-disabled="Boolean(item.disabled)">
-        <ActionIcon :name="iconOf(item.icon)" />
-        <span>{{ item.label }}</span>
-      </a>
-    </template>
-  </Menu>
+  <div class="relative size-6">
+    <Button
+      id="actions-menu"
+      severity="secondary"
+      text
+      size="small"
+      class="size-full p-0"
+      :aria-label="label"
+      :aria-expanded="open"
+      @click="handleToggle"
+    >
+      <ActionIcon name="menu" />
+    </Button>
+    <Menu
+      ref="menu"
+      id="actions-menu-popup"
+      popup
+      append-to="self"
+      :model="model"
+      class="origin-top-right"
+      @show="handleMenuShow"
+      @hide="handleHide"
+      @keydown.esc="handleEscape"
+    >
+      <template #item="{ item, props: itemProps }">
+        <a v-bind="itemProps.action" :aria-disabled="Boolean(item.disabled)">
+          <ActionIcon :name="iconOf(item.icon)" />
+          <span>{{ item.label }}</span>
+        </a>
+      </template>
+    </Menu>
+  </div>
 </template>

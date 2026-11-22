@@ -54,6 +54,16 @@ test("one collapsed panel per group, in the given order", () => {
   );
 });
 
+test("dividers appear only between groups", () => {
+  const first = groups[0];
+  assert.ok(first);
+  const one = mountPopup(GroupList, { props: { groups: [first], panes: fakePanes() } });
+  const two = mountPopup(GroupList, { props: { groups, panes: fakePanes() } });
+
+  assert.equal(one.findAll(".p-accordionpanel").length, 1);
+  assert.equal(two.findAll(".p-accordionpanel").length, 2);
+});
+
 test("expanding a group lists its PRs and looks up the panes of every listed PR", async () => {
   const panes = fakePanes();
   const wrapper = mountPopup(GroupList, { props: { groups, panes }, attachTo: document.body });

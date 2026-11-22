@@ -216,6 +216,7 @@ onMounted(handlePopupMounted);
       @go="handleSearchGo"
     />
     <GroupList
+      v-if="hasPrTabs"
       ref="groupList"
       :groups="visibleGroups"
       :panes="panes"

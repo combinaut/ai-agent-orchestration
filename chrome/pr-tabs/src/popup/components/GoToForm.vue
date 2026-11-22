@@ -34,7 +34,7 @@ function handleRepoAccept(): void {
 
 <template>
   <form id="go" @submit.prevent="handleFormSubmit">
-    <div class="mb-1.5 flex items-center justify-between">
+    <div class="mb-1.5 flex h-6 items-center justify-between">
       <label for="target" class="font-label">{{ goToLabel }}</label>
       <slot name="actions" />
     </div>

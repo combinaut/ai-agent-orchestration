@@ -8,12 +8,19 @@ import type { ActionCase, FakeReplies, PendingOpeningReplies } from "#test/types
 import { effectiveRepos, pickedRepo, showRepoPicker } from "#/core";
 import App from "#popup/App.vue";
 import RepoSelect from "#popup/components/RepoSelect.vue";
-import { mountPopup } from "#test/components/mountPopup";
+import { mountPopup, popupStubs } from "#test/components/mountPopup";
 import { createI18n } from "#test/i18n/catalog";
 
+const mounted: { unmount: () => void }[] = [];
+
 afterEach(() => {
+  for (const wrapper of mounted.splice(0)) {
+    wrapper.unmount();
+  }
+
+  vi.useRealTimers();
   vi.unstubAllGlobals();
-  document.body.innerHTML = "";
+  document.body.replaceChildren();
 });
 
 function noop(): void {}
@@ -78,7 +85,11 @@ async function popup(
     i18n: createI18n(),
   });
 
-  const wrapper = mountPopup(App, { attachTo: document.body });
+  const wrapper = mountPopup(App, {
+    attachTo: document.body,
+    global: { stubs: popupStubs },
+  });
+  mounted.push(wrapper);
 
   await flushPromises();
   sent.length = 0;
@@ -337,6 +348,29 @@ test("actions live in the burger menu", async () => {
   wrapper.unmount();
 });
 
+test("action menu keeps the header geometry fixed and opens below its trigger", async () => {
+  const { wrapper } = await popup([]);
+  const header = wrapper.find("#go > div");
+  const input = wrapper.find("#target");
+  const trigger = wrapper.find<HTMLButtonElement>("#actions-menu");
+  const headerClasses = header.attributes("class");
+  const inputClasses = input.attributes("class");
+
+  assert.ok(header.classes().includes("h-6"));
+  assert.ok(trigger.element.parentElement?.classList.contains("size-6"));
+  assert.ok(trigger.classes().includes("p-0"));
+  await trigger.trigger("click");
+  await flushPromises();
+
+  const menu = document.getElementById("actions-menu-popup");
+  assert.equal(menu?.parentElement, trigger.element.parentElement);
+  assert.equal(menu?.style.top, "calc(100% + 4px)");
+  assert.equal(menu?.style.right, "0px");
+  assert.equal(header.attributes("class"), headerClasses);
+  assert.equal(input.attributes("class"), inputClasses);
+  wrapper.unmount();
+});
+
 test("close actions stay visible but disabled without PR tabs", async () => {
   const { wrapper, sent } = await popup([], { summary: { prs: 0, groups: [] } });
   await wrapper.find("#actions-menu").trigger("click");
@@ -364,12 +398,16 @@ test("close actions are enabled when PR tabs exist", async () => {
 
 test("search is hidden without PR tabs and shown when a PR tab exists", async () => {
   const empty = await popup([], { summary: { prs: 0, groups: [] } });
+  assert.ok(empty.wrapper.find("#popup-content").classes().includes("p-popup-padding"));
   assert.equal(empty.wrapper.find("#pr-search").exists(), false);
+  assert.equal(empty.wrapper.find("#groups").exists(), false);
   assert.ok(empty.wrapper.text().includes("No PR tabs open"));
   empty.wrapper.unmount();
 
   const populated = await popup([]);
+  assert.ok(populated.wrapper.find("#popup-content").classes().includes("p-popup-padding"));
   assert.equal(populated.wrapper.find("#pr-search").exists(), true);
+  assert.equal(populated.wrapper.find("#groups").exists(), true);
   populated.wrapper.unmount();
 });
 
