@@ -424,7 +424,7 @@ export interface FetchedStates {
 }
 
 // The popup's composables.
-export type StatusKind = "info" | "error";
+export type StatusKind = "success" | "info" | "warning" | "error";
 
 export interface StatusLine {
   readonly kind: StatusKind;
@@ -435,8 +435,10 @@ export type StatusRevision = number;
 
 export interface Status {
   statusText: ComputedRef<string>;
+  statusKind: ComputedRef<StatusKind>;
   isStatusError: ComputedRef<boolean>;
   revision: Readonly<Ref<StatusRevision>>;
+  show: (line: StatusLine, revision?: StatusRevision) => void;
   info: (text: string, revision?: StatusRevision) => void;
   error: (text: string, revision?: StatusRevision) => void;
 }
@@ -509,7 +511,7 @@ export type TabActionType = OpenBatchAction | "checkNow" | "closeDuplicates";
 
 export interface TabActionContext {
   ask: Ask;
-  status: Pick<Status, "statusText" | "isStatusError" | "info" | "error" | "revision">;
+  status: Pick<Status, "statusText" | "isStatusError" | "show" | "info" | "error" | "revision">;
   refresh: () => Promise<void>;
 }
 
@@ -523,7 +525,7 @@ export interface TabActionSpec<K extends TabActionType> {
   request: PlainRequest<K>;
   pending: string;
   refreshOnFailure?: boolean;
-  report: (result: Replies[K]) => string;
+  report: (result: Replies[K]) => StatusLine;
 }
 
 export interface TabAction {
@@ -549,7 +551,7 @@ export interface OpeningProgressProps {
 
 export interface StatusToastProps {
   text: string;
-  error: boolean;
+  kind: StatusKind;
   shown: boolean;
   revision: number;
   raised: boolean;

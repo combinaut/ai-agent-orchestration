@@ -94,13 +94,13 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
     "clear",
   ],
   "popup/components/RepoOptionItem.vue": ["pick", "hover"],
-  "popup/components/StatusToast.vue": ["alert", "status"],
+  "popup/components/StatusToast.vue": ["alert", "status", "success", "info"],
   "popup/components/OpeningProgress.vue": ["determinate", "indeterminate"],
   "popup/components/GroupItem.vue": ["go", "close", "collapse", "ArrowLeft", "ArrowRight"],
   "popup/components/GroupList.vue": ["go", "close", "collapse"],
   "popup/components/PrItem.vue": ["go", "close", "Delete", "Backspace"],
   "popup/primevue.ts": ["none"],
-  "texts.ts": ["MERGED"],
+  "texts.ts": ["MERGED", "success", "info", "warning"],
 };
 
 function isMachineIdentifier(text: string, codes: ReadonlySet<string>): boolean {

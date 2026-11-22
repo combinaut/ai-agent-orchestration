@@ -1,13 +1,14 @@
 import { computed, ref } from "vue";
-import type { Status, StatusKind, StatusLine, StatusRevision } from "#/types";
+import type { Status, StatusLine, StatusRevision } from "#/types";
 
 export function useStatus(): Status {
   const status = ref<StatusLine>({ kind: "info", text: "" });
   const revision = ref<StatusRevision>(0);
   const statusText = computed(() => status.value.text);
+  const statusKind = computed(() => status.value.kind);
   const isStatusError = computed(() => status.value.kind === "error");
 
-  function update(kind: StatusKind, text: string, expected?: StatusRevision): void {
+  function show(line: StatusLine, expected?: StatusRevision): void {
     if (expected !== undefined && expected !== revision.value) {
       return;
     }
@@ -16,16 +17,16 @@ export function useStatus(): Status {
       revision.value++;
     }
 
-    status.value = { kind, text };
+    status.value = line;
   }
 
   function info(text: string, expected?: StatusRevision): void {
-    update("info", text, expected);
+    show({ kind: "info", text }, expected);
   }
 
   function error(text: string, expected?: StatusRevision): void {
-    update("error", text, expected);
+    show({ kind: "error", text }, expected);
   }
 
-  return { statusText, isStatusError, revision, info, error };
+  return { statusText, statusKind, isStatusError, revision, show, info, error };
 }

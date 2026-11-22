@@ -38,8 +38,14 @@
 .pi-check-circle::before {
   content: "\e90a";
 }
-.pi-exclamation-circle::before {
-  content: "\e989";
+.pi-info-circle::before {
+  content: "\e924";
+}
+.pi-exclamation-triangle::before {
+  content: "\e922";
+}
+.pi-times-circle::before {
+  content: "\e90c";
 }
 .pi-clone::before {
   content: "\e955";

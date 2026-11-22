@@ -33,6 +33,11 @@ function menuItemSlot(item: MenuItem, slots: Slots) {
 
 export const popupStubs = {
   teleport: true,
+  transition: defineComponent(
+    (_, { slots }) =>
+      () =>
+        slots.default?.(),
+  ),
   Menu: defineComponent({
     name: "Menu",
     props: {

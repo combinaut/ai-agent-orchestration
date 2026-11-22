@@ -52,7 +52,7 @@ const {
 ]);
 const { ask } = useServiceWorker();
 const status = useStatus();
-const { statusText, isStatusError, revision: statusRevision } = status;
+const { statusText, statusKind, isStatusError, revision: statusRevision } = status;
 const { groups, text: summaryLine, refresh } = useSummary(ask, status);
 const isStatusShown = computed(
   () => isStatusError.value || (statusText.value !== "" && statusText.value !== summaryLine.value),
@@ -358,7 +358,7 @@ onMounted(handlePopupMounted);
     </section>
     <StatusToast
       :text="statusText"
-      :error="isStatusError"
+      :kind="statusKind"
       :shown="isStatusShown"
       :revision="statusRevision"
       :raised="hasPrTabs"

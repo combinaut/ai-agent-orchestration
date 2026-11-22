@@ -1,6 +1,6 @@
 // Popup status lines built from catalog messages.
 import { getMessage, getPluralMessage, listText } from "#/i18n";
-import type { CheckResult, OpenAllResult, Summary } from "#/types";
+import type { CheckResult, OpenAllResult, StatusKind, StatusLine, Summary } from "#/types";
 
 export function duplicateText(closed: number | undefined): string {
   if (!closed) {
@@ -82,4 +82,25 @@ export function openAllText(result: OpenAllResult, summary: string): string {
   const more = estimated ? "aboutMoreNotOpened" : "moreNotOpened";
 
   return `${done} ${getMessage(more, { count: remaining })}`;
+}
+
+export function duplicateLine(closed: number | undefined): StatusLine {
+  return { kind: closed ? "success" : "info", text: duplicateText(closed) };
+}
+
+// Kept in-view tabs and PRs left for the next check are warnings; closing something is success.
+function checkKind(result: CheckResult): StatusKind {
+  if (result.inView.length || result.checked < result.prs) {
+    return "warning";
+  }
+
+  return result.closed.length ? "success" : "info";
+}
+
+export function checkLine(result: CheckResult): StatusLine {
+  return { kind: result.tabs ? checkKind(result) : "info", text: checkText(result) };
+}
+
+export function openAllLine(result: OpenAllResult, summary: string): StatusLine {
+  return { kind: result.remaining ? "warning" : "success", text: openAllText(result, summary) };
 }

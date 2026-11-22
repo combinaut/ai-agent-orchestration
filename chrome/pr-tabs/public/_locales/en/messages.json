@@ -414,6 +414,6 @@
     "message": "already open · ↵ switch"
   },
   "closeStatus": {
-    "message": "Dismiss message"
+    "message": "Dismiss"
   }
 }
