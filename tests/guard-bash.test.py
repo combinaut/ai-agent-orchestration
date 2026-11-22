@@ -2370,6 +2370,8 @@ pkill -f vite
         ("rg files home pipeline", "rg --files ~ | rg x", True),
         ("rg content HOME", "rg foo $HOME", True),
         ("find filesystem root", "find / -name x", True),
+        ("find H filesystem root", "find -H / -name x", True),
+        ("find L home root", "find -L ~ -name x", True),
         ("fd private tmp root", "fd x /private/tmp", True),
         ("rg project directory", "rg foo src/", False),
         ("rg private tmp child", "rg foo /private/tmp/sub/file", False),

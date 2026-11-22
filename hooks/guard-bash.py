@@ -1518,7 +1518,18 @@ def search_operands(executable, args):
     """The positional search roots for the supported search programs."""
     if executable == "find":
         roots = []
+        skip_debug = False
         for arg in args:
+            if skip_debug:
+                skip_debug = False
+                continue
+            if not roots and arg in ("-H", "-L", "-P", "--"):
+                continue
+            if not roots and re.fullmatch(r"-O\d*", arg):
+                continue
+            if not roots and arg == "-D":
+                skip_debug = True
+                continue
             if arg.startswith("-"):
                 break
             roots.append(arg)
