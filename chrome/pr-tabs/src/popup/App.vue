@@ -14,7 +14,7 @@ import { useServiceWorker } from "#/composables/useServiceWorker";
 import { useStatus } from "#/composables/useStatus";
 import { useSummary } from "#/composables/useSummary";
 import { useTabActions } from "#/composables/useTabActions";
-import ActionButton from "./components/ActionButton.vue";
+import ActionMenu from "./components/ActionMenu.vue";
 import GoToForm from "./components/GoToForm.vue";
 import GroupList from "./components/GroupList.vue";
 import OpeningProgress from "./components/OpeningProgress.vue";
@@ -29,6 +29,7 @@ const {
   checkNowHint,
   closeDuplicatesButton,
   closeDuplicatesHint,
+  actionMenuLabel,
 } = useMessages([
   "openReviewsButton",
   "openReviewsHint",
@@ -38,11 +39,13 @@ const {
   "checkNowHint",
   "closeDuplicatesButton",
   "closeDuplicatesHint",
+  "actionMenuLabel",
 ]);
 const { ask } = useServiceWorker();
 const status = useStatus();
 const { statusText, isStatusError } = status;
 const { groups, refresh } = useSummary(ask, status);
+const hasPrTabs = computed(() => groups.value.length > 0);
 const panes = usePanes(ask, status);
 const query = ref("");
 const {
@@ -70,6 +73,36 @@ const openingProgress = computed(() => ({
   active: workerProgress.value.active || localBusy.value,
 }));
 const isOpeningBatch = computed(() => openingProgress.value.active);
+const actionMenuItems = computed(() => [
+  {
+    id: "open-all",
+    label: openAllButton,
+    hint: openAllHint,
+    busy: isOpeningBatch.value,
+    run: handleOpenAllRun,
+  },
+  {
+    id: "open-reviews",
+    label: openReviewsButton,
+    hint: openReviewsHint,
+    busy: isOpeningBatch.value,
+    run: handleOpenReviewsRun,
+  },
+  {
+    id: "check-now",
+    label: checkNowButton,
+    hint: checkNowHint,
+    busy: isCheckingNow.value,
+    run: handleCheckNowRun,
+  },
+  {
+    id: "close-duplicates",
+    label: closeDuplicatesButton,
+    hint: closeDuplicatesHint,
+    busy: isClosingDuplicates.value,
+    run: handleCloseDuplicatesRun,
+  },
+]);
 
 function handleSearchNext(): void {
   groupList.value?.focusFirst();
@@ -153,41 +186,15 @@ onMounted(handlePopupMounted);
       @close-repo="handleRepoClose"
       @go="handleGoToSubmit"
       @pick="handleRepoPick"
-    />
-    <div class="mt-3 grid grid-cols-2 gap-2">
-      <ActionButton
-        id="open-all"
-        primary
-        :label="openAllButton"
-        :hint="openAllHint"
-        :busy="isOpeningBatch"
-        @run="handleOpenAllRun"
-      />
-      <ActionButton
-        id="open-reviews"
-        :label="openReviewsButton"
-        :hint="openReviewsHint"
-        :busy="isOpeningBatch"
-        @run="handleOpenReviewsRun"
-      />
-      <ActionButton
-        id="check-now"
-        :label="checkNowButton"
-        :hint="checkNowHint"
-        :busy="isCheckingNow"
-        @run="handleCheckNowRun"
-      />
-      <ActionButton
-        id="close-duplicates"
-        :label="closeDuplicatesButton"
-        :hint="closeDuplicatesHint"
-        :busy="isClosingDuplicates"
-        @run="handleCloseDuplicatesRun"
-      />
-    </div>
+    >
+      <template #actions>
+        <ActionMenu :actions="actionMenuItems" :label="actionMenuLabel" />
+      </template>
+    </GoToForm>
     <OpeningProgress :progress="openingProgress" />
     <StatusLine :text="statusText" :error="isStatusError" />
     <PrSearch
+      v-if="hasPrTabs"
       v-model="query"
       :active="isFiltering"
       :count="matchCount"

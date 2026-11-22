@@ -169,6 +169,7 @@ export interface FakeAsk {
 
 export interface ActionCase {
   button: string;
+  label: string;
   request: PlainRequest<TabActionType>;
   reply: Replies[TabActionType];
   status: string;

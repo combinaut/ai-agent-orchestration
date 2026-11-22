@@ -16,6 +16,7 @@ export const COMPONENTS: readonly string[] = [
   "inputicon",
   "inputtext",
   "message",
+  "menu",
   "progressbar",
   "ripple",
   "select",

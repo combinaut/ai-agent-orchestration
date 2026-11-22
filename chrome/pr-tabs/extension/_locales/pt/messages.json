@@ -30,6 +30,7 @@
     "message": "Nenhum repositório disponível"
   },
   "repoGuessUnavailable": { "message": "Repo guess unavailable: update the host" },
+  "actionMenuLabel": { "message": "Actions" },
   "openAllButton": {
     "message": "Abrir todos"
   },

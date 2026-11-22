@@ -78,6 +78,8 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   "i18n.ts": ["one", "other", "conjunction"],
   "messages.ts": ["error", "object", "message", "string", "type", "reply"],
   "popup/components/ActionButton.vue": ["secondary", "run"],
+  "popup/App.vue": ["Actions"],
+  "App.vue": ["Actions"],
   "popup/components/GoToForm.vue": ["input", "repo", "go", "pick"],
   "popup/components/OpeningProgress.vue": ["determinate", "indeterminate"],
   "popup/components/GroupItem.vue": ["go", "close", "-mx-popup-padding px-popup-padding"],

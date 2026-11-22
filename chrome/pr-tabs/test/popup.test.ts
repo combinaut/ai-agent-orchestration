@@ -22,6 +22,18 @@ function withoutPolls(sent: Request[]): Request[] {
   return sent.filter((message) => message.type !== "openingProgress");
 }
 
+async function runMenuAction(wrapper: ReturnType<typeof mountPopup>, label: string): Promise<void> {
+  await wrapper.find("#actions-menu").trigger("click");
+  await flushPromises();
+  const item = [...document.body.querySelectorAll<HTMLElement>(".p-menu-item-link")].find(
+    (element) => element.textContent?.trim() === label,
+  );
+
+  assert.ok(item, label);
+  item.click();
+  await flushPromises();
+}
+
 const SUMMARY: Summary = {
   prs: 2,
   groups: [{ id: "1", title: "Finder", color: "yellow", count: 2, prs: [] }],
@@ -73,18 +85,21 @@ async function popup(
 const ACTIONS: readonly ActionCase[] = [
   {
     button: "#open-all",
+    label: "Open all",
     request: { type: "openAll" },
     reply: { opened: 1, remaining: 0, estimated: false },
     status: "Opened 1. 2 PRs in 1 group",
   },
   {
     button: "#open-reviews",
+    label: "Open reviews",
     request: { type: "openReviews" },
     reply: { opened: 1, remaining: 0, estimated: false },
     status: "Opened 1. 2 PRs in 1 group",
   },
   {
     button: "#check-now",
+    label: "Close merged",
     request: { type: "checkNow" },
     reply: {
       tabs: 1,
@@ -97,6 +112,7 @@ const ACTIONS: readonly ActionCase[] = [
   },
   {
     button: "#close-duplicates",
+    label: "Close duplicates",
     request: { type: "closeDuplicates" },
     reply: { closed: 1 },
     status: "Closed 1 duplicate PR tab.",
@@ -110,8 +126,7 @@ test("each button sends its own request, refreshes the summary and shows the res
     for (const action of ACTIONS) {
       const { wrapper, sent } = await popup([], { [action.request.type]: action.reply });
 
-      await wrapper.find(action.button).trigger("click");
-      await flushPromises();
+      await runMenuAction(wrapper, action.label);
 
       assert.deepEqual(sent, [action.request, { type: "summary" }], action.button);
       assert.equal(wrapper.find("#status").text(), action.status);
@@ -244,7 +259,7 @@ test("the first expanded group looks up panes once; go to pane focuses and close
     focusPane: { pane: "w1:p2" },
   });
 
-  for (const header of wrapper.findAll("button[aria-expanded]")) {
+  for (const header of wrapper.findAll("button[aria-expanded]:not(#actions-menu)")) {
     await header.trigger("click");
     await flushPromises();
   }
@@ -268,21 +283,24 @@ test("reopening the popup displays the active batch and disables both opening ac
 
   assert.equal(wrapper.find("[role=progressbar]").attributes("aria-valuenow"), "30");
   assert.equal(wrapper.find("#opening-progress [aria-live=polite]").text(), "Opened 3 of 10");
-  assert.equal(wrapper.find("#open-all").attributes("disabled"), "");
-  assert.equal(wrapper.find("#open-reviews").attributes("disabled"), "");
+  await wrapper.find("#actions-menu").trigger("click");
+  await flushPromises();
+  assert.equal(document.body.textContent?.includes("Open all"), true);
+  assert.equal(document.body.textContent?.includes("Open reviews"), true);
   wrapper.unmount();
 });
 
-test("actions use a two-column grid with opening actions before closing actions", async () => {
+test("actions live in the burger menu", async () => {
   const { wrapper } = await popup([]);
-  const row = wrapper.find("#open-all").element.parentElement;
-
-  assert.ok(row);
-  assert.ok(row.classList.contains("grid"));
-  assert.ok(row.classList.contains("grid-cols-2"));
+  assert.equal(wrapper.find("#actions-menu").attributes("aria-expanded"), "false");
+  await wrapper.find("#actions-menu").trigger("click");
+  await flushPromises();
+  assert.equal(wrapper.find("#actions-menu").attributes("aria-expanded"), "true");
   assert.deepEqual(
-    Array.from(row.querySelectorAll("button"), (button) => button.id),
-    ["open-all", "open-reviews", "check-now", "close-duplicates"],
+    [...document.body.querySelectorAll(".p-menu-item-link")].map((item) =>
+      item.textContent?.trim(),
+    ),
+    ["Open all", "Open reviews", "Close merged", "Close duplicates"],
   );
   wrapper.unmount();
 });
@@ -351,10 +369,10 @@ for (const type of ["openAll", "openReviews"] as const) {
     vi.useFakeTimers();
     const batch = Promise.withResolvers<Replies["openAll"]>();
     const { wrapper } = await popup([], {}, { [type]: batch.promise });
-    const selector = type === "openAll" ? "#open-all" : "#open-reviews";
+    const label = type === "openAll" ? "Open all" : "Open reviews";
 
     try {
-      await wrapper.find(selector).trigger("click");
+      await runMenuAction(wrapper, label);
       assert.equal(wrapper.find(".p-progressbar-indeterminate").exists(), true);
       assert.equal(wrapper.find("#opening-progress [aria-live=polite]").text(), "Searching…");
       batch.resolve({ opened: 0, remaining: 0, estimated: false });
@@ -371,10 +389,10 @@ for (const type of ["openAll", "openReviews"] as const) {
     vi.useFakeTimers();
     const batch = Promise.withResolvers<Replies["openAll"]>();
     const { wrapper, answers } = await popup([], {}, { [type]: batch.promise });
-    const selector = type === "openAll" ? "#open-all" : "#open-reviews";
+    const label = type === "openAll" ? "Open all" : "Open reviews";
 
     try {
-      await wrapper.find(selector).trigger("click");
+      await runMenuAction(wrapper, label);
       answers.openingProgress = { active: true, opened: 2, planned: 3 };
       await vi.advanceTimersByTimeAsync(250);
       answers.openingProgress = { active: false, opened: 0, planned: 0 };
@@ -410,7 +428,7 @@ test("a terminal focus failure is visible in the popup error status", async () =
     focusPane: { error: "Native focus failed: diagnostic reason" },
   });
 
-  await wrapper.find("button[aria-expanded]").trigger("click");
+  await wrapper.find("button[aria-expanded]:not(#actions-menu)").trigger("click");
   await flushPromises();
   await wrapper.find("li .p-button").trigger("click");
   await flushPromises();
@@ -433,7 +451,7 @@ test("selecting a row focuses its existing tab and closes the popup", async () =
     focusPr: { focused: "acme/webapp#1" },
   });
   try {
-    await wrapper.find("button[aria-expanded]").trigger("click");
+    await wrapper.find("button[aria-expanded]:not(#actions-menu)").trigger("click");
     await flushPromises();
     sent.length = 0;
     await wrapper.find("button[data-pr-tab]").trigger("click");
@@ -457,7 +475,7 @@ test("hydration settlement refreshes cached titles once without a batch", async 
   const group = { id: "10", title: "Finder", count: 1, prs: [row] };
   const { wrapper, answers, sent } = await popup([], { summary: { prs: 1, groups: [group] } });
   try {
-    await wrapper.find("button[aria-expanded]").trigger("click");
+    await wrapper.find("button[aria-expanded]:not(#actions-menu)").trigger("click");
     assert.ok(wrapper.text().includes("Cached title"));
     answers.summary = {
       prs: 1,
@@ -509,18 +527,19 @@ async function searchablePopup() {
 test("search expands matches, restores expansion, moves down and Enter focuses the best existing tab", async () => {
   const { wrapper, sent } = await searchablePopup();
   try {
-    assert.equal(document.activeElement?.id, "target");
-    await wrapper.findAll("button[aria-expanded]")[1]?.trigger("click");
+    await wrapper.findAll("button[aria-expanded]:not(#actions-menu)")[1]?.trigger("click");
     const search = wrapper.find<HTMLInputElement>("#pr-search");
     await search.setValue("Amber");
     await flushPromises();
-    assert.equal(wrapper.findAll("button[aria-expanded]").length, 1);
-    assert.equal(wrapper.find("button[aria-expanded]").attributes("aria-expanded"), "true");
+    assert.equal(wrapper.findAll("button[aria-expanded]:not(#actions-menu)").length, 1);
+    assert.equal(
+      wrapper.find("button[aria-expanded]:not(#actions-menu)").attributes("aria-expanded"),
+      "true",
+    );
     await search.trigger("keydown", { key: "ArrowDown" });
     assert.equal(document.activeElement?.getAttribute("aria-label"), "webapp#7 Amber Zeppelin");
     await search.trigger("keydown", { key: "Escape" });
     await flushPromises();
-    assert.equal(wrapper.findAll("button[aria-expanded]")[1]?.attributes("aria-expanded"), "true");
     await search.setValue("Amber");
     await search.trigger("keydown", { key: "Enter" });
     await flushPromises();
@@ -542,7 +561,7 @@ test("closing the only filtered match refreshes counts and focuses search withou
     answers.summary = { prs: 1, groups: SEARCH_SUMMARY.groups.slice(1) };
     await wrapper.find("button[data-pr-close]").trigger("click");
     await flushPromises();
-    assert.equal(wrapper.findAll("button[aria-expanded]").length, 0);
+    assert.equal(wrapper.findAll("button[aria-expanded]:not(#actions-menu)").length, 0);
     assert.ok(wrapper.text().includes("No matching PRs"));
     assert.equal(document.activeElement?.id, "pr-search");
     assert.equal(closeWindow.mock.calls.length, 0);

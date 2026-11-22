@@ -34,7 +34,10 @@ function handleRepoAccept(): void {
 
 <template>
   <form id="go" @submit.prevent="handleFormSubmit">
-    <label for="target" class="mb-1.5 block font-label">{{ goToLabel }}</label>
+    <div class="mb-1.5 flex items-center justify-between">
+      <label for="target" class="font-label">{{ goToLabel }}</label>
+      <slot name="actions" />
+    </div>
     <PrInput ref="prInput" v-model="input" :readonly="busy" />
     <RepoSelect
       v-if="showRepo"
