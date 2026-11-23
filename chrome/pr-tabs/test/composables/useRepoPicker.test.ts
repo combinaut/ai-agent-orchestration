@@ -61,12 +61,12 @@ test("a listed choice selects the stored pick and is visible only for a bare num
   }
 });
 
-test("a bare number preselects the closest matching repo without saving it", async () => {
+test("a bare number preselects a repo that can hold it without saving it", async () => {
   const input = ref("");
   const { ask, sent } = fakeAsk({
     repos: {
       repos: ["webapp", "api", "docs"],
-      selected: "api",
+      selected: "webapp",
       show: true,
       newest: { webapp: 520, api: 2000, docs: 34400 },
     },
@@ -77,12 +77,15 @@ test("a bare number preselects the closest matching repo without saving it", asy
   input.value = "505";
   picker.suggest();
   assert.equal(picker.repo.value, "webapp");
+  input.value = "1500";
+  picker.suggest();
+  assert.equal(picker.repo.value, "api");
   input.value = "#34330";
   picker.suggest();
   assert.equal(picker.repo.value, "docs");
   input.value = "99999";
   picker.suggest();
-  assert.equal(picker.repo.value, "docs");
+  assert.equal(picker.repo.value, "webapp");
   assert.deepEqual(sent, [{ type: "repos" }]);
 });
 

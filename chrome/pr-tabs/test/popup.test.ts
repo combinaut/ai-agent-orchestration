@@ -215,7 +215,7 @@ test("Enter opens inline preselected repository suggestions and the next Enter o
   const { wrapper, sent } = await popup(["webapp", "api", "docs"], {
     repos: {
       repos: ["webapp", "api", "docs"],
-      selected: "api",
+      selected: "webapp",
       show: true,
       newest: { webapp: 520, api: 2000, docs: 34400 },
     },
@@ -247,7 +247,7 @@ test("Enter always opens a bare-number picker before opening its PR", async () =
   const { wrapper, sent } = await popup(["infra", "big", "orch", "hub"], {
     repos: {
       repos: ["infra", "big", "orch", "hub"],
-      selected: "big",
+      selected: "hub",
       show: true,
       newest: { infra: 515, big: 34352, orch: 198, hub: 111 },
     },

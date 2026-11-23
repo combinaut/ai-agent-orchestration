@@ -361,33 +361,38 @@ test("the selected repo is the last pick while listed, else defaultRepo", () => 
   assert.equal(pickedRepo(multi, ""), "webapp");
 });
 
-test("a bare PR number picks the closest newest issue or PR number", () => {
-  const newest = { webapp: 520, api: 2000, docs: 34400 };
+test("a repo whose newest number is below the typed number never qualifies", () => {
+  const repos = ["infra", "sparkle"];
+  const newest = { infra: 520, sparkle: 34300 };
 
-  const repos = effectiveRepos(multi);
-  assert.equal(suggestedRepo(repos, 505, { fallback: "webapp", newest }), "webapp");
-  assert.equal(suggestedRepo(repos, 1500, { fallback: "webapp", newest }), "api");
-  assert.equal(suggestedRepo(repos, 34330, { fallback: "webapp", newest }), "docs");
-  assert.equal(suggestedRepo(repos, 99999, { fallback: "api", newest }), "docs");
-  assert.equal(suggestedRepo(repos, 505, { fallback: "api", newest: {} }), "api");
-  assert.equal(suggestedRepo(repos, 505, { fallback: "api", newest: { webapp: 500 } }), "webapp");
+  assert.equal(suggestedRepo(repos, 3999, { fallback: "infra", newest }), "sparkle");
   assert.equal(
-    suggestedRepo(repos, 505, { fallback: "api", newest: { webapp: 520, api: 520 } }),
-    "webapp",
-  );
-  const current = { infra: 515, big: 34352, orch: 198, hub: 111 };
-  assert.equal(
-    suggestedRepo(["infra", "big", "orch", "hub"], 515, { fallback: "big", newest: current }),
+    suggestedRepo(["infra"], 520, { fallback: "hub", newest: { infra: 520, hub: 111 } }),
     "infra",
   );
-  assert.equal(
-    suggestedRepo(["infra", "big", "orch", "hub"], 520, { fallback: "big", newest: current }),
-    "infra",
-  );
-  assert.equal(
-    suggestedRepo(["infra", "big", "orch", "hub"], 34330, { fallback: "infra", newest: current }),
-    "big",
-  );
+});
+
+test("the selected repo is kept when its newest number reaches the typed number", () => {
+  const newest = { a: 1000, b: 5000 };
+
+  assert.equal(suggestedRepo(["a", "b"], 900, { fallback: "b", newest }), "b");
+});
+
+test("otherwise the qualifying repo with the smallest newest number wins", () => {
+  const newest = { a: 850, b: 5000, c: 2000 };
+
+  assert.equal(suggestedRepo(["a", "b", "c"], 900, { fallback: "a", newest }), "c");
+});
+
+test("with no qualifying repo the selected repo stays", () => {
+  assert.equal(suggestedRepo(["b", "a"], 999, { fallback: "a", newest: { a: 100, b: 200 } }), "a");
+  assert.equal(suggestedRepo(["b", "a"], 999, { fallback: "a", newest: {} }), "a");
+});
+
+test("repos without a cached newest number are skipped", () => {
+  const newest = { infra: 520, api: 2000 };
+
+  assert.equal(suggestedRepo(["hub", "infra", "api"], 999, { fallback: "hub", newest }), "api");
 });
 
 test("a bare number goes to the picked repo", () => {
