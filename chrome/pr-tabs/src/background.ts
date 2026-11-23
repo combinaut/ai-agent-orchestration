@@ -70,6 +70,7 @@ import type {
   SearchReply,
   SearchResult,
   SeenOpen,
+  SeenOpenState,
   States,
   StoredState,
   Summary,
@@ -83,13 +84,14 @@ const STORED_DEFAULTS: StoredState = {
   prTabsSettings: null,
   owners: {},
   meta: {},
-  seenOpen: {},
   failures: 0,
   cursor: 0,
   prTabsRepo: "",
   prTabsRepoNumbers: { newest: {} },
   prTabsCollapsed: [],
 };
+
+const SESSION_DEFAULTS: SeenOpenState = { seenOpen: {} };
 
 const HOST = "orch.pr_tabs";
 const ALARM = "pr-tabs-poll";
@@ -108,6 +110,16 @@ async function readStored<K extends keyof StoredState>(key: K): Promise<StoredSt
 
 function writeStored(values: Partial<StoredState>): Promise<void> {
   return chrome.storage.local.set(values);
+}
+
+async function readSeenOpen(): Promise<SeenOpen> {
+  const stored = await chrome.storage.session.get<Partial<SeenOpenState>>("seenOpen");
+
+  return stored.seenOpen ?? SESSION_DEFAULTS.seenOpen;
+}
+
+function writeSeenOpen(seenOpen: SeenOpen): Promise<void> {
+  return chrome.storage.session.set({ seenOpen });
 }
 
 function hasId(tab: Tab): tab is IdTab {
@@ -228,6 +240,42 @@ function serial<T>(task: () => Promise<T>): Promise<T> {
 
 // Tab IDs that showed a PR at the last scan.
 const prTabIds = new Set<TabId>();
+const prKeysById = new Map<TabId, PrKey>();
+const tabGenerations = new Map<TabId, number>();
+
+interface EntrySnapshot {
+  entries: PrEntry[];
+  observed: Map<TabId, { key: PrKey; generation: number }>;
+}
+
+function generationOf(tabId: TabId): number {
+  return tabGenerations.get(tabId) ?? 0;
+}
+
+function snapshotEntries(entries: PrEntry[]): EntrySnapshot {
+  return {
+    entries,
+    observed: new Map(
+      entries.map((entry) => [
+        entry.tab.id,
+        { key: entry.pr.key, generation: generationOf(entry.tab.id) },
+      ]),
+    ),
+  };
+}
+
+function isCurrentObservation(entry: PrEntry, snapshot: EntrySnapshot): boolean {
+  const observed = snapshot.observed.get(entry.tab.id);
+
+  return observed?.key === entry.pr.key && observed.generation === generationOf(entry.tab.id);
+}
+
+async function currentEntries(
+  rules: Pick<Rules, "org">,
+  snapshot: EntrySnapshot,
+): Promise<PrEntry[]> {
+  return (await prEntries(rules)).filter((entry) => isCurrentObservation(entry, snapshot));
+}
 
 function isOpenPrTab(tab: Tab): tab is IdTab {
   return hasId(tab) && !tab.incognito && prKey(tab.pendingUrl || tab.url) !== null;
@@ -255,9 +303,11 @@ export async function prEntries(rules: Pick<Rules, "org">): Promise<PrEntry[]> {
   const entries = tabs.flatMap((tab) => entryOf(tab, rules.org));
 
   prTabIds.clear();
+  prKeysById.clear();
 
-  for (const { tab } of entries) {
+  for (const { tab, pr } of entries) {
     prTabIds.add(tab.id);
+    prKeysById.set(tab.id, pr.key);
   }
 
   return entries;
@@ -317,12 +367,14 @@ function readMeta(): Promise<Meta> {
 }
 
 let metaChain: Promise<unknown> = Promise.resolve();
+let metaStoreRevision = 0;
 
 // Every metadata write runs here, one at a time: read, change, write.
 function updateMeta(change: (meta: Meta) => Meta | Promise<Meta>): Promise<void> {
   async function rewrite(): Promise<void> {
     const meta = await readMeta();
     await writeStored({ meta: await change(meta) });
+    metaStoreRevision++;
   }
 
   const run = metaChain.then(rewrite);
@@ -333,13 +385,15 @@ function updateMeta(change: (meta: Meta) => Meta | Promise<Meta>): Promise<void>
 }
 
 let seenOpenChain: Promise<unknown> = Promise.resolve();
+let seenOpenRevision = 0;
 
 function updateSeenOpen(
   change: (seenOpen: SeenOpen) => SeenOpen | Promise<SeenOpen>,
 ): Promise<void> {
   async function rewrite(): Promise<void> {
-    const seenOpen = await readStored("seenOpen");
-    await writeStored({ seenOpen: await change(seenOpen) });
+    const seenOpen = await readSeenOpen();
+    await writeSeenOpen(await change(seenOpen));
+    seenOpenRevision++;
   }
 
   const run = seenOpenChain.then(rewrite);
@@ -425,14 +479,22 @@ async function groupTabId(tabId: TabId): Promise<void> {
   }
 }
 
-// Drops per-PR and per-tab state without a tab.
-function pruneClosedTabs(rules: Rules): Promise<void> {
-  return prEntries(rules).then((entries) =>
-    Promise.all([
-      updateMeta((meta) => pruneMeta(meta, new Set(entries.map((entry) => entry.pr.key)))),
-      updateSeenOpen((seenOpen) => recordSeenOpen(seenOpen, entries, {})),
-    ]).then(() => undefined),
-  );
+async function pruneClosedTabs(rules: Rules): Promise<void> {
+  const revisions = { meta: metaStoreRevision, seenOpen: seenOpenRevision };
+  const entries = await prEntries(rules);
+
+  await Promise.all([
+    updateMeta(async (meta) => {
+      const current = revisions.meta === metaStoreRevision ? entries : await prEntries(rules);
+
+      return pruneMeta(meta, new Set(current.map((entry) => entry.pr.key)));
+    }),
+    updateSeenOpen(async (seenOpen) => {
+      const current = revisions.seenOpen === seenOpenRevision ? entries : await prEntries(rules);
+
+      return recordSeenOpen(seenOpen, current, {});
+    }),
+  ]);
 }
 
 async function ensureAlarm(): Promise<void> {
@@ -545,15 +607,25 @@ async function closeIfFinished(id: TabId, key: PrKey, org: OrgName): Promise<boo
   return removeTab(id);
 }
 
-async function closeFinished(rules: Rules, entries: PrEntry[], states: States): Promise<Closed[]> {
-  const keyById = new Map(entries.map((entry) => [entry.tab.id, entry.pr.key]));
-  const seenOpen = await readStored("seenOpen");
+async function closeFinished(
+  rules: Rules,
+  snapshot: EntrySnapshot,
+  states: States,
+): Promise<Closed[]> {
+  const keyById = new Map(snapshot.entries.map((entry) => [entry.tab.id, entry.pr.key]));
+  const seenOpen = await readSeenOpen();
   const closed: Closed[] = [];
 
-  for (const id of tabsToClose(entries, states, seenOpen)) {
+  for (const id of tabsToClose(snapshot.entries, states, seenOpen)) {
     const key = keyById.get(id);
+    const entry = snapshot.entries.find((candidate) => candidate.tab.id === id);
 
-    if (key !== undefined && (await closeIfFinished(id, key, rules.org))) {
+    if (
+      key !== undefined &&
+      entry !== undefined &&
+      isCurrentObservation(entry, snapshot) &&
+      (await closeIfFinished(id, key, rules.org))
+    ) {
       closed.push({ key, state: states[key]?.state });
     }
   }
@@ -588,22 +660,23 @@ async function regroup(rules: Rules, entries: PrEntry[]): Promise<void> {
 
 async function applyStates(
   rules: Rules,
-  entries: PrEntry[],
+  snapshot: EntrySnapshot,
   fetched: FetchedStates,
 ): Promise<CheckResult> {
   const { states, prs, checked, nextCursor } = fetched;
-  const closed = await closeFinished(rules, entries, states);
-  const inView = activeFinished(entries, states);
+  const closed = await closeFinished(rules, snapshot, states);
+  const entriesNow = await currentEntries(rules, snapshot);
+  const inView = activeFinished(entriesNow, states);
 
   await Promise.all([
     updateMeta((meta) => recordStates(meta, states)),
-    updateSeenOpen((previous) => recordSeenOpen(previous, entries, states)),
+    updateSeenOpen((previous) => recordSeenOpen(previous, entriesNow, states)),
   ]);
   await writeStored({ failures: 0, cursor: nextCursor });
   await chrome.alarms.create(ALARM, { delayInMinutes: nextDelaySeconds(0) / 60 });
-  await regroup(rules, entries);
+  await regroup(rules, entriesNow);
 
-  return { tabs: entries.length, prs, checked, closed, inView };
+  return { tabs: snapshot.entries.length, prs, checked, closed, inView };
 }
 
 function noTabsChecked(): CheckResult {
@@ -614,21 +687,21 @@ function noTabsChecked(): CheckResult {
 // reports what happened.
 async function checkOnce(): Promise<Reply<"checkNow">> {
   const rules = await loadRules();
-  const entries = await prEntries(rules);
+  const snapshot = snapshotEntries(await prEntries(rules));
 
-  if (!entries.length) {
+  if (!snapshot.entries.length) {
     await chrome.alarms.clear(ALARM);
 
     return noTabsChecked();
   }
 
-  const fetched = await fetchStates(entries);
+  const fetched = await fetchStates(snapshot.entries);
 
   if ("error" in fetched) {
     return fetched;
   }
 
-  return applyStates(rules, entries, fetched);
+  return applyStates(rules, snapshot, fetched);
 }
 
 // Re-checks the open tabs inside the serial chain, so a tab opened since the search is not
@@ -1096,7 +1169,8 @@ function metadataBatch(entries: PrEntry[], meta: Meta): PrRef[] {
 
 async function hydrateMetadata(): Promise<void> {
   const rules = await loadRules();
-  const batch = metadataBatch(await prEntries(rules), await readMeta());
+  const snapshot = snapshotEntries(await prEntries(rules));
+  const batch = metadataBatch(snapshot.entries, await readMeta());
 
   if (batch.length === 0) {
     return;
@@ -1105,7 +1179,11 @@ async function hydrateMetadata(): Promise<void> {
   try {
     const reply = await askHost({ type: "states", prs: batch });
     await recordOwners(reply.owners);
-    await updateMeta((meta) => recordStates(meta, reply.prs));
+    const entries = await currentEntries(rules, snapshot);
+    await Promise.all([
+      updateMeta((meta) => recordStates(meta, reply.prs)),
+      updateSeenOpen((seenOpen) => recordSeenOpen(seenOpen, entries, reply.prs)),
+    ]);
     await regroup(rules, await prEntries(rules));
   } finally {
     metadataRevision++;
@@ -1162,12 +1240,33 @@ export async function focusPane(head: BranchRef): Promise<FocusedPane> {
 
 const pending = new Map<TabId, ReturnType<typeof setTimeout>>();
 
+function invalidateTabObservation(tabId: TabId): void {
+  tabGenerations.set(tabId, generationOf(tabId) + 1);
+  prKeysById.delete(tabId);
+  void updateSeenOpen((seenOpen) => {
+    const next = { ...seenOpen };
+    delete next[tabId];
+
+    return next;
+  });
+}
+
 function handleTabSettled(tabId: TabId): void {
   pending.delete(tabId);
   void serial(() => groupTabId(tabId)).then(ensureAlarm);
 }
 
 function handleTabUpdated(tabId: TabId, change: chrome.tabs.OnUpdatedInfo, tab: Tab): void {
+  const key = prKey(tab.pendingUrl || tab.url);
+
+  if (change.url && prKeysById.get(tabId) !== key) {
+    invalidateTabObservation(tabId);
+  }
+
+  if (key) {
+    prKeysById.set(tabId, key);
+  }
+
   if (!tabUpdateMatters(change, tab, prTabIds.has(tabId))) {
     return;
   }
@@ -1179,6 +1278,7 @@ function handleTabUpdated(tabId: TabId, change: chrome.tabs.OnUpdatedInfo, tab: 
 function handleTabRemoved(tabId: TabId): void {
   clearTimeout(pending.get(tabId));
   pending.delete(tabId);
+  invalidateTabObservation(tabId);
   ensureAlarm().catch(warn);
 }
 

@@ -75,6 +75,9 @@ export interface PrState extends PrHead {
 export type States = Partial<Record<PrKey, PrState | null>>;
 export type Meta = Partial<Record<PrKey, PrState>>;
 export type SeenOpen = Partial<Record<TabId, PrKey>>;
+export interface SeenOpenState {
+  seenOpen: SeenOpen;
+}
 export type Owners = Partial<Record<OwnerKey, GroupTitle>>;
 
 export interface SearchHit extends PrHead {
@@ -409,7 +412,6 @@ export interface StoredState {
   prTabsSettings: HostOk<Partial<Rules>> | null;
   owners: Owners;
   meta: Meta;
-  seenOpen: SeenOpen;
   failures: number;
   cursor: number;
   prTabsRepo: RepoName;

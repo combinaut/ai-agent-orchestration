@@ -28,6 +28,7 @@ const realNow = Date.now;
 afterEach(() => {
   vi.restoreAllMocks();
   Date.now = realNow;
+  world.session = {};
   world.hostSettings = CONFIGURED;
 });
 
@@ -453,7 +454,7 @@ test("a tab opened after its PR finished stays open", async () => {
     inView: [],
   });
   assert.deepEqual(ids(), [1]);
-  assert.deepEqual(world.store.seenOpen, {});
+  assert.deepEqual(world.session.seenOpen, {});
 });
 
 test("a tab seen open closes after its PR finishes, but a later tab stays open", async () => {
@@ -467,7 +468,7 @@ test("a tab seen open closes after its PR finishes, but a later tab stays open",
   });
 
   await chromeMessageCheck();
-  assert.deepEqual(world.store.seenOpen, { 1: "acme/webapp#7" });
+  assert.deepEqual(world.session.seenOpen, { 1: "acme/webapp#7" });
 
   state = "MERGED";
   world.tabs.push({ id: 2, url: `${PR}/7`, active: false });

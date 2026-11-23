@@ -19,6 +19,7 @@ import type {
   Request,
   RequestType,
   Rules,
+  SeenOpenState,
   StoredState,
   Tab,
   TabActionType,
@@ -32,6 +33,7 @@ export type FakeTab = Required<Pick<Tab, "id" | "url">> &
   Pick<chrome.tabs.QueryInfo, "windowType">;
 
 export type FakeStore = Partial<StoredState>;
+export type FakeSession = Partial<SeenOpenState>;
 export type HostSettings = HostReply<Partial<Rules>>;
 
 export interface CreatedAlarm {
@@ -45,12 +47,15 @@ export interface World {
   tabs: FakeTab[];
   created: chrome.tabs.CreateProperties[];
   store: FakeStore;
+  session: FakeSession;
   grouped: chrome.tabGroups.UpdateProperties[];
   createdAlarms: CreatedAlarm[];
   settingsCalls: number;
   hostSettings: HostSettings;
   nativeHandler: (message: HostRequest) => Promise<unknown>;
   nextId: TabId;
+  tabUpdatedListener: Parameters<typeof chrome.tabs.onUpdated.addListener>[0];
+  tabRemovedListener: Parameters<typeof chrome.tabs.onRemoved.addListener>[0];
   alarmListener: (alarm: FiredAlarm) => void;
   installedListener: () => Promise<void>;
   startupListener: () => Promise<void>;
@@ -99,6 +104,10 @@ export type FakeStorage = Known<
     local: {
       get: (key: keyof StoredState) => Promise<FakeStore>;
       set: (values: FakeStore) => Promise<void>;
+    };
+    session: {
+      get: (key: keyof SeenOpenState) => Promise<FakeSession>;
+      set: (values: FakeSession) => Promise<void>;
     };
   },
   typeof chrome.storage

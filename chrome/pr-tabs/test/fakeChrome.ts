@@ -34,16 +34,27 @@ export const world: World = {
   tabs: [],
   created: [],
   store: {},
+  session: {},
   grouped: [],
   createdAlarms: [],
   settingsCalls: 0,
   hostSettings: CONFIGURED,
   nativeHandler: noHostAnswer,
   nextId: 100,
+  tabUpdatedListener: noListener,
+  tabRemovedListener: noListener,
   alarmListener: noListener,
   installedListener: noListener,
   startupListener: noListener,
 };
+
+function handleTabUpdatedListen(listener: World["tabUpdatedListener"]): void {
+  world.tabUpdatedListener = listener;
+}
+
+function handleTabRemovedListen(listener: World["tabRemovedListener"]): void {
+  world.tabRemovedListener = listener;
+}
 
 const ignored = { addListener() {} };
 
@@ -90,8 +101,8 @@ const tabs = {
     world.tabs = world.tabs.filter((tab) => tab.id !== id);
   },
   group: async () => 1,
-  onUpdated: ignored,
-  onRemoved: ignored,
+  onUpdated: { addListener: handleTabUpdatedListen },
+  onRemoved: { addListener: handleTabRemovedListen },
 } satisfies FakeTabs;
 
 const tabGroups = {
@@ -121,6 +132,12 @@ const storage = {
     get: async (key) => ({ [key]: world.store[key] }),
     set: async (values) => {
       Object.assign(world.store, values);
+    },
+  },
+  session: {
+    get: async (key) => ({ [key]: world.session[key] }),
+    set: async (values) => {
+      Object.assign(world.session, values);
     },
   },
 } satisfies FakeStorage;

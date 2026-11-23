@@ -28,11 +28,11 @@ test("the tab in view stays until the user leaves it", () => {
   assert.equal(shouldClose({ active: true }, "MERGED"), false);
 });
 
-test("a tab first observed after its PR finished stays open", () => {
-  const entries: Entry[] = [{ tab: { id: 1, active: false }, pr: { key: "acme/webapp#1" } }];
-  const states: States = { "acme/webapp#1": { state: "MERGED" } };
+test("an observation does not follow a tab to another PR", () => {
+  const entries: Entry[] = [{ tab: { id: 1, active: false }, pr: { key: "acme/webapp#2" } }];
+  const states: States = { "acme/webapp#2": { state: "MERGED" } };
 
-  assert.deepEqual(tabsToClose(entries, states), []);
+  assert.deepEqual(tabsToClose(entries, states, { 1: "acme/webapp#1" }), []);
 });
 
 test("every background tab of a merged or closed PR is closed, nothing else", () => {
