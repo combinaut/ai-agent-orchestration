@@ -454,6 +454,7 @@ export interface RepoPicker {
   visible: ComputedRef<boolean>;
   guessUnavailable: ComputedRef<boolean>;
   load: () => Promise<void>;
+  ready: () => Promise<void>;
   suggest: () => void;
   pick: () => void;
 }

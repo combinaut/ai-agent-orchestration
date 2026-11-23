@@ -253,12 +253,18 @@ function openSelected(selected: Selectable): void {
   }
 }
 
-function handleFieldGo(): void {
-  if (active.value) {
-    openSelected(active.value);
-  } else if (number.value !== null && !isRepoPickerOpen.value && repos.value.length > 0) {
+async function hasRepoChoice(): Promise<boolean> {
+  await picker.ready();
+
+  return repos.value.length > 0;
+}
+
+async function handleFieldGo(): Promise<void> {
+  if (number.value !== null && !isRepoPickerOpen.value && (await hasRepoChoice())) {
     picker.suggest();
     isRepoPickerOpen.value = true;
+  } else if (active.value) {
+    openSelected(active.value);
   } else if (mode.value === "goto") {
     void go();
   }

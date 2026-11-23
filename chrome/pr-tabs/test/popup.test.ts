@@ -791,6 +791,57 @@ test("an already open PR in the picked repo switches to its tab instead of openi
   wrapper.unmount();
 });
 
+test("Enter on a bare number before the repos load waits and asks for the repo", async () => {
+  let release = noop;
+  const choices = { repos: ["webapp", "api"], selected: "webapp", show: true, newest: {} };
+  const held = new Promise((resolve) => {
+    release = () => resolve(choices);
+  });
+  const { wrapper, sent } = await popup(["webapp", "api"], {
+    repos: held as unknown as Replies["repos"],
+  });
+  const field = wrapper.find("#target");
+
+  await field.setValue("505");
+  await field.trigger("keydown", { key: "Enter" });
+  await flushPromises();
+  assert.deepEqual(withoutPolls(sent), []);
+  release();
+  await flushPromises();
+  assert.equal(wrapper.find("[role=option][aria-selected=true]").text(), "webapp");
+  assert.deepEqual(withoutPolls(sent), []);
+  wrapper.unmount();
+});
+
+test("a highlighted matching row does not act on the first Enter of a bare number", async () => {
+  const { wrapper, sent } = await popup(["webapp", "api"], {
+    summary: SEARCH_SUMMARY,
+    repos: { repos: ["webapp", "api"], selected: "webapp", show: true, newest: {} },
+    focusPr: { focused: "acme/webapp#7" },
+  });
+  const field = wrapper.find("#target");
+
+  await field.setValue("7");
+  await field.trigger("keydown", { key: "ArrowDown" });
+  await field.trigger("keydown", { key: "Enter" });
+  await flushPromises();
+  assert.deepEqual(withoutPolls(sent), []);
+  assert.equal(wrapper.find(".goto-label").text(), "Open #7 in");
+  wrapper.unmount();
+});
+
+test("with one listed repo a bare number opens on the first Enter", async () => {
+  vi.spyOn(window, "close").mockImplementation(noop);
+  const { wrapper, sent } = await popup(["webapp"], { goTo: { opened: "acme/webapp#76" } });
+  const field = wrapper.find("#target");
+
+  await field.setValue("76");
+  await field.trigger("keydown", { key: "Enter" });
+  await flushPromises();
+  assert.deepEqual(withoutPolls(sent), [{ type: "goTo", input: "76" }]);
+  wrapper.unmount();
+});
+
 test("closing the only filtered match refreshes counts and focuses search without closing the popup", async () => {
   const closeWindow = vi.spyOn(window, "close").mockImplementation(noop);
   const { wrapper, answers, sent } = await searchablePopup();

@@ -4,6 +4,24 @@ import { bareNumber, hasBareNumber, suggestedRepo } from "#/core";
 import { failed } from "#/messages";
 import type { Ask, RepoChoices, RepoName, RepoPicker } from "#/types";
 
+function noop(): void {}
+
+// load starts a fetch; ready waits for the current one, starting it when none has run.
+function loadOnce(execute: () => Promise<unknown>): Pick<RepoPicker, "load" | "ready"> {
+  let loading: Promise<void> | undefined;
+
+  async function load(): Promise<void> {
+    loading = execute().then(noop);
+    await loading;
+  }
+
+  async function ready(): Promise<void> {
+    await (loading ?? load());
+  }
+
+  return { load, ready };
+}
+
 function preselectedRepo(choices: RepoChoices | null, input: string): RepoName | null {
   const number = bareNumber(input);
 
@@ -24,7 +42,7 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPi
   function handleChoicesLoaded(loaded: RepoChoices | null): void {
     if (loaded) {
       repo.value = loaded.selected;
-      preselectRepo();
+      suggest();
     }
   }
 
@@ -38,7 +56,7 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPi
   const visible = computed(() => available.value && hasBareNumber(toValue(input)));
   const guessUnavailable = computed(() => choices.value?.guessUnavailable ?? false);
 
-  function preselectRepo(value = toValue(input)): void {
+  function suggest(value = toValue(input)): void {
     const selected = preselectedRepo(choices.value, value);
 
     if (selected) {
@@ -46,13 +64,11 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPi
     }
   }
 
-  async function load(): Promise<void> {
-    await executeImmediate();
-  }
+  const { load, ready } = loadOnce(executeImmediate);
 
   function pick(): void {
     void ask({ type: "pickRepo", repo: repo.value });
   }
 
-  return { repos, repo, available, visible, guessUnavailable, load, suggest: preselectRepo, pick };
+  return { repos, repo, available, visible, guessUnavailable, load, ready, suggest, pick };
 }
