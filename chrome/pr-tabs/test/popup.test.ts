@@ -813,20 +813,51 @@ test("Enter on a bare number before the repos load waits and asks for the repo",
   wrapper.unmount();
 });
 
-test("a highlighted matching row does not act on the first Enter of a bare number", async () => {
-  const { wrapper, sent } = await popup(["webapp", "api"], {
+async function openRowPopup() {
+  vi.spyOn(window, "close").mockImplementation(noop);
+
+  return popup(["webapp", "api"], {
     summary: SEARCH_SUMMARY,
     repos: { repos: ["webapp", "api"], selected: "webapp", show: true, newest: {} },
     focusPr: { focused: "acme/webapp#7" },
   });
+}
+
+test("Enter on an arrow-selected open row of a bare number focuses its tab", async () => {
+  const { wrapper, sent } = await openRowPopup();
   const field = wrapper.find("#target");
 
   await field.setValue("7");
   await field.trigger("keydown", { key: "ArrowDown" });
   await field.trigger("keydown", { key: "Enter" });
   await flushPromises();
-  assert.deepEqual(withoutPolls(sent), []);
-  assert.equal(wrapper.find(".goto-label").text(), "Open #7 in");
+  assert.deepEqual(withoutPolls(sent), [{ type: "focusPr", key: "acme/webapp#7" }]);
+  wrapper.unmount();
+});
+
+test("Enter on a hovered open row of a bare number focuses its tab", async () => {
+  const { wrapper, sent } = await openRowPopup();
+  const field = wrapper.find("#target");
+
+  await field.setValue("7");
+  await wrapper.find("#pr-7").trigger("mouseenter");
+  await field.trigger("keydown", { key: "Enter" });
+  await flushPromises();
+  assert.deepEqual(withoutPolls(sent), [{ type: "focusPr", key: "acme/webapp#7" }]);
+  wrapper.unmount();
+});
+
+test("the repo picker highlights the repo where the number is already open", async () => {
+  const { wrapper } = await popup(["api", "webapp"], {
+    summary: SEARCH_SUMMARY,
+    repos: { repos: ["api", "webapp"], selected: "api", show: true, newest: {} },
+  });
+  const field = wrapper.find("#target");
+
+  await field.setValue("7");
+  await field.trigger("keydown", { key: "Enter" });
+  await flushPromises();
+  assert.equal(wrapper.find("[aria-selected=true] .repo-option-name").text(), "webapp");
   wrapper.unmount();
 });
 

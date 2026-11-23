@@ -42,6 +42,10 @@ function handleRowClick(): void {
   emit("go", props.pr.key);
 }
 
+function handleRowMouseenter(): void {
+  emit("hover", props.pr.tabId);
+}
+
 function handleRowKeydown(event: KeyboardEvent): void {
   if (event.key === "Delete" || event.key === "Backspace") {
     event.preventDefault();
@@ -57,7 +61,14 @@ function handleGoClick(): void {
 </script>
 
 <template>
-  <li :id="rowId" class="pr-row" :class="rowClass" role="option" :aria-selected="isSelected">
+  <li
+    :id="rowId"
+    class="pr-row"
+    :class="rowClass"
+    role="option"
+    :aria-selected="isSelected"
+    @mouseenter="handleRowMouseenter"
+  >
     <button
       data-pr-tab
       type="button"

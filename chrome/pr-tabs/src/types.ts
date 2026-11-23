@@ -657,6 +657,7 @@ export type Labels<K extends PlainMessageKey> = Readonly<Record<K, string>>;
 export interface PrRowEvents {
   go: [key: PrKey];
   close: [key: PrKey, tabId: TabId];
+  hover: [tabId: TabId];
 }
 export interface RepoOptionEvents {
   pick: [option: RepoOption];

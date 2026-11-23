@@ -245,6 +245,10 @@ function handleRepoHover(option: RepoOption): void {
   activeIndex.value = selectables.value.findIndex((item) => item.id === option.id);
 }
 
+function handlePrHover(tabId: TabId): void {
+  activeIndex.value = selectables.value.findIndex((item) => item.id === `pr-${tabId}`);
+}
+
 function openSelected(selected: Selectable): void {
   if (selected.kind === "repo") {
     openRepo(selected.option);
@@ -260,11 +264,11 @@ async function hasRepoChoice(): Promise<boolean> {
 }
 
 async function handleFieldGo(): Promise<void> {
-  if (number.value !== null && !isRepoPickerOpen.value && (await hasRepoChoice())) {
+  if (active.value) {
+    openSelected(active.value);
+  } else if (number.value !== null && (await hasRepoChoice())) {
     picker.suggest();
     isRepoPickerOpen.value = true;
-  } else if (active.value) {
-    openSelected(active.value);
   } else if (mode.value === "goto") {
     void go();
   }
@@ -356,6 +360,7 @@ onMounted(handlePopupMounted);
         @collapse="handleCollapse"
         @go="handlePrGo"
         @close="handlePrClose"
+        @hover="handlePrHover"
       />
     </section>
     <section v-else class="empty-state">

@@ -29,7 +29,7 @@ function openKey(groups: GroupSummary[], repo: RepoName, number: PrNumber): PrKe
   return row?.key ?? null;
 }
 
-// The go-to repository choices for a PR number, guessed repository first.
+// The go-to repository choices for a PR number: a repo with it open first, else the guessed one.
 export function useRepoOptions({ groups, repos, guessed, number }: RepoOptionSources) {
   return computed<RepoOption[]>(() => {
     const target = toValue(number);
@@ -44,11 +44,13 @@ export function useRepoOptions({ groups, repos, guessed, number }: RepoOptionSou
       ? [first, ...listed.filter((repo) => repo !== first)]
       : [...listed];
 
-    return ordered.map((repo) => ({
+    const options = ordered.map((repo) => ({
       id: `repo-${repo}`,
       repo,
       color: colorOf(toValue(groups), repo),
       open: openKey(toValue(groups), repo, target),
     }));
+
+    return options.toSorted((a, b) => Number(b.open !== null) - Number(a.open !== null));
   });
 }

@@ -44,6 +44,10 @@ function handlePrClose(key: PrKey, tabId: TabId): void {
   emit("close", key, tabId);
 }
 
+function handlePrHover(tabId: TabId): void {
+  emit("hover", tabId);
+}
+
 function handleGroupsChanged(): void {
   void props.panes.ensure(lookupHeads(props.groups));
 }
@@ -70,6 +74,7 @@ watch(() => props.groups, handleGroupsChanged, { immediate: true });
       @collapse="handleCollapse"
       @go="handlePrGo"
       @close="handlePrClose"
+      @hover="handlePrHover"
     />
   </Accordion>
 </template>

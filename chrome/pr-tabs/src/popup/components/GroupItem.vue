@@ -33,6 +33,10 @@ function handlePrClose(key: PrKey, tabId: TabId): void {
   emit("close", key, tabId);
 }
 
+function handlePrHover(tabId: TabId): void {
+  emit("hover", tabId);
+}
+
 function handleHeaderKeydown(event: KeyboardEvent): void {
   if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
     event.preventDefault();
@@ -65,6 +69,7 @@ function handleHeaderKeydown(event: KeyboardEvent): void {
           :selected="selected"
           @go="handlePrGo"
           @close="handlePrClose"
+          @hover="handlePrHover"
         />
       </ul>
     </AccordionContent>
