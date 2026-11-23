@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { Closed, Entry, Meta, Opened, States } from "#/types";
 import { checkText } from "#/texts";
-import { pruneMeta, recordStates, seedOpen, shouldClose, stillShowsPr, tabsToClose } from "#/core";
+import {
+  pruneMeta,
+  recordSeenOpen,
+  recordStates,
+  seedOpen,
+  shouldClose,
+  stillShowsPr,
+  tabsToClose,
+} from "#/core";
 
 const background = { active: false };
 
@@ -18,6 +26,13 @@ test("an open or unknown PR keeps its tab", () => {
 
 test("the tab in view stays until the user leaves it", () => {
   assert.equal(shouldClose({ active: true }, "MERGED"), false);
+});
+
+test("a tab first observed after its PR finished stays open", () => {
+  const entries: Entry[] = [{ tab: { id: 1, active: false }, pr: { key: "acme/webapp#1" } }];
+  const states: States = { "acme/webapp#1": { state: "MERGED" } };
+
+  assert.deepEqual(tabsToClose(entries, states), []);
 });
 
 test("every background tab of a merged or closed PR is closed, nothing else", () => {
@@ -37,7 +52,43 @@ test("every background tab of a merged or closed PR is closed, nothing else", ()
     "acme/webapp#4": null,
   };
 
-  assert.deepEqual(tabsToClose(entries, states), [1, 2, 4]);
+  assert.deepEqual(
+    tabsToClose(entries, states, {
+      1: "acme/webapp#1",
+      2: "acme/webapp#1",
+      4: "acme/webapp#3",
+    }),
+    [1, 2, 4],
+  );
+});
+
+test("only the tab that saw its PR open closes after it finishes", () => {
+  const entries: Entry[] = [
+    { tab: { id: 1, active: false }, pr: { key: "acme/webapp#1" } },
+    { tab: { id: 2, active: false }, pr: { key: "acme/webapp#1" } },
+  ];
+  const states: States = { "acme/webapp#1": { state: "MERGED" } };
+
+  assert.deepEqual(tabsToClose(entries, states, { 1: "acme/webapp#1" }), [1]);
+});
+
+test("an open observation is recorded for its tab", () => {
+  const entries: Entry[] = [{ tab: { id: 2, active: false }, pr: { key: "acme/webapp#2" } }];
+
+  assert.deepEqual(recordSeenOpen({}, entries, { "acme/webapp#2": { state: "OPEN" } }), {
+    2: "acme/webapp#2",
+  });
+});
+
+test("an open observation is kept for its current tab and PR only", () => {
+  const entries: Entry[] = [
+    { tab: { id: 1, active: false }, pr: { key: "acme/webapp#1" } },
+    { tab: { id: 2, active: false }, pr: { key: "acme/webapp#2" } },
+  ];
+
+  assert.deepEqual(recordSeenOpen({ 1: "acme/webapp#1", 3: "acme/webapp#3" }, entries, {}), {
+    1: "acme/webapp#1",
+  });
 });
 
 test("a tab that moved to another page since the poll started is not closed", () => {

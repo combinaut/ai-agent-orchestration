@@ -437,6 +437,51 @@ test("existing check cadence regroups tabs after ownership changes or disappears
   assert.equal(world.grouped.at(-1)?.title, "webapp");
 });
 
+test("a tab opened after its PR finished stays open", async () => {
+  world.tabs = [{ id: 1, url: `${PR}/7`, active: false }];
+  world.store = {};
+  world.nativeHandler = async () => ({
+    ok: true,
+    prs: { "acme/webapp#7": { state: "MERGED" } },
+  });
+
+  assert.deepEqual(await chromeMessageCheck(), {
+    tabs: 1,
+    prs: 1,
+    checked: 1,
+    closed: [],
+    inView: [],
+  });
+  assert.deepEqual(ids(), [1]);
+  assert.deepEqual(world.store.seenOpen, {});
+});
+
+test("a tab seen open closes after its PR finishes, but a later tab stays open", async () => {
+  world.tabs = [{ id: 1, url: `${PR}/7`, active: false }];
+  world.store = {};
+
+  let state: "OPEN" | "MERGED" = "OPEN";
+  world.nativeHandler = async () => ({
+    ok: true,
+    prs: { "acme/webapp#7": { state } },
+  });
+
+  await chromeMessageCheck();
+  assert.deepEqual(world.store.seenOpen, { 1: "acme/webapp#7" });
+
+  state = "MERGED";
+  world.tabs.push({ id: 2, url: `${PR}/7`, active: false });
+
+  assert.deepEqual(await chromeMessageCheck(), {
+    tabs: 2,
+    prs: 1,
+    checked: 1,
+    closed: [{ key: "acme/webapp#7", state: "MERGED" }],
+    inView: [],
+  });
+  assert.deepEqual(ids(), [2]);
+});
+
 test("a restarted worker restores ownership before grouping persisted PR metadata", async () => {
   world.tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
   world.store = {

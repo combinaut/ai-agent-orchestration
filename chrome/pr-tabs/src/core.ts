@@ -31,6 +31,7 @@ import type {
   RepoRules,
   Rules,
   SearchResult,
+  SeenOpen,
   States,
   Summary,
   TabChange,
@@ -323,7 +324,6 @@ export function groupForPr(owners: Owners, pr: PrBranch): GroupPlacement {
   return { name, color: groupColor(name) };
 }
 
-// A PR tab closes once its PR is merged or closed, unless it is the tab in view.
 export function shouldClose(tab: Pick<TabLike, "active">, state: PrStateName | undefined): boolean {
   return (state === "MERGED" || state === "CLOSED") && !tab.active;
 }
@@ -337,10 +337,29 @@ export function stillShowsPr(
   return parsePrUrl(tab?.url, org)?.key === key;
 }
 
-export function tabsToClose(entries: Entry[], states: States): TabId[] {
+export function tabsToClose(entries: Entry[], states: States, seenOpen: SeenOpen = {}): TabId[] {
   return entries
-    .filter((entry) => shouldClose(entry.tab, states[entry.pr.key]?.state))
+    .filter(
+      (entry) =>
+        seenOpen[entry.tab.id] === entry.pr.key &&
+        shouldClose(entry.tab, states[entry.pr.key]?.state),
+    )
     .map((entry) => entry.tab.id);
+}
+
+export function recordSeenOpen(seenOpen: SeenOpen, entries: Entry[], states: States): SeenOpen {
+  const next: SeenOpen = {};
+
+  for (const entry of entries) {
+    const { id } = entry.tab;
+    const { key } = entry.pr;
+
+    if (seenOpen[id] === key || states[key]?.state === "OPEN") {
+      next[id] = key;
+    }
+  }
+
+  return next;
 }
 
 function keysOf(record: Partial<Record<PrKey, unknown>>): PrKey[] {

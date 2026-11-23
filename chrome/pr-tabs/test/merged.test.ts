@@ -7,7 +7,7 @@ function tab(id: TabId, active = false): TabLike {
   return { id, active };
 }
 
-test("a tab on a PR that merged or closed before the extension saw it open is closed", () => {
+test("a tab on a PR that merged or closed before the extension saw it open stays open", () => {
   const entries: Entry[] = [
     { tab: tab(1), pr: { key: "acme/webapp#3284" } },
     { tab: tab(2), pr: { key: "acme/ai-agent-orchestration#17" } },
@@ -18,5 +18,5 @@ test("a tab on a PR that merged or closed before the extension saw it open is cl
     "acme/ai-agent-orchestration#17": { state: "CLOSED" },
   };
 
-  assert.deepEqual(tabsToClose(entries, states), [1, 2]);
+  assert.deepEqual(tabsToClose(entries, states), []);
 });

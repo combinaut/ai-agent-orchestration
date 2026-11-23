@@ -11,6 +11,7 @@ import {
   planOpenAll,
   pollBatch,
   pruneMeta,
+  recordSeenOpen,
   recordStates,
   seedOpen,
   stillShowsPr,
@@ -68,6 +69,7 @@ import type {
   Rules,
   SearchReply,
   SearchResult,
+  SeenOpen,
   States,
   StoredState,
   Summary,
@@ -81,6 +83,7 @@ const STORED_DEFAULTS: StoredState = {
   prTabsSettings: null,
   owners: {},
   meta: {},
+  seenOpen: {},
   failures: 0,
   cursor: 0,
   prTabsRepo: "",
@@ -329,6 +332,23 @@ function updateMeta(change: (meta: Meta) => Meta | Promise<Meta>): Promise<void>
   return run;
 }
 
+let seenOpenChain: Promise<unknown> = Promise.resolve();
+
+function updateSeenOpen(
+  change: (seenOpen: SeenOpen) => SeenOpen | Promise<SeenOpen>,
+): Promise<void> {
+  async function rewrite(): Promise<void> {
+    const seenOpen = await readStored("seenOpen");
+    await writeStored({ seenOpen: await change(seenOpen) });
+  }
+
+  const run = seenOpenChain.then(rewrite);
+
+  seenOpenChain = run.catch(warn);
+
+  return run;
+}
+
 async function groupFor(windowId: WindowId, name: GroupTitle): Promise<TabGroup | null> {
   const [group] = await chrome.tabGroups.query({ windowId, title: name });
 
@@ -405,15 +425,14 @@ async function groupTabId(tabId: TabId): Promise<void> {
   }
 }
 
-// Drops metadata of PRs without a tab.
+// Drops per-PR and per-tab state without a tab.
 function pruneClosedTabs(rules: Rules): Promise<void> {
-  async function pruneWithoutTab(meta: Meta): Promise<Meta> {
-    const keys = new Set((await prEntries(rules)).map((entry) => entry.pr.key));
-
-    return pruneMeta(meta, keys);
-  }
-
-  return updateMeta(pruneWithoutTab);
+  return prEntries(rules).then((entries) =>
+    Promise.all([
+      updateMeta((meta) => pruneMeta(meta, new Set(entries.map((entry) => entry.pr.key)))),
+      updateSeenOpen((seenOpen) => recordSeenOpen(seenOpen, entries, {})),
+    ]).then(() => undefined),
+  );
 }
 
 async function ensureAlarm(): Promise<void> {
@@ -528,9 +547,10 @@ async function closeIfFinished(id: TabId, key: PrKey, org: OrgName): Promise<boo
 
 async function closeFinished(rules: Rules, entries: PrEntry[], states: States): Promise<Closed[]> {
   const keyById = new Map(entries.map((entry) => [entry.tab.id, entry.pr.key]));
+  const seenOpen = await readStored("seenOpen");
   const closed: Closed[] = [];
 
-  for (const id of tabsToClose(entries, states)) {
+  for (const id of tabsToClose(entries, states, seenOpen)) {
     const key = keyById.get(id);
 
     if (key !== undefined && (await closeIfFinished(id, key, rules.org))) {
@@ -575,7 +595,10 @@ async function applyStates(
   const closed = await closeFinished(rules, entries, states);
   const inView = activeFinished(entries, states);
 
-  await updateMeta((meta) => recordStates(meta, states));
+  await Promise.all([
+    updateMeta((meta) => recordStates(meta, states)),
+    updateSeenOpen((previous) => recordSeenOpen(previous, entries, states)),
+  ]);
   await writeStored({ failures: 0, cursor: nextCursor });
   await chrome.alarms.create(ALARM, { delayInMinutes: nextDelaySeconds(0) / 60 });
   await regroup(rules, entries);
