@@ -255,6 +255,38 @@ test("a scan from before the tab left PRs does not restore its visit", async () 
   assert.deepEqual(await closedBy(worker), []);
 });
 
+test("a same-PR subpage opened during a scan after a worker restart keeps the visit", async () => {
+  resetWorld();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  world.tabs = [{ id: 1, url: A, active: false }];
+  const worker = await freshWorker("scan-subpage-before");
+  world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
+  await worker.checkNow();
+  await flush();
+
+  const restarted = await freshWorker("scan-subpage-after");
+  const scanned = world.tabs.map((tab) => ({ ...tab }));
+  let release: ((tabs: chrome.tabs.Tab[]) => void) | undefined;
+  vi.spyOn(chrome.tabs, "query").mockImplementationOnce(
+    () => new Promise((resolve) => (release = resolve)),
+  );
+  tick();
+  const scanning = restarted.prEntries({ org: "acme" });
+  await flush();
+
+  tick();
+  navigate(1, `${A}/files`);
+  await flush();
+  release?.(scanned as chrome.tabs.Tab[]);
+  await scanning;
+
+  const closedAt = tick();
+  tick();
+  world.nativeHandler = answer({ [KEY_A]: { state: "MERGED", closedAt } });
+
+  assert.deepEqual(await closedBy(restarted), [{ key: KEY_A, state: "MERGED" }]);
+});
+
 test("a delayed prune cannot drop a newer visit", async () => {
   resetWorld();
   const worker = await freshWorker("prune");

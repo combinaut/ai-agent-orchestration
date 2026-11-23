@@ -81,7 +81,7 @@ test("a scan keeps a visit on the same PR and starts one for a new or moved tab"
     3: { key: "acme/webapp#3", since: 5 },
   };
 
-  assert.deepEqual(recordVisits(visits, { entries, scannedAt: 10 }, 20), {
+  assert.deepEqual(recordVisits(visits, { entries, scannedAt: 10, moved: [] }, 20), {
     1: { key: "acme/webapp#1", since: 5 },
     2: { key: "acme/webapp#2", since: 20 },
     3: { key: "acme/webapp#4", since: 20 },
@@ -95,12 +95,16 @@ test("a visit that started during a scan wins over that scan", () => {
     2: { key: "acme/webapp#3", since: 11 },
   };
 
-  assert.deepEqual(recordVisits(visits, { entries, scannedAt: 10 }, 20), visits);
+  assert.deepEqual(recordVisits(visits, { entries, scannedAt: 10, moved: [] }, 20), visits);
 });
 
 test("a scan drops the older visit of a tab it did not find", () => {
   assert.deepEqual(
-    recordVisits({ 1: { key: "acme/webapp#1", since: 9 } }, { entries: [], scannedAt: 10 }, 20),
+    recordVisits(
+      { 1: { key: "acme/webapp#1", since: 9 } },
+      { entries: [], scannedAt: 10, moved: [] },
+      20,
+    ),
     {},
   );
 });

@@ -87,6 +87,8 @@ export type TabVisits = Partial<Record<TabId, TabVisit>>;
 export interface TabScan {
   entries: Entry[];
   scannedAt: number;
+  // Tabs the scan found but did not record, because they navigated during it.
+  moved: TabId[];
 }
 
 export interface SessionState {

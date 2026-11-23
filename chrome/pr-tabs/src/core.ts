@@ -365,14 +365,15 @@ export function tabsToClose(entries: Entry[], states: States, visits: TabVisits 
 }
 
 // Merges a tab scan: a visit newer than the scan wins, a scanned tab keeps a visit on its PR or
-// starts one at now, and an older visit of an unscanned tab is dropped.
+// starts one at now, a moved tab keeps its visit, and an older visit of a tab not found is dropped.
 export function recordVisits(visits: TabVisits, scan: TabScan, now: number): TabVisits {
-  const { entries, scannedAt } = scan;
+  const { entries, scannedAt, moved } = scan;
   const scanned = new Map(entries.map((entry) => [entry.tab.id, entry.pr.key]));
+  const found = new Set([...scanned.keys(), ...moved]);
   const next: TabVisits = {};
 
   for (const [id, visit] of visitsOf(visits)) {
-    if (scanned.has(id) || visit.since >= scannedAt) {
+    if (found.has(id) || visit.since >= scannedAt) {
       next[id] = visit;
     }
   }

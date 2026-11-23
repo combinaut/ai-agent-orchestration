@@ -300,10 +300,12 @@ export async function prEntries(rules: Pick<Rules, "org">): Promise<PrEntry[]> {
     prTabIds.add(tab.id);
   }
 
-  const unmoved = entries.filter(({ tab }) => revisionOf(tab.id) === (revisions.get(tab.id) ?? 0));
+  const isUnmoved = ({ tab }: PrEntry) => revisionOf(tab.id) === (revisions.get(tab.id) ?? 0);
+  const unmoved = entries.filter(isUnmoved);
+  const moved = entries.filter((entry) => !isUnmoved(entry)).map(({ tab }) => tab.id);
 
   await updateTabVisits((visits) =>
-    recordVisits(visits, { entries: unmoved, scannedAt }, Date.now()),
+    recordVisits(visits, { entries: unmoved, scannedAt, moved }, Date.now()),
   );
 
   return entries;
