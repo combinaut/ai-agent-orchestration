@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test, vi } from "vitest";
+import { afterEach, beforeEach, test, vi } from "vitest";
 import type * as Background from "#/background";
 import type { Closed, HostRequest, PrState } from "#/types";
 import { fakeChrome, installFakeChrome, world } from "./fakeChrome";
@@ -78,6 +78,13 @@ async function closedBy(worker: typeof Background): Promise<Closed[]> {
   return result.closed;
 }
 
+beforeEach(() => {});
+
+beforeEach(() => {
+  resetWorld();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+});
+
 afterEach(async () => {
   await flush();
   vi.restoreAllMocks();
@@ -87,8 +94,6 @@ afterEach(async () => {
 });
 
 test("a subpage of the same PR keeps the visit after a service-worker restart", async () => {
-  resetWorld();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   world.tabs = [{ id: 1, url: A, active: false }];
   const worker = await freshWorker("subpage-before");
   world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
@@ -106,8 +111,6 @@ test("a subpage of the same PR keeps the visit after a service-worker restart", 
 });
 
 test("leaving and returning to a PR starts a new visit, even during the final tab read", async () => {
-  resetWorld();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   world.tabs = [{ id: 1, url: A, active: false }];
   const worker = await freshWorker("close-gap");
   world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
@@ -136,7 +139,6 @@ test("leaving and returning to a PR starts a new visit, even during the final ta
 });
 
 test("leaving and returning to a PR during the final visit read keeps the tab", async () => {
-  resetWorld();
   world.tabs = [{ id: 1, url: A, active: false }];
   const worker = await freshWorker("visit-read-gap");
   world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
@@ -156,8 +158,6 @@ test("leaving and returning to a PR during the final visit read keeps the tab", 
 });
 
 test("a subpage of the same PR opened during the final visit read still closes", async () => {
-  resetWorld();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const worker = await freshWorker("subpage-gap");
   navigate(1, A);
   world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
@@ -175,7 +175,6 @@ test("a subpage of the same PR opened during the final visit read still closes",
 });
 
 test("a visit write still pending when the close reads visits keeps the returned tab", async () => {
-  resetWorld();
   world.tabs = [{ id: 1, url: A, active: false }];
   const worker = await freshWorker("pending-write");
   world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
@@ -205,7 +204,6 @@ test("a visit write still pending when the close reads visits keeps the returned
 });
 
 test("a tab activated during the final visit read stays", async () => {
-  resetWorld();
   world.tabs = [{ id: 1, url: A, active: false }];
   const worker = await freshWorker("activation-gap");
   world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
@@ -225,7 +223,6 @@ test("a tab activated during the final visit read stays", async () => {
 });
 
 test("a scan from before the tab left PRs does not restore its visit", async () => {
-  resetWorld();
   world.tabs = [{ id: 1, url: A, active: false }];
   const worker = await freshWorker("stale-scan");
   world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
@@ -256,8 +253,6 @@ test("a scan from before the tab left PRs does not restore its visit", async () 
 });
 
 test("a same-PR subpage opened during a scan after a worker restart keeps the visit", async () => {
-  resetWorld();
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   world.tabs = [{ id: 1, url: A, active: false }];
   const worker = await freshWorker("scan-subpage-before");
   world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
@@ -288,7 +283,6 @@ test("a same-PR subpage opened during a scan after a worker restart keeps the vi
 });
 
 test("a delayed prune cannot drop a newer visit", async () => {
-  resetWorld();
   const worker = await freshWorker("prune");
   let release: ((tabs: chrome.tabs.Tab[]) => void) | undefined;
   vi.spyOn(chrome.tabs, "query").mockImplementationOnce(
@@ -313,7 +307,6 @@ test("a delayed prune cannot drop a newer visit", async () => {
 });
 
 test("an older poll keeps the visit of a tab opened during its host request", async () => {
-  resetWorld();
   world.tabs = [{ id: 1, url: A, active: false }];
   const worker = await freshWorker("overlap");
   let release: ((reply: unknown) => void) | undefined;
@@ -344,7 +337,6 @@ test("an older poll keeps the visit of a tab opened during its host request", as
 });
 
 test("tabs outside the polled batch keep their visits until their PR is checked", async () => {
-  resetWorld();
   world.tabs = Array.from({ length: 101 }, (_, i) => ({
     id: i + 1,
     url: `https://github.com/acme/webapp/pull/${i + 1}`,
@@ -374,7 +366,6 @@ test("tabs outside the polled batch keep their visits until their PR is checked"
 });
 
 test("the tab in view stays and is reported until the user leaves it", async () => {
-  resetWorld();
   world.tabs = [{ id: 1, url: A, active: true }];
   const worker = await freshWorker("in-view");
   world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
@@ -393,4 +384,20 @@ test("the tab in view stays and is reported until the user leaves it", async () 
   assert.ok(tab);
   tab.active = false;
   assert.equal((await closedBy(worker)).length, 1);
+});
+
+test("the tab in view on an already merged PR is not reported", async () => {
+  const closedAt = tick();
+  tick();
+  world.tabs = [{ id: 1, url: A, active: true }];
+  const worker = await freshWorker("in-view-merged");
+  world.nativeHandler = answer({ [KEY_A]: { state: "MERGED", closedAt } });
+
+  assert.deepEqual(await worker.checkNow(), {
+    tabs: 1,
+    prs: 1,
+    checked: 1,
+    closed: [],
+    inView: [],
+  });
 });

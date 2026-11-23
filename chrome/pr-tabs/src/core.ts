@@ -33,12 +33,12 @@ import type {
   SearchResult,
   States,
   Summary,
-  TabScan,
-  TabVisit,
-  TabVisits,
   TabChange,
   TabId,
   TabLike,
+  TabScan,
+  TabVisit,
+  TabVisits,
   UrlTab,
   WindowId,
 } from "#/types";
@@ -326,7 +326,7 @@ export function groupForPr(owners: Owners, pr: PrBranch): GroupPlacement {
   return { name, color: groupColor(name) };
 }
 
-// A PR tab closes once its PR is merged or closed, unless it is the tab in view.
+// A PR tab may close once its PR is merged or closed, unless it is the tab in view.
 export function shouldClose(tab: Pick<TabLike, "active">, state: PrStateName | undefined): boolean {
   return (state === "MERGED" || state === "CLOSED") && !tab.active;
 }
@@ -340,7 +340,6 @@ export function stillShowsPr(
   return parsePrUrl(tab?.url, org)?.key === key;
 }
 
-// The PR closed after the tab started showing it.
 export function closedDuringVisit(
   state: PrState | null | undefined,
   visit: TabVisit | undefined,
@@ -351,7 +350,7 @@ export function closedDuringVisit(
   return visit?.key === key && closedAt > visit.since;
 }
 
-export function tabsToClose(entries: Entry[], states: States, visits: TabVisits = {}): TabId[] {
+export function tabsToClose(entries: Entry[], states: States, visits: TabVisits): TabId[] {
   return entries
     .filter((entry) => {
       const state = states[entry.pr.key];

@@ -150,7 +150,7 @@
     }
   },
   "noneClosed_one": {
-    "message": "Nenhum PR mesclado ou fechado entre $COUNT$ PR verificado",
+    "message": "Nada a fechar entre $COUNT$ PR verificado",
     "placeholders": {
       "count": {
         "content": "$1"
@@ -158,7 +158,7 @@
     }
   },
   "noneClosed_other": {
-    "message": "Nenhum PR mesclado ou fechado entre $COUNT$ PRs verificados",
+    "message": "Nada a fechar entre $COUNT$ PRs verificados",
     "placeholders": {
       "count": {
         "content": "$1"

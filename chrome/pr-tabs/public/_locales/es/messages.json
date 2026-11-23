@@ -150,7 +150,7 @@
     }
   },
   "noneClosed_one": {
-    "message": "Ningún PR fusionado ni cerrado entre $COUNT$ PR comprobado",
+    "message": "Nada que cerrar entre $COUNT$ PR comprobado",
     "placeholders": {
       "count": {
         "content": "$1"
@@ -158,7 +158,7 @@
     }
   },
   "noneClosed_other": {
-    "message": "Ningún PR fusionado ni cerrado entre $COUNT$ PR comprobados",
+    "message": "Nada que cerrar entre $COUNT$ PR comprobados",
     "placeholders": {
       "count": {
         "content": "$1"

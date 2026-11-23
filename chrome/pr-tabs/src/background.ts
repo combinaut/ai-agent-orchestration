@@ -16,6 +16,7 @@ import {
   recordVisits,
   seedOpen,
   stillShowsPr,
+  closedDuringVisit,
   summarize,
   MAX_SEARCH_PAGES,
   OPEN_ALL_CAP,
@@ -71,8 +72,8 @@ import type {
   Rules,
   SearchReply,
   SearchResult,
-  States,
   SessionState,
+  States,
   StoredState,
   Summary,
   Tab,
@@ -582,7 +583,11 @@ async function closeIfFinished(id: TabId, closing: Closing, org: OrgName): Promi
   return removeTab(id);
 }
 
-async function closeFinished(rules: Rules, entries: PrEntry[], states: States): Promise<Closed[]> {
+async function closeFinished(
+  rules: Rules,
+  entries: PrEntry[],
+  states: States,
+): Promise<Pick<CheckResult, "closed" | "inView">> {
   const keyById = new Map(entries.map((entry) => [entry.tab.id, entry.pr.key]));
   const revisions = new Map(entries.map(({ tab }) => [tab.id, revisionOf(tab.id)]));
   const visits = await withTabVisits(async (latest) => latest);
@@ -597,17 +602,23 @@ async function closeFinished(rules: Rules, entries: PrEntry[], states: States): 
     }
   }
 
-  return closed;
+  return { closed, inView: activeFinished(entries, states, visits) };
 }
 
-function isFinished(entry: PrEntry, states: States): boolean {
-  const state = states[entry.pr.key]?.state;
+function isFinished(entry: PrEntry, states: States, visits: TabVisits): boolean {
+  const { tab, pr } = entry;
+  const state = states[pr.key];
 
-  return entry.tab.active && state !== undefined && FINISHED.has(state);
+  return (
+    tab.active &&
+    state?.state !== undefined &&
+    FINISHED.has(state.state) &&
+    closedDuringVisit(state, visits[tab.id], pr.key)
+  );
 }
 
-function activeFinished(entries: PrEntry[], states: States): PrKey[] {
-  return entries.filter((entry) => isFinished(entry, states)).map((entry) => entry.pr.key);
+function activeFinished(entries: PrEntry[], states: States, visits: TabVisits): PrKey[] {
+  return entries.filter((entry) => isFinished(entry, states, visits)).map((entry) => entry.pr.key);
 }
 
 async function groupEntries(rules: Rules, entries: PrEntry[], meta: Meta): Promise<void> {
@@ -631,8 +642,7 @@ async function applyStates(
   fetched: FetchedStates,
 ): Promise<CheckResult> {
   const { states, prs, checked, nextCursor } = fetched;
-  const closed = await closeFinished(rules, entries, states);
-  const inView = activeFinished(entries, states);
+  const { closed, inView } = await closeFinished(rules, entries, states);
 
   await updateMeta((meta) => recordStates(meta, states));
   await writeStored({ failures: 0, cursor: nextCursor });
@@ -646,8 +656,8 @@ function noTabsChecked(): CheckResult {
   return { tabs: 0, prs: 0, checked: 0, closed: [], inView: [] };
 }
 
-// Fetches the PR states in one host call, closes background tabs of merged or closed PRs and
-// reports what happened.
+// Fetches the PR states in one host call, closes background tabs whose PR merged or closed during
+// the tab's visit and reports what happened.
 async function checkOnce(): Promise<Reply<"checkNow">> {
   const rules = await loadRules();
   const entries = await prEntries(rules);

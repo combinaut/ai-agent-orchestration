@@ -150,7 +150,7 @@
     }
   },
   "noneClosed_one": {
-    "message": "No merged or closed PRs among $COUNT$ PR checked",
+    "message": "Nothing to close among $COUNT$ PR checked",
     "placeholders": {
       "count": {
         "content": "$1"
@@ -158,7 +158,7 @@
     }
   },
   "noneClosed_other": {
-    "message": "No merged or closed PRs among $COUNT$ PRs checked",
+    "message": "Nothing to close among $COUNT$ PRs checked",
     "placeholders": {
       "count": {
         "content": "$1"

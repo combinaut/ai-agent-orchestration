@@ -150,7 +150,7 @@
     }
   },
   "noneClosed_one": {
-    "message": "Kein gemergter oder geschlossener PR unter $COUNT$ geprüftem PR",
+    "message": "Nichts zu schließen unter $COUNT$ geprüftem PR",
     "placeholders": {
       "count": {
         "content": "$1"
@@ -158,7 +158,7 @@
     }
   },
   "noneClosed_other": {
-    "message": "Kein gemergter oder geschlossener PR unter $COUNT$ geprüften PRs",
+    "message": "Nichts zu schließen unter $COUNT$ geprüften PRs",
     "placeholders": {
       "count": {
         "content": "$1"

@@ -91,9 +91,6 @@ export interface TabScan {
   moved: TabId[];
 }
 
-export interface SessionState {
-  tabVisits: TabVisits;
-}
 export type Owners = Partial<Record<OwnerKey, GroupTitle>>;
 
 export interface SearchHit extends PrHead {
@@ -433,6 +430,10 @@ export interface StoredState {
   prTabsRepo: RepoName;
   prTabsRepoNumbers: RepoNumbersCache;
   prTabsCollapsed: string[];
+}
+
+export interface SessionState {
+  tabVisits: TabVisits;
 }
 
 export interface Closing {

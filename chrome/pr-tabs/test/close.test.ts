@@ -203,7 +203,7 @@ test("the check result names what was closed, what stayed in view and what waits
   );
   assert.equal(
     checkText({ tabs: 120, prs: 110, checked: 100, closed: [], inView: [] }),
-    "No merged or closed PRs among 100 PRs checked; 10 more next time.",
+    "Nothing to close among 100 PRs checked; 10 more next time.",
   );
   assert.equal(
     checkText({ tabs: 0, prs: 0, checked: 0, closed: [], inView: [] }),
