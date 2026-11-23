@@ -433,9 +433,9 @@ export interface StoredState {
   prTabsCollapsed: string[];
 }
 
-export interface CheckedPr {
+export interface Closing {
   key: PrKey;
-  state: PrState | null | undefined;
+  revision: number;
 }
 
 export interface FetchedStates {

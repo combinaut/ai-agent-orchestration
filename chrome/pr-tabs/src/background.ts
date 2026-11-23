@@ -1,5 +1,4 @@
 import {
-  closedDuringVisit,
   duplicateTabIds,
   prKey,
   findOpenTab,
@@ -34,9 +33,9 @@ import { getMessage } from "#/i18n";
 import { errorText, messageListener } from "#/messages";
 import type {
   BranchRef,
-  CheckedPr,
   CheckResult,
   Closed,
+  Closing,
   DuplicatesClosed,
   Failure,
   FetchedStates,
@@ -261,6 +260,13 @@ function serial<T>(task: () => Promise<T>): Promise<T> {
 // Tab IDs that showed a PR at the last scan.
 const prTabIds = new Set<TabId>();
 
+// Per open tab: its last PR key from a URL event and how often that key changed.
+const tabKeys = new Map<TabId, { key: PrKey | null; revision: number }>();
+
+function revisionOf(id: TabId): number {
+  return tabKeys.get(id)?.revision ?? 0;
+}
+
 function isOpenPrTab(tab: Tab): tab is IdTab {
   return hasId(tab) && !tab.incognito && prKey(tab.pendingUrl || tab.url) !== null;
 }
@@ -284,6 +290,7 @@ function entryOf(tab: IdTab, org: OrgName): PrEntry[] {
 
 export async function prEntries(rules: Pick<Rules, "org">): Promise<PrEntry[]> {
   const scannedAt = Date.now();
+  const revisions = new Map([...tabKeys].map(([id, { revision }]) => [id, revision]));
   const tabs = await openPrTabs();
   const entries = tabs.flatMap((tab) => entryOf(tab, rules.org));
 
@@ -293,7 +300,11 @@ export async function prEntries(rules: Pick<Rules, "org">): Promise<PrEntry[]> {
     prTabIds.add(tab.id);
   }
 
-  await updateTabVisits((visits) => recordVisits(visits, { entries, scannedAt }, Date.now()));
+  const unmoved = entries.filter(({ tab }) => revisionOf(tab.id) === (revisions.get(tab.id) ?? 0));
+
+  await updateTabVisits((visits) =>
+    recordVisits(visits, { entries: unmoved, scannedAt }, Date.now()),
+  );
 
   return entries;
 }
@@ -554,29 +565,32 @@ async function fetchStates(entries: PrEntry[]): Promise<FetchedStates | Failure>
   }
 }
 
-async function closeIfFinished(id: TabId, pr: CheckedPr, org: OrgName): Promise<boolean> {
-  const { key, state } = pr;
+async function closeIfFinished(id: TabId, closing: Closing, org: OrgName): Promise<boolean> {
   const tab = await findTab(id);
 
-  if (!tab || tab.active || !stillShowsPr(tab, key, org)) {
+  if (
+    !tab ||
+    tab.active ||
+    !stillShowsPr(tab, closing.key, org) ||
+    revisionOf(id) !== closing.revision
+  ) {
     return false;
   }
 
-  async function closeDuringVisit(visits: TabVisits): Promise<boolean> {
-    return closedDuringVisit(state, visits[id], key) && removeTab(id);
-  }
-
-  return withTabVisits(closeDuringVisit);
+  return removeTab(id);
 }
 
 async function closeFinished(rules: Rules, entries: PrEntry[], states: States): Promise<Closed[]> {
   const keyById = new Map(entries.map((entry) => [entry.tab.id, entry.pr.key]));
+  const revisions = new Map(entries.map(({ tab }) => [tab.id, revisionOf(tab.id)]));
+  const visits = await withTabVisits(async (latest) => latest);
   const closed: Closed[] = [];
 
-  for (const id of tabsToClose(entries, states, await readTabVisits())) {
+  for (const id of tabsToClose(entries, states, visits)) {
     const key = keyById.get(id);
+    const revision = revisions.get(id) ?? 0;
 
-    if (key !== undefined && (await closeIfFinished(id, { key, state: states[key] }, rules.org))) {
+    if (key !== undefined && (await closeIfFinished(id, { key, revision }, rules.org))) {
       closed.push({ key, state: states[key]?.state });
     }
   }
@@ -1189,7 +1203,14 @@ function handleTabSettled(tabId: TabId): void {
 
 function handleTabUpdated(tabId: TabId, change: chrome.tabs.OnUpdatedInfo, tab: Tab): void {
   if (change.url) {
-    void visitTab(tabId, prKey(tab.pendingUrl || tab.url));
+    const key = prKey(tab.pendingUrl || tab.url);
+    const known = tabKeys.get(tabId);
+
+    if (!known || known.key !== key) {
+      tabKeys.set(tabId, { key, revision: revisionOf(tabId) + 1 });
+    }
+
+    void visitTab(tabId, key);
   }
 
   if (!tabUpdateMatters(change, tab, prTabIds.has(tabId))) {
@@ -1203,6 +1224,7 @@ function handleTabUpdated(tabId: TabId, change: chrome.tabs.OnUpdatedInfo, tab: 
 function handleTabRemoved(tabId: TabId): void {
   clearTimeout(pending.get(tabId));
   pending.delete(tabId);
+  tabKeys.delete(tabId);
   ensureAlarm().catch(warn);
 }
 

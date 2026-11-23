@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import type * as Background from "#/background";
 import type { Closed, HostRequest, PrState } from "#/types";
-import { installFakeChrome, world } from "./fakeChrome";
+import { fakeChrome, installFakeChrome, world } from "./fakeChrome";
 
 installFakeChrome();
 
@@ -44,6 +44,30 @@ function navigate(id: number, url: string): void {
 
   world.tabs = [...world.tabs.filter((candidate) => candidate.id !== id), tab];
   world.tabUpdatedListener(id, { url }, tab as chrome.tabs.Tab);
+}
+
+// Answers with prs and holds the close's visit read, the first session read after the reply.
+function answerHoldingCloseRead(prs: Record<string, PrState>) {
+  const hold: { release?: () => void } = {};
+
+  world.nativeHandler = async () => {
+    const { session } = fakeChrome.storage;
+    const read = session.get.bind(session);
+    let reads = 0;
+
+    vi.spyOn(session, "get").mockImplementation((key) => {
+      const snapshot = read(key);
+      reads += 1;
+
+      return reads === 1
+        ? new Promise((resolve) => (hold.release = () => resolve(snapshot)))
+        : snapshot;
+    });
+
+    return { ok: true, prs };
+  };
+
+  return hold;
 }
 
 async function closedBy(worker: typeof Background): Promise<Closed[]> {
@@ -108,6 +132,126 @@ test("leaving and returning to a PR starts a new visit, even during the final ta
   assert.deepEqual(await checking, []);
   await vi.advanceTimersByTimeAsync(401);
   world.nativeHandler = answer({ [KEY_A]: { state: "MERGED", closedAt } });
+  assert.deepEqual(await closedBy(worker), []);
+});
+
+test("leaving and returning to a PR during the final visit read keeps the tab", async () => {
+  resetWorld();
+  world.tabs = [{ id: 1, url: A, active: false }];
+  const worker = await freshWorker("visit-read-gap");
+  world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
+  await worker.checkNow();
+  await flush();
+
+  const hold = answerHoldingCloseRead({ [KEY_A]: { state: "MERGED", closedAt: tick() } });
+  const checking = closedBy(worker);
+  await vi.waitFor(() => assert.ok(hold.release));
+
+  tick();
+  navigate(1, B);
+  navigate(1, A);
+  hold.release?.();
+
+  assert.deepEqual(await checking, []);
+});
+
+test("a subpage of the same PR opened during the final visit read still closes", async () => {
+  resetWorld();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const worker = await freshWorker("subpage-gap");
+  navigate(1, A);
+  world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
+  await worker.checkNow();
+  await flush();
+
+  const hold = answerHoldingCloseRead({ [KEY_A]: { state: "MERGED", closedAt: tick() } });
+  const checking = closedBy(worker);
+  await vi.waitFor(() => assert.ok(hold.release));
+
+  navigate(1, `${A}/files`);
+  hold.release?.();
+
+  assert.deepEqual(await checking, [{ key: KEY_A, state: "MERGED" }]);
+});
+
+test("a visit write still pending when the close reads visits keeps the returned tab", async () => {
+  resetWorld();
+  world.tabs = [{ id: 1, url: A, active: false }];
+  const worker = await freshWorker("pending-write");
+  world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
+  await worker.checkNow();
+  await flush();
+
+  const closedAt = tick();
+  let reply: ((value: unknown) => void) | undefined;
+  world.nativeHandler = () => new Promise((resolve) => (reply = resolve));
+  const checking = closedBy(worker);
+  await vi.waitFor(() => assert.ok(reply));
+
+  const { session } = fakeChrome.storage;
+  const write = session.set.bind(session);
+  let persist: (() => void) | undefined;
+  vi.spyOn(session, "set").mockImplementationOnce(
+    (values) => new Promise((resolve) => (persist = () => resolve(write(values)))),
+  );
+  tick();
+  navigate(1, B);
+  navigate(1, A);
+  reply?.({ ok: true, prs: { [KEY_A]: { state: "MERGED", closedAt } } });
+  await flush();
+  persist?.();
+
+  assert.deepEqual(await checking, []);
+});
+
+test("a tab activated during the final visit read stays", async () => {
+  resetWorld();
+  world.tabs = [{ id: 1, url: A, active: false }];
+  const worker = await freshWorker("activation-gap");
+  world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
+  await worker.checkNow();
+  await flush();
+
+  const hold = answerHoldingCloseRead({ [KEY_A]: { state: "MERGED", closedAt: tick() } });
+  const checking = closedBy(worker);
+  await vi.waitFor(() => assert.ok(hold.release));
+
+  const [tab] = world.tabs;
+  assert.ok(tab);
+  tab.active = true;
+  hold.release?.();
+
+  assert.deepEqual(await checking, []);
+});
+
+test("a scan from before the tab left PRs does not restore its visit", async () => {
+  resetWorld();
+  world.tabs = [{ id: 1, url: A, active: false }];
+  const worker = await freshWorker("stale-scan");
+  world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
+  await worker.checkNow();
+  await flush();
+
+  const scanned = world.tabs.map((tab) => ({ ...tab }));
+  let release: ((tabs: chrome.tabs.Tab[]) => void) | undefined;
+  vi.spyOn(chrome.tabs, "query").mockImplementationOnce(
+    () => new Promise((resolve) => (release = resolve)),
+  );
+  const scanning = worker.prEntries({ org: "acme" });
+  await flush();
+
+  tick();
+  navigate(1, "https://github.com/acme/webapp/pulls");
+  await flush();
+  release?.(scanned as chrome.tabs.Tab[]);
+  await scanning;
+
+  const closedAt = tick();
+  tick();
+  navigate(1, A);
+  await flush();
+  world.nativeHandler = answer({ [KEY_A]: { state: "MERGED", closedAt } });
+
   assert.deepEqual(await closedBy(worker), []);
 });
 

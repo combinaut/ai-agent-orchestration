@@ -70,30 +70,22 @@ test("a PR closed in the same millisecond its visit started keeps the tab", () =
   assert.deepEqual(tabsToClose(entries, states, { 1: { key: "acme/webapp#1", since: SINCE } }), []);
 });
 
-test("a scan starts a visit for a new tab and keeps the visit of a tab on the same PR", () => {
+test("a scan keeps a visit on the same PR and starts one for a new or moved tab", () => {
   const entries: Entry[] = [
     { tab: { id: 1, active: false }, pr: { key: "acme/webapp#1" } },
     { tab: { id: 2, active: false }, pr: { key: "acme/webapp#2" } },
+    { tab: { id: 3, active: false }, pr: { key: "acme/webapp#4" } },
   ];
+  const visits: TabVisits = {
+    1: { key: "acme/webapp#1", since: 5 },
+    3: { key: "acme/webapp#3", since: 5 },
+  };
 
-  assert.deepEqual(
-    recordVisits({ 1: { key: "acme/webapp#1", since: 5 } }, { entries, scannedAt: 10 }, 20),
-    {
-      1: { key: "acme/webapp#1", since: 5 },
-      2: { key: "acme/webapp#2", since: 20 },
-    },
-  );
-});
-
-test("a scan restarts the visit of a tab that moved to another PR before the scan", () => {
-  const entries: Entry[] = [{ tab: { id: 1, active: false }, pr: { key: "acme/webapp#2" } }];
-
-  assert.deepEqual(
-    recordVisits({ 1: { key: "acme/webapp#1", since: 5 } }, { entries, scannedAt: 10 }, 20),
-    {
-      1: { key: "acme/webapp#2", since: 20 },
-    },
-  );
+  assert.deepEqual(recordVisits(visits, { entries, scannedAt: 10 }, 20), {
+    1: { key: "acme/webapp#1", since: 5 },
+    2: { key: "acme/webapp#2", since: 20 },
+    3: { key: "acme/webapp#4", since: 20 },
+  });
 });
 
 test("a visit that started during a scan wins over that scan", () => {
@@ -121,6 +113,7 @@ test("navigation keeps the visit on the same PR, restarts it on another and ends
     1: { key: "acme/webapp#2", since: 20 },
   });
   assert.deepEqual(navigateVisit(visits, 1, null), {});
+  assert.deepEqual(visits, { 1: { key: "acme/webapp#1", since: 5 } });
 });
 
 test("a tab that moved to another page since the poll started is not closed", () => {
