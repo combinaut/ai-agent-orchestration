@@ -33,7 +33,7 @@ Corrupt or unreadable state is renamed to `github.json.corrupt.<timestamp>` unde
 
 Registered services participate after their normal upgrade/restart. **Foreground monitors need a manual restart.** Existing processes are not stopped or restarted by this change. With 10 architects and 30 workers, demand can exceed the 20-start/minute capacity: bounded waits then fail as reads, retaining evidence. At one quota point per CLI call the cap is 1,200/hour; costly queries, pagination, and raw calls can still exhaust quota.
 
-The supervisor accepts monotonic deadlines from callers loaded before the wall-clock update. Wall-clock callers are identified by their companion `GITHUB_POLL_MONOTONIC_DEADLINE` variable. New callers keep the deadline argument numeric so a rollback to the first wall-clock release can still parse it; the supervisor also accepts the `wall:` tag from previously loaded callers. This lets an already participating foreground monitor keep polling when the supervisor file changes on disk.
+The supervisor accepts monotonic deadlines from callers loaded before the wall-clock update. Wall-clock callers are identified by their companion `GITHUB_POLL_MONOTONIC_DEADLINE` variable. New callers keep the deadline argument numeric so a rollback to the first wall-clock release can still parse it. A launch without either deadline variable defaults to a 45-second monotonic budget. This lets an already participating foreground monitor keep polling when the supervisor file changes on disk.
 Downgrades to a release before wall-clock deadlines still require a watcher restart.
 
 | Mutation | Regression witness | Result |
@@ -41,6 +41,8 @@ Downgrades to a release before wall-clock deadlines still require a watcher rest
 | Interpret an untagged legacy deadline as wall time | `RoundTwoTests.test_prs_legacy_caller_survives_supervisor_upgrade` invokes `prs.viewer_login()` with the legacy launch protocol and the current supervisor | Fails with `RuntimeError: gh deadline exceeded` before the fix; succeeds with the compatibility conversion |
 | Disable the companion-variable branch with `elif False:` | `RoundTwoTests.test_untagged_wall_deadline_with_companion_bounds_supervisor` launches a slow command with an untagged wall deadline and its companion | Fails because the command completes instead of the supervisor returning deadline status 124 |
 | Restore the `wall:` prefix on emitted arguments | `RoundTwoTests.test_supervised_deadline_argument_remains_numeric_for_rollback` parses the emitted argument as an older supervisor does | Fails with `ValueError` instead of accepting the numeric deadline |
+| Restore a wall-clock default without a companion | `RoundTwoTests.test_supervised_default_deadline_stops_slow_child` launches a slow child with the default budget shortened through the caller's clock | Fails because the child completes instead of returning deadline status 124 |
+| Convert a legacy deadline to `time.time() + 3600` | `RoundTwoTests.test_legacy_deadline_stops_slow_child_even_when_monotonic_pauses` checks a slow child with and without a paused monotonic clock | Fails in the paused-clock case because the child completes instead of returning deadline status 124 |
 
 ## Measurement
 

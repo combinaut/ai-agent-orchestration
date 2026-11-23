@@ -385,6 +385,54 @@ class RoundTwoTests(IsolatedTestCase):
         command = g.supervised(["gh"], env)
         self.assertEqual(float(command[4]), float(env["GITHUB_POLL_DEADLINE"]))
 
+    def test_supervised_default_deadline_stops_slow_child(self):
+        self.real_clock()
+        env = dict(os.environ)
+        env.pop("GITHUB_POLL_MONOTONIC_DEADLINE", None)
+        with patch.object(g.time, "monotonic", return_value=time.monotonic() - 44.6):
+            command = g.supervised(
+                [sys.executable, "-c", "import time; time.sleep(1.5)"], {}
+            )
+        result = subprocess.run(
+            command, env=env, capture_output=True, text=True, timeout=3
+        )
+        self.assertEqual(result.returncode, 124, result.stderr)
+        self.assertIn("gh deadline exceeded", result.stderr)
+
+    def test_legacy_deadline_stops_slow_child_even_when_monotonic_pauses(self):
+        self.real_clock()
+        env = dict(os.environ)
+        env.pop("GITHUB_POLL_MONOTONIC_DEADLINE", None)
+        for paused in (False, True):
+            with self.subTest(paused=paused):
+                launcher = (
+                    "import runpy,sys,time; "
+                    "tick=time.monotonic(); "
+                    + ("time.monotonic=lambda:tick; " if paused else "")
+                    + "sys.argv=sys.argv[1:]; "
+                    "runpy.run_path(sys.argv[0],run_name='__main__')"
+                )
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-I",
+                        "-c",
+                        launcher,
+                        str(Path(g.__file__)),
+                        "--supervise",
+                        str(time.monotonic() + 0.4),
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(1.5)",
+                    ],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                )
+                self.assertEqual(result.returncode, 124, result.stderr)
+                self.assertIn("gh deadline exceeded", result.stderr)
+
     def test_contention_waits_for_release_within_call_timeout(self):
         self.real_clock()
         self.state.mkdir()

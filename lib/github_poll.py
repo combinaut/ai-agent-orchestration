@@ -430,7 +430,7 @@ def supervised(argv, env):
         "-I",
         str(Path(__file__).resolve()),
         "--supervise",
-        env.get("GITHUB_POLL_DEADLINE", str(time.time() + 45)),
+        env.get("GITHUB_POLL_DEADLINE", str(time.monotonic() + 45)),
         *argv,
     ]
 
@@ -606,9 +606,7 @@ def main():
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--supervise":
         value = sys.argv[2]
-        if value.startswith("wall:"):
-            deadline = float(value.removeprefix("wall:"))
-        elif "GITHUB_POLL_MONOTONIC_DEADLINE" in os.environ:
+        if "GITHUB_POLL_MONOTONIC_DEADLINE" in os.environ:
             deadline = float(value)
         else:
             # Pre-wall-clock callers remain loaded in long-running watchers.
