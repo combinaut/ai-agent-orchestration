@@ -21,7 +21,7 @@ MAX_STATES = 100
 MAX_SEARCH = 100
 MAX_REPOS = 100
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
-PR_FIELDS = "state title headRefName headRepository { nameWithOwner }"
+PR_FIELDS = "state closedAt title headRefName headRepository { nameWithOwner }"
 SEARCH = (
     "query($q: String!, $n: Int!, $a: String) { search(query: $q, type: ISSUE, first: $n, after: $a) { issueCount"
     " pageInfo { endCursor hasNextPage } nodes { ... on PullRequest { url title headRefName headRepository { nameWithOwner } } } } }"

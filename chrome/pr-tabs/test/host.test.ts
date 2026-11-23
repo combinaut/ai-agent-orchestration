@@ -197,9 +197,16 @@ test("settings refuse a config that is not UTF-8, scoped wrong or broken", () =>
   assertRefused(settingsFor('[pr_tabs]\norg = "unterminated\n'), cannot);
 });
 
+const MERGED_ONE = {
+  state: "MERGED",
+  closedAt: "2026-01-01T00:00:00Z",
+  title: "One",
+  headRefName: "a",
+};
+
 test("states for many PRs take one gh call and come back keyed by PR", () => {
   const data = {
-    p0: { pullRequest: { state: "MERGED", title: "One", headRefName: "a" } },
+    p0: { pullRequest: MERGED_ONE },
     p1: { pullRequest: { state: "OPEN", title: "Two", headRefName: "b" } },
     p2: null,
   };
@@ -207,11 +214,12 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
   const { reply, calls } = ask({ type: "states", prs }, { reply: { data } });
 
   assert.equal(calls.length, 1);
+  assert.match(String(calls[0]), /pullRequest\(number: \$n0\) \{ state closedAt /);
   assert.deepEqual(reply, {
     ok: true,
     owners: {},
     prs: {
-      "acme/webapp#1": { state: "MERGED", title: "One", headRefName: "a" },
+      "acme/webapp#1": MERGED_ONE,
       "acme/webapp#2": { state: "OPEN", title: "Two", headRefName: "b" },
       "acme/webapp#3": null,
     },

@@ -70,13 +70,27 @@ export interface PrHead {
 export interface PrState extends PrHead {
   state?: PrStateName;
   title?: string;
+  closedAt?: string | null;
 }
 
 export type States = Partial<Record<PrKey, PrState | null>>;
 export type Meta = Partial<Record<PrKey, PrState>>;
-export type SeenOpen = Partial<Record<TabId, PrKey>>;
-export interface SeenOpenState {
-  seenOpen: SeenOpen;
+
+// When the extension first saw a tab showing a PR, in epoch milliseconds.
+export interface TabVisit {
+  key: PrKey;
+  since: number;
+}
+
+export type TabVisits = Partial<Record<TabId, TabVisit>>;
+
+export interface TabScan {
+  entries: Entry[];
+  scannedAt: number;
+}
+
+export interface SessionState {
+  tabVisits: TabVisits;
 }
 export type Owners = Partial<Record<OwnerKey, GroupTitle>>;
 
@@ -417,6 +431,11 @@ export interface StoredState {
   prTabsRepo: RepoName;
   prTabsRepoNumbers: RepoNumbersCache;
   prTabsCollapsed: string[];
+}
+
+export interface CheckedPr {
+  key: PrKey;
+  state: PrState | null | undefined;
 }
 
 export interface FetchedStates {

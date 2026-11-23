@@ -438,40 +438,20 @@ test("existing check cadence regroups tabs after ownership changes or disappears
   assert.equal(world.grouped.at(-1)?.title, "webapp");
 });
 
-test("a tab opened after its PR finished stays open", async () => {
-  world.tabs = [{ id: 1, url: `${PR}/7`, active: false }];
+test("a tab open before its PR finished closes, while a tab opened after it stays", async () => {
+  const clock = fakeClock();
+  world.tabs = [{ id: 11, url: `${PR}/7`, active: false }];
   world.store = {};
-  world.nativeHandler = async () => ({
-    ok: true,
-    prs: { "acme/webapp#7": { state: "MERGED" } },
-  });
+  Object.assign(world.store, { tabVisits: { 12: { key: "acme/webapp#7", since: 0 } } });
 
-  assert.deepEqual(await chromeMessageCheck(), {
-    tabs: 1,
-    prs: 1,
-    checked: 1,
-    closed: [],
-    inView: [],
-  });
-  assert.deepEqual(ids(), [1]);
-  assert.deepEqual(world.session.seenOpen, {});
-});
-
-test("a tab seen open closes after its PR finishes, but a later tab stays open", async () => {
-  world.tabs = [{ id: 1, url: `${PR}/7`, active: false }];
-  world.store = {};
-
-  let state: "OPEN" | "MERGED" = "OPEN";
-  world.nativeHandler = async () => ({
-    ok: true,
-    prs: { "acme/webapp#7": { state } },
-  });
+  let reply: { state: "OPEN" | "MERGED"; closedAt?: string } = { state: "OPEN" };
+  world.nativeHandler = async () => ({ ok: true, prs: { "acme/webapp#7": reply } });
 
   await chromeMessageCheck();
-  assert.deepEqual(world.session.seenOpen, { 1: "acme/webapp#7" });
-
-  state = "MERGED";
-  world.tabs.push({ id: 2, url: `${PR}/7`, active: false });
+  clock.advance(1);
+  reply = { state: "MERGED", closedAt: new Date(Date.now()).toISOString() };
+  clock.advance(1);
+  world.tabs.push({ id: 12, url: `${PR}/7`, active: false });
 
   assert.deepEqual(await chromeMessageCheck(), {
     tabs: 2,
@@ -480,7 +460,7 @@ test("a tab seen open closes after its PR finishes, but a later tab stays open",
     closed: [{ key: "acme/webapp#7", state: "MERGED" }],
     inView: [],
   });
-  assert.deepEqual(ids(), [2]);
+  assert.deepEqual(ids(), [12]);
 });
 
 test("a restarted worker restores ownership before grouping persisted PR metadata", async () => {

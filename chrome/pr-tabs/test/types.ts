@@ -19,7 +19,7 @@ import type {
   Request,
   RequestType,
   Rules,
-  SeenOpenState,
+  SessionState,
   StoredState,
   Tab,
   TabActionType,
@@ -33,7 +33,7 @@ export type FakeTab = Required<Pick<Tab, "id" | "url">> &
   Pick<chrome.tabs.QueryInfo, "windowType">;
 
 export type FakeStore = Partial<StoredState>;
-export type FakeSession = Partial<SeenOpenState>;
+export type FakeSession = Partial<SessionState>;
 export type HostSettings = HostReply<Partial<Rules>>;
 
 export interface CreatedAlarm {
@@ -106,7 +106,7 @@ export type FakeStorage = Known<
       set: (values: FakeStore) => Promise<void>;
     };
     session: {
-      get: (key: keyof SeenOpenState) => Promise<FakeSession>;
+      get: (key: keyof SessionState) => Promise<FakeSession>;
       set: (values: FakeSession) => Promise<void>;
     };
   },

@@ -31,9 +31,11 @@ import type {
   RepoRules,
   Rules,
   SearchResult,
-  SeenOpen,
   States,
   Summary,
+  TabScan,
+  TabVisit,
+  TabVisits,
   TabChange,
   TabId,
   TabLike,
@@ -324,6 +326,7 @@ export function groupForPr(owners: Owners, pr: PrBranch): GroupPlacement {
   return { name, color: groupColor(name) };
 }
 
+// A PR tab closes once its PR is merged or closed, unless it is the tab in view.
 export function shouldClose(tab: Pick<TabLike, "active">, state: PrStateName | undefined): boolean {
   return (state === "MERGED" || state === "CLOSED") && !tab.active;
 }
@@ -337,29 +340,69 @@ export function stillShowsPr(
   return parsePrUrl(tab?.url, org)?.key === key;
 }
 
-export function tabsToClose(entries: Entry[], states: States, seenOpen: SeenOpen = {}): TabId[] {
+// The PR closed after the tab started showing it.
+export function closedDuringVisit(
+  state: PrState | null | undefined,
+  visit: TabVisit | undefined,
+  key: PrKey,
+): boolean {
+  const closedAt = Date.parse(state?.closedAt ?? "");
+
+  return visit?.key === key && closedAt > visit.since;
+}
+
+export function tabsToClose(entries: Entry[], states: States, visits: TabVisits = {}): TabId[] {
   return entries
-    .filter(
-      (entry) =>
-        seenOpen[entry.tab.id] === entry.pr.key &&
-        shouldClose(entry.tab, states[entry.pr.key]?.state),
-    )
+    .filter((entry) => {
+      const state = states[entry.pr.key];
+
+      return (
+        shouldClose(entry.tab, state?.state) &&
+        closedDuringVisit(state, visits[entry.tab.id], entry.pr.key)
+      );
+    })
     .map((entry) => entry.tab.id);
 }
 
-export function recordSeenOpen(seenOpen: SeenOpen, entries: Entry[], states: States): SeenOpen {
-  const next: SeenOpen = {};
+// Merges a tab scan: a visit newer than the scan wins, a scanned tab keeps a visit on its PR or
+// starts one at now, and an older visit of an unscanned tab is dropped.
+export function recordVisits(visits: TabVisits, scan: TabScan, now: number): TabVisits {
+  const { entries, scannedAt } = scan;
+  const scanned = new Map(entries.map((entry) => [entry.tab.id, entry.pr.key]));
+  const next: TabVisits = {};
 
-  for (const entry of entries) {
-    const { id } = entry.tab;
-    const { key } = entry.pr;
+  for (const [id, visit] of visitsOf(visits)) {
+    if (scanned.has(id) || visit.since >= scannedAt) {
+      next[id] = visit;
+    }
+  }
 
-    if (seenOpen[id] === key || states[key]?.state === "OPEN") {
-      next[id] = key;
+  for (const [id, key] of scanned) {
+    const visit = next[id];
+
+    if (!visit || (visit.key !== key && visit.since < scannedAt)) {
+      next[id] = { key, since: now };
     }
   }
 
   return next;
+}
+
+// A tab that moves to another PR starts the given visit; one that leaves PRs has none.
+export function navigateVisit(visits: TabVisits, id: TabId, visit: TabVisit | null): TabVisits {
+  const next = { ...visits };
+
+  if (visit === null) {
+    delete next[id];
+  } else if (next[id]?.key !== visit.key) {
+    next[id] = visit;
+  }
+
+  return next;
+}
+
+function visitsOf(visits: TabVisits): [TabId, TabVisit][] {
+  return Object.entries(visits).flatMap(([id, visit]) => (visit ? [[Number(id), visit]] : []));
 }
 
 function keysOf(record: Partial<Record<PrKey, unknown>>): PrKey[] {
