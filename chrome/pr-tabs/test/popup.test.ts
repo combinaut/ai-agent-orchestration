@@ -146,7 +146,7 @@ const ACTIONS: readonly ActionCase[] = [
   },
 ];
 
-test("each button sends its own request, refreshes the summary and shows the result", async () => {
+test("each menu action sends its own request, refreshes the summary and shows the result", async () => {
   vi.useFakeTimers();
 
   try {

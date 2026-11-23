@@ -31,6 +31,15 @@ test("one field exposes the idle, go-to and search modes", async () => {
   wrapper.unmount();
 });
 
+test("a busy field is read-only", async () => {
+  const wrapper = field("goto");
+
+  assert.equal(wrapper.find("#target").attributes("readonly"), undefined);
+  await wrapper.setProps({ busy: true });
+  assert.equal(wrapper.find("#target").attributes("readonly"), "");
+  wrapper.unmount();
+});
+
 test("the active option id becomes aria-activedescendant", async () => {
   const wrapper = field("search");
   const input = wrapper.find("#target");

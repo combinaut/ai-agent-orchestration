@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { bareNumber, isGoToInput } from "#/core";
-import { getMessage, getPluralMessage } from "#/i18n";
+import { getMessage } from "#/i18n";
 import type { ActionMenuItem, PrKey, RepoOption, SearchQuery, Selectable, TabId } from "#/types";
 import { useCollapsed } from "#/composables/useCollapsed";
 import { usePrClose } from "#/composables/usePrClose";

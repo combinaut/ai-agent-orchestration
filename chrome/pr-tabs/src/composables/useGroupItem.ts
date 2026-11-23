@@ -3,7 +3,7 @@ import { isGroupColor } from "#/core";
 import { getPluralMessage } from "#/i18n";
 import type { GroupColor, GroupRow, GroupSummary } from "#/types";
 
-// The class that sets --group-color; unknown colours are grey.
+// The class that sets --group-color.
 export function groupColorClass(color: string | undefined): `group-${GroupColor}` {
   return `group-${isGroupColor(color) ? color : "grey"}`;
 }

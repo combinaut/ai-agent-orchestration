@@ -501,7 +501,7 @@ export type TagSeverity = "success" | "info" | "secondary" | "warn";
 
 export interface SummaryList {
   groups: Ref<GroupSummary[]>;
-  // The summary line of the last refresh.
+  // The summary line of the last successful refresh.
   text: Readonly<Ref<string>>;
   refresh: () => Promise<void>;
 }

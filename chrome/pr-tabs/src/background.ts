@@ -835,8 +835,7 @@ function refreshRepoNumbersNow(
   return refresh;
 }
 
-// What the popup needs for the repo choice: listed repos, the selected one, and refreshed newest
-// numbers. Each popup open asks GitHub; the previous cache is only a failure fallback.
+// Repo choices for the popup; stored newest numbers fill in when no fresh fetch succeeds.
 export async function repoChoices(): Promise<RepoChoices> {
   const rules = await loadRules();
   const [stored, cache] = await Promise.all([

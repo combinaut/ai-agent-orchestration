@@ -28,9 +28,6 @@ jobs:
             outside_extension:
               - '**'
               - '!chrome/**'
-              - '!**/*.md'
-              - '!LICENSE'
-              - '!docs/**'
 
   macos:
     name: Validate (macos-latest)

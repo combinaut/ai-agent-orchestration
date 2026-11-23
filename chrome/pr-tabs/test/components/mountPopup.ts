@@ -1,6 +1,6 @@
 import { mount, type ComponentMountingOptions } from "@vue/test-utils";
 import PrimeVue from "primevue/config";
-import { defineComponent, h, nextTick, ref, type Component, type PropType, type Slots } from "vue";
+import { defineComponent, h, ref, type Component, type PropType, type Slots } from "vue";
 import { primeVueConfiguration } from "#popup/primevue";
 import type { PopupWrapper } from "#test/types";
 
@@ -43,7 +43,7 @@ export const popupStubs = {
     props: {
       model: { type: Array as PropType<MenuItem[]>, default: () => [] },
     },
-    emits: ["show", "hide"],
+    emits: ["hide"],
     setup(props, { attrs, emit, expose, slots }) {
       const open = ref(false);
 
@@ -57,7 +57,6 @@ export const popupStubs = {
           hide();
         } else {
           open.value = true;
-          void nextTick(() => emit("show"));
         }
       }
 
