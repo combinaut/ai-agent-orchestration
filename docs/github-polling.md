@@ -33,11 +33,14 @@ Corrupt or unreadable state is renamed to `github.json.corrupt.<timestamp>` unde
 
 Registered services participate after their normal upgrade/restart. **Foreground monitors need a manual restart.** Existing processes are not stopped or restarted by this change. With 10 architects and 30 workers, demand can exceed the 20-start/minute capacity: bounded waits then fail as reads, retaining evidence. At one quota point per CLI call the cap is 1,200/hour; costly queries, pagination, and raw calls can still exhaust quota.
 
-The supervisor accepts monotonic deadlines from callers loaded before the wall-clock update. New callers tag their deadline argument with `wall:`; untagged callers from the first wall-clock release are identified by their companion `GITHUB_POLL_MONOTONIC_DEADLINE` variable. This lets an already participating foreground monitor keep polling when the supervisor file changes on disk.
+The supervisor accepts monotonic deadlines from callers loaded before the wall-clock update. Wall-clock callers are identified by their companion `GITHUB_POLL_MONOTONIC_DEADLINE` variable. New callers keep the deadline argument numeric so a rollback to the first wall-clock release can still parse it; the supervisor also accepts the `wall:` tag from previously loaded callers. This lets an already participating foreground monitor keep polling when the supervisor file changes on disk.
+Downgrades to a release before wall-clock deadlines still require a watcher restart.
 
 | Mutation | Regression witness | Result |
 | --- | --- | --- |
 | Interpret an untagged legacy deadline as wall time | `RoundTwoTests.test_prs_legacy_caller_survives_supervisor_upgrade` invokes `prs.viewer_login()` with the legacy launch protocol and the current supervisor | Fails with `RuntimeError: gh deadline exceeded` before the fix; succeeds with the compatibility conversion |
+| Disable the companion-variable branch with `elif False:` | `RoundTwoTests.test_untagged_wall_deadline_with_companion_bounds_supervisor` launches a slow command with an untagged wall deadline and its companion | Fails because the command completes instead of the supervisor returning deadline status 124 |
+| Restore the `wall:` prefix on emitted arguments | `RoundTwoTests.test_supervised_deadline_argument_remains_numeric_for_rollback` parses the emitted argument as an older supervisor does | Fails with `ValueError` instead of accepting the numeric deadline |
 
 ## Measurement
 

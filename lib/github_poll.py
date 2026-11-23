@@ -430,7 +430,7 @@ def supervised(argv, env):
         "-I",
         str(Path(__file__).resolve()),
         "--supervise",
-        "wall:" + env.get("GITHUB_POLL_DEADLINE", str(time.time() + 45)),
+        env.get("GITHUB_POLL_DEADLINE", str(time.time() + 45)),
         *argv,
     ]
 

@@ -353,6 +353,38 @@ class RoundTwoTests(IsolatedTestCase):
         ):
             self.assertEqual(prs.viewer_login(), "fixture-user")
 
+    def test_untagged_wall_deadline_with_companion_bounds_supervisor(self):
+        self.real_clock()
+        env = dict(
+            os.environ, GITHUB_POLL_MONOTONIC_DEADLINE=str(time.monotonic() + 0.4)
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                str(Path(g.__file__)),
+                "--supervise",
+                str(time.time() + 0.4),
+                sys.executable,
+                "-c",
+                "import time; time.sleep(1.5)",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        self.assertEqual(result.returncode, 124, result.stderr)
+        self.assertIn("gh deadline exceeded", result.stderr)
+
+    def test_supervised_deadline_argument_remains_numeric_for_rollback(self):
+        env = {
+            "GITHUB_POLL_DEADLINE": "1700000003.0",
+            "GITHUB_POLL_MONOTONIC_DEADLINE": "1003.0",
+        }
+        command = g.supervised(["gh"], env)
+        self.assertEqual(float(command[4]), float(env["GITHUB_POLL_DEADLINE"]))
+
     def test_contention_waits_for_release_within_call_timeout(self):
         self.real_clock()
         self.state.mkdir()
