@@ -137,14 +137,12 @@ const isListShown = computed(() => hasPrTabs.value || hasRepoOptions.value);
 
 const openingMenuItems = computed<ActionMenuItem[]>(() => [
   {
-    id: "open-all",
     label: openAllButton,
     icon: "pi-external-link",
     busy: isOpeningBatch.value,
     run: handleOpenAllRun,
   },
   {
-    id: "open-reviews",
     label: openReviewsButton,
     icon: "pi-eye",
     busy: isOpeningBatch.value,
@@ -153,7 +151,6 @@ const openingMenuItems = computed<ActionMenuItem[]>(() => [
 ]);
 const closingMenuItems = computed<ActionMenuItem[]>(() => [
   {
-    id: "check-now",
     label: checkNowButton,
     icon: "pi-check-circle",
     busy: isCheckingNow.value || !hasPrTabs.value,
@@ -161,7 +158,6 @@ const closingMenuItems = computed<ActionMenuItem[]>(() => [
     run: handleCheckNowRun,
   },
   {
-    id: "close-duplicates",
     label: closeDuplicatesButton,
     icon: "pi-clone",
     busy: isClosingDuplicates.value || !hasPrTabs.value,

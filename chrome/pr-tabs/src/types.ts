@@ -402,7 +402,6 @@ export type HostReply<T> = HostOk<T> | HostFailure;
 
 export interface RepoNumbersCache {
   newest: RepoNumbers;
-  refreshedAt: number;
 }
 
 export interface StoredState {
@@ -451,7 +450,6 @@ export interface RepoPicker {
   repos: ComputedRef<RepoName[]>;
   repo: Ref<RepoName>;
   available: ComputedRef<boolean>;
-  visible: ComputedRef<boolean>;
   guessUnavailable: ComputedRef<boolean>;
   load: () => Promise<void>;
   ready: () => Promise<void>;
@@ -592,7 +590,6 @@ export interface PopupFieldProps {
 }
 
 export interface ActionMenuItem {
-  id: string;
   label: string;
   icon: string;
   busy: boolean;
@@ -712,7 +709,6 @@ export interface Collapsed {
   collapsed: Readonly<Ref<ReadonlySet<string>>>;
   load: () => Promise<void>;
   set: (id: string, collapsed: boolean) => void;
-  toggle: (id: string) => void;
 }
 
 export interface RepoOption {

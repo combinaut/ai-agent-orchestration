@@ -17,8 +17,10 @@ test("one field exposes the idle, go-to and search modes", async () => {
   assert.equal(input.attributes("role"), "combobox");
   assert.equal(input.attributes("aria-controls"), "popup-list");
   assert.equal(input.attributes("aria-expanded"), "false");
+  assert.equal(input.attributes("aria-label"), "PR number, link, or search open tabs");
   assert.ok(wrapper.find(".pi-search").exists());
-  assert.equal(wrapper.find(".popup-field-trailing").exists(), false);
+  assert.equal(wrapper.find(".popup-field-trailing").attributes("style"), "display: none;");
+  assert.equal(wrapper.find(".popup-field-trailing").attributes("aria-live"), "polite");
   await wrapper.setProps({ mode: "goto", modelValue: "515" });
   assert.equal(wrapper.find(".popup-field-trailing").text(), "PR number");
   assert.ok(wrapper.find(".popup-field").classes().includes("popup-field-goto"));

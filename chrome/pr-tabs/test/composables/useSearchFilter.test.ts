@@ -113,3 +113,21 @@ test("number-only queries match PR numbers only, as a substring", () => {
   assert.deepEqual(result.groups.value[0]?.prs[0]?.highlights, { number: [[1, 4]], title: [] });
   assert.equal(filter({ text: "amber", numberOnly: true }).count.value, 0);
 });
+
+test("a query without matches leaves no groups and counts zero", () => {
+  const result = search("zzzzqqqq");
+
+  assert.deepEqual([result.groups.value, result.count.value], [[], 0]);
+});
+
+test("the filter follows changes to the query and the groups", () => {
+  const source = ref(groups);
+  const query = ref<SearchQuery>({ text: "Shortcuts", numberOnly: false });
+  const result = useSearchFilter(source, query);
+
+  assert.equal(result.count.value, 1);
+  query.value = { text: "Upload", numberOnly: false };
+  assert.equal(result.groups.value[0]?.prs[0]?.tabId, 47);
+  source.value = groups.slice(0, 1);
+  assert.equal(result.count.value, 0);
+});

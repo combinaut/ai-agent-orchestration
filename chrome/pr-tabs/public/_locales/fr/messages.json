@@ -15,7 +15,7 @@
     "message": "Dépôt pour un numéro seul"
   },
   "repoGuessUnavailable": {
-    "message": "Repo guess unavailable: update the host"
+    "message": "Suggestion de dépôt indisponible : mettez à jour l'hôte"
   },
   "actionMenuLabel": {
     "message": "Actions"

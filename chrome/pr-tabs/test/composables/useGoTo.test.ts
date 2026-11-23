@@ -37,7 +37,7 @@ test("blank input sends nothing", async () => {
   assert.equal(flow.closes(), 0);
 });
 
-test("the picked repo goes along only while the dropdown is available, and success closes the popup", async () => {
+test("the picked repo goes along only while repo options are available, and success closes the popup", async () => {
   const withPicker = fakeAsk({ goTo: { opened: "acme/api#7" } });
   const picked = goTo(withPicker.ask, true, "7");
 

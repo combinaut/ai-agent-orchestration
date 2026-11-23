@@ -84,7 +84,7 @@ const STORED_DEFAULTS: StoredState = {
   failures: 0,
   cursor: 0,
   prTabsRepo: "",
-  prTabsRepoNumbers: { newest: {}, refreshedAt: 0 },
+  prTabsRepoNumbers: { newest: {} },
   prTabsCollapsed: [],
 };
 
@@ -813,7 +813,7 @@ async function refreshRepoNumbers(
     const { newest } = await askHost({ type: "repoNumbers", org: rules.org, repos });
 
     if (newest && typeof newest === "object") {
-      const cache = { newest, refreshedAt: Date.now() };
+      const cache = { newest };
       await writeStored({ prTabsRepoNumbers: cache });
 
       return { cache, failed: false };
@@ -835,7 +835,7 @@ function refreshRepoNumbersNow(
   return refresh;
 }
 
-// What the popup needs for the repo dropdown: listed repos, the selected one, and refreshed newest
+// What the popup needs for the repo choice: listed repos, the selected one, and refreshed newest
 // numbers. Each popup open asks GitHub; the previous cache is only a failure fallback.
 export async function repoChoices(): Promise<RepoChoices> {
   const rules = await loadRules();
@@ -854,7 +854,7 @@ export async function repoChoices(): Promise<RepoChoices> {
   };
 }
 
-// Remembers the dropdown pick when it is a listed repo.
+// Remembers the repo pick when it is a listed repo.
 export async function pickRepo(repo?: RepoName): Promise<void> {
   const rules = await loadRules();
 

@@ -1,4 +1,4 @@
-/* High-fidelity popup tokens. PrimeVue components inherit these through the popup root. */
+/* Popup design tokens and the styles that apply them, including PrimeVue class overrides. */
 :root {
   --bg: #ffffff;
   --surface: #f3f4f6;

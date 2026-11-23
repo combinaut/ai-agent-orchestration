@@ -1,20 +1,18 @@
 // @vitest-environment happy-dom
 import assert from "node:assert/strict";
-import { flushPromises, mount } from "@vue/test-utils";
-import PrimeVue from "primevue/config";
+import { flushPromises } from "@vue/test-utils";
 import { afterEach, test } from "vitest";
 import ActionMenu from "#popup/components/ActionMenu.vue";
-import { primeVueConfiguration } from "#popup/primevue";
 import type { ActionMenuItem } from "#/types";
+import { mountPopup } from "./mountPopup";
 
 afterEach(() => {
   document.body.replaceChildren();
 });
 
 const ACTIONS: ActionMenuItem[] = [
-  { id: "open", label: "Open all", icon: "pi-external-link", busy: false, run() {} },
+  { label: "Open all", icon: "pi-external-link", busy: false, run() {} },
   {
-    id: "merged",
     label: "Close merged",
     icon: "pi-check-circle",
     busy: true,
@@ -24,10 +22,10 @@ const ACTIONS: ActionMenuItem[] = [
 ];
 
 function menu() {
-  return mount(ActionMenu, {
+  return mountPopup(ActionMenu, {
     attachTo: document.body,
     props: { label: "Actions", actions: ACTIONS },
-    global: { plugins: [[PrimeVue, primeVueConfiguration]], stubs: { teleport: true } },
+    global: { stubs: { teleport: true } },
   });
 }
 

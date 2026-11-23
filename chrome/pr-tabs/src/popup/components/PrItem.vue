@@ -81,7 +81,7 @@ function handleGoClick(): void {
     <span class="pr-number">
       <PrTextSegment v-for="(segment, index) in numberSegments" :key="index" :segment="segment" />
     </span>
-    <span class="pr-title" :title="rowLabel">
+    <span class="pr-title">
       <PrTextSegment v-for="(segment, index) in titleSegments" :key="index" :segment="segment" />
     </span>
     <Tag

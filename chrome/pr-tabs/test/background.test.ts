@@ -583,7 +583,7 @@ async function multiRepoWorker(tag: string) {
   return freshWorker(tag);
 }
 
-test("the dropdown lists the repos and selects the remembered listed pick", async () => {
+test("the repo choice lists the repos and selects the remembered listed pick", async () => {
   const multi = await multiRepoWorker("multi-repo-choices");
 
   assert.deepEqual(await multi.repoChoices(), {
@@ -628,6 +628,30 @@ test("an old host that rejects repo numbers preserves the pick and reports an un
   });
 });
 
+test("repo numbers are fetched once per popup open, cached, and used when the next fetch fails", async () => {
+  const multi = await multiRepoWorker("repo-numbers-cache");
+  const sent: HostRequest[] = [];
+  const newest = { webapp: 900, api: 40 };
+
+  world.nativeHandler = async (message) => {
+    sent.push(message);
+
+    return { ok: true, newest };
+  };
+
+  const [first, second] = await Promise.all([multi.repoChoices(), multi.repoChoices()]);
+
+  assert.deepEqual(first, { ...second, newest, guessUnavailable: false });
+  assert.equal(sent.filter((message) => message.type === "repoNumbers").length, 1);
+  assert.deepEqual(world.store.prTabsRepoNumbers, { newest });
+
+  world.nativeHandler = async () => ({ ok: false, error: "offline" });
+
+  const fallback = await multi.repoChoices();
+
+  assert.deepEqual([fallback.newest, fallback.guessUnavailable], [newest, true]);
+});
+
 test("goTo opens a bare number in the picked repo, else the remembered pick", async () => {
   const multi = await multiRepoWorker("multi-repo");
 
@@ -647,7 +671,7 @@ test("goTo opens a bare number in the picked repo, else the remembered pick", as
   world.tabs = [];
 });
 
-test("one listed repo hides the dropdown", async () => {
+test("one listed repo hides the repo options", async () => {
   world.hostSettings = { ...CONFIGURED, repos: ["webapp"] };
   const single = await freshWorker("single-repo");
   assert.equal((await single.repoChoices()).show, false);

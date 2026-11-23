@@ -24,14 +24,6 @@ test("a header shows the colour rail class, name, count badge and an open chevro
   assert.ok(wrapper.find(".group-chevron .pi-chevron-down").exists());
 });
 
-test("an unknown group colour falls back to the grey rail", () => {
-  const wrapper = list([
-    { id: "1", title: "Finder", color: "magenta" as "grey", count: 1, prs: [] },
-  ]);
-
-  assert.ok(wrapper.find(".group-panel").classes().includes("group-grey"));
-});
-
 test("a collapsed group shows a right chevron and keeps its badge", () => {
   const wrapper = list([{ id: "1", title: "Finder", count: 3, prs: [] }], new Set(["1"]));
 

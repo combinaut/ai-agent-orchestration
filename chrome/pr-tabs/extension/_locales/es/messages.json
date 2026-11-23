@@ -15,10 +15,10 @@
     "message": "Repositorio para un número solo"
   },
   "repoGuessUnavailable": {
-    "message": "Repo guess unavailable: update the host"
+    "message": "Sugerencia de repositorio no disponible: actualiza el host"
   },
   "actionMenuLabel": {
-    "message": "Actions"
+    "message": "Acciones"
   },
   "openAllButton": {
     "message": "Abrir todos"

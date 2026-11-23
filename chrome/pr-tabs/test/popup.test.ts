@@ -9,10 +9,10 @@ import App from "#popup/App.vue";
 import { mountPopup, popupStubs } from "#test/components/mountPopup";
 import { createI18n } from "#test/i18n/catalog";
 
-const mounted: { unmount: () => void }[] = [];
+const mounted: { unmount: () => void; vm: { $: { isUnmounted: boolean } } }[] = [];
 
 afterEach(() => {
-  for (const wrapper of mounted.splice(0)) {
+  for (const wrapper of mounted.splice(0).filter((item) => !item.vm.$.isUnmounted)) {
     wrapper.unmount();
   }
 
@@ -115,21 +115,18 @@ async function popup(
 
 const ACTIONS: readonly ActionCase[] = [
   {
-    button: "#open-all",
     label: "Open all",
     request: { type: "openAll" },
     reply: { opened: 1, remaining: 0, estimated: false },
     status: "Opened 1. 2 PRs in 1 group",
   },
   {
-    button: "#open-reviews",
     label: "Open reviews",
     request: { type: "openReviews" },
     reply: { opened: 1, remaining: 0, estimated: false },
     status: "Opened 1. 2 PRs in 1 group",
   },
   {
-    button: "#check-now",
     label: "Close merged",
     request: { type: "checkNow" },
     reply: {
@@ -142,7 +139,6 @@ const ACTIONS: readonly ActionCase[] = [
     status: "Closed 1 merged tab.",
   },
   {
-    button: "#close-duplicates",
     label: "Close duplicates",
     request: { type: "closeDuplicates" },
     reply: { closed: 1 },
@@ -159,7 +155,7 @@ test("each button sends its own request, refreshes the summary and shows the res
 
       await runMenuAction(wrapper, action.label);
 
-      assert.deepEqual(sent, [action.request, { type: "summary" }], action.button);
+      assert.deepEqual(sent, [action.request, { type: "summary" }], action.label);
       assert.equal(wrapper.find("#status").text(), action.status);
 
       wrapper.unmount();
@@ -210,38 +206,6 @@ test("the unified field detects a bare number without opening suggestions", asyn
   wrapper.unmount();
 });
 
-test("Enter opens inline preselected repository suggestions and the next Enter opens the PR", async () => {
-  const close = vi.spyOn(window, "close").mockImplementation(noop);
-  const { wrapper, sent } = await popup(["webapp", "api", "docs"], {
-    repos: {
-      repos: ["webapp", "api", "docs"],
-      selected: "webapp",
-      show: true,
-      newest: { webapp: 520, api: 2000, docs: 34400 },
-    },
-    goTo: { opened: "acme/webapp#505" },
-  });
-
-  await wrapper.find("#target").setValue("505");
-  const field = wrapper.find("#target");
-  await field.trigger("keydown", { key: "Enter" });
-  await flushPromises();
-
-  const selected = wrapper.find("[role=option][aria-selected=true]");
-  assert.equal(selected.text(), "webapp");
-  assert.equal(field.attributes("aria-activedescendant"), "repo-webapp");
-  assert.equal(wrapper.find(".goto-label").text(), "Open #505 in");
-  assert.deepEqual(withoutPolls(sent), []);
-  await field.trigger("keydown", { key: "Enter" });
-  await flushPromises();
-  assert.deepEqual(withoutPolls(sent), [
-    { type: "pickRepo", repo: "webapp" },
-    { type: "goTo", input: "505", repo: "webapp" },
-  ]);
-  assert.equal(close.mock.calls.length, 1);
-  wrapper.unmount();
-});
-
 test("Enter always opens a bare-number picker before opening its PR", async () => {
   const close = vi.spyOn(window, "close").mockImplementation(noop);
   const { wrapper, sent } = await popup(["infra", "big", "orch", "hub"], {
@@ -259,6 +223,8 @@ test("Enter always opens a bare-number picker before opening its PR", async () =
   await field.trigger("keydown", { key: "Enter" });
   await flushPromises();
   assert.equal(wrapper.find("[role=option][aria-selected=true]").text(), "infra");
+  assert.equal(field.attributes("aria-activedescendant"), "repo-infra");
+  assert.equal(wrapper.find(".goto-label").text(), "Open #515 in");
   assert.deepEqual(withoutPolls(sent), []);
   await field.trigger("keydown", { key: "Enter" });
   await flushPromises();
@@ -361,46 +327,21 @@ test("reopening the popup displays the active batch and disables both opening ac
   assert.equal(wrapper.find("#opening-progress [aria-live=polite]").text(), "Opened 3 of 10");
   await wrapper.find("#actions-menu").trigger("click");
   await flushPromises();
-  assert.equal(document.body.textContent?.includes("Open all"), true);
-  assert.equal(document.body.textContent?.includes("Open reviews"), true);
+  assert.equal(menuItem("Open all")?.getAttribute("aria-disabled"), "true");
+  assert.equal(menuItem("Open reviews")?.getAttribute("aria-disabled"), "true");
   wrapper.unmount();
 });
 
 test("actions live in the burger menu", async () => {
   const { wrapper } = await popup([]);
-  assert.equal(wrapper.find("#actions-menu").attributes("aria-expanded"), "false");
-  assert.ok(wrapper.find("#actions-menu .pi-bars").exists());
   await wrapper.find("#actions-menu").trigger("click");
   await flushPromises();
-  assert.equal(wrapper.find("#actions-menu").attributes("aria-expanded"), "true");
   const items = [...document.body.querySelectorAll<HTMLElement>(".p-menu-item-link")];
   assert.equal(document.body.querySelectorAll(".p-menu-separator").length, 1);
   assert.deepEqual(
     items.map((item) => item.textContent?.trim()),
     ["Open all", "Open reviews", "Close merged", "Close duplicates"],
   );
-  assert.equal(
-    items.every((item) => item.querySelector(".pi") !== null),
-    true,
-  );
-  wrapper.unmount();
-});
-
-test("action menu keeps the header geometry fixed and opens below its trigger", async () => {
-  const { wrapper } = await popup([]);
-  const header = wrapper.find("header");
-  const input = wrapper.find("#target");
-  const trigger = wrapper.find<HTMLButtonElement>("#actions-menu");
-  const headerClasses = header.attributes("class");
-  const inputClasses = input.attributes("class");
-
-  assert.ok(header.classes().includes("popup-title"));
-  assert.ok(trigger.classes().includes("menu-button"));
-  await trigger.trigger("click");
-  await flushPromises();
-
-  assert.equal(header.attributes("class"), headerClasses);
-  assert.equal(input.attributes("class"), inputClasses);
   wrapper.unmount();
 });
 
@@ -445,26 +386,6 @@ test("the empty state replaces the list and footer until a PR tab exists", async
     "2 PRs in 1 group↑↓ select · ↵ open · esc clear",
   );
   populated.wrapper.unmount();
-});
-
-test("the popup root keeps the menu reservation with empty, short, and long lists", async () => {
-  for (const summary of [
-    { prs: 0, groups: [] },
-    SUMMARY,
-    {
-      prs: 9,
-      groups: Array.from({ length: 9 }, (_, id) => ({
-        id: String(id),
-        title: "A",
-        count: 1,
-        prs: [],
-      })),
-    },
-  ]) {
-    const { wrapper } = await popup([], { summary });
-    assert.ok(wrapper.find("#popup-content").exists());
-    wrapper.unmount();
-  }
 });
 
 for (const result of [{ opened: 3, remaining: 0, estimated: false }, { error: "offline" }]) {

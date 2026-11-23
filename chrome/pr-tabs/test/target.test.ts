@@ -28,7 +28,6 @@ import {
   parsePrUrl,
   parseTarget,
   splitTargets,
-  hasBareNumber,
   summarize,
 } from "#/core";
 import { duplicateText, summaryText } from "#/texts";
@@ -349,7 +348,7 @@ test("defaultRepo is first in the effective repos, without repeats", () => {
   assert.deepEqual(effectiveRepos(rules), ["webapp"]);
 });
 
-test("the dropdown shows only with two or more repos", () => {
+test("repo options show only with two or more repos", () => {
   assert.equal(showRepoPicker(rules), false);
   assert.equal(showRepoPicker({ ...rules, repos: ["Webapp"] }), false);
   assert.equal(showRepoPicker(multi), true);
@@ -437,11 +436,4 @@ test("a list keeps URLs and junk as items and counts a repeat once", () => {
     "foo",
     "api#9",
   ]);
-});
-
-test("a list needs the repo pick when any item is a bare number", () => {
-  assert.equal(hasBareNumber("76"), true);
-  assert.equal(hasBareNumber("https://github.com/acme/webapp/pull/1, 76"), true);
-  assert.equal(hasBareNumber("#76, api#2"), false);
-  assert.equal(hasBareNumber(""), false);
 });

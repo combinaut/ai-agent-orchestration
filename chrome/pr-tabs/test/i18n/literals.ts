@@ -41,7 +41,6 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
     "panes",
     "opened",
   ],
-  "highlight.ts": ["label", "title"],
   "composables/useOpeningProgress.ts": ["sync"],
   "composables/usePanes.ts": ["panes"],
   "composables/usePrPane.ts": [
@@ -55,7 +54,7 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
     "unchecked",
     "idle",
   ],
-  "composables/useRepoPicker.ts": ["repos", "sync"],
+  "composables/useRepoPicker.ts": ["repos"],
   "composables/useStatus.ts": ["info", "error"],
   "composables/useSummary.ts": ["summary"],
   "core.ts": [
@@ -81,7 +80,6 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   "composables/useSearchFilter.ts": ["title", "label", "repo", "number", "branch", "groupName"],
   "popup/components/PopupField.vue": [
     "input",
-    "idle",
     "goto",
     "search",
     "Enter",

@@ -192,11 +192,7 @@ export function splitTargets(input: string | undefined): string[] {
   return [...new Set((input || "").split(/[\s,]+/).filter(Boolean))];
 }
 
-export function hasBareNumber(input: string): boolean {
-  return bareNumber(input) !== null || splitTargets(input).some((target) => /^\d+$/.test(target));
-}
-
-// The popup shows a repo dropdown only when there is a choice.
+// The popup offers repo options only when there is a choice.
 export function showRepoPicker(rules: RepoRules): boolean {
   return effectiveRepos(rules).length >= 2;
 }

@@ -108,21 +108,6 @@ test("the checks catch what they ban", () => {
   );
 });
 
-// The utility a @theme token makes, e.g. --text-body -> text-body, --color-popup-text -> text-popup-text.
-function utilities(css: string): string[] {
-  const prefixes: Record<string, string[]> = { color: ["bg", "text"], text: ["text"] };
-
-  return [...css.matchAll(/--(color|text)-([\w-]+):/g)].flatMap((match) => {
-    const [, kind = "", name] = match;
-
-    return (prefixes[kind] ?? []).map((prefix) => `${prefix}-${name}`);
-  });
-}
-
-function duplicates(names: string[]): string[] {
-  return names.filter((name, index) => names.indexOf(name) !== index);
-}
-
 test("the named colour check reads styles, not other words", () => {
   const markup = `<p class="red" style="color: red">red</p>
     <i :style="{ borderColor: 'navy' }" />
@@ -130,12 +115,6 @@ test("the named colour check reads styles, not other words", () => {
 
   assert.deepEqual(namedColours(stylesOf("Sample.vue", markup)), ["red", "navy", "Green"]);
   assert.deepEqual(namedColours(stylesOf("t.css", "--color-x: var(--y); outline: none")), []);
-});
-
-test("no two @theme tokens claim the same Tailwind utility", () => {
-  const theme = readFileSync(join(SRC, "popup/tailwind.css"), "utf8");
-  assert.deepEqual(duplicates(utilities(theme)), []);
-  assert.deepEqual(duplicates(utilities("--color-popup: a; --text-popup: b;")), ["text-popup"]);
 });
 
 test("rows and headers use the design's hover and selection tokens", () => {

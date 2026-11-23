@@ -10,7 +10,6 @@ const { open, toggle, close } = useActionMenu();
 const buttonClass = computed(() => ({ "menu-button-open": open.value }));
 
 interface MenuEntry {
-  id?: string;
   label?: string;
   icon?: string;
   disabled?: boolean;
@@ -20,7 +19,6 @@ interface MenuEntry {
 
 function menuItem(action: ActionMenuItem): MenuEntry {
   return {
-    id: action.id,
     label: action.label,
     icon: action.icon,
     disabled: action.busy,

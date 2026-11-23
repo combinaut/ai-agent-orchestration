@@ -32,8 +32,8 @@ test("collapsed groups load from and save to chrome.storage.local", async () => 
   await state.load();
   assert.deepEqual([...state.collapsed.value], ["1"]);
 
-  state.toggle("2");
-  state.toggle("1");
+  state.set("2", true);
+  state.set("1", false);
   assert.deepEqual([...state.collapsed.value], ["2"]);
   assert.deepEqual(stored["prTabsCollapsed"], ["2"]);
 

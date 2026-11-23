@@ -3,7 +3,6 @@ import type { Collapsed, StoredState } from "#/types";
 
 const KEY = "prTabsCollapsed";
 
-// Collapsed group ids, kept in chrome.storage.local.
 export function useCollapsed(): Collapsed {
   const collapsed = ref<ReadonlySet<string>>(new Set());
 
@@ -26,9 +25,5 @@ export function useCollapsed(): Collapsed {
     void chrome.storage.local.set({ [KEY]: [...next] });
   }
 
-  function toggle(id: string): void {
-    set(id, !collapsed.value.has(id));
-  }
-
-  return { collapsed, load, set, toggle };
+  return { collapsed, load, set };
 }

@@ -46,7 +46,6 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 }
 
-defineExpose({ focus });
 onMounted(focus);
 </script>
 
@@ -64,9 +63,10 @@ onMounted(focus);
       :aria-expanded="expanded"
       :aria-activedescendant="activeDescendant"
       :placeholder="placeholder"
+      :aria-label="placeholder"
       :readonly="busy"
       @keydown="handleKeydown"
     />
-    <span v-if="trailing" class="popup-field-trailing">{{ trailing }}</span>
+    <span v-show="trailing" class="popup-field-trailing" aria-live="polite">{{ trailing }}</span>
   </IconField>
 </template>

@@ -87,7 +87,6 @@ export function mountPopup<C extends Component>(
     global: {
       ...global,
       plugins: [[PrimeVue, primeVueConfiguration]],
-      stubs: global?.stubs,
     },
   });
 }

@@ -9,7 +9,7 @@ import { fakeAsk } from "./fakeAsk";
 import type { CloseQueueFixture } from "#test/types";
 
 const ROWS =
-  '<input id="pr-search"><button data-pr-close-id="1" data-pr-close="acme/webapp#1"></button><button data-pr-close-id="2" data-pr-close="acme/webapp#2"></button><button data-pr-close-id="3" data-pr-close="acme/webapp#3"></button>';
+  '<input id="target"><button data-pr-close-id="1" data-pr-close="acme/webapp#1"></button><button data-pr-close-id="2" data-pr-close="acme/webapp#2"></button><button data-pr-close-id="3" data-pr-close="acme/webapp#3"></button>';
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -41,7 +41,7 @@ for (const choice of ["next", "previous", "empty"] as const) {
       choice === "empty"
         ? document.activeElement?.id
         : (document.activeElement as HTMLElement).dataset.prClose,
-      choice === "empty" ? "pr-search" : expected,
+      choice === "empty" ? "target" : expected,
     );
   });
 }

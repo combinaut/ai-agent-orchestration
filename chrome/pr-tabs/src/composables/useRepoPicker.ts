@@ -1,6 +1,6 @@
 import { useAsyncState } from "@vueuse/core";
 import { computed, ref, toValue, type MaybeRefOrGetter } from "vue";
-import { bareNumber, hasBareNumber, suggestedRepo } from "#/core";
+import { bareNumber, suggestedRepo } from "#/core";
 import { failed } from "#/messages";
 import type { Ask, RepoChoices, RepoName, RepoPicker } from "#/types";
 
@@ -53,11 +53,10 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPi
 
   const repos = computed(() => [...(choices.value?.repos ?? [])]);
   const available = computed(() => choices.value !== null);
-  const visible = computed(() => available.value && hasBareNumber(toValue(input)));
   const guessUnavailable = computed(() => choices.value?.guessUnavailable ?? false);
 
-  function suggest(value = toValue(input)): void {
-    const selected = preselectedRepo(choices.value, value);
+  function suggest(): void {
+    const selected = preselectedRepo(choices.value, toValue(input));
 
     if (selected) {
       repo.value = selected;
@@ -70,5 +69,5 @@ export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPi
     void ask({ type: "pickRepo", repo: repo.value });
   }
 
-  return { repos, repo, available, visible, guessUnavailable, load, ready, suggest, pick };
+  return { repos, repo, available, guessUnavailable, load, ready, suggest, pick };
 }

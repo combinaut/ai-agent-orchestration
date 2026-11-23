@@ -4,19 +4,6 @@ import { test } from "vitest";
 import { useRepoPicker } from "#/composables/useRepoPicker";
 import { fakeAsk } from "./fakeAsk";
 
-const BARE_VISIBILITY = [
-  ["", false],
-  ["76", true],
-  [" 76 ", true],
-  ["#76", true],
-  ["webapp#76", false],
-  ["https://github.com/acme/webapp/pull/76", false],
-  ["76a", false],
-  ["76, 77", true],
-  ["#76\nhttps://github.com/acme/webapp/pull/76 78", true],
-  ["#76, webapp#77", false],
-] as const;
-
 test("the picker is available only when the service worker says to show it", async () => {
   const single = useRepoPicker(
     fakeAsk({ repos: { repos: ["webapp"], selected: "webapp", show: false, newest: {} } }).ask,
@@ -26,7 +13,6 @@ test("the picker is available only when the service worker says to show it", asy
   await single.load();
 
   assert.equal(single.available.value, false);
-  assert.equal(single.visible.value, false);
 
   const broken = useRepoPicker(fakeAsk({ repos: { error: "No answer" } }).ask, "76");
 
@@ -35,7 +21,7 @@ test("the picker is available only when the service worker says to show it", asy
   assert.equal(broken.available.value, false);
 });
 
-test("a listed choice selects the stored pick and is visible only for a bare number", async () => {
+test("a listed choice selects the stored pick", async () => {
   const input = ref("");
   const picker = useRepoPicker(
     fakeAsk({
@@ -54,11 +40,6 @@ test("a listed choice selects the stored pick and is visible only for a bare num
   assert.deepEqual(picker.repos.value, ["webapp", "api"]);
   assert.equal(picker.repo.value, "api");
   assert.equal(picker.available.value, true);
-
-  for (const [text, visible] of BARE_VISIBILITY) {
-    input.value = text;
-    assert.equal(picker.visible.value, visible, JSON.stringify(text));
-  }
 });
 
 test("a bare number preselects a repo that can hold it without saving it", async () => {
