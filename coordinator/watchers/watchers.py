@@ -1178,15 +1178,11 @@ def collect_pulls(command, before, clock=time.monotonic):
             # The 100-review connection is metadata for dedupe; bodies/classification keep the six-review window.
             display_pr = dict(pr, reviews=pr.get("recentReviews", pr["reviews"]))
             bot = os.environ.get("ORCH_BOT_REVIEWER_LOGIN", "")
-            visible_bot_reviews = (
-                [
-                    review["id"]
-                    for review in pr["reviews"]["nodes"]
-                    if (review.get("author") or {}).get("login") == bot
-                ]
-                if bot
-                else []
-            )
+            visible_bot_reviews = [
+                review["id"]
+                for review in pr["reviews"]["nodes"]
+                if (review.get("author") or {}).get("login") == bot
+            ]
             # Every qualifying human review is remembered, so a later edit cannot resurface an older one.
             visible_bot_reviews += [
                 review["id"]
@@ -1336,16 +1332,12 @@ def pull_identities(pr, lines):
             if review["state"] == "APPROVED"
         ]
     bot = os.environ.get("ORCH_BOT_REVIEWER_LOGIN", "")
-    reviews = (
-        [
-            row
-            for row in pr["reviews"]["nodes"]
-            if (row.get("author") or {}).get("login") == bot
-        ]
-        if bot
-        else []
-    )
-    if bot and "COPILOT" in lines:
+    reviews = [
+        row
+        for row in pr["reviews"]["nodes"]
+        if (row.get("author") or {}).get("login") == bot
+    ]
+    if "COPILOT" in lines:
         identities["COPILOT"] = reviews[-1]["id"]
     if "COMMENTED" in lines:
         identities["COMMENTED"] = audit.commented_review(pr, bot)["id"]

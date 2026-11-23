@@ -89,7 +89,8 @@ class PullsTest(IsolatedTestCase):
                 "body": "Needs a closer look\nCheck it",
             }
         ]
-        with patch.dict(os.environ, {"ORCH_BOT_REVIEWER_LOGIN": ""}):
+        with patch.dict(os.environ):
+            os.environ.pop("ORCH_BOT_REVIEWER_LOGIN", None)
             state, events = w.reduce_pulls(
                 None, w.collect_pulls(self.command([row]), None)
             )
