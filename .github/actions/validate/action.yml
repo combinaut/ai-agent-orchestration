@@ -1,18 +1,12 @@
 name: Validate
 description: ShellCheck, Ruff, the PR tabs extension and the test suites
-inputs:
-  extension-only:
-    required: false
-    default: 'false'
 runs:
   using: composite
   steps:
     - name: ShellCheck
-      if: inputs.extension-only != 'true'
       shell: bash
       run: scripts/ci/shellcheck.sh
     - name: Ruff
-      if: inputs.extension-only != 'true'
       shell: bash
       run: scripts/ci/ruff.sh
     - name: Set up pnpm for the PR tabs extension
@@ -32,30 +26,27 @@ runs:
       shell: bash
       run: scripts/ci/pr-tabs.sh
     - name: Prove Linux runner systemctl tripwire
-      if: runner.os == 'Linux' && inputs.extension-only != 'true'
+      if: runner.os == 'Linux'
       shell: bash
       run: scripts/ci/prove-linux-systemctl-tripwire.sh
     - name: Run hog against real Linux processes
-      if: runner.os == 'Linux' && inputs.extension-only != 'true'
+      if: runner.os == 'Linux'
       shell: bash
       run: scripts/ci/run-hog-linux.sh
     - name: Run balance against real Linux processes
-      if: runner.os == 'Linux' && inputs.extension-only != 'true'
+      if: runner.os == 'Linux'
       shell: bash
       run: scripts/ci/run-balance-linux.sh
     - name: Run workers entrypoint with fake Herdr
-      if: inputs.extension-only != 'true'
       shell: bash
       run: scripts/ci/run-workers-fake-herdr.sh
     - name: Run audit entrypoint with fake GitHub and Herdr
-      if: inputs.extension-only != 'true'
       shell: bash
       run: scripts/ci/run-audit-fake-github-herdr.sh
     - name: Validate isolated test suites
-      if: inputs.extension-only != 'true'
       shell: bash
       run: tests/run.sh
     - name: Verify Linux watcher units
-      if: runner.os == 'Linux' && inputs.extension-only != 'true'
+      if: runner.os == 'Linux'
       shell: bash
       run: scripts/ci/verify-linux-watcher-units.sh

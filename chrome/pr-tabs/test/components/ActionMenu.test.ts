@@ -25,7 +25,6 @@ function menu() {
   return mountPopup(ActionMenu, {
     attachTo: document.body,
     props: { label: "Actions", actions: ACTIONS },
-    global: { stubs: { teleport: true } },
   });
 }
 

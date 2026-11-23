@@ -671,10 +671,19 @@ test("goTo opens a bare number in the picked repo, else the remembered pick", as
   world.tabs = [];
 });
 
-test("one listed repo hides the repo options", async () => {
+test("one listed repo hides the repo options and asks the host for no numbers", async () => {
   world.hostSettings = { ...CONFIGURED, repos: ["webapp"] };
   const single = await freshWorker("single-repo");
+  const sent: HostRequest[] = [];
+
+  world.nativeHandler = async (message) => {
+    sent.push(message);
+
+    return { ok: true, newest: { webapp: 9 } };
+  };
+
   assert.equal((await single.repoChoices()).show, false);
+  assert.deepEqual(sent, []);
 });
 
 test("a pane lookup is one host request for at most the cap; none for no heads", async () => {

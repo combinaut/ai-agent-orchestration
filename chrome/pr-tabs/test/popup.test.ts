@@ -201,6 +201,7 @@ test("the unified field detects a bare number without opening suggestions", asyn
   assert.equal(field.attributes("role"), "combobox");
   assert.equal(field.attributes("aria-controls"), "popup-list");
   assert.equal(field.attributes("aria-activedescendant"), undefined);
+  assert.equal(wrapper.find(".repo-option").exists(), false);
   assert.ok(wrapper.find("footer").text().endsWith("↵ open · ↑↓ repository · esc close"));
 
   wrapper.unmount();

@@ -842,12 +842,13 @@ export async function repoChoices(): Promise<RepoChoices> {
     readStored("prTabsRepo"),
     readStored("prTabsRepoNumbers"),
   ]);
-  const refreshed = await refreshRepoNumbersNow(rules);
+  const show = showRepoPicker(rules);
+  const refreshed = show ? await refreshRepoNumbersNow(rules) : { cache: null, failed: false };
 
   return {
     repos: effectiveRepos(rules),
     selected: pickedRepo(rules, stored),
-    show: showRepoPicker(rules),
+    show,
     newest: refreshed.cache?.newest || cache.newest,
     guessUnavailable: refreshed.failed,
   };
