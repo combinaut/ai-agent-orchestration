@@ -187,10 +187,12 @@ def repo_numbers(request):
             f"r{i}: repository(owner: $o, name: $r{i}) {{ issues(first: 1, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ number }} }} pullRequests(first: 1, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ number }} }} }}"
         )
         variables.append((f"r{i}", repo))
-    data, _ = gh_graphql(
+    data, failure = gh_graphql(
         f"query($o: String!, {', '.join(declarations)}) {{ {' '.join(fields)} }}",
         [("o", owner), *variables],
     )
+    if not any(isinstance(data.get(f"r{i}"), dict) for i in range(len(repos))):
+        raise RequestError(failure)
     newest = {}
     for i, repo in enumerate(repos):
         repository = data.get(f"r{i}") or {}

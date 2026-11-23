@@ -207,7 +207,7 @@ test("the unified field detects a bare number without opening suggestions", asyn
   wrapper.unmount();
 });
 
-test("Enter always opens a bare-number picker before opening its PR", async () => {
+test("with several repos, Enter opens a bare-number picker before opening its PR", async () => {
   const close = vi.spyOn(window, "close").mockImplementation(noop);
   const { wrapper, sent } = await popup(["infra", "big", "orch", "hub"], {
     repos: {
@@ -534,7 +534,6 @@ test("selecting a row focuses its existing tab and closes the popup", async () =
     focusPr: { focused: "acme/webapp#1" },
   });
   try {
-    sent.length = 0;
     await wrapper.find("button[data-pr-tab]").trigger("click");
     await flushPromises();
     assert.deepEqual(withoutPolls(sent), [{ type: "focusPr", key: "acme/webapp#1" }]);

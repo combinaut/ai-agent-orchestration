@@ -236,6 +236,16 @@ test("repo numbers return each repository's newest issue number in one gh call",
   assert.deepEqual(reply, { ok: true, newest: { webapp: 521, api: 2000 } });
 });
 
+test("repo numbers where no repository resolved return the GraphQL errors, not an empty success", () => {
+  const errors = [{ message: "Could not resolve to a Repository" }];
+  const { reply } = ask(
+    { type: "repoNumbers", org: "acme", repos: ["webapp", "api"] },
+    { reply: { data: { r0: null, r1: null }, errors }, status: 1 },
+  );
+
+  assert.deepEqual(reply, { ok: false, error: "Could not resolve to a Repository" });
+});
+
 test("repo number lookups reject invalid repositories before calling gh", () => {
   const { reply, calls } = ask({ type: "repoNumbers", org: "acme", repos: ["bad repo"] });
 

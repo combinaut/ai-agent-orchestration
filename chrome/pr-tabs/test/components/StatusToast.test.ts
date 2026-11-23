@@ -88,3 +88,14 @@ test("the next message replaces a closed or shown toast; hidden status shows non
 test("the close button is labelled", () => {
   assert.equal(toast().find(".status-toast-close").attributes("aria-label"), "Dismiss");
 });
+
+test("a toast hidden under the pointer does not pause the next toast", async () => {
+  vi.useFakeTimers();
+  const wrapper = toast({ kind: "error" });
+
+  await wrapper.find("#status").trigger("mouseenter");
+  await wrapper.setProps({ shown: false });
+  await wrapper.setProps({ kind: "success", shown: true, revision: 2 });
+  await vi.advanceTimersByTimeAsync(4000);
+  assert.equal(wrapper.find("#status").exists(), false);
+});

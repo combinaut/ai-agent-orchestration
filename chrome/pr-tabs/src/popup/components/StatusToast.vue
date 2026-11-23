@@ -47,6 +47,12 @@ function handleClose(): void {
 
 function handleMessageChanged(): void {
   open.value = props.shown;
+
+  if (!props.shown) {
+    hovered.value = false;
+    focused.value = false;
+  }
+
   startTimer();
 }
 
