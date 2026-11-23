@@ -16,7 +16,7 @@ jobs:
     permissions:
       pull-requests: read
     outputs:
-      extension_only: ${{ github.event_name == 'pull_request' && github.event.pull_request.changed_files < 3000 && steps.filter.outputs.extension_only == 'true' }}
+      extension_only: ${{ github.event_name == 'pull_request' && github.event.pull_request.changed_files < 3000 && steps.filter.outputs.outside_extension == 'false' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -25,11 +25,12 @@ jobs:
         with:
           predicate-quantifier: every
           filters: |
-            extension_only:
-              - 'chrome/**'
-              - '**/*.md'
-              - 'LICENSE'
-              - 'docs/**'
+            outside_extension:
+              - '**'
+              - '!chrome/**'
+              - '!**/*.md'
+              - '!LICENSE'
+              - '!docs/**'
 
   macos:
     name: Validate (macos-latest)
@@ -47,6 +48,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     needs: changes
+    if: ${{ !cancelled() }}
     steps:
       - uses: actions/checkout@v7
       - run: scripts/ci/install-deps-ubuntu.sh
