@@ -796,12 +796,22 @@ def review_line(entry, cleared=False):
     )
 
 
+def review_identity(row, previous):
+    if not (row.get("agent_session") or {}).get("value"):
+        saved = [
+            key for key, entry in previous.items() if entry["pane"] == row["pane_id"]
+        ]
+        if len(saved) == 1:
+            return saved[0]
+    return identity(row)
+
+
 def reduce_review_waiting(previous, raw):
     owners = waiting_owners(raw)
     old = previous.get("review_waiting", {})
     current, events = {}, []
     for row in agents(raw):
-        key = identity(row)
+        key = review_identity(row, old)
         entry = old.get(key)
         owner = (
             owners.get(row.get("workspace_id"))
@@ -822,16 +832,27 @@ def reduce_review_waiting(previous, raw):
             else None
         )
         seq = row.get("state_change_seq")
-        same = entry and entry["owner"] == owner and entry.get("seq") == seq
+        old_seq = (entry or {}).get("seq")
+        same = (
+            entry
+            and entry["owner"] == owner
+            and (seq is None or old_seq is None or old_seq == seq)
+        )
         if check is True or (check is None and same):
-            current[key] = dict(pane=row["pane_id"], owner=owner, seq=seq)
+            current[key] = dict(
+                pane=row["pane_id"],
+                owner=owner,
+                seq=seq if seq is not None else old_seq,
+            )
     for key in sorted(set(old) | set(current)):
-        if old.get(key) == current.get(key):
+        before_line = review_line(old[key]) if key in old else None
+        after_line = review_line(current[key]) if key in current else None
+        if before_line == after_line:
             continue
-        if key in old:
+        if before_line:
             events.append(review_line(old[key], cleared=True))
-        if key in current:
-            events.append(review_line(current[key]))
+        if after_line:
+            events.append(after_line)
     return current, events
 
 
@@ -854,10 +875,11 @@ def reduce_waiting(previous, raw):
             rows[key] = row
             gaps[key] = True
     owners = waiting_owners(raw)
+    review_panes = {entry["pane"] for entry in raw.get("review_waiting", {}).values()}
     current, events = {}, []
     for key, row in rows.items():
         entry = old.get(key)
-        if key in raw.get("review_waiting", {}) or worker_signals.suppressed(row, raw):
+        if row["pane_id"] in review_panes or worker_signals.suppressed(row, raw):
             continue
         if architect_like(row):
             continue
@@ -2460,8 +2482,14 @@ def collect_review_waiting(raw, before, started):
         return
     previous = before or {}
     now = raw["observed_at"]
+    keys = {
+        row["pane_id"]: review_identity(row, previous.get("review_waiting", {}))
+        for row in agents(raw)
+    }
     live = {
-        identity(row) for row in agents(raw) if row.get("agent_status") in IDLE_STATUSES
+        keys[row["pane_id"]]
+        for row in agents(raw)
+        if row.get("agent_status") in IDLE_STATUSES
     }
     checked = {
         key: at for key, at in previous.get("review_checked", {}).items() if key in live
@@ -2481,17 +2509,17 @@ def collect_review_waiting(raw, before, started):
             completed
             and not architect_like(row)
             and owners.get(row.get("workspace_id"))
-            and now - checked.get(identity(row), -600) >= 600
+            and now - checked.get(keys[row["pane_id"]], -600) >= 600
         ):
             candidates.append(row)
     checks = {}
-    for row in sorted(candidates, key=lambda row: checked.get(identity(row), -600))[
-        :OPEN_PR_CHECKS_MAX
-    ]:
+    for row in sorted(
+        candidates, key=lambda row: checked.get(keys[row["pane_id"]], -600)
+    )[:OPEN_PR_CHECKS_MAX]:
         if _monotonic() - started >= IDLE_CHECK_SECONDS:
             break
         checks[row["pane_id"]] = open_pr(row, review_requested=True)
-        checked[identity(row)] = now
+        checked[keys[row["pane_id"]]] = now
     raw.update(review_wait=checks, review_checked=checked)
     raw["review_waiting"], _ = reduce_review_waiting(previous, raw)
 

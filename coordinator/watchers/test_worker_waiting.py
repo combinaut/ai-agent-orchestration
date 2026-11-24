@@ -167,6 +167,56 @@ class WaitingTests(IsolatedTestCase):
                     not preserved,
                 )
 
+    def test_review_wait_preserves_missing_metadata_and_clears_known_changes(self):
+        row = dict(self.row, state_change_seq=10)
+        raw = dict(
+            result={"agents": [row]},
+            observed_at=0,
+            workspaces=workspace_snapshot("architect"),
+            review_wait={"p1": True},
+            review_checked={"s1": 0},
+        )
+        state, _ = w.reduce_workers(None, raw)
+        for field in ("state_change_seq", "agent_session"):
+            for explicit_null in (False, True):
+                changed = dict(row)
+                if explicit_null:
+                    changed[field] = None
+                else:
+                    changed.pop(field)
+                with self.subTest(field=field, explicit_null=explicit_null):
+                    gap = dict(
+                        raw,
+                        result={"agents": [changed]},
+                        observed_at=60,
+                        review_wait={},
+                    )
+                    after, events = w.reduce_workers(state, gap)
+                    self.assertEqual(after["review_waiting"], state["review_waiting"])
+                    self.assertFalse(after["waiting"])
+                    self.assertFalse(
+                        any("waiting on review cleared" in line for line in events)
+                    )
+                    with patch.object(w, "open_pr") as check:
+                        w.collect_review_waiting(gap, state, w._monotonic())
+                        check.assert_not_called()
+        initial, _ = w.reduce_workers(None, dict(raw, result={"agents": [self.row]}))
+        after, events = w.reduce_workers(
+            initial, dict(raw, observed_at=60, review_wait={})
+        )
+        self.assertEqual(after["review_waiting"]["s1"]["seq"], 10)
+        self.assertFalse(any("waiting on review cleared" in line for line in events))
+        for changed in (
+            dict(row, state_change_seq=11),
+            dict(row, agent_session={"value": "successor"}),
+        ):
+            after, events = w.reduce_workers(
+                state,
+                dict(raw, result={"agents": [changed]}, observed_at=60, review_wait={}),
+            )
+            self.assertFalse(after["review_waiting"])
+            self.assertTrue(any("waiting on review cleared" in line for line in events))
+
     def test_review_checks_are_bounded_and_idle_needs_current_completion(self):
         rows = [
             dict(self.row, pane_id=f"p{n}", agent_session={"value": f"s{n}"})
