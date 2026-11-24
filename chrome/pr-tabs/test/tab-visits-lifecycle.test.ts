@@ -157,6 +157,25 @@ test("leaving and returning to a PR during the final visit read keeps the tab", 
   assert.deepEqual(await checking, []);
 });
 
+test("a tab known from a URL event that leaves and returns during the final visit read stays", async () => {
+  const worker = await freshWorker("known-return-gap");
+  navigate(1, A);
+  world.nativeHandler = answer({ [KEY_A]: { state: "OPEN" } });
+  await worker.checkNow();
+  await flush();
+
+  const hold = answerHoldingCloseRead({ [KEY_A]: { state: "MERGED", closedAt: tick() } });
+  const checking = closedBy(worker);
+  await vi.waitFor(() => assert.ok(hold.release));
+
+  tick();
+  navigate(1, B);
+  navigate(1, A);
+  hold.release?.();
+
+  assert.deepEqual(await checking, []);
+});
+
 test("a subpage of the same PR opened during the final visit read still closes", async () => {
   const worker = await freshWorker("subpage-gap");
   navigate(1, A);
