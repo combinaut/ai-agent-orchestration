@@ -258,7 +258,11 @@ def native_messages(args, stamped, fallback, patterns):
             by_owner.setdefault(owner.group(1), []).append(
                 native(line.split(" ", 1)[1])
                 + (
-                    ". Answer with orch-signal answer <id> <text>."
+                    (
+                        ". Deliver it by hand; orch-signal answer does not apply."
+                        if " question=UNDELIVERED:" in body
+                        else ". Answer with orch-signal answer <id> <text>."
+                    )
                     if body.startswith("workers: WORKER QUESTION ")
                     else ". No reply needed."
                 )

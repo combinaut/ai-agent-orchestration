@@ -30,6 +30,8 @@ DONE_EVENTS_KEEP_SECONDS = 3600
 ID = re.compile(r"signal-[a-f0-9]{32}\Z")
 IDENTITY_KEYS = ("pane", "workspace", "owner")
 EXIT_UNWRITABLE = 73
+COMPOSER_STATE = Path(__file__).parents[1] / "composer-state.py"
+SEND_SECONDS = 15
 
 
 def directory():
@@ -286,6 +288,8 @@ def new_question(ident, question, options, timeout, deadline=None):
                 old = read(path)
                 if old["pane"] == ident["pane"]:
                     alive = asker_alive(old)
+                    if old.get("undelivered_for"):
+                        continue
                     if old.get("cleanup") and not alive:
                         continue
                     if old.get("cleanup"):
@@ -320,16 +324,100 @@ def new_question(ident, question, options, timeout, deadline=None):
         ) from None
 
 
-def wait_answer(record, timeout, deadline=None):
+def parent_detached(start):
+    """A shell `&` job loses its parent; init, or any change since the start, means nobody waits for this process."""
+    current = os.getppid()
+    return current == 1 or current != start
+
+
+def mark_detached(record):
+    record["detached"] = True
+    current = read(question_path(record["id"]))
+    if current and not current.get("cleanup"):
+        write(question_path(record["id"]), dict(current, detached=True))
+
+
+def deliver_to_pane(record, text):
+    """Type the answer into the waiter's own pane; return why it could not, or None."""
+    pane = record["pane"]
+    line = strip_controls(" ".join(text.split()))
+    herdr = (
+        os.environ.get("HERDR_BIN_PATH") or os.environ.get("ORCH_HERDR_BIN") or "herdr"
+    )
+    try:
+        composer = subprocess.run(
+            [sys.executable, str(COMPOSER_STATE), pane],
+            capture_output=True,
+            text=True,
+            timeout=SEND_SECONDS,
+        )
+        if composer.returncode != 0:
+            return (
+                "composer holds text"
+                if composer.returncode == 1
+                else "composer is not readable"
+            )
+        sent = subprocess.run(
+            [herdr, "agent", "prompt", pane, f"Answer to {record['id']}: {line}"],
+            capture_output=True,
+            text=True,
+            timeout=SEND_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return str(error)
+    if sent.returncode != 0:
+        return f"herdr agent prompt exited {sent.returncode}"
+    return None
+
+
+def report_failed_delivery(record, text, reason):
+    """A fresh question record: the owner's workers watcher already turns it into a WORKER QUESTION line."""
+    now = time.time()
+    pane = record["pane"]
+    failure = dict(
+        {key: record[key] for key in IDENTITY_KEYS},
+        id="signal-" + uuid.uuid4().hex,
+        kind="question",
+        undelivered_for=record["id"],
+        question=strip_controls(
+            f"UNDELIVERED: answer for {record['id']} could not be typed into pane {pane}: {reason}. "
+            f"Deliver it by hand to pane {pane}; orch-signal answer does not apply. answer was: {text}"
+        ),
+        options="",
+        at=now,
+        deadline=now + QUESTION_RETAIN_SECONDS,
+    )
+    print(f"orch-signal: {failure['question']}", file=sys.stderr)
+    with answers_lock():
+        write(question_path(failure["id"]), failure)
+
+
+def deliver_answer(record, text):
+    """Runs after the ask deadline guard, so its alarm cannot fire inside the send and double-deliver."""
+    if not record.get("detached"):
+        return
+    try:
+        reason = deliver_to_pane(record, text)
+    except KeyboardInterrupt:
+        reason = "interrupted during the send; it may already be typed"
+    if reason:
+        report_failed_delivery(record, text, reason)
+
+
+def wait_answer(record, timeout, deadline=None, parent=None):
     deadline = time.monotonic() + timeout if deadline is None else deadline
+    parent = os.getppid() if parent is None else parent
+    text = None
     try:
         while True:
             with answers_lock(timeout=max(0, deadline - time.monotonic())):
+                if not record.get("detached") and parent_detached(parent):
+                    mark_detached(record)
                 path = answer_path(record["id"])
                 if path.exists():
                     text = read_text(path).strip()
                     remove_question(record, close_panel=False)
-                    return text
+                    break
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     remove_question(record, close_panel=False)
@@ -337,7 +425,9 @@ def wait_answer(record, timeout, deadline=None):
             time.sleep(min(POLL_SECONDS, remaining))
     except TimeoutError:
         pass  # Leave cancellation to bounded retention cleanup when the lock becomes available.
-    raise ValueError(f"question {record['id']} timed out after {timeout:g}s")
+    if text is None:
+        raise ValueError(f"question {record['id']} timed out after {timeout:g}s")
+    return text
 
 
 def open_user_question(identifier, path, timeout=None):
@@ -356,6 +446,11 @@ def answer(identifier, text, to_user=False):
             raise ValueError("question is missing or expired")
         if caller["workspace"] != record["owner"]:
             raise ValueError("only the owner architect workspace may answer")
+        if record.get("undelivered_for"):
+            raise ValueError(
+                f"nothing to answer: the answer for {record['undelivered_for']} could not be typed into "
+                f"pane {record['pane']}; deliver it by hand"
+            )
         if not asker_alive(record):
             raise ValueError("asker is gone")
         if answer_path(identifier).exists():
@@ -383,6 +478,10 @@ def answer(identifier, text, to_user=False):
             if not text or not text.strip():
                 raise ValueError("answer text is required")
             atomic_write(answer_path(identifier), text)
+        if record.get("detached"):
+            print(
+                f"orch-signal: asker of {identifier} is detached; its waiter will type the answer into pane {record['pane']}"
+            )
 
 
 def bridge_user_answer(identifier, text):
@@ -558,7 +657,8 @@ def main():
             import watcher_runtime as runtime
 
             deadline = time.monotonic() + args.timeout
-            record = None
+            parent = os.getppid()
+            record = result = None
 
             def interrupted(signum, frame):
                 raise KeyboardInterrupt
@@ -569,19 +669,24 @@ def main():
             }
             try:
                 try:
-                    with runtime.deadline(args.timeout, "orch-signal ask", soft=True):
-                        record = new_question(
-                            identity(recover=True),
-                            args.question,
-                            args.options,
-                            args.timeout,
-                            deadline,
-                        )
-                        result = wait_answer(record, args.timeout, deadline)
-                except TimeoutError:
-                    raise ValueError(
-                        f"question timed out after {args.timeout:g}s"
-                    ) from None
+                    try:
+                        with runtime.deadline(
+                            args.timeout, "orch-signal ask", soft=True
+                        ):
+                            record = new_question(
+                                identity(recover=True),
+                                args.question,
+                                args.options,
+                                args.timeout,
+                                deadline,
+                            )
+                            result = wait_answer(record, args.timeout, deadline, parent)
+                    except TimeoutError:
+                        if result is None:
+                            raise ValueError(
+                                f"question timed out after {args.timeout:g}s"
+                            ) from None
+                    deliver_answer(record, result)
                 except KeyboardInterrupt:
                     # Ignore further interrupts while cancelling under the lock.
                     for number in previous:
@@ -604,6 +709,7 @@ def main():
                     if (
                         caller["workspace"] in (record["workspace"], record["owner"])
                         and not record.get("cleanup")
+                        and not record.get("undelivered_for")
                         and record["deadline"] > time.time()
                         and not answer_path(record["id"]).exists()
                     ):
