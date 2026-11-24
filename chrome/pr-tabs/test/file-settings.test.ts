@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import assert from "node:assert/strict";
-import { mount, flushPromises } from "@vue/test-utils";
+import { flushPromises } from "@vue/test-utils";
 import { afterEach, test, vi } from "vitest";
+import { mountPopup as mount } from "#test/components/mountPopup";
 import App from "#/options/App.vue";
 import {
   DEFAULT_PATTERNS,
@@ -140,5 +141,52 @@ test("own storage echoes cannot discard a newer queued pattern edit", async () =
     enabled: false,
     patterns: [...DEFAULT_PATTERNS, "*.test.ts"],
   });
+  wrapper.unmount();
+});
+
+test("settings use branded PrimeVue controls and accessible icon-only remove buttons", async () => {
+  storage();
+  const wrapper = mount(App);
+  await flushPromises();
+  assert.equal(wrapper.get("h1").text(), "PR Tabs settings");
+  assert.equal(wrapper.get(".settings-icon").attributes("src"), "./icons/icon-48.png");
+  assert.equal(wrapper.get("h2").text(), "Hide files on pull request pages");
+  assert.ok(wrapper.find(".p-toggleswitch").exists());
+  assert.ok(wrapper.find(".p-inputtext").exists());
+  const remove = wrapper.get("li button");
+  assert.equal(remove.attributes("aria-label"), "Remove *.stories.*");
+  assert.equal(remove.text(), "");
+  assert.ok(remove.find(".pi-trash").exists());
+  wrapper.unmount();
+});
+
+test("empty and duplicate patterns show inline feedback without writing", async () => {
+  storage();
+  const wrapper = mount(App);
+  await flushPromises();
+  await wrapper.get("form").trigger("submit");
+  assert.equal(wrapper.get("#pattern-feedback").text(), "Enter a pattern.");
+  assert.equal(wrapper.get("#file-pattern").attributes("aria-invalid"), "true");
+  await wrapper.get("#file-pattern").setValue(" *.spec.ts ");
+  assert.equal(wrapper.get("#pattern-feedback").text(), "");
+  await wrapper.get("form").trigger("submit");
+  assert.equal(wrapper.get("#pattern-feedback").text(), "This pattern is already in the list.");
+  assert.equal(set.mock.calls.length, 0);
+  await wrapper.get("#file-pattern").setValue("*.test.ts");
+  await wrapper.get("form").trigger("submit");
+  await flushPromises();
+  assert.equal(wrapper.get("#pattern-feedback").text(), "");
+  assert.equal(wrapper.findAll("li").length, 4);
+  wrapper.unmount();
+});
+
+test("pattern rows look inactive when filtering is off but remain editable", async () => {
+  storage();
+  const wrapper = mount(App);
+  await flushPromises();
+  assert.ok(wrapper.get(".settings-patterns").classes().includes("patterns-inactive"));
+  assert.equal(wrapper.get("li button").attributes("disabled"), undefined);
+  await wrapper.get<HTMLInputElement>('input[type="checkbox"]').setValue(true);
+  assert.equal(wrapper.get(".settings-patterns").classes().includes("patterns-inactive"), false);
   wrapper.unmount();
 });

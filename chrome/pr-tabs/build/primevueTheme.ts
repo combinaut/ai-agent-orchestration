@@ -19,6 +19,7 @@ export const COMPONENTS: readonly string[] = [
   "progressbar",
   "ripple",
   "tag",
+  "toggleswitch",
 ];
 
 async function loadStyle(specifier: string): Promise<ThemeStyleModule> {

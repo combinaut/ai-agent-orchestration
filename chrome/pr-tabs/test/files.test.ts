@@ -87,7 +87,11 @@ test("show them reveals this page including later arrivals until navigation", ()
   root?.insertAdjacentHTML("beforeend", root.firstElementChild?.outerHTML ?? "");
   filter.update();
   assert.equal(document.querySelectorAll(HIDDEN).length, 0);
-  assert.equal(document.querySelector("#pr-tabs-hidden-files"), null);
+  assert.equal(
+    document.querySelector("#pr-tabs-hidden-files span")?.textContent,
+    "1 hidden files shown ·",
+  );
+  assert.equal(document.querySelector("#pr-tabs-hidden-files button")?.textContent, "Hide them");
   page = "https://github.com/example/project/pull/2/changes";
   filter.update();
   assert.equal(document.querySelectorAll(HIDDEN).length, 3);
@@ -148,4 +152,50 @@ test("observer follows turbo navigation and stops cleanly", async () => {
   document.dispatchEvent(new Event("turbo:load"));
   await vi.advanceTimersByTimeAsync(60);
   assert.equal(document.querySelectorAll(HIDDEN).length, 0);
+});
+
+test("the bar toggles both ways with a stable unique count and keyboard focus", () => {
+  setup();
+  const button = document.querySelector<HTMLButtonElement>("#pr-tabs-hidden-files button");
+  button?.focus();
+  button?.click();
+  assert.equal(document.querySelectorAll(HIDDEN).length, 0);
+  assert.equal(
+    document.querySelector("#pr-tabs-hidden-files span")?.textContent,
+    "1 hidden files shown ·",
+  );
+  assert.equal(document.activeElement, button);
+  button?.click();
+  assert.equal(document.querySelectorAll(HIDDEN).length, 2);
+  assert.equal(
+    document.querySelector("#pr-tabs-hidden-files span")?.textContent,
+    "1 files hidden by PR Tabs ·",
+  );
+  assert.equal(button?.textContent, "Show them");
+  assert.equal(document.activeElement, button);
+});
+
+test("shown-mode counts update for late arrivals and live settings", () => {
+  const filter = setup();
+  document.querySelector<HTMLButtonElement>("#pr-tabs-hidden-files button")?.click();
+  const root = document.querySelector("[data-testid=progressive-diffs-list]");
+  root?.insertAdjacentHTML(
+    "beforeend",
+    root.firstElementChild?.outerHTML
+      .replaceAll("src/Button.stories.ts", "src/other.spec.ts")
+      .replaceAll("diff-story", "diff-other") ?? "",
+  );
+  filter.update();
+  assert.equal(document.querySelectorAll(HIDDEN).length, 0);
+  assert.equal(
+    document.querySelector("#pr-tabs-hidden-files span")?.textContent,
+    "2 hidden files shown ·",
+  );
+  filter.configure({ enabled: true, patterns: ["*.spec.ts"] });
+  assert.equal(
+    document.querySelector("#pr-tabs-hidden-files span")?.textContent,
+    "1 hidden files shown ·",
+  );
+  document.querySelector<HTMLButtonElement>("#pr-tabs-hidden-files button")?.click();
+  assert.equal(document.querySelectorAll(HIDDEN).length, 1);
 });

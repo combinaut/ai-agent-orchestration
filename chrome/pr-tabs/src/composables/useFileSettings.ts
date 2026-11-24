@@ -1,27 +1,22 @@
 import { computed, onMounted, onUnmounted, ref, type Ref } from "vue";
 import { loadFileSettings, saveFileSettings, watchFileSettings } from "#/files/settings";
+import { usePatternInput } from "#/composables/usePatternInput";
 import type { FileSettings } from "#/files/settings";
 
 export function useFileSettings() {
   const settings = ref<FileSettings>({ enabled: false, patterns: [] });
-  const pattern = ref("");
   const ready = ref(false);
   const failed = ref(false);
   const disabled = computed(() => !ready.value);
   const source = crypto.randomUUID();
   const persist = settingsWriter(settings, failed, source);
 
-  function handleToggle(event: Event): void {
-    const enabled = (event.target as HTMLInputElement).checked;
+  function handleToggle(enabled: boolean): void {
     void persist({ ...settings.value, enabled });
   }
 
-  function handleAdd(): void {
-    const value = pattern.value.trim();
-    if (value && !settings.value.patterns.includes(value)) {
-      void persist({ ...settings.value, patterns: [...settings.value.patterns, value] });
-      pattern.value = "";
-    }
+  function add(value: string): void {
+    void persist({ ...settings.value, patterns: [...settings.value.patterns, value] });
   }
 
   function remove(value: string): void {
@@ -35,7 +30,9 @@ export function useFileSettings() {
   const enabled = computed(() => settings.value.enabled);
   const patterns = computed(() => settings.value.patterns);
 
-  return { enabled, patterns, pattern, disabled, failed, handleToggle, handleAdd, remove };
+  const draft = usePatternInput(patterns, add);
+
+  return { enabled, patterns, ...draft, disabled, failed, handleToggle, remove };
 }
 
 interface SettingsRefs {

@@ -432,7 +432,12 @@
     "message": "Add"
   },
   "removePattern": {
-    "message": "Remove"
+    "message": "Remove $PATTERN$",
+    "placeholders": {
+      "pattern": {
+        "content": "$1"
+      }
+    }
   },
   "showHiddenFiles": {
     "message": "Show them"
@@ -445,6 +450,32 @@
   },
   "filesHidden": {
     "message": "$COUNT$ files hidden by PR Tabs ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "settingsPageTitle": {
+    "message": "PR Tabs settings"
+  },
+  "filePatternsLabel": {
+    "message": "File patterns"
+  },
+  "filePatternPlaceholder": {
+    "message": "e.g. *.test.ts"
+  },
+  "filePatternEmpty": {
+    "message": "Enter a pattern."
+  },
+  "filePatternDuplicate": {
+    "message": "This pattern is already in the list."
+  },
+  "hideHiddenFiles": {
+    "message": "Hide them"
+  },
+  "hiddenFilesShown": {
+    "message": "$COUNT$ hidden files shown ·",
     "placeholders": {
       "count": {
         "content": "$1"

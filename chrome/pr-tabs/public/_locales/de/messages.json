@@ -432,7 +432,12 @@
     "message": "Hinzufügen"
   },
   "removePattern": {
-    "message": "Entfernen"
+    "message": "$PATTERN$ entfernen",
+    "placeholders": {
+      "pattern": {
+        "content": "$1"
+      }
+    }
   },
   "showHiddenFiles": {
     "message": "Anzeigen"
@@ -445,6 +450,32 @@
   },
   "filesHidden": {
     "message": "$COUNT$ Dateien von PR Tabs ausgeblendet ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "settingsPageTitle": {
+    "message": "PR Tabs Einstellungen"
+  },
+  "filePatternsLabel": {
+    "message": "Dateimuster"
+  },
+  "filePatternPlaceholder": {
+    "message": "z. B. *.test.ts"
+  },
+  "filePatternEmpty": {
+    "message": "Ein Muster eingeben."
+  },
+  "filePatternDuplicate": {
+    "message": "Dieses Muster ist bereits in der Liste."
+  },
+  "hideHiddenFiles": {
+    "message": "Ausblenden"
+  },
+  "hiddenFilesShown": {
+    "message": "$COUNT$ ausgeblendete Dateien angezeigt ·",
     "placeholders": {
       "count": {
         "content": "$1"

@@ -727,34 +727,175 @@ mark {
 }
 
 #file-settings {
-  max-width: 720px;
+  box-sizing: border-box;
+  max-width: 640px;
   margin: 40px auto;
   padding: 24px;
   color: var(--fg);
   font:
-    16px/1.5 system-ui,
+    13px/20px system-ui,
     sans-serif;
+  --p-inputtext-background: var(--bg);
+  --p-inputtext-color: var(--fg);
+  --p-inputtext-border-color: var(--line);
+  --p-inputtext-hover-border-color: var(--muted);
+  --p-inputtext-focus-border-color: var(--accent);
+  --p-inputtext-border-radius: 8px;
+  --p-inputtext-placeholder-color: var(--muted);
+  --p-button-primary-background: var(--accent);
+  --p-button-primary-hover-background: var(--accent);
+  --p-button-primary-active-background: var(--accent);
+  --p-button-primary-border-color: var(--accent);
+  --p-button-primary-hover-border-color: var(--accent);
+  --p-button-primary-active-border-color: var(--accent);
+  --p-button-primary-color: var(--bg);
+  --p-button-primary-hover-color: var(--bg);
+  --p-button-primary-active-color: var(--bg);
+  --p-button-border-radius: 8px;
+  --p-toggleswitch-checked-background: var(--accent);
+  --p-toggleswitch-checked-hover-background: var(--accent);
+  --p-toggleswitch-handle-checked-background: var(--bg);
+  --p-toggleswitch-handle-checked-hover-background: var(--bg);
+}
+
+#file-settings .settings-header {
+  margin-bottom: 24px;
+}
+
+#file-settings .settings-icon {
+  width: 36px;
+  height: 36px;
+}
+
+#file-settings h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+#file-settings .settings-card {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--pop);
+}
+
+#file-settings h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+#file-settings .settings-help {
+  margin: 6px 0 20px;
+  color: var(--muted);
 }
 
 #file-settings fieldset {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 20px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
-#file-settings li,
-#file-settings form {
+#file-settings .settings-toggle {
+  padding-block: 16px;
+  border-block: 1px solid var(--line);
+  font-weight: 600;
+}
+
+#file-settings .settings-patterns {
+  margin-block: 20px;
+  transition: opacity 0.15s;
+}
+
+#file-settings .patterns-inactive {
+  opacity: 0.45;
+}
+
+#file-settings h3 {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+#file-settings ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#file-settings .settings-pattern {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  margin-block: 12px;
+  min-width: 0;
+  padding: 4px 8px 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
 }
 
-#file-settings button,
-#file-settings input {
-  font: inherit;
+#file-settings code,
+#file-settings .p-inputtext {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
 }
 
-#file-settings [role="alert"] {
+#file-settings code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#file-settings .p-button {
+  font-size: 13px;
+}
+
+#file-settings .settings-pattern .p-button {
+  flex: none;
+}
+
+#file-settings .settings-add-form > label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+#file-settings .settings-add-row .p-inputtext {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+}
+
+#file-settings .settings-add-row .p-button {
+  flex: none;
+}
+
+#file-settings .settings-feedback {
+  min-height: 20px;
+  margin: 6px 0 0;
   color: var(--error);
+  font-size: 12px;
+}
+
+#file-settings .settings-error {
+  margin: 12px 0 0;
+  color: var(--error);
+}
+
+@media (width <= 640px) {
+  #file-settings {
+    margin: 0 auto;
+    padding: 20px;
+  }
+
+  #file-settings .settings-card {
+    padding: 20px;
+  }
 }

@@ -1,4 +1,4 @@
-/* The PrimeIcons glyphs the popup uses, from the woff2 font only. */
+/* The PrimeIcons glyphs the extension uses, from the woff2 font only. */
 @font-face {
   font-family: "primeicons";
   font-display: block;
@@ -49,4 +49,14 @@
 }
 .pi-clone::before {
   content: "\e955";
+}
+
+.pi-cog::before {
+  content: "\e94a";
+}
+.pi-trash::before {
+  content: "\e93d";
+}
+.pi-plus::before {
+  content: "\e90d";
 }

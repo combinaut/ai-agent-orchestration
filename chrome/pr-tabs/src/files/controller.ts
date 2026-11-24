@@ -13,6 +13,7 @@ class FileFilter {
   private owned = new Set<HTMLElement>();
   private bar: HTMLElement;
   private label: HTMLElement;
+  private toggle: HTMLButtonElement;
 
   constructor(
     private doc: Document,
@@ -21,25 +22,29 @@ class FileFilter {
     this.page = pageUrl(currentUrl());
     this.bar = doc.createElement("div");
     this.label = doc.createElement("span");
-    const show = doc.createElement("button");
+    this.toggle = doc.createElement("button");
     this.bar.id = "pr-tabs-hidden-files";
     this.bar.className = "flash mb-3";
     this.bar.setAttribute("role", "status");
-    show.type = "button";
-    show.className = "btn-link ml-2";
-    show.textContent = getMessage("showHiddenFiles");
-    show.addEventListener("click", () => {
-      this.revealed = true;
+    this.toggle.type = "button";
+    this.toggle.className = "btn-link ml-2";
+    this.toggle.textContent = getMessage("showHiddenFiles");
+    this.toggle.addEventListener("click", () => {
+      this.revealed = !this.revealed;
       this.update();
     });
-    this.bar.append(this.label, show);
+    this.bar.append(this.label, this.toggle);
   }
 
-  restore = (): void => {
+  private clearHidden(): void {
     for (const element of this.owned) {
       element.removeAttribute(HIDDEN);
     }
     this.owned.clear();
+  }
+
+  restore = (): void => {
+    this.clearHidden();
     this.bar.remove();
   };
 
@@ -49,11 +54,13 @@ class FileFilter {
       this.revealed = false;
       this.page = url;
     }
-    this.restore();
-    const active = this.settings.enabled && !this.revealed && isFilesPage(url);
+    this.clearHidden();
+    const active = this.settings.enabled && isFilesPage(url);
     const view = active ? readFileView(this.doc) : null;
     if (view) {
       this.apply(view);
+    } else {
+      this.bar.remove();
     }
   };
 
@@ -64,13 +71,25 @@ class FileFilter {
       this.settings.patterns,
     );
     for (const file of files) {
-      if (paths.has(file.path)) {
+      if (!this.revealed && paths.has(file.path)) {
         file.element.setAttribute(HIDDEN, "");
         this.owned.add(file.element);
       }
     }
-    if (paths.size > 0) {
-      this.label.textContent = getMessage("filesHidden", { count: paths.size });
+    this.showBar(view, paths.size);
+  }
+
+  private showBar(view: FileView, count: number): void {
+    if (count === 0) {
+      this.bar.remove();
+
+      return;
+    }
+    const label = this.revealed ? "hiddenFilesShown" : "filesHidden";
+    const action = this.revealed ? "hideHiddenFiles" : "showHiddenFiles";
+    this.label.textContent = getMessage(label, { count });
+    this.toggle.textContent = getMessage(action);
+    if (this.bar.nextSibling !== view.root) {
       view.root.before(this.bar);
     }
   }

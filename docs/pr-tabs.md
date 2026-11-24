@@ -58,8 +58,9 @@ subfolders. Empty patterns are ignored.
 On recognized GitHub Files changed pages, matching diff blocks and file-tree
 entries disappear completely. The **N files hidden by PR Tabs · Show them** bar
 counts distinct matching paths available in the loaded diff or file tree.
-**Show them** reveals files for this page until reload or navigation; jumping to
-an anchor within the page preserves that choice. Lazy-loaded files are checked
+**Show them** reveals files and keeps the bar visible as **N hidden files shown · Hide them**.
+**Hide them** applies filtering again. This toggle stays on the current page until
+reload or navigation; jumping to an anchor preserves that choice. Lazy-loaded files are checked
 automatically, and changing settings restores or hides files live.
 
 Classic and React Files changed views are supported. If GitHub changes the

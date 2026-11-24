@@ -432,7 +432,12 @@
     "message": "Ajouter"
   },
   "removePattern": {
-    "message": "Supprimer"
+    "message": "Supprimer $PATTERN$",
+    "placeholders": {
+      "pattern": {
+        "content": "$1"
+      }
+    }
   },
   "showHiddenFiles": {
     "message": "Les afficher"
@@ -445,6 +450,32 @@
   },
   "filesHidden": {
     "message": "$COUNT$ fichiers masqués par PR Tabs ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "settingsPageTitle": {
+    "message": "Paramètres de PR Tabs"
+  },
+  "filePatternsLabel": {
+    "message": "Motifs de fichiers"
+  },
+  "filePatternPlaceholder": {
+    "message": "p. ex. *.test.ts"
+  },
+  "filePatternEmpty": {
+    "message": "Saisissez un motif."
+  },
+  "filePatternDuplicate": {
+    "message": "Ce motif figure déjà dans la liste."
+  },
+  "hideHiddenFiles": {
+    "message": "Les masquer"
+  },
+  "hiddenFilesShown": {
+    "message": "$COUNT$ fichiers masqués affichés ·",
     "placeholders": {
       "count": {
         "content": "$1"
