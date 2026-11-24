@@ -793,13 +793,15 @@ def waiting_line(key, entry, now, suffix=""):
 def reduce_review_waiting(previous, raw):
     owners = waiting_owners(raw)
     old = previous.get("review_waiting", {})
-    if owners is None:
-        return old, []
     current, events = {}, []
     for row in agents(raw):
         key = identity(row)
-        owner = owners.get(row.get("workspace_id"))
         entry = old.get(key)
+        owner = (
+            owners.get(row.get("workspace_id"))
+            if owners is not None
+            else (entry or {}).get("owner")
+        )
         if not owner or architect_like(row):
             continue
         if row.get("agent_status") not in WORKER_STATUSES:
@@ -808,7 +810,11 @@ def reduce_review_waiting(previous, raw):
             continue
         if row.get("agent_status") not in IDLE_STATUSES:
             continue
-        check = raw.get("review_wait", {}).get(row["pane_id"])
+        check = (
+            raw.get("review_wait", {}).get(row["pane_id"])
+            if owners is not None
+            else None
+        )
         seq = row.get("state_change_seq")
         same = entry and entry["owner"] == owner and entry.get("seq") == seq
         if check is True or (check is None and same):

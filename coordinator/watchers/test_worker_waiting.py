@@ -130,6 +130,37 @@ class WaitingTests(IsolatedTestCase):
         self.assertFalse(state["review_waiting"])
         self.assertTrue(any("cleared" in line for line in events))
 
+    def test_review_wait_uses_agent_evidence_during_ownership_outage(self):
+        raw = dict(
+            result={"agents": [self.row]},
+            observed_at=0,
+            workspaces=workspace_snapshot("architect"),
+            review_wait={"p1": True},
+        )
+        state, _ = w.reduce_workers(None, raw)
+        for rows, preserved in (
+            ([self.row], True),
+            ([dict(self.row, agent_status="unknown")], True),
+            ([dict(self.row, agent_status="working")], False),
+            ([], False),
+        ):
+            with self.subTest(rows=rows):
+                after, events = w.reduce_workers(
+                    state,
+                    dict(
+                        raw,
+                        result={"agents": rows},
+                        observed_at=1,
+                        workspaces=None,
+                        review_wait={},
+                    ),
+                )
+                self.assertEqual(bool(after["review_waiting"]), preserved)
+                self.assertEqual(
+                    any("waiting on review cleared" in line for line in events),
+                    not preserved,
+                )
+
     def test_review_checks_are_bounded_and_idle_needs_current_completion(self):
         rows = [
             dict(self.row, pane_id=f"p{n}", agent_session={"value": f"s{n}"})
