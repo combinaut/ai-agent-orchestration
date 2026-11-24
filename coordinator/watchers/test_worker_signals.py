@@ -4,7 +4,6 @@ import io
 import json
 import os
 import re
-import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -41,6 +40,20 @@ class SignalTests(IsolatedTestCase):
         adapter = patch.object(s.discovery, "open_work", return_value=self.work)
         adapter.start()
         self.addCleanup(adapter.stop)
+        caller = patch.object(
+            s.discovery.adapter(),
+            "caller_pane",
+            side_effect=lambda command, panes: next(
+                (
+                    row
+                    for row in panes
+                    if row["pane"] == os.environ.get("HERDR_PANE_ID")
+                ),
+                panes[0],
+            ),
+        )
+        caller.start()
+        self.addCleanup(caller.stop)
         opener = patch.object(s, "open_user_question", return_value=0)
         self.opener = opener.start()
         self.addCleanup(opener.stop)
@@ -48,11 +61,22 @@ class SignalTests(IsolatedTestCase):
     def record(self, **kw):
         return s.new_question(s.identity(), "Which?", "a,b", **kw)
 
-    def git_repo(self, name):
-        path = self.base / name
-        path.mkdir()
-        subprocess.run(["git", "init", "-q", path], check=True)
-        return path
+    def test_live_but_wrong_inherited_pane_cannot_steal_completion(self):
+        self.work["workspaces"].append(dict(id="other", owner="other-owner"))
+        self.work["panes"].append(dict(pane="other-pane", workspace="other"))
+        with (
+            patch.dict(
+                os.environ, HERDR_PANE_ID="other-pane", HERDR_WORKSPACE_ID="other"
+            ),
+            patch.object(
+                s.discovery.adapter(), "caller_pane", return_value=self.work["panes"][0]
+            ),
+        ):
+            record = s.record_signal(s.identity(), "done", outcome="succeeded")
+        self.assertEqual(record["pane"], "pane:1")
+        self.assertEqual(record["workspace"], "worker")
+        self.assertEqual(record["owner"], "owner")
+        self.assertFalse(s.pane_path("other-pane").exists())
 
     def test_pending_bound(self):
         self.record(timeout=60)
@@ -357,204 +381,22 @@ class SignalTests(IsolatedTestCase):
         with self.assertRaises(ValueError):
             s.question_path("../other")
 
-    def test_identity_requires_environment_and_owner(self):
-        with patch.dict(os.environ, HERDR_PANE_ID=""):
-            with self.assertRaises(ValueError):
-                s.worker_identity(s.identity())
+    def test_identity_uses_verified_workspace_and_requires_owner(self):
+        with patch.dict(os.environ, HERDR_PANE_ID="", HERDR_WORKSPACE_ID=""):
+            self.assertEqual(
+                s.identity(), dict(pane="pane:1", workspace="worker", owner="owner")
+            )
         self.work["workspaces"][0]["owner"] = None
         with self.assertRaises(ValueError):
             s.worker_identity(s.identity())
 
-    def test_identity_recovers_a_missing_stale_pane_from_its_worktree(self):
-        worktree = self.git_repo("worker")
-        pane_cwd = worktree / "lib"
-        caller_cwd = worktree / "app/models"
-        pane_cwd.mkdir(parents=True)
-        caller_cwd.mkdir(parents=True)
-        self.work["panes"] = [
-            dict(
-                pane="live-pane",
-                workspace="worker",
-                cwd=str(pane_cwd),
-                agent="codex",
-            ),
-            dict(pane="architect", workspace="owner", cwd=str(self.git_repo("owner"))),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value=str(caller_cwd)),
+    def test_identity_fails_closed_when_process_cannot_be_verified(self):
+        with patch.object(
+            s.discovery.adapter(), "caller_pane", side_effect=ValueError("unverified")
         ):
-            self.assertEqual(
-                s.identity(recover=True),
-                dict(
-                    pane="live-pane",
-                    workspace="worker",
-                    owner="owner",
-                    recovered_from="stale-pane",
-                ),
-            )
-
-    def test_identity_does_not_recover_a_present_pane_in_another_workspace(self):
-        root = self.git_repo("worker")
-        self.work["panes"] = [
-            dict(pane="pane:1", workspace="worker", cwd=str(root), agent="codex"),
-            dict(pane="architect", workspace="owner", cwd=str(self.git_repo("owner"))),
-        ]
-        with (
-            patch.dict(os.environ, HERDR_WORKSPACE_ID="owner"),
-            patch.object(s.os, "getcwd", return_value=str(root)),
-        ):
-            with self.assertRaisesRegex(
-                ValueError,
-                "pane='pane:1' is in workspace='worker'.*socket=.*panes=2",
-            ):
-                s.identity(recover=True)
-
-    def test_identity_does_not_recover_a_non_codex_worktree_match(self):
-        self.work["panes"] = [
-            dict(pane="live-pane", workspace="worker", cwd="/worktree", agent="claude"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value="/worktree/subdirectory"),
-            patch.object(s, "worktree_of", return_value="/worktree"),
-        ):
-            with self.assertRaisesRegex(ValueError, "worktree_matches=1"):
-                s.identity(recover=True)
-
-    def test_identity_reports_ambiguous_stale_pane_recovery(self):
-        self.work["panes"] = [
-            dict(pane="one", workspace="worker", cwd="/worktree", agent="codex"),
-            dict(pane="two", workspace="owner", cwd="/worktree", agent="codex"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-                HERDR_SOCKET_PATH="/socket",
-            ),
-            patch.object(s.os, "getcwd", return_value="/worktree"),
-            patch.object(s, "worktree_of", return_value="/worktree"),
-        ):
-            with self.assertRaisesRegex(
-                ValueError,
-                "pane='stale-pane'.*workspace='stale-workspace'.*socket='/socket'.*panes=2.*worktree_matches=2",
-            ):
-                s.identity(recover=True)
-
-    def test_identity_does_not_recover_a_codex_pane_in_another_worktree(self):
-        caller, other = self.git_repo("caller"), self.git_repo("other")
-        self.work["panes"] = [
-            dict(pane="live-pane", workspace="worker", cwd=str(other), agent="codex"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value=str(caller)),
-        ):
-            with self.assertRaisesRegex(ValueError, "worktree_matches=0"):
-                s.identity(recover=True)
-
-    def test_identity_does_not_recover_when_caller_or_pane_is_not_in_git(self):
-        caller, pane = self.base / "caller", self.base / "pane"
-        caller.mkdir()
-        pane.mkdir()
-        self.work["panes"] = [
-            dict(pane="live-pane", workspace="worker", cwd=str(pane), agent="codex"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value=str(caller)),
-        ):
-            with self.assertRaisesRegex(
-                ValueError, "worktree=None.*worktree_matches=0"
-            ):
-                s.identity(recover=True)
-
-    def test_identity_does_not_recover_from_a_workspace_repo_root(self):
-        root = self.git_repo("main-clone")
-        self.work["workspaces"][0]["repo_root"] = str(root)
-        self.work["panes"] = [
-            dict(pane="live-pane", workspace="worker", cwd=str(root), agent="codex"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value=str(root)),
-        ):
-            with self.assertRaisesRegex(
-                ValueError, "worktree is a workspace repo_root"
-            ):
-                s.identity(recover=True)
-
-    def test_worktree_of_times_out_and_ignores_git_environment(self):
-        timeout = subprocess.TimeoutExpired(["git"], 5)
-        with (
-            patch.dict(os.environ, GIT_DIR="/wrong", GIT_WORK_TREE="/wrong"),
-            patch.object(s.subprocess, "run", side_effect=timeout) as run,
-        ):
-            self.assertIsNone(s.worktree_of("/repo"))
-        self.assertEqual(run.call_args.kwargs["timeout"], 5)
-        self.assertFalse(
-            any(key.startswith("GIT_") for key in run.call_args.kwargs["env"])
-        )
-
-    def test_worktree_of_propagates_the_worker_deadline(self):
-        with patch.object(s.subprocess, "run", side_effect=TimeoutError("deadline")):
-            with self.assertRaisesRegex(TimeoutError, "deadline"):
-                s.worktree_of("/repo")
-
-    def test_strict_identity_does_not_recover_stale_panes(self):
-        root = self.git_repo("worker")
-        self.work["panes"] = [
-            dict(pane="live-pane", workspace="worker", cwd=str(root), agent="codex"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value=str(root)),
-        ):
-            with self.assertRaisesRegex(ValueError, "pane='stale-pane' is not live"):
-                s.identity()
-
-    def test_answer_does_not_recover_a_stale_codex_pane(self):
-        question = self.record(timeout=60)
-        root = self.git_repo("architect")
-        self.work["panes"] = [
-            dict(pane="live-pane", workspace="owner", cwd=str(root), agent="codex"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value=str(root)),
-        ):
-            with self.assertRaisesRegex(ValueError, "caller pane does not belong"):
-                s.answer(question["id"], "a")
+            with self.assertRaisesRegex(s.discovery.Unavailable, "unverified"):
+                s.record_signal(s.identity(), "heartbeat")
+        self.assertFalse(s.directory().exists())
 
     def test_completion_backlog_bound_and_expiry(self):
         ident = s.identity()

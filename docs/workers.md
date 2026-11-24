@@ -12,16 +12,17 @@ How the roles fit together: [`architecture.md`](architecture.md).
 
 ## Explicit worker signals
 
-`orch-signal` works for Claude, Codex, pi and cursor. Identity is the caller's
-`HERDR_PANE_ID`, `HERDR_WORKSPACE_ID` and the workspace's `owner` token, read
-through the env adapter. It needs no Claude session ID. A shared Codex
-app-server daemon can retain a dead pane environment for later tool shells.
-When that stale pane ID is absent from Herdr, `orch-signal` recovers only a
-single live Codex pane whose Git worktree matches the shell's current directory;
-a present pane in another workspace is still refused. Identity failures name the
-claimed pane, workspace, Herdr socket and pane count.
-Recovery applies only to worker `heartbeat`, `done` and `ask` signals, never to
-the architect-facing `answer` or `list` commands.
+`orch-signal` works for Claude, Codex, pi and cursor. The Herdr env adapter
+verifies the caller's process ancestry against live pane foreground processes,
+then reads the pane's workspace and its `owner` token. Inherited pane IDs only
+prioritize the lookup: cached shell environments and session IDs can belong to
+another terminal after a restart or concurrent session resume. A corrected pane
+is logged and preserved as `recovered_from` in the signal record. Neither a
+matching working directory nor a live inherited pane proves caller identity.
+All commands, including architect `answer` and `list`, require a verified caller;
+an unverifiable caller fails without writing a signal. If the sandbox blocks
+process inspection, run the command escalated. Tool shells must descend from
+the pane's foreground process (Codex workers start with `--no-daemon`).
 
 `orch-signal` writes `~/.claude/coordinator`, outside the Codex sandbox. Codex
 workers run every `orch-signal` command as an escalated command, like

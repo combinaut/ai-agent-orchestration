@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 NOT_A_CHECKOUT = re.compile(
@@ -115,3 +116,41 @@ def architect_owners(command):
                 ambiguous.add(label)
             owners[label] = workspace
     return {name: owner for name, owner in owners.items() if name not in ambiguous}
+
+
+def caller_pane(command, panes):
+    """Verify the caller through live process ancestry; cached pane and session IDs can cross terminals."""
+    try:
+        text = command("ps", "-A", "-o", "pid=,ppid=", timeout=5)
+    except TimeoutError:
+        raise
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError(
+            "cannot read caller process ancestry (sandbox?); run this command escalated"
+        ) from error
+    parents = {
+        int(pid): int(parent)
+        for pid, parent in (line.split() for line in text.splitlines())
+    }
+    ancestors, pid = set(), os.getpid()
+    while pid and pid not in ancestors:
+        ancestors.add(pid)
+        pid = parents.get(pid, 0)
+
+    hint = os.environ.get("HERDR_PANE_ID")
+    for pane in sorted(panes, key=lambda row: row["pane"] != hint):
+        try:
+            info = result(command, "pane", "process-info", "--pane", pane["pane"])[
+                "process_info"
+            ]
+        except subprocess.CalledProcessError:
+            continue  # A pane can close after the topology snapshot.
+        if info["pane_id"] != pane["pane"]:
+            raise ValueError(
+                "pane process identity changed during lookup; retry the command"
+            )
+        if any(process["pid"] in ancestors for process in info["foreground_processes"]):
+            return pane
+    raise ValueError(
+        "cannot verify caller pane from live foreground processes; refusing inherited identity"
+    )
