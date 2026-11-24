@@ -255,11 +255,12 @@ def native_messages(args, stamped, fallback, patterns):
                 or (args.bindings_dir / f"architect-{owner.group(1)}.json").exists()
             )
         ):
+            question_id = re.search(r" id=(\S+)", body)
             by_owner.setdefault(owner.group(1), []).append(
                 native(line.split(" ", 1)[1])
                 + (
-                    ". Answer with orch-signal answer <id> <text>."
-                    if body.startswith("workers: WORKER QUESTION ")
+                    f". Answer with orch-signal answer {question_id[1]} <text>."
+                    if body.startswith("workers: WORKER QUESTION ") and question_id
                     else ". No reply needed."
                 )
             )

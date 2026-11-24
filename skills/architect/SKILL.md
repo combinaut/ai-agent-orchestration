@@ -203,6 +203,14 @@ No code starts until the Coordinator answers `LEGACY OK`. Other projects skip th
 Every brief that ends in a PR says so explicitly: the worker **watches and resolves review comments
 automatically and continuously**, until nothing is outstanding. Not one round, not on request.
 
+**On every dispatch, arm one watch per worker** for `orch-signal ask`, PR head changes,
+CI state changes and writes to its report file, as well as completion. Reuse the shared
+workers/PR watchers and native owner binding for pushed events; watch the local report
+file in that same worker watch. Rebind and verify delivery after a recycle. On each
+change, answer or escalate a question when needed, notify the worker of required action,
+and tell the user one short line unasked, with current facts only. A completed worker
+awaiting requested human review is waiting on review; keep its watch armed.
+
 **The watching is yours; the reacting is theirs.** A pane agent processes a prompt and returns to
 idle — it cannot poll forever without spinning in a sleep loop, burning tokens invisibly. So you run
 a cheap background poll over the session's PRs (unresolved threads, failing checks, a

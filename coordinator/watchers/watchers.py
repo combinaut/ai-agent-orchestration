@@ -790,6 +790,43 @@ def waiting_line(key, entry, now, suffix=""):
     return f"WORKER WAITING {name}" + tail
 
 
+def reduce_review_waiting(previous, raw):
+    owners = waiting_owners(raw)
+    old = previous.get("review_waiting", {})
+    if owners is None:
+        return old, []
+    current, events = {}, []
+    for row in agents(raw):
+        key = identity(row)
+        owner = owners.get(row.get("workspace_id"))
+        entry = old.get(key)
+        if not owner or architect_like(row):
+            continue
+        if row.get("agent_status") not in WORKER_STATUSES:
+            if entry and entry["owner"] == owner:
+                current[key] = entry
+            continue
+        if row.get("agent_status") not in IDLE_STATUSES:
+            continue
+        check = raw.get("review_wait", {}).get(row["pane_id"])
+        seq = row.get("state_change_seq")
+        same = entry and entry["owner"] == owner and entry.get("seq") == seq
+        if check is True or (check is None and same):
+            current[key] = dict(pane=row["pane_id"], owner=owner, seq=seq)
+    for key in sorted(set(old) | set(current)):
+        if old.get(key) == current.get(key):
+            continue
+        if key in old:
+            events.append(
+                f"WORKER REVIEW {old[key]['pane']} owner={old[key]['owner']} waiting on review cleared"
+            )
+        if key in current:
+            events.append(
+                f"WORKER REVIEW {current[key]['pane']} owner={current[key]['owner']} waiting on review"
+            )
+    return current, events
+
+
 def reduce_waiting(previous, raw):
     """Timers use session IDs, falling back to panes. Unreadable metadata freezes existing state."""
     old = previous.get("waiting", {})
@@ -812,7 +849,7 @@ def reduce_waiting(previous, raw):
     current, events = {}, []
     for key, row in rows.items():
         entry = old.get(key)
-        if worker_signals.suppressed(row, raw):
+        if key in raw.get("review_waiting", {}) or worker_signals.suppressed(row, raw):
             continue
         if architect_like(row):
             continue
@@ -943,6 +980,9 @@ def reduce_workers(before, raw):
             elif row.get("agent_status") == "working" and record.get("id") in idle_done:
                 resumed.add(record.get("id"))
     raw = dict(raw, resumed_done_ids=list(resumed))
+    review_waiting, review_events = reduce_review_waiting(previous, raw)
+    raw = dict(raw, review_waiting=review_waiting)
+    events += review_events
     waiting, waiting_events = reduce_waiting(previous, raw)
     events += waiting_events
     signal_events = raw.get("signal_events", [])
@@ -962,6 +1002,8 @@ def reduce_workers(before, raw):
         unreadable=unreadable,
         seen=seen,
         waiting=waiting,
+        review_waiting=review_waiting,
+        review_checked=raw.get("review_checked", previous.get("review_checked", {})),
         waiting_read_failures=raw.get(
             "waiting_read_failures", previous.get("waiting_read_failures", [])
         ),
@@ -2323,7 +2365,7 @@ def github_remotes(cwd):
     return found
 
 
-def open_pr(row):
+def open_pr(row, review_requested=False):
     """Whether the worker's branch has an open PR on any GitHub remote of its checkout (a PR from a fork is on
     `upstream`) whose head is in the repository of the checkout's `origin`. A plain detached HEAD, a checkout that is
     not a git repository and a checkout without a GitHub remote cannot have one: False. None when a git or gh call
@@ -2365,14 +2407,34 @@ def open_pr(row):
                             "--state",
                             "open",
                             "--json",
-                            "number,headRepositoryOwner",
+                            "number,headRepositoryOwner,reviewRequests,isDraft,reviewDecision"
+                            if review_requested
+                            else "number,headRepositoryOwner",
                         )
                     ):
                         owner = (
                             (pr.get("headRepositoryOwner") or {}).get("login") or ""
                         ).lower()
                         if owner == head_owner:
-                            return True
+                            if not review_requested:
+                                return True
+                            if (
+                                "reviewRequests" not in pr
+                                or "isDraft" not in pr
+                                or "reviewDecision" not in pr
+                            ):
+                                unknown = True
+                            elif (
+                                any(
+                                    reviewer.get("__typename") != "Bot"
+                                    and not reviewer.get("login", "").endswith("[bot]")
+                                    and reviewer.get("login", "").lower() != "copilot"
+                                    for reviewer in (pr["reviewRequests"] or [])
+                                )
+                                and not pr["isDraft"]
+                                and pr["reviewDecision"] != "CHANGES_REQUESTED"
+                            ):
+                                return True
                         unknown = unknown or not owner
                 except TimeoutError:
                     raise
@@ -2383,6 +2445,47 @@ def open_pr(row):
         raise
     except (*discovery.READ_ERRORS, subprocess.CalledProcessError):
         return None
+
+
+def collect_review_waiting(raw, before, started):
+    if waiting_owners(raw) is None:
+        return
+    previous = before or {}
+    now = raw["observed_at"]
+    live = {
+        identity(row) for row in agents(raw) if row.get("agent_status") in IDLE_STATUSES
+    }
+    checked = {
+        key: at for key, at in previous.get("review_checked", {}).items() if key in live
+    }
+    candidates = []
+    owners = waiting_owners(raw)
+    for row in agents(raw):
+        record = raw.get("worker_signals", {}).get(row["pane_id"], {})
+        completed = row.get("agent_status") == "done" or (
+            row.get("agent_status") == "idle"
+            and record.get("kind") == "done"
+            and worker_signals.suppressed(
+                row, dict(raw, resumed_done_ids=previous.get("resumed_done_ids", []))
+            )
+        )
+        if (
+            completed
+            and not architect_like(row)
+            and owners.get(row.get("workspace_id"))
+            and now - checked.get(identity(row), -600) >= 600
+        ):
+            candidates.append(row)
+    checks = {}
+    for row in sorted(candidates, key=lambda row: checked.get(identity(row), -600))[
+        :OPEN_PR_CHECKS_MAX
+    ]:
+        if _monotonic() - started >= IDLE_CHECK_SECONDS:
+            break
+        checks[row["pane_id"]] = open_pr(row, review_requested=True)
+        checked[identity(row)] = now
+    raw.update(review_wait=checks, review_checked=checked)
+    raw["review_waiting"], _ = reduce_review_waiting(previous, raw)
 
 
 def collect_idle(raw, before, started):
@@ -2453,6 +2556,7 @@ def collect(mode, before, scope="", base=None):
                 raw["worker_signals"] = signals
                 raw["signal_events"] = events
                 raw["observed_at"] = time.time()
+            collect_review_waiting(raw, before, started)
             collect_waiting_jobs(raw, before)
             if base is not None:
                 raw["closed"] = closed_panes(

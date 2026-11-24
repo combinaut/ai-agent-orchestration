@@ -319,6 +319,60 @@ class WorkerIdleCollectTests(IsolatedTestCase):
     def gh_calls(self):
         return [call for call in self.calls if call[0] == "gh"]
 
+    def test_completed_worker_review_classification_and_recheck(self):
+        review = json.dumps(
+            [
+                dict(
+                    number=3,
+                    headRepositoryOwner={"login": "acme"},
+                    reviewRequests=[{"login": "reviewer"}],
+                    isDraft=False,
+                    reviewDecision="REVIEW_REQUIRED",
+                )
+            ]
+        )
+        events = self.run_at(0, status="done", pr=review)
+        self.assertTrue(any("waiting on review" in line for line in events))
+        self.run_at(599)
+        self.assertEqual(len(self.gh_calls()), 1)
+        self.assertFalse(any("ESCALATE" in line for line in self.run_at(4201)))
+        failure = subprocess.CalledProcessError(1, ["gh"], stderr="rate limited")
+        self.assertEqual(self.run_at(4801, gh_error=failure), [])
+        self.assertTrue(
+            any(
+                "waiting on review cleared" in line
+                for line in self.run_at(5401, pr="[]", gh_error=None)
+            )
+        )
+
+    def test_review_requires_matching_head_owner_requested_review_and_ready_pr(self):
+        for fields, expected in (
+            ({}, True),
+            ({"headRepositoryOwner": {"login": "other"}}, False),
+            ({"reviewRequests": []}, False),
+            ({"reviewRequests": [{"__typename": "Bot", "login": "review-bot"}]}, False),
+            ({"reviewRequests": [{"login": "copilot"}]}, False),
+            ({"isDraft": True}, False),
+            ({"reviewDecision": "CHANGES_REQUESTED"}, False),
+            ({"reviewRequests": None}, False),
+        ):
+            pr = dict(
+                number=3,
+                headRepositoryOwner={"login": "acme"},
+                reviewRequests=[{"login": "reviewer"}],
+                isDraft=False,
+                reviewDecision="REVIEW_REQUIRED",
+            )
+            pr.update(fields)
+            self.pr = json.dumps([pr])
+            with self.subTest(fields=fields), patch.object(w, "command", self.fake):
+                self.assertIs(
+                    w.open_pr(self.agents()[0], review_requested=True), expected
+                )
+        self.pr = pr_json()
+        with patch.object(w, "command", self.fake):
+            self.assertIsNone(w.open_pr(self.agents()[0], review_requested=True))
+
     def test_the_check_runs_once_when_the_worker_crosses_the_line_and_names_branch_and_repo(
         self,
     ):

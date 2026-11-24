@@ -94,6 +94,77 @@ class WaitingTests(IsolatedTestCase):
         self.assertIn("session=s1", events[0])
         return events[0]
 
+    def test_completed_worker_waits_on_review_without_escalating(self):
+        state = None
+        events = []
+        for now in (0, 601, 2401, 4201, 10000):
+            raw = dict(
+                result={"agents": [self.row]},
+                observed_at=now,
+                workspaces=workspace_snapshot("architect"),
+                review_wait={"p1": True},
+            )
+            state, lines = w.reduce_workers(state, raw)
+            events += lines
+        self.assertTrue(any("waiting on review" in line for line in events))
+        self.assertFalse(any("ESCALATE" in line for line in events))
+        self.assertFalse(state["waiting"])
+
+    def test_review_wait_clears_on_work_and_failed_reads_preserve_it(self):
+        def step(state, now, status="done", check=True):
+            return w.reduce_workers(
+                state,
+                dict(
+                    result={"agents": [dict(self.row, agent_status=status)]},
+                    observed_at=now,
+                    workspaces=workspace_snapshot("architect"),
+                    review_wait={"p1": check},
+                ),
+            )
+
+        state, _ = step(None, 0)
+        state, events = step(state, 5000, check=None)
+        self.assertFalse(any("ESCALATE" in line for line in events))
+        self.assertTrue(state["review_waiting"])
+        state, events = step(state, 5001, status="working")
+        self.assertFalse(state["review_waiting"])
+        self.assertTrue(any("cleared" in line for line in events))
+
+    def test_review_checks_are_bounded_and_idle_needs_current_completion(self):
+        rows = [
+            dict(self.row, pane_id=f"p{n}", agent_session={"value": f"s{n}"})
+            for n in range(5)
+        ]
+        raw = dict(
+            result={"agents": rows},
+            observed_at=1000,
+            workspaces=workspace_snapshot("architect"),
+        )
+        with patch.object(w, "open_pr", return_value=True) as check:
+            w.collect_review_waiting(raw, None, w._monotonic())
+        self.assertEqual(check.call_count, 3)
+        self.assertTrue(
+            all(
+                call.kwargs == {"review_requested": True}
+                for call in check.call_args_list
+            )
+        )
+        rows[0]["agent_status"] = "idle"
+        raw["result"]["agents"] = rows[:1]
+        with patch.object(w, "open_pr", return_value=True) as check:
+            w.collect_review_waiting(raw, None, w._monotonic())
+            check.assert_not_called()
+        record = dict(kind="done", id="done-job", workspace="w1", owner="architect")
+        raw["worker_signals"] = {"p0": record}
+        with patch.object(w, "open_pr", return_value=True) as check:
+            w.collect_review_waiting(raw, None, w._monotonic())
+            check.assert_called_once()
+        with patch.object(w, "open_pr", return_value=True) as check:
+            w.collect_review_waiting(
+                raw, {"resumed_done_ids": ["done-job"]}, w._monotonic()
+            )
+            check.assert_not_called()
+
     def test_waiting_protocol_keeps_the_uncertainty_caveat(self):
         line = self.start()
         self.assertTrue(line.endswith("(may be waiting on its own job)"))

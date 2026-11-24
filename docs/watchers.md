@@ -10,7 +10,7 @@ The watchers write alerts to files. One notifier turns them into a feed at `~/.c
 | host | Memory, swap, processes, open files, load |
 | hog | Big processes and long or big `git` processes |
 | balance | Worktree CPU and memory against the heavy-slot cap |
-| workers | Blocked, errored or vanished agents; finished workers waiting on their architect; sends `WORKER IDLE` (worker idle or done for `workers.idle_s`, 2 h by default, with no open PR) to the owning architect |
+| workers | `WORKER QUESTION` (pane, question, options, ask id and answer command) and `WORKER DONE` pushed to the owner architect through the shared notifier/outbox; `WORKER REVIEW` for completed workers waiting on requested review. Blocked, errored or vanished agents; finished workers waiting on their architect; sends `WORKER IDLE` (worker idle or done for `workers.idle_s`, 2 h by default, with no open PR) to the owning architect |
 | user-todo | What waits on you (see [The to-do pane](todo.md)) |
 
 ## 🔔 With services
@@ -84,6 +84,14 @@ interval. The escalation goes to the feed and natively to the Coordinator throug
 its binding and the existing bounded retry outbox. Each gap is at least
 60 seconds, including after laptop sleep. No further repeats. The user's to-do
 list is unchanged.
+
+A completed worker with an open PR from its branch and a requested review emits
+`WORKER REVIEW <pane> owner=<workspace> waiting on review`, rather than advancing
+WAITING toward ESCALATE. Draft PRs and changes-requested reviews do not qualify.
+The check uses the checkout's GitHub remotes and head owner, at most three workers
+per pass within the shared 30-second PR-check budget, rechecking every ten minutes.
+Failed reads preserve a known review wait; a successful negative read or resumed
+work clears it. Idle workers qualify only with a current explicit completion.
 
 An observed `working` status resets the timer. Closing the session, removing its
 owner tag, or changing its owner clears its old alert immediately. Clears also
