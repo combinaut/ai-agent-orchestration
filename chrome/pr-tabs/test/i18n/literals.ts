@@ -45,7 +45,7 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   ],
   "files/matcher.ts": ["u"],
   "files/observe.ts": ["popstate"],
-  "files/settings.ts": ["object", "enabled", "patterns", "string", "sync"],
+  "files/settings.ts": ["object", "enabled", "patterns", "string", "sync", "source"],
   "options/PatternItem.vue": ["remove"],
   "background.ts": [
     "MERGED",

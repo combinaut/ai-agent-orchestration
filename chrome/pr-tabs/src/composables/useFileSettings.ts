@@ -8,7 +8,8 @@ export function useFileSettings() {
   const ready = ref(false);
   const failed = ref(false);
   const disabled = computed(() => !ready.value);
-  const persist = settingsWriter(settings, failed);
+  const source = crypto.randomUUID();
+  const persist = settingsWriter(settings, failed, source);
 
   function handleToggle(event: Event): void {
     const enabled = (event.target as HTMLInputElement).checked;
@@ -30,7 +31,7 @@ export function useFileSettings() {
     });
   }
 
-  bindSettings({ settings, ready, failed });
+  bindSettings({ settings, ready, failed, source });
   const enabled = computed(() => settings.value.enabled);
   const patterns = computed(() => settings.value.patterns);
 
@@ -41,6 +42,7 @@ interface SettingsRefs {
   settings: Ref<FileSettings>;
   ready: Ref<boolean>;
   failed: Ref<boolean>;
+  source: string;
 }
 
 function bindSettings(state: SettingsRefs): void {
@@ -50,7 +52,7 @@ function bindSettings(state: SettingsRefs): void {
       state.settings.value = await loadFileSettings();
       stop = watchFileSettings((value) => {
         state.settings.value = value;
-      });
+      }, state.source);
       state.ready.value = true;
     } catch {
       state.failed.value = true;
@@ -59,14 +61,14 @@ function bindSettings(state: SettingsRefs): void {
   onUnmounted(() => stop?.());
 }
 
-function settingsWriter(settings: Ref<FileSettings>, failed: Ref<boolean>) {
+function settingsWriter(settings: Ref<FileSettings>, failed: Ref<boolean>, source: string) {
   let writes = Promise.resolve();
 
   return (next: FileSettings): void => {
     settings.value = next;
     failed.value = false;
     writes = writes
-      .then(() => saveFileSettings(next))
+      .then(() => saveFileSettings(next, source))
       .catch(() => {
         failed.value = true;
       });

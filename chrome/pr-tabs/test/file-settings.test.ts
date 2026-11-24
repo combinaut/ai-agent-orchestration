@@ -84,9 +84,10 @@ test("options load defaults, toggle, add unique trimmed patterns and remove", as
   await wrapper.get("form").trigger("submit");
   await wrapper.get("li button").trigger("click");
   await flushPromises();
-  assert.deepEqual(set.mock.calls.at(-1), [
-    { [FILE_SETTINGS_KEY]: { enabled: true, patterns: ["*_spec.rb", "*.spec.ts", "*.test.ts"] } },
-  ]);
+  assert.deepEqual(parseFileSettings(set.mock.calls.at(-1)?.[0]?.[FILE_SETTINGS_KEY]), {
+    enabled: true,
+    patterns: ["*_spec.rb", "*.spec.ts", "*.test.ts"],
+  });
   wrapper.unmount();
   assert.equal(removeListener.mock.calls.length, 1);
 });
@@ -117,5 +118,27 @@ test("options report failed writes and accept live settings", async () => {
   await flushPromises();
   assert.equal(wrapper.findAll("li").length, 1);
   assert.equal(wrapper.get("code").text(), "*.rb");
+  wrapper.unmount();
+});
+
+test("own storage echoes cannot discard a newer queued pattern edit", async () => {
+  storage();
+  const first = Promise.withResolvers<void>();
+  set.mockImplementationOnce(() => first.promise);
+  const wrapper = mount(App);
+  await flushPromises();
+  await wrapper.get<HTMLInputElement>('input[type="checkbox"]').setValue(true);
+  const oldValue = set.mock.calls[0]?.[0]?.[FILE_SETTINGS_KEY];
+  await wrapper.get("#file-pattern").setValue("*.test.ts");
+  await wrapper.get("form").trigger("submit");
+  const listener = addListener.mock.calls[0]?.[0];
+  listener?.({ [FILE_SETTINGS_KEY]: { newValue: oldValue } }, "sync");
+  await wrapper.get<HTMLInputElement>('input[type="checkbox"]').setValue(false);
+  first.resolve();
+  await flushPromises();
+  assert.deepEqual(parseFileSettings(set.mock.calls.at(-1)?.[0]?.[FILE_SETTINGS_KEY]), {
+    enabled: false,
+    patterns: [...DEFAULT_PATTERNS, "*.test.ts"],
+  });
   wrapper.unmount();
 });

@@ -24,18 +24,35 @@ export async function loadFileSettings(): Promise<FileSettings> {
   return parseFileSettings(stored[FILE_SETTINGS_KEY]);
 }
 
-export async function saveFileSettings(settings: FileSettings): Promise<void> {
-  await chrome.storage.sync.set({ [FILE_SETTINGS_KEY]: settings });
+export async function saveFileSettings(settings: FileSettings, source?: string): Promise<void> {
+  const value = source ? { ...settings, source } : settings;
+  await chrome.storage.sync.set({ [FILE_SETTINGS_KEY]: value });
 }
 
-export function watchFileSettings(apply: (settings: FileSettings) => void): () => void {
+export function watchFileSettings(
+  apply: (settings: FileSettings) => void,
+  ignoredSource?: string,
+): () => void {
   function changed(changes: Record<string, chrome.storage.StorageChange>, area: string): void {
     if (area === "sync" && FILE_SETTINGS_KEY in changes) {
-      apply(parseFileSettings(changes[FILE_SETTINGS_KEY]?.newValue));
+      const value = changes[FILE_SETTINGS_KEY]?.newValue;
+      if (!isOwnChange(value, ignoredSource)) {
+        apply(parseFileSettings(value));
+      }
     }
   }
 
   chrome.storage.onChanged.addListener(changed);
 
   return () => chrome.storage.onChanged.removeListener(changed);
+}
+
+function isOwnChange(value: unknown, source?: string): boolean {
+  return (
+    source !== undefined &&
+    typeof value === "object" &&
+    value !== null &&
+    "source" in value &&
+    value.source === source
+  );
 }
