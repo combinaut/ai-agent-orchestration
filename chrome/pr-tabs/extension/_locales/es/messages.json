@@ -415,5 +415,40 @@
   },
   "closeStatus": {
     "message": "Cerrar"
+  },
+  "hideFilesTitle": {
+    "message": "Ocultar archivos en páginas de solicitudes de cambios"
+  },
+  "hideFilesEnabled": {
+    "message": "Ocultar archivos coincidentes"
+  },
+  "hideFilesHelp": {
+    "message": "Los patrones coinciden con la ruta completa. * = cualquier carácter."
+  },
+  "filePattern": {
+    "message": "Patrón glob"
+  },
+  "addPattern": {
+    "message": "Añadir"
+  },
+  "removePattern": {
+    "message": "Eliminar"
+  },
+  "showHiddenFiles": {
+    "message": "Mostrarlos"
+  },
+  "fileSettingsError": {
+    "message": "No se pudo guardar o cargar la configuración. Recarga e inténtalo de nuevo."
+  },
+  "settingsMenu": {
+    "message": "Configuración"
+  },
+  "filesHidden": {
+    "message": "$COUNT$ archivos ocultos por PR Tabs ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
   }
 }

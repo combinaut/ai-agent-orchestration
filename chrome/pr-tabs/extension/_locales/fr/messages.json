@@ -415,5 +415,40 @@
   },
   "closeStatus": {
     "message": "Fermer"
+  },
+  "hideFilesTitle": {
+    "message": "Masquer des fichiers sur les pages de pull request"
+  },
+  "hideFilesEnabled": {
+    "message": "Masquer les fichiers correspondants"
+  },
+  "hideFilesHelp": {
+    "message": "Les motifs correspondent au chemin complet. * = caractères quelconques."
+  },
+  "filePattern": {
+    "message": "Motif glob"
+  },
+  "addPattern": {
+    "message": "Ajouter"
+  },
+  "removePattern": {
+    "message": "Supprimer"
+  },
+  "showHiddenFiles": {
+    "message": "Les afficher"
+  },
+  "fileSettingsError": {
+    "message": "Impossible de charger ou enregistrer les paramètres. Rechargez et réessayez."
+  },
+  "settingsMenu": {
+    "message": "Paramètres"
+  },
+  "filesHidden": {
+    "message": "$COUNT$ fichiers masqués par PR Tabs ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
   }
 }

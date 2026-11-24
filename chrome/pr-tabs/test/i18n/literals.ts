@@ -25,6 +25,28 @@ const CAMEL_CASE = /^[a-z]+(?:[A-Z][a-z0-9]*)+$/;
 // Plain words a file uses as codes (message types, states, colours, option names), by file. A word
 // is a code only in the files listed, so "search" in another file is still text.
 const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
+  "files/content.ts": ["pagehide"],
+  "files/controller.ts": [
+    "div",
+    "span",
+    "button",
+    "flash mb-3",
+    "role",
+    "status",
+    "btn-link ml-2",
+    "click",
+  ],
+  "files/dom.ts": [
+    "h3",
+    "a code",
+    "href",
+    "#pr-file-tree [role='treeitem']:not([aria-expanded]), file-tree [role='treeitem']:not([aria-expanded])",
+    "#diff-comparison-viewer-container [data-testid='progressive-diffs-list']",
+  ],
+  "files/matcher.ts": ["u"],
+  "files/observe.ts": ["popstate"],
+  "files/settings.ts": ["object", "enabled", "patterns", "string", "sync"],
+  "options/PatternItem.vue": ["remove"],
   "background.ts": [
     "MERGED",
     "CLOSED",

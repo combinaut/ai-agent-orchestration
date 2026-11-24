@@ -415,5 +415,40 @@
   },
   "closeStatus": {
     "message": "Dismiss"
+  },
+  "hideFilesTitle": {
+    "message": "Hide files on pull request pages"
+  },
+  "hideFilesEnabled": {
+    "message": "Hide matching files"
+  },
+  "hideFilesHelp": {
+    "message": "Patterns match the full path. * = any characters."
+  },
+  "filePattern": {
+    "message": "Glob pattern"
+  },
+  "addPattern": {
+    "message": "Add"
+  },
+  "removePattern": {
+    "message": "Remove"
+  },
+  "showHiddenFiles": {
+    "message": "Show them"
+  },
+  "fileSettingsError": {
+    "message": "Could not save or load settings. Reload and try again."
+  },
+  "settingsMenu": {
+    "message": "Settings"
+  },
+  "filesHidden": {
+    "message": "$COUNT$ files hidden by PR Tabs ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
   }
 }

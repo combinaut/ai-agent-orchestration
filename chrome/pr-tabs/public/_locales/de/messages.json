@@ -415,5 +415,40 @@
   },
   "closeStatus": {
     "message": "Schließen"
+  },
+  "hideFilesTitle": {
+    "message": "Dateien auf Pull-Request-Seiten ausblenden"
+  },
+  "hideFilesEnabled": {
+    "message": "Passende Dateien ausblenden"
+  },
+  "hideFilesHelp": {
+    "message": "Muster gelten für den vollständigen Pfad. * = beliebige Zeichen."
+  },
+  "filePattern": {
+    "message": "Glob-Muster"
+  },
+  "addPattern": {
+    "message": "Hinzufügen"
+  },
+  "removePattern": {
+    "message": "Entfernen"
+  },
+  "showHiddenFiles": {
+    "message": "Anzeigen"
+  },
+  "fileSettingsError": {
+    "message": "Einstellungen konnten nicht gespeichert oder geladen werden. Neu laden und erneut versuchen."
+  },
+  "settingsMenu": {
+    "message": "Einstellungen"
+  },
+  "filesHidden": {
+    "message": "$COUNT$ Dateien von PR Tabs ausgeblendet ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
   }
 }

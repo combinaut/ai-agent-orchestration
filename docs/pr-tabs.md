@@ -41,6 +41,31 @@ GitHub access goes through your local `gh` login, via a native messaging host. N
 
 After an update, run the install command, then click the reload icon on the extension card at `chrome://extensions`.
 
+## Hide files on pull request pages
+
+Open the extension's **Options** from its card at `chrome://extensions`. Under
+**Hide files on pull request pages**, enable **Hide matching files**. The default
+patterns are `*.stories.*`, `*_spec.rb`, and `*.spec.ts`. Add or remove patterns
+in the list; changes are saved in Chrome sync storage and apply to open PR pages.
+The feature starts disabled.
+
+Patterns match the full, case-sensitive file path. `*` matches any characters,
+including folder separators; other characters are literal. Thus `*.stories.*`
+works in any folder, while `src/*.spec.ts` restricts matching to `src/` and its
+subfolders. Empty patterns are ignored.
+
+On recognized GitHub Files changed pages, matching diff blocks and file-tree
+entries disappear completely. The **N files hidden by PR Tabs · Show them** bar
+counts distinct matching paths available in the loaded diff or file tree.
+**Show them** reveals files for this page until reload or navigation; jumping to
+an anchor within the page preserves that choice. Lazy-loaded files are checked
+automatically, and changing settings restores or hides files live.
+
+Classic and React Files changed views are supported. If GitHub changes the
+recognized markup, the extension leaves files visible and shows no bar. Reload
+an already-open PR after installing or reloading the extension to activate its
+content script. No additional permissions are required.
+
 ## 🔩 Settings and ownership
 
 `pr_tabs.org` selects the organization, `pr_tabs.default_repo` is the repo for bare numbers, `pr_tabs.repos` adds more repos to pick from (environment form: comma-separated `ORCH_PR_TABS_REPOS`), `pr_tabs.open_all` is the GitHub search behind the button, and `pr_tabs.terminal_app` is the macOS app go to pane brings forward. Their environment overrides are `ORCH_PR_TABS_ORG`, `ORCH_PR_TABS_DEFAULT_REPO`, `ORCH_PR_TABS_REPOS`, `ORCH_PR_TABS_OPEN_ALL` and `ORCH_PR_TABS_TERMINAL_APP`. Reload the extension after changing settings.

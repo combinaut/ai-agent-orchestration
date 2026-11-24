@@ -37,7 +37,11 @@ export default defineConfig({
     modulePreload: { polyfill: false },
     reportCompressedSize: false,
     rolldownOptions: {
-      input: { popup: path("src/popup.html"), background: path("src/background.ts") },
+      input: {
+        popup: path("src/popup.html"),
+        background: path("src/background.ts"),
+        options: path("src/options.html"),
+      },
       output: {
         entryFileNames: "[name].js",
         chunkFileNames: "shared.js",

@@ -27,5 +27,17 @@
       "48": "icons/icon-48.png",
       "128": "icons/icon-128.png"
     }
-  }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://github.com/*/*/pull/*", "*://www.github.com/*/*/pull/*"],
+      "js": ["files.js"],
+      "css": ["file-filter.css"],
+      "run_at": "document_idle"
+    }
+  ]
 }

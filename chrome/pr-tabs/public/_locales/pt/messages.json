@@ -415,5 +415,40 @@
   },
   "closeStatus": {
     "message": "Fechar"
+  },
+  "hideFilesTitle": {
+    "message": "Ocultar arquivos nas páginas de pull request"
+  },
+  "hideFilesEnabled": {
+    "message": "Ocultar arquivos correspondentes"
+  },
+  "hideFilesHelp": {
+    "message": "Os padrões correspondem ao caminho completo. * = quaisquer caracteres."
+  },
+  "filePattern": {
+    "message": "Padrão glob"
+  },
+  "addPattern": {
+    "message": "Adicionar"
+  },
+  "removePattern": {
+    "message": "Remover"
+  },
+  "showHiddenFiles": {
+    "message": "Mostrar"
+  },
+  "fileSettingsError": {
+    "message": "Não foi possível salvar ou carregar as configurações. Recarregue e tente novamente."
+  },
+  "settingsMenu": {
+    "message": "Configurações"
+  },
+  "filesHidden": {
+    "message": "$COUNT$ arquivos ocultos pelo PR Tabs ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
   }
 }

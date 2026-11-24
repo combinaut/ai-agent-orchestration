@@ -725,3 +725,36 @@ mark {
   background: var(--hl);
   color: inherit;
 }
+
+#file-settings {
+  max-width: 720px;
+  margin: 40px auto;
+  padding: 24px;
+  color: var(--fg);
+  font:
+    16px/1.5 system-ui,
+    sans-serif;
+}
+
+#file-settings fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+#file-settings li,
+#file-settings form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-block: 12px;
+}
+
+#file-settings button,
+#file-settings input {
+  font: inherit;
+}
+
+#file-settings [role="alert"] {
+  color: var(--error);
+}
