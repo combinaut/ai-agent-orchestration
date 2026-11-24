@@ -16,7 +16,9 @@ def cases(suite):
 
 def main():
     loader = unittest.TestLoader()
-    suite = loader.discover(".", pattern="test_*.py")
+    suite = loader.discover(
+        ".", pattern=sys.argv[1] if len(sys.argv) > 1 else "test_*.py"
+    )
     if loader.errors:
         print("\n".join(loader.errors), file=sys.stderr)
         return 1

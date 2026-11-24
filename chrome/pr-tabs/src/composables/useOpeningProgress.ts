@@ -2,7 +2,7 @@ import { useIntervalFn } from "@vueuse/core";
 import { ref, watch } from "vue";
 import type { Ref } from "vue";
 import { failed } from "#/messages";
-import { openAllText } from "#/texts";
+import { openAllLine } from "#/texts";
 import type {
   OpeningProgress,
   OpeningProgressContext,
@@ -25,7 +25,7 @@ async function reportCompletion(
   if (failed(result)) {
     status.error(result.error);
   } else {
-    status.info(openAllText(result, status.statusText.value));
+    status.show(openAllLine(result, status.statusText.value));
   }
 }
 

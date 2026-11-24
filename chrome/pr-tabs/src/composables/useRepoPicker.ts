@@ -1,44 +1,73 @@
 import { useAsyncState } from "@vueuse/core";
 import { computed, ref, toValue, type MaybeRefOrGetter } from "vue";
-import { hasBareNumber } from "#/core";
+import { bareNumber, suggestedRepo } from "#/core";
 import { failed } from "#/messages";
 import type { Ask, RepoChoices, RepoName, RepoPicker } from "#/types";
+
+function noop(): void {}
+
+// load starts a fetch; ready waits for the current one, starting it when none has run.
+function loadOnce(execute: () => Promise<unknown>): Pick<RepoPicker, "load" | "ready"> {
+  let loading: Promise<void> | undefined;
+
+  async function load(): Promise<void> {
+    loading = execute().then(noop);
+    await loading;
+  }
+
+  async function ready(): Promise<void> {
+    await (loading ?? load());
+  }
+
+  return { load, ready };
+}
+
+function preselectedRepo(choices: RepoChoices | null, input: string): RepoName | null {
+  const number = bareNumber(input);
+
+  return number && choices
+    ? suggestedRepo(choices.repos, number, { fallback: choices.selected, newest: choices.newest })
+    : null;
+}
+
+async function loadChoices(ask: Ask): Promise<RepoChoices | null> {
+  const reply = await ask({ type: "repos" });
+
+  return failed(reply) || !reply.show ? null : reply;
+}
 
 export function useRepoPicker(ask: Ask, input: MaybeRefOrGetter<string>): RepoPicker {
   const repo = ref<RepoName>("");
 
-  async function loadChoices(): Promise<RepoChoices | null> {
-    const reply = await ask({ type: "repos" });
-
-    if (failed(reply) || !reply.show) {
-      return null;
-    }
-
-    return reply;
-  }
-
   function handleChoicesLoaded(loaded: RepoChoices | null): void {
     if (loaded) {
       repo.value = loaded.selected;
+      suggest();
     }
   }
 
-  const { state: choices, executeImmediate } = useAsyncState(loadChoices, null, {
+  const { state: choices, executeImmediate } = useAsyncState(() => loadChoices(ask), null, {
     immediate: false,
     onSuccess: handleChoicesLoaded,
   });
 
   const repos = computed(() => [...(choices.value?.repos ?? [])]);
   const available = computed(() => choices.value !== null);
-  const visible = computed(() => available.value && hasBareNumber(toValue(input)));
+  const guessUnavailable = computed(() => choices.value?.guessUnavailable ?? false);
 
-  async function load(): Promise<void> {
-    await executeImmediate();
+  function suggest(): void {
+    const selected = preselectedRepo(choices.value, toValue(input));
+
+    if (selected) {
+      repo.value = selected;
+    }
   }
+
+  const { load, ready } = loadOnce(executeImmediate);
 
   function pick(): void {
     void ask({ type: "pickRepo", repo: repo.value });
   }
 
-  return { repos, repo, available, visible, load, pick };
+  return { repos, repo, available, guessUnavailable, load, ready, suggest, pick };
 }

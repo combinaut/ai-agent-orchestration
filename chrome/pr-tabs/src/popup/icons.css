@@ -1,0 +1,62 @@
+/* The PrimeIcons glyphs the extension uses, from the woff2 font only. */
+@font-face {
+  font-family: "primeicons";
+  font-display: block;
+  src: url("primeicons/fonts/primeicons.woff2") format("woff2");
+}
+
+.pi {
+  display: inline-block;
+  font-family: "primeicons";
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+.pi-search::before {
+  content: "\e908";
+}
+.pi-bars::before {
+  content: "\e91d";
+}
+.pi-times::before {
+  content: "\e90b";
+}
+.pi-chevron-down::before {
+  content: "\e902";
+}
+.pi-chevron-right::before {
+  content: "\e901";
+}
+.pi-external-link::before {
+  content: "\e93c";
+}
+.pi-eye::before {
+  content: "\e966";
+}
+.pi-check-circle::before {
+  content: "\e90a";
+}
+.pi-info-circle::before {
+  content: "\e924";
+}
+.pi-exclamation-triangle::before {
+  content: "\e922";
+}
+.pi-times-circle::before {
+  content: "\e90c";
+}
+.pi-clone::before {
+  content: "\e955";
+}
+
+.pi-cog::before {
+  content: "\e94a";
+}
+.pi-trash::before {
+  content: "\e93d";
+}
+.pi-plus::before {
+  content: "\e90d";
+}

@@ -11,41 +11,23 @@
   "goToLabel": {
     "message": "Ir a un PR"
   },
-  "goToPlaceholder": {
-    "message": "2972 o la URL de un PR"
-  },
-  "submitHintLabel": {
-    "message": "Pulsa Intro"
-  },
   "repoSelectLabel": {
     "message": "Repositorio para un número solo"
   },
-  "repoSelectedMessage": {
-    "message": "1 repositorio seleccionado"
+  "repoGuessUnavailable": {
+    "message": "Sugerencia de repositorio no disponible: actualiza el host"
   },
-  "repoNoneSelectedMessage": {
-    "message": "Ningún repositorio seleccionado"
-  },
-  "repoEmptyMessage": {
-    "message": "No hay repositorios disponibles"
+  "actionMenuLabel": {
+    "message": "Acciones"
   },
   "openAllButton": {
     "message": "Abrir todos"
   },
-  "openAllHint": {
-    "message": "Abrir todos mis PR abiertos"
-  },
   "checkNowButton": {
     "message": "Cerrar fusionados"
   },
-  "checkNowHint": {
-    "message": "Cerrar PR fusionados"
-  },
   "closeDuplicatesButton": {
     "message": "Cerrar duplicadas"
-  },
-  "closeDuplicatesHint": {
-    "message": "Cerrar pestañas duplicadas"
   },
   "groupsLabel": {
     "message": "Grupos de pestañas de PR"
@@ -168,7 +150,7 @@
     }
   },
   "noneClosed_one": {
-    "message": "Ningún PR fusionado ni cerrado entre $COUNT$ PR comprobado",
+    "message": "Nada que cerrar entre $COUNT$ PR comprobado",
     "placeholders": {
       "count": {
         "content": "$1"
@@ -176,7 +158,7 @@
     }
   },
   "noneClosed_other": {
-    "message": "Ningún PR fusionado ni cerrado entre $COUNT$ PR comprobados",
+    "message": "Nada que cerrar entre $COUNT$ PR comprobados",
     "placeholders": {
       "count": {
         "content": "$1"
@@ -345,9 +327,6 @@
   "openReviewsButton": {
     "message": "Abrir revisiones"
   },
-  "openReviewsHint": {
-    "message": "Abrir las PR con mi revisión solicitada"
-  },
   "openingProgress": {
     "message": "Abiertas $OPENED$ de $PLANNED$",
     "placeholders": {
@@ -365,32 +344,140 @@
   "errPrTabGone": {
     "message": "La pestaña de esa PR ya no está abierta."
   },
-  "prSearchLabel": {
-    "message": "Buscar pestañas de PR"
-  },
-  "prSearchEmpty": {
-    "message": "No hay PR coincidentes"
-  },
-  "prSearchCount_one": {
-    "message": "$COUNT$ PR coincidente",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
-  "prSearchCount_other": {
-    "message": "$COUNT$ PR coincidentes",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
   "closePrTab": {
     "message": "Cerrar pestaña $PR$",
     "placeholders": {
       "pr": {
+        "content": "$1"
+      }
+    }
+  },
+  "fieldPlaceholder": {
+    "message": "Número de PR, enlace o buscar pestañas abiertas"
+  },
+  "fieldNumberHint": {
+    "message": "Número de PR"
+  },
+  "fieldMatches_one": {
+    "message": "$COUNT$ resultado",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "fieldMatches_other": {
+    "message": "$COUNT$ resultados",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "footerFiltered": {
+    "message": "$MATCHES$ de $TOTAL$ PR",
+    "placeholders": {
+      "matches": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "footerListHint": {
+    "message": "↑↓ elegir · ↵ abrir · esc borrar"
+  },
+  "footerGoToHint": {
+    "message": "↵ abrir · ↑↓ repositorio · esc cerrar"
+  },
+  "emptyHint": {
+    "message": "Escribe un número de PR como 2972 o pega un enlace de PR. Enter elige el repositorio y otro Enter lo abre."
+  },
+  "goToOpenIn": {
+    "message": "Abrir #$NUMBER$ en",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "goToMatching": {
+    "message": "Pestañas abiertas con $NUMBER$",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "alreadyOpen": {
+    "message": "ya abierto · ↵ cambiar"
+  },
+  "closeStatus": {
+    "message": "Cerrar"
+  },
+  "hideFilesTitle": {
+    "message": "Ocultar archivos en páginas de solicitudes de cambios"
+  },
+  "hideFilesEnabled": {
+    "message": "Ocultar archivos coincidentes"
+  },
+  "hideFilesHelp": {
+    "message": "Los patrones coinciden con la ruta completa. * = cualquier carácter."
+  },
+  "filePattern": {
+    "message": "Patrón glob"
+  },
+  "addPattern": {
+    "message": "Añadir"
+  },
+  "removePattern": {
+    "message": "Eliminar $PATTERN$",
+    "placeholders": {
+      "pattern": {
+        "content": "$1"
+      }
+    }
+  },
+  "showHiddenFiles": {
+    "message": "Mostrarlos"
+  },
+  "fileSettingsError": {
+    "message": "No se pudo guardar o cargar la configuración. Recarga e inténtalo de nuevo."
+  },
+  "settingsMenu": {
+    "message": "Configuración"
+  },
+  "filesHidden": {
+    "message": "$COUNT$ archivos ocultos por PR Tabs ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "settingsPageTitle": {
+    "message": "Configuración de PR Tabs"
+  },
+  "filePatternsLabel": {
+    "message": "Patrones de archivos"
+  },
+  "filePatternPlaceholder": {
+    "message": "p. ej. *.test.ts"
+  },
+  "filePatternEmpty": {
+    "message": "Introduce un patrón."
+  },
+  "filePatternDuplicate": {
+    "message": "Este patrón ya está en la lista."
+  },
+  "hideHiddenFiles": {
+    "message": "Ocultarlos"
+  },
+  "hiddenFilesShown": {
+    "message": "$COUNT$ archivos ocultos mostrados ·",
+    "placeholders": {
+      "count": {
         "content": "$1"
       }
     }

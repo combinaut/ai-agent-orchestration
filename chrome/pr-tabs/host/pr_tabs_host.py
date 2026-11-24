@@ -19,8 +19,9 @@ MAX_REPLY_BYTES = 1024 * 1024
 GH_TIMEOUT_SECONDS = 30
 MAX_STATES = 100
 MAX_SEARCH = 100
+MAX_REPOS = 100
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
-PR_FIELDS = "state title headRefName headRepository { nameWithOwner }"
+PR_FIELDS = "state closedAt title headRefName headRepository { nameWithOwner }"
 SEARCH = (
     "query($q: String!, $n: Int!, $a: String) { search(query: $q, type: ISSUE, first: $n, after: $a) { issueCount"
     " pageInfo { endCursor hasNextPage } nodes { ... on PullRequest { url title headRefName headRepository { nameWithOwner } } } } }"
@@ -169,6 +170,45 @@ def search(request):
         "endCursor": page.get("endCursor"),
         "hasNextPage": bool(page.get("hasNextPage")),
     }
+
+
+def repo_numbers(request):
+    owner, repos = request.get("org"), request.get("repos")
+    if not isinstance(owner, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", owner):
+        raise RequestError("invalid repository owner")
+    if not isinstance(repos, list) or not 1 <= len(repos) <= MAX_REPOS:
+        raise RequestError(f"repos must list 1 to {MAX_REPOS} repositories")
+    if any(not isinstance(repo, str) or not NAME.fullmatch(repo) for repo in repos):
+        raise RequestError("invalid repository name")
+    declarations, fields, variables = [], [], []
+    for i, repo in enumerate(repos):
+        declarations.append(f"$r{i}: String!")
+        fields.append(
+            f"r{i}: repository(owner: $o, name: $r{i}) {{ issues(first: 1, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ number }} }} pullRequests(first: 1, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ number }} }} }}"
+        )
+        variables.append((f"r{i}", repo))
+    data, failure = gh_graphql(
+        f"query($o: String!, {', '.join(declarations)}) {{ {' '.join(fields)} }}",
+        [("o", owner), *variables],
+    )
+    if not any(isinstance(data.get(f"r{i}"), dict) for i in range(len(repos))):
+        raise RequestError(failure)
+    newest = {}
+    for i, repo in enumerate(repos):
+        repository = data.get(f"r{i}") or {}
+        numbers = []
+        for connection in (repository.get("issues"), repository.get("pullRequests")):
+            nodes = connection.get("nodes") if isinstance(connection, dict) else []
+            number = (
+                (nodes[0] or {}).get("number")
+                if isinstance(nodes, list) and nodes
+                else None
+            )
+            if is_count(number, 10**9):
+                numbers.append(number)
+        if numbers:
+            newest[repo] = max(numbers)
+    return {"ok": True, "newest": newest}
 
 
 def project_settings():
@@ -629,6 +669,7 @@ HANDLERS = {
     "states": states,
     "search": search,
     "settings": settings,
+    "repoNumbers": repo_numbers,
     "panes": panes,
     "focusPane": focus_pane,
 }

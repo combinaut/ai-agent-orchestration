@@ -104,15 +104,16 @@ json.dump(pages, open(path, "w"))' "$TMP" "${1:-me}"
 
 # edit_comments <code>: runs Python code over the record r of each sweep comment in $TMP/comments.json.
 edit_comments() {
-  python3 -c 'import json,re,sys
+  python3 -c 'import json,sys
+sys.path.insert(0, sys.argv[2])
+import sweep_record, sweep_run
 path = sys.argv[1]
 pages = json.load(open(path))
 for c in pages[0]:
-    m = re.search(r"```json\n(.*?)\n```", c["body"], re.S)
-    r = json.loads(m.group(1))
-    exec(sys.argv[2])
-    c["body"] = c["body"][: m.start(1)] + json.dumps(r) + c["body"][m.end(1) :]
-json.dump(pages, open(path, "w"))' "$TMP/comments.json" "$1"
+    r = sweep_record.comment_record(c["body"])
+    exec(sys.argv[3])
+    c["body"] = sweep_run.comment_body(r)
+json.dump(pages, open(path, "w"))' "$TMP/comments.json" "$ROOT/lib" "$1"
 }
 
 gate() {
@@ -449,12 +450,39 @@ body = json.load(open(sys.argv[1]))["body"]
 record = json.load(open(sys.argv[2]))
 assert body.startswith("<!-- orch-sweep v1 -->"), body
 assert sys.argv[3] in body
-block = re.search(r"```json\n(.*?)\n```", body, re.S).group(1)
+block = re.search(r"<!-- orch-sweep-record\n(.*?)\n-->", body, re.S).group(1)
 assert json.loads(block) == record
+assert "```json" not in body
 assert body.rstrip().endswith("*(Generated using Codex)*"), body
 assert "**Kept**" in body and "| fix |" in body
 assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_SHA"
   [ -f "$XDG_CACHE_HOME/review-prs/sweeps/acme/app/7/$HEAD_SHA.json" ]
+}
+
+@test "the hidden comment record round-trips comment-ending finding text" {
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,re,sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+record = json.load(open(sys.argv[2]))
+record["items"][0]["summary"] = "finding --> --!> stays intact"
+body = sweep_run.comment_body(record)
+block = re.search(r"<!-- orch-sweep-record\n(.*?)\n-->", body, re.S).group(1)
+assert "-->" not in block and "--!>" not in block
+assert json.loads(block) == record
+assert json.loads(block)["items"][0]["summary"] == "finding --> --!> stays intact"' "$ROOT/lib" "$TMP/record.json"
+}
+
+@test "both record readers accept visible legacy and hidden comment records" {
+  PATH="/opt/homebrew/bin:$PATH" python3 -c 'import json,sys
+sys.path.insert(0, sys.argv[1])
+import sweep_record, sweep_run
+record = {"tool": "orch-sweep", "items": [], "dropped": []}
+payload = json.dumps(record)
+for body in (f"<!-- orch-sweep v1 -->\n```json\n{payload}\n```", f"<!-- orch-sweep v1 -->\n<!-- orch-sweep-record\n{payload}\n-->"):
+    assert sweep_record.comment_record(body) == record
+    assert sweep_run.sweep_outcomes(body) == []' "$ROOT/lib"
 }
 
 @test "the isolated posting helper imports only the trusted library" {
@@ -952,7 +980,7 @@ json.dump([big], open(sys.argv[1], "w"))' "$TMP/comments.json"
   python3 -c 'import json,re,sys
 body = json.load(open(sys.argv[1]))["body"]
 assert len(body) <= 65536, len(body)
-block = re.search(r"```json\n(.*?)\n```", body, re.S).group(1)
+block = re.search(r"<!-- orch-sweep-record\n(.*?)\n-->", body, re.S).group(1)
 assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$TMP/record.json"
 }
 

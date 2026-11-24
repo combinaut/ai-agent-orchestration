@@ -29,6 +29,11 @@ BIG_REPO_REASON = (
     "No git grep in a configured big repo. Use rg scoped to the directories you need."
 )
 BIG_REPO_BATCH_REASON = "No whole-tree cat-file batch read in a configured big repo. Use rg scoped to the directories you need."
+SEARCH_ROOT_REASON = (
+    "Do not search a whole-machine root. Search a named project directory, or use the "
+    "known helper paths: orch-signal is on PATH and GitHub writes use "
+    "python3 <orch repo>/lib/github_write.py."
+)
 PI_REASON = "pi starts only through ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart|provider/model-id from ORCH_PI_MODELS>; DeepSeek is off unless the repo opted in, and a live pi never switches model."
 CODEX_REASON = "A raw codex start may not carry --dangerously-bypass-hook-trust, --dangerously-bypass-approvals-and-sandbox, --yolo, --full-auto, --approve-for-me, -a/--ask-for-approval, -s/--sandbox, --add-dir, -p/--profile, --disable hooks, -c/--config keys starting sandbox, approval, permissions, default_permissions, profiles or hooks, or a $ or backtick in its agent arguments; start a bypassed Codex worker with ~/.claude/coordinator/codex-start.sh <name> <pane> <worker|smart>."
 CODEX_FLAGS = (
@@ -1378,6 +1383,32 @@ def guard_script_kill(raw, cwd, disabled):
     return None
 
 
+def guard_script_search_roots(raw, cwd, disabled):
+    """Checks inline shell programs such as bash -c without rereading script input."""
+    if "guard_search_roots" in disabled:
+        return None
+    try:
+        entries = command_entries(raw, cwd)
+    except (ValueError, OSError):
+        return None
+    for words, where, _, _ in entries:
+        words, _ = unwrap(list(words))
+        for code in shell_programs(words):
+            reason = evaluate(
+                code,
+                where,
+                disabled=(
+                    *disabled,
+                    "guard_inline_shell",
+                    "guard_disk_script",
+                    "guard_written_script",
+                ),
+            )
+            if reason == SEARCH_ROOT_REASON:
+                return reason
+    return None
+
+
 def guard_memory(args, cwd, opts, raw):
     if not args:
         return None
@@ -1473,6 +1504,110 @@ def guard_big_repo_reads(args, cwd, opts, raw, pipeline=()):
             for words in pipeline[:-1]
         ):
             return config_error or BIG_REPO_BATCH_REASON
+    return None
+
+
+def forbidden_search_root(word, cwd):
+    """Whether one literal search root is broad enough to traverse the machine."""
+    if word in ("/", "~", "~/", "$HOME", "${HOME}", "/tmp", "/private/tmp"):
+        return True
+    return word == str(Path.home()) or (
+        not word and str(cwd) in {"/", str(Path.home()), "/tmp", "/private/tmp"}
+    )
+
+
+def search_operands(executable, args):
+    """The positional search roots for the supported search programs."""
+    if executable == "find":
+        roots = []
+        skip_debug = False
+        for arg in args:
+            if skip_debug:
+                skip_debug = False
+                continue
+            if not roots and arg in ("-H", "-L", "-P", "--"):
+                continue
+            if not roots and re.fullmatch(r"-O\d*", arg):
+                continue
+            if not roots and arg == "-D":
+                skip_debug = True
+                continue
+            if arg.startswith("-"):
+                break
+            roots.append(arg)
+        return roots
+    value_options = {
+        "fd": {
+            "-e",
+            "-E",
+            "-g",
+            "-t",
+            "--extension",
+            "--exclude",
+            "--glob",
+            "--type",
+            "--max-depth",
+            "--min-depth",
+            "--size",
+            "--changed-within",
+            "--changed-before",
+            "--owner",
+            "--exec",
+        },
+        "rg": {
+            "-e",
+            "-f",
+            "-g",
+            "-t",
+            "-T",
+            "-m",
+            "-A",
+            "-B",
+            "-C",
+            "-j",
+            "--regexp",
+            "--file",
+            "--glob",
+            "--iglob",
+            "--type",
+            "--type-not",
+            "--max-count",
+            "--after-context",
+            "--before-context",
+            "--context",
+            "--threads",
+            "--max-filesize",
+            "--pre",
+            "--pre-glob",
+            "--replace",
+        },
+    }
+    operands = []
+    after_options = False
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+            continue
+        if arg == "--":
+            after_options = True
+        elif arg in value_options[executable]:
+            skip = True
+        elif after_options or not arg.startswith("-"):
+            operands.append(arg)
+    if executable == "fd":
+        return operands[1:]
+    if executable == "rg":
+        return operands if "--files" in args else operands[1:]
+    return []
+
+
+def guard_search_roots(executable, args, cwd):
+    roots = search_operands(executable, args)
+    if any(forbidden_search_root(root, cwd) for root in roots):
+        return SEARCH_ROOT_REASON
+    if not roots and forbidden_search_root("", cwd):
+        return SEARCH_ROOT_REASON
     return None
 
 
@@ -2137,6 +2272,9 @@ GUARDED_EXECUTABLES = {
     "grep",
     "awk",
     "xargs",
+    "rg",
+    "find",
+    "fd",
 }
 
 
@@ -2184,6 +2322,8 @@ def evaluate_words(words, where, command, disabled, pipeline):
     elif executable in ("pkill", "pgrep", "killall", "ps", "grep", "awk", "xargs"):
         args = [executable, *args]
         guards = (guard_memory,)
+    elif executable in ("rg", "find", "fd"):
+        guards = (guard_search_roots,)
     else:
         return None
     for guard in guards:
@@ -2191,6 +2331,8 @@ def evaluate_words(words, where, command, disabled, pipeline):
             reason = (
                 guard(args, where, opts, command, pipeline)
                 if guard is guard_big_repo_reads
+                else guard(executable, args, where)
+                if guard is guard_search_roots
                 else guard(args, where, opts, command)
             )
             if reason:
@@ -2227,6 +2369,9 @@ def evaluate(command, cwd, disabled=()):
                 )
                 if reason:
                     return reason
+        reason = guard_script_search_roots(normalized_command, cwd, disabled)
+        if reason:
+            return reason
         return guard_pi_text(normalized_command, cwd, disabled, 0, direct=False)
     except ValueError:
         return raw_fallback(normalized_command)

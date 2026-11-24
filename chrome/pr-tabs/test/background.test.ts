@@ -28,6 +28,7 @@ const realNow = Date.now;
 afterEach(() => {
   vi.restoreAllMocks();
   Date.now = realNow;
+  world.session = {};
   world.hostSettings = CONFIGURED;
 });
 
@@ -437,6 +438,31 @@ test("existing check cadence regroups tabs after ownership changes or disappears
   assert.equal(world.grouped.at(-1)?.title, "webapp");
 });
 
+test("a tab open before its PR finished closes, while a tab opened after it stays", async () => {
+  const clock = fakeClock();
+  world.tabs = [{ id: 11, url: `${PR}/7`, active: false }];
+  world.store = {};
+  Object.assign(world.store, { tabVisits: { 12: { key: "acme/webapp#7", since: 0 } } });
+
+  let reply: { state: "OPEN" | "MERGED"; closedAt?: string } = { state: "OPEN" };
+  world.nativeHandler = async () => ({ ok: true, prs: { "acme/webapp#7": reply } });
+
+  await chromeMessageCheck();
+  clock.advance(1);
+  reply = { state: "MERGED", closedAt: new Date(Date.now()).toISOString() };
+  clock.advance(1);
+  world.tabs.push({ id: 12, url: `${PR}/7`, active: false });
+
+  assert.deepEqual(await chromeMessageCheck(), {
+    tabs: 2,
+    prs: 1,
+    checked: 1,
+    closed: [{ key: "acme/webapp#7", state: "MERGED" }],
+    inView: [],
+  });
+  assert.deepEqual(ids(), [12]);
+});
+
 test("a restarted worker restores ownership before grouping persisted PR metadata", async () => {
   world.tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
   world.store = {
@@ -583,15 +609,27 @@ async function multiRepoWorker(tag: string) {
   return freshWorker(tag);
 }
 
-test("the dropdown lists the repos and selects the remembered listed pick", async () => {
+test("the repo choice lists the repos and selects the remembered listed pick", async () => {
   const multi = await multiRepoWorker("multi-repo-choices");
 
-  assert.deepEqual(await multi.repoChoices(), { repos: REPOS, selected: "webapp", show: true });
+  assert.deepEqual(await multi.repoChoices(), {
+    repos: REPOS,
+    selected: "webapp",
+    show: true,
+    newest: {},
+    guessUnavailable: true,
+  });
 
   await multi.pickRepo("api");
 
   assert.equal(world.store.prTabsRepo, "api");
-  assert.deepEqual(await multi.repoChoices(), { repos: REPOS, selected: "api", show: true });
+  assert.deepEqual(await multi.repoChoices(), {
+    repos: REPOS,
+    selected: "api",
+    show: true,
+    newest: {},
+    guessUnavailable: true,
+  });
 
   await multi.pickRepo("docs");
 
@@ -600,6 +638,44 @@ test("the dropdown lists the repos and selects the remembered listed pick", asyn
   await multi.pickRepo("unlisted");
 
   assert.equal(world.store.prTabsRepo, "docs");
+});
+
+test("an old host that rejects repo numbers preserves the pick and reports an unavailable guess", async () => {
+  const multi = await multiRepoWorker("old-repo-number-host");
+  world.store.prTabsRepo = "api";
+  world.nativeHandler = async () => ({ ok: false, error: "unknown request type: 'repoNumbers'" });
+
+  assert.deepEqual(await multi.repoChoices(), {
+    repos: REPOS,
+    selected: "api",
+    show: true,
+    newest: {},
+    guessUnavailable: true,
+  });
+});
+
+test("repo numbers are fetched once per popup open, cached, and used when the next fetch fails", async () => {
+  const multi = await multiRepoWorker("repo-numbers-cache");
+  const sent: HostRequest[] = [];
+  const newest = { webapp: 900, api: 40 };
+
+  world.nativeHandler = async (message) => {
+    sent.push(message);
+
+    return { ok: true, newest };
+  };
+
+  const [first, second] = await Promise.all([multi.repoChoices(), multi.repoChoices()]);
+
+  assert.deepEqual(first, { ...second, newest, guessUnavailable: false });
+  assert.equal(sent.filter((message) => message.type === "repoNumbers").length, 1);
+  assert.deepEqual(world.store.prTabsRepoNumbers, { newest });
+
+  world.nativeHandler = async () => ({ ok: false, error: "offline" });
+
+  const fallback = await multi.repoChoices();
+
+  assert.deepEqual([fallback.newest, fallback.guessUnavailable], [newest, true]);
 });
 
 test("goTo opens a bare number in the picked repo, else the remembered pick", async () => {
@@ -621,10 +697,19 @@ test("goTo opens a bare number in the picked repo, else the remembered pick", as
   world.tabs = [];
 });
 
-test("one listed repo hides the dropdown", async () => {
+test("one listed repo hides the repo options and asks the host for no numbers", async () => {
   world.hostSettings = { ...CONFIGURED, repos: ["webapp"] };
   const single = await freshWorker("single-repo");
+  const sent: HostRequest[] = [];
+
+  world.nativeHandler = async (message) => {
+    sent.push(message);
+
+    return { ok: true, newest: { webapp: 9 } };
+  };
+
   assert.equal((await single.repoChoices()).show, false);
+  assert.deepEqual(sent, []);
 });
 
 test("a pane lookup is one host request for at most the cap; none for no heads", async () => {

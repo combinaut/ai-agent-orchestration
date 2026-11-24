@@ -1,8 +1,15 @@
 name: Validate
 description: ShellCheck, Ruff, the PR tabs extension and the test suites
+inputs:
+  suites:
+    description: Space-separated suite names from the CI dependency map
+    default: all pr-tabs hog balance workers audit units tripwire
 runs:
   using: composite
   steps:
+    - name: CI dependency map tests
+      shell: bash
+      run: python3 scripts/ci/test_select_tests.py
     - name: ShellCheck
       shell: bash
       run: scripts/ci/shellcheck.sh
@@ -10,43 +17,47 @@ runs:
       shell: bash
       run: scripts/ci/ruff.sh
     - name: Set up pnpm for the PR tabs extension
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && contains(format(' {0} ', inputs.suites), ' pr-tabs ')
       uses: pnpm/action-setup@v6
       with:
         package_json_file: chrome/pr-tabs/package.json
     - name: Set up Node for the PR tabs extension
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && contains(format(' {0} ', inputs.suites), ' pr-tabs ')
       uses: actions/setup-node@v7
       with:
         node-version: 24
         cache: pnpm
         cache-dependency-path: chrome/pr-tabs/pnpm-lock.yaml
     - name: PR tabs extension lint, types, tests and build check
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && contains(format(' {0} ', inputs.suites), ' pr-tabs ')
       shell: bash
       run: scripts/ci/pr-tabs.sh
     - name: Prove Linux runner systemctl tripwire
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && contains(format(' {0} ', inputs.suites), ' tripwire ')
       shell: bash
       run: scripts/ci/prove-linux-systemctl-tripwire.sh
     - name: Run hog against real Linux processes
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && contains(format(' {0} ', inputs.suites), ' hog ')
       shell: bash
       run: scripts/ci/run-hog-linux.sh
     - name: Run balance against real Linux processes
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && contains(format(' {0} ', inputs.suites), ' balance ')
       shell: bash
       run: scripts/ci/run-balance-linux.sh
     - name: Run workers entrypoint with fake Herdr
+      if: contains(format(' {0} ', inputs.suites), ' workers ')
       shell: bash
       run: scripts/ci/run-workers-fake-herdr.sh
     - name: Run audit entrypoint with fake GitHub and Herdr
+      if: contains(format(' {0} ', inputs.suites), ' audit ')
       shell: bash
       run: scripts/ci/run-audit-fake-github-herdr.sh
     - name: Validate isolated test suites
+      env:
+        AO_TEST_SUITES: ${{ inputs.suites }}
       shell: bash
       run: tests/run.sh
     - name: Verify Linux watcher units
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && contains(format(' {0} ', inputs.suites), ' units ')
       shell: bash
       run: scripts/ci/verify-linux-watcher-units.sh

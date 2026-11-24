@@ -11,41 +11,23 @@
   "goToLabel": {
     "message": "Aller à une PR"
   },
-  "goToPlaceholder": {
-    "message": "2972 ou une URL de PR"
-  },
-  "submitHintLabel": {
-    "message": "Appuyez sur Entrée"
-  },
   "repoSelectLabel": {
     "message": "Dépôt pour un numéro seul"
   },
-  "repoSelectedMessage": {
-    "message": "1 dépôt sélectionné"
+  "repoGuessUnavailable": {
+    "message": "Suggestion de dépôt indisponible : mettez à jour l'hôte"
   },
-  "repoNoneSelectedMessage": {
-    "message": "Aucun dépôt sélectionné"
-  },
-  "repoEmptyMessage": {
-    "message": "Aucun dépôt disponible"
+  "actionMenuLabel": {
+    "message": "Actions"
   },
   "openAllButton": {
     "message": "Tout ouvrir"
   },
-  "openAllHint": {
-    "message": "Ouvrir toutes mes PR ouvertes"
-  },
   "checkNowButton": {
     "message": "Fermer fusionnées"
   },
-  "checkNowHint": {
-    "message": "Fermer les PR fusionnées"
-  },
   "closeDuplicatesButton": {
     "message": "Fermer doublons"
-  },
-  "closeDuplicatesHint": {
-    "message": "Fermer les onglets en double"
   },
   "groupsLabel": {
     "message": "Groupes d'onglets de PR"
@@ -168,7 +150,7 @@
     }
   },
   "noneClosed_one": {
-    "message": "Aucune PR fusionnée ou fermée parmi $COUNT$ PR vérifiée",
+    "message": "Rien à fermer parmi $COUNT$ PR vérifiée",
     "placeholders": {
       "count": {
         "content": "$1"
@@ -176,7 +158,7 @@
     }
   },
   "noneClosed_other": {
-    "message": "Aucune PR fusionnée ou fermée parmi $COUNT$ PR vérifiées",
+    "message": "Rien à fermer parmi $COUNT$ PR vérifiées",
     "placeholders": {
       "count": {
         "content": "$1"
@@ -345,9 +327,6 @@
   "openReviewsButton": {
     "message": "Ouvrir revues"
   },
-  "openReviewsHint": {
-    "message": "Ouvrir les PR dont ma revue est demandée"
-  },
   "openingProgress": {
     "message": "$OPENED$ sur $PLANNED$ ouvertes",
     "placeholders": {
@@ -365,32 +344,140 @@
   "errPrTabGone": {
     "message": "L’onglet de cette PR n’est plus ouvert."
   },
-  "prSearchLabel": {
-    "message": "Rechercher un onglet PR"
-  },
-  "prSearchEmpty": {
-    "message": "Aucune PR correspondante"
-  },
-  "prSearchCount_one": {
-    "message": "$COUNT$ PR correspondante",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
-  "prSearchCount_other": {
-    "message": "$COUNT$ PR correspondantes",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
   "closePrTab": {
     "message": "Fermer l’onglet $PR$",
     "placeholders": {
       "pr": {
+        "content": "$1"
+      }
+    }
+  },
+  "fieldPlaceholder": {
+    "message": "Numéro de PR, lien ou recherche dans les onglets ouverts"
+  },
+  "fieldNumberHint": {
+    "message": "Numéro de PR"
+  },
+  "fieldMatches_one": {
+    "message": "$COUNT$ résultat",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "fieldMatches_other": {
+    "message": "$COUNT$ résultats",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "footerFiltered": {
+    "message": "$MATCHES$ sur $TOTAL$ PR",
+    "placeholders": {
+      "matches": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "footerListHint": {
+    "message": "↑↓ choisir · ↵ ouvrir · esc effacer"
+  },
+  "footerGoToHint": {
+    "message": "↵ ouvrir · ↑↓ dépôt · esc fermer"
+  },
+  "emptyHint": {
+    "message": "Saisissez un numéro de PR comme 2972 ou collez un lien de PR. Entrée choisit le dépôt, une seconde Entrée l’ouvre."
+  },
+  "goToOpenIn": {
+    "message": "Ouvrir #$NUMBER$ dans",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "goToMatching": {
+    "message": "Onglets ouverts avec $NUMBER$",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "alreadyOpen": {
+    "message": "déjà ouvert · ↵ basculer"
+  },
+  "closeStatus": {
+    "message": "Fermer"
+  },
+  "hideFilesTitle": {
+    "message": "Masquer des fichiers sur les pages de pull request"
+  },
+  "hideFilesEnabled": {
+    "message": "Masquer les fichiers correspondants"
+  },
+  "hideFilesHelp": {
+    "message": "Les motifs correspondent au chemin complet. * = caractères quelconques."
+  },
+  "filePattern": {
+    "message": "Motif glob"
+  },
+  "addPattern": {
+    "message": "Ajouter"
+  },
+  "removePattern": {
+    "message": "Supprimer $PATTERN$",
+    "placeholders": {
+      "pattern": {
+        "content": "$1"
+      }
+    }
+  },
+  "showHiddenFiles": {
+    "message": "Les afficher"
+  },
+  "fileSettingsError": {
+    "message": "Impossible de charger ou enregistrer les paramètres. Rechargez et réessayez."
+  },
+  "settingsMenu": {
+    "message": "Paramètres"
+  },
+  "filesHidden": {
+    "message": "$COUNT$ fichiers masqués par PR Tabs ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "settingsPageTitle": {
+    "message": "Paramètres de PR Tabs"
+  },
+  "filePatternsLabel": {
+    "message": "Motifs de fichiers"
+  },
+  "filePatternPlaceholder": {
+    "message": "p. ex. *.test.ts"
+  },
+  "filePatternEmpty": {
+    "message": "Saisissez un motif."
+  },
+  "filePatternDuplicate": {
+    "message": "Ce motif figure déjà dans la liste."
+  },
+  "hideHiddenFiles": {
+    "message": "Les masquer"
+  },
+  "hiddenFilesShown": {
+    "message": "$COUNT$ fichiers masqués affichés ·",
+    "placeholders": {
+      "count": {
         "content": "$1"
       }
     }

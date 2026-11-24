@@ -108,21 +108,6 @@ test("the checks catch what they ban", () => {
   );
 });
 
-// The utility a @theme token makes, e.g. --text-body -> text-body, --color-popup-text -> text-popup-text.
-function utilities(css: string): string[] {
-  const prefixes: Record<string, string[]> = { color: ["bg", "text"], text: ["text"] };
-
-  return [...css.matchAll(/--(color|text)-([\w-]+):/g)].flatMap((match) => {
-    const [, kind = "", name] = match;
-
-    return (prefixes[kind] ?? []).map((prefix) => `${prefix}-${name}`);
-  });
-}
-
-function duplicates(names: string[]): string[] {
-  return names.filter((name, index) => names.indexOf(name) !== index);
-}
-
 test("the named colour check reads styles, not other words", () => {
   const markup = `<p class="red" style="color: red">red</p>
     <i :style="{ borderColor: 'navy' }" />
@@ -132,31 +117,14 @@ test("the named colour check reads styles, not other words", () => {
   assert.deepEqual(namedColours(stylesOf("t.css", "--color-x: var(--y); outline: none")), []);
 });
 
-test("no two @theme tokens claim the same Tailwind utility", () => {
-  const theme = readFileSync(join(SRC, "popup/tailwind.css"), "utf8");
-  assert.deepEqual(duplicates(utilities(theme)), []);
-  assert.deepEqual(duplicates(utilities("--color-popup: a; --text-popup: b;")), ["text-popup"]);
-});
-
-test("the popup content owns a stable scrollbar gutter before groups expand", () => {
-  const tailwind = readFileSync(join(SRC, "popup/tailwind.css"), "utf8");
-
-  assert.match(
-    tailwind,
-    /@utility scrollbar-gutter-both-edges\s*\{\s*scrollbar-gutter: stable both-edges;/,
-  );
-  assert.doesNotMatch(tailwind, /@layer base\s*\{\s*html\s*\{/);
-});
-
-test("PR rows use Aura's hover colour for pointer and keyboard interaction", () => {
-  const tailwind = readFileSync(join(SRC, "popup/tailwind.css"), "utf8");
+test("rows and headers use the design's hover and selection tokens", () => {
   const tokens = readFileSync(join(SRC, TOKENS), "utf8");
 
-  assert.match(tailwind, /--color-row-hover: var\(--p-content-hover-background\);/);
-  assert.match(tailwind, /--spacing-popup-content: var\(--pr-tabs-popup-max-height\);/);
-  assert.match(tailwind, /--spacing-popup-padding: var\(--pr-tabs-popup-padding\);/);
-  assert.match(tailwind, /--spacing-pane-icon: var\(--pr-tabs-pane-icon-size\);/);
-  assert.match(tokens, /--pr-tabs-pane-icon-size: var\(--p-icon-size\);/);
-  assert.match(tailwind, /--spacing-pr-row: var\(--pr-tabs-pr-row-min-height\);/);
-  assert.match(tokens, /--pr-tabs-pr-row-min-height: calc\(/);
+  assert.match(tokens, /\.pr-row:hover \{\s*background: var\(--hover\);/);
+  assert.match(tokens, /\.pr-row\.pr-row-selected \{\s*background: var\(--sel\);/);
+  assert.match(
+    tokens,
+    /#groups \.group-header:not\(\.p-disabled\):hover \{\s*background: var\(--hover\);/,
+  );
+  assert.match(tokens, /\.repo-option\.repo-option-selected \{\s*background: var\(--sel\);/);
 });

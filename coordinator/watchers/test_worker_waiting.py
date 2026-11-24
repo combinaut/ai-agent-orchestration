@@ -94,6 +94,164 @@ class WaitingTests(IsolatedTestCase):
         self.assertIn("session=s1", events[0])
         return events[0]
 
+    def test_completed_worker_waits_on_review_without_escalating(self):
+        state = None
+        events = []
+        for now in (0, 601, 2401, 4201, 10000):
+            raw = dict(
+                result={"agents": [self.row]},
+                observed_at=now,
+                workspaces=workspace_snapshot("architect"),
+                review_wait={"p1": True},
+            )
+            state, lines = w.reduce_workers(state, raw)
+            events += lines
+        self.assertTrue(any("waiting on review" in line for line in events))
+        self.assertFalse(any("ESCALATE" in line for line in events))
+        self.assertFalse(state["waiting"])
+        self.assertTrue(
+            any(
+                "waiting on review" in line
+                for line in inbox.snapshot_lines("workers", state)
+            )
+        )
+
+    def test_review_wait_clears_on_work_and_failed_reads_preserve_it(self):
+        def step(state, now, status="done", check=True):
+            return w.reduce_workers(
+                state,
+                dict(
+                    result={"agents": [dict(self.row, agent_status=status)]},
+                    observed_at=now,
+                    workspaces=workspace_snapshot("architect"),
+                    review_wait={"p1": check},
+                ),
+            )
+
+        state, _ = step(None, 0)
+        state, events = step(state, 5000, check=None)
+        self.assertFalse(any("ESCALATE" in line for line in events))
+        self.assertTrue(state["review_waiting"])
+        state, events = step(state, 5001, status="working")
+        self.assertFalse(state["review_waiting"])
+        self.assertTrue(any("cleared" in line for line in events))
+
+    def test_review_wait_uses_agent_evidence_during_ownership_outage(self):
+        raw = dict(
+            result={"agents": [self.row]},
+            observed_at=0,
+            workspaces=workspace_snapshot("architect"),
+            review_wait={"p1": True},
+        )
+        state, _ = w.reduce_workers(None, raw)
+        for rows, preserved in (
+            ([self.row], True),
+            ([dict(self.row, agent_status="unknown")], True),
+            ([dict(self.row, agent_status="working")], False),
+            ([], False),
+        ):
+            with self.subTest(rows=rows):
+                after, events = w.reduce_workers(
+                    state,
+                    dict(
+                        raw,
+                        result={"agents": rows},
+                        observed_at=1,
+                        workspaces=None,
+                        review_wait={},
+                    ),
+                )
+                self.assertEqual(bool(after["review_waiting"]), preserved)
+                self.assertEqual(
+                    any("waiting on review cleared" in line for line in events),
+                    not preserved,
+                )
+
+    def test_review_wait_preserves_missing_metadata_and_clears_known_changes(self):
+        row = dict(self.row, state_change_seq=10)
+        raw = dict(
+            result={"agents": [row]},
+            observed_at=0,
+            workspaces=workspace_snapshot("architect"),
+            review_wait={"p1": True},
+            review_checked={"s1": 0},
+        )
+        state, _ = w.reduce_workers(None, raw)
+        for field in ("state_change_seq", "agent_session"):
+            for explicit_null in (False, True):
+                changed = dict(row)
+                if explicit_null:
+                    changed[field] = None
+                else:
+                    changed.pop(field)
+                with self.subTest(field=field, explicit_null=explicit_null):
+                    gap = dict(
+                        raw,
+                        result={"agents": [changed]},
+                        observed_at=60,
+                        review_wait={},
+                    )
+                    after, events = w.reduce_workers(state, gap)
+                    self.assertEqual(after["review_waiting"], state["review_waiting"])
+                    self.assertFalse(after["waiting"])
+                    self.assertFalse(
+                        any("waiting on review cleared" in line for line in events)
+                    )
+                    with patch.object(w, "open_pr") as check:
+                        w.collect_review_waiting(gap, state, w._monotonic())
+                        check.assert_not_called()
+        initial, _ = w.reduce_workers(None, dict(raw, result={"agents": [self.row]}))
+        after, events = w.reduce_workers(
+            initial, dict(raw, observed_at=60, review_wait={})
+        )
+        self.assertEqual(after["review_waiting"]["s1"]["seq"], 10)
+        self.assertFalse(any("waiting on review cleared" in line for line in events))
+        for changed in (
+            dict(row, state_change_seq=11),
+            dict(row, agent_session={"value": "successor"}),
+        ):
+            after, events = w.reduce_workers(
+                state,
+                dict(raw, result={"agents": [changed]}, observed_at=60, review_wait={}),
+            )
+            self.assertFalse(after["review_waiting"])
+            self.assertTrue(any("waiting on review cleared" in line for line in events))
+
+    def test_review_checks_are_bounded_and_idle_needs_current_completion(self):
+        rows = [
+            dict(self.row, pane_id=f"p{n}", agent_session={"value": f"s{n}"})
+            for n in range(5)
+        ]
+        raw = dict(
+            result={"agents": rows},
+            observed_at=1000,
+            workspaces=workspace_snapshot("architect"),
+        )
+        with patch.object(w, "open_pr", return_value=True) as check:
+            w.collect_review_waiting(raw, None, w._monotonic())
+        self.assertEqual(check.call_count, 3)
+        self.assertTrue(
+            all(
+                call.kwargs == {"review_requested": True}
+                for call in check.call_args_list
+            )
+        )
+        rows[0]["agent_status"] = "idle"
+        raw["result"]["agents"] = rows[:1]
+        with patch.object(w, "open_pr", return_value=True) as check:
+            w.collect_review_waiting(raw, None, w._monotonic())
+            check.assert_not_called()
+        record = dict(kind="done", id="done-job", workspace="w1", owner="architect")
+        raw["worker_signals"] = {"p0": record}
+        with patch.object(w, "open_pr", return_value=True) as check:
+            w.collect_review_waiting(raw, None, w._monotonic())
+            check.assert_called_once()
+        with patch.object(w, "open_pr", return_value=True) as check:
+            w.collect_review_waiting(
+                raw, {"resumed_done_ids": ["done-job"]}, w._monotonic()
+            )
+            check.assert_not_called()
+
     def test_waiting_protocol_keeps_the_uncertainty_caveat(self):
         line = self.start()
         self.assertTrue(line.endswith("(may be waiting on its own job)"))

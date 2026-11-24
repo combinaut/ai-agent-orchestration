@@ -1,6 +1,7 @@
 import { useAsyncState } from "@vueuse/core";
 import { failed } from "#/messages";
 import { summaryText } from "#/texts";
+import { ref } from "vue";
 import type { Ask, GroupSummary, Status, StatusRevision, SummaryList } from "#/types";
 
 // A failed refresh keeps the groups it had.
@@ -8,6 +9,8 @@ export function useSummary(
   ask: Ask,
   status: Pick<Status, "info" | "error" | "revision">,
 ): SummaryList {
+  const text = ref("");
+
   async function loadGroups(revision: StatusRevision): Promise<GroupSummary[]> {
     const summary = await ask({ type: "summary" });
 
@@ -17,7 +20,8 @@ export function useSummary(
       return groups.value;
     }
 
-    status.info(summaryText(summary), revision);
+    text.value = summaryText(summary);
+    status.info(text.value, revision);
 
     return summary.groups;
   }
@@ -41,5 +45,5 @@ export function useSummary(
     return refreshing;
   }
 
-  return { groups, refresh };
+  return { groups, text, refresh };
 }

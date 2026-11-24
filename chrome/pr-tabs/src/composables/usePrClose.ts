@@ -27,7 +27,7 @@ function closeFocus(tabId: TabId): CloseFocus {
       after.find((button) => button.dataset.prCloseId === preferred) ??
       after[index] ??
       after.at(-1);
-    const target = next ?? document.querySelector<HTMLInputElement>("#pr-search");
+    const target = next ?? document.querySelector<HTMLInputElement>("#target");
     target?.focus();
   };
 }

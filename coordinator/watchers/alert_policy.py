@@ -260,6 +260,15 @@ def worker_facts(line):
         item = fact("workers:signal:" + signal.group(1), line, terminal=True)
         item["text"] = line
         return [item]
+    review = re.fullmatch(
+        r"WORKER REVIEW (\S+) owner=(\S+) waiting on review( cleared)?", line
+    )
+    if review:
+        pane, owner, cleared = review.groups()
+        key = f"workers:review:{pane}:{owner}"
+        return (
+            [clear(key, exact=True)] if cleared else [fact(key, line, clearable=True)]
+        )
     waiting = re.fullmatch(
         r"WORKER WAITING .+ pane=\S+ owner=\S+ \d+m session=(\S+?)(?: (REPEAT|ESCALATE|cleared))?",
         line.removesuffix(WORKER_WAIT_NOTE),

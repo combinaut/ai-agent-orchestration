@@ -10,3 +10,4 @@
 ^[^ ]+ answers: DISMISSED [^ ]+ \(start\)$
 ^[^ ]+ answers: REMIND [^ ]+ [0-9-]+ [0-9:]+ \(start\)$
 ^[^ ]+ balance: SLOT (KILLED|RUNLONG) .*\(start\)$
+^[^ ]+ bindings: BINDING STALE [^ ]+ [^ ]+ \(start\)$

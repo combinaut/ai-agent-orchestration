@@ -40,3 +40,13 @@ test("summary writes share a revision until a newer action report supersedes the
   assert.equal(status.statusText.value, "Opened 3.");
   assert.equal(status.isStatusError.value, false);
 });
+
+test("a shown line keeps its severity", () => {
+  const status = useStatus();
+
+  status.show({ kind: "warning", text: "2 PRs wait for the next check." });
+
+  assert.equal(status.statusKind.value, "warning");
+  assert.equal(status.statusText.value, "2 PRs wait for the next check.");
+  assert.equal(status.isStatusError.value, false);
+});

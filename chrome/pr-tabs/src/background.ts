@@ -8,12 +8,15 @@ import {
   parsePrUrl,
   parseTarget,
   splitTargets,
+  navigateVisit,
   planOpenAll,
   pollBatch,
   pruneMeta,
   recordStates,
+  recordVisits,
   seedOpen,
   stillShowsPr,
+  closedDuringVisit,
   summarize,
   MAX_SEARCH_PAGES,
   OPEN_ALL_CAP,
@@ -33,6 +36,7 @@ import type {
   BranchRef,
   CheckResult,
   Closed,
+  Closing,
   DuplicatesClosed,
   Failure,
   FetchedStates,
@@ -62,17 +66,20 @@ import type {
   PrStateName,
   RepoChoices,
   RepoName,
+  RepoNumbersCache,
   Reply,
   RequestOf,
   Rules,
   SearchReply,
   SearchResult,
+  SessionState,
   States,
   StoredState,
   Summary,
   Tab,
   TabGroup,
   TabId,
+  TabVisits,
   WindowId,
 } from "#/types";
 
@@ -83,7 +90,11 @@ const STORED_DEFAULTS: StoredState = {
   failures: 0,
   cursor: 0,
   prTabsRepo: "",
+  prTabsRepoNumbers: { newest: {} },
+  prTabsCollapsed: [],
 };
+
+const SESSION_DEFAULTS: SessionState = { tabVisits: {} };
 
 const HOST = "orch.pr_tabs";
 const ALARM = "pr-tabs-poll";
@@ -102,6 +113,33 @@ async function readStored<K extends keyof StoredState>(key: K): Promise<StoredSt
 
 function writeStored(values: Partial<StoredState>): Promise<void> {
   return chrome.storage.local.set(values);
+}
+
+async function readTabVisits(): Promise<TabVisits> {
+  const stored = await chrome.storage.session.get<Partial<SessionState>>("tabVisits");
+
+  return stored.tabVisits ?? SESSION_DEFAULTS.tabVisits;
+}
+
+let visitsChain: Promise<unknown> = Promise.resolve();
+
+// Every tab-visit read and write runs here, one at a time.
+function withTabVisits<T>(task: (visits: TabVisits) => Promise<T>): Promise<T> {
+  const run = visitsChain.then(async () => task(await readTabVisits()));
+
+  visitsChain = run.catch(warn);
+
+  return run;
+}
+
+function updateTabVisits(change: (visits: TabVisits) => TabVisits): Promise<void> {
+  return withTabVisits((visits) => chrome.storage.session.set({ tabVisits: change(visits) }));
+}
+
+function visitTab(id: TabId, key: PrKey | null): Promise<void> {
+  const visit = key === null ? null : { key, since: Date.now() };
+
+  return updateTabVisits((visits) => navigateVisit(visits, id, visit));
 }
 
 function hasId(tab: Tab): tab is IdTab {
@@ -223,6 +261,13 @@ function serial<T>(task: () => Promise<T>): Promise<T> {
 // Tab IDs that showed a PR at the last scan.
 const prTabIds = new Set<TabId>();
 
+// Per open tab: its last PR key from a URL event and how often that key changed.
+const tabKeys = new Map<TabId, { key: PrKey | null; revision: number }>();
+
+function revisionOf(id: TabId): number {
+  return tabKeys.get(id)?.revision ?? 0;
+}
+
 function isOpenPrTab(tab: Tab): tab is IdTab {
   return hasId(tab) && !tab.incognito && prKey(tab.pendingUrl || tab.url) !== null;
 }
@@ -245,6 +290,8 @@ function entryOf(tab: IdTab, org: OrgName): PrEntry[] {
 }
 
 export async function prEntries(rules: Pick<Rules, "org">): Promise<PrEntry[]> {
+  const scannedAt = Date.now();
+  const revisions = new Map([...tabKeys].map(([id, { revision }]) => [id, revision]));
   const tabs = await openPrTabs();
   const entries = tabs.flatMap((tab) => entryOf(tab, rules.org));
 
@@ -253,6 +300,14 @@ export async function prEntries(rules: Pick<Rules, "org">): Promise<PrEntry[]> {
   for (const { tab } of entries) {
     prTabIds.add(tab.id);
   }
+
+  const isUnmoved = ({ tab }: PrEntry) => revisionOf(tab.id) === (revisions.get(tab.id) ?? 0);
+  const unmoved = entries.filter(isUnmoved);
+  const moved = entries.filter((entry) => !isUnmoved(entry)).map(({ tab }) => tab.id);
+
+  await updateTabVisits((visits) =>
+    recordVisits(visits, { entries: unmoved, scannedAt, moved }, Date.now()),
+  );
 
   return entries;
 }
@@ -513,39 +568,57 @@ async function fetchStates(entries: PrEntry[]): Promise<FetchedStates | Failure>
   }
 }
 
-async function closeIfFinished(id: TabId, key: PrKey, org: OrgName): Promise<boolean> {
+async function closeIfFinished(id: TabId, closing: Closing, org: OrgName): Promise<boolean> {
   const tab = await findTab(id);
 
-  if (!tab || tab.active || !stillShowsPr(tab, key, org)) {
+  if (
+    !tab ||
+    tab.active ||
+    !stillShowsPr(tab, closing.key, org) ||
+    revisionOf(id) !== closing.revision
+  ) {
     return false;
   }
 
   return removeTab(id);
 }
 
-async function closeFinished(rules: Rules, entries: PrEntry[], states: States): Promise<Closed[]> {
+async function closeFinished(
+  rules: Rules,
+  entries: PrEntry[],
+  states: States,
+): Promise<Pick<CheckResult, "closed" | "inView">> {
   const keyById = new Map(entries.map((entry) => [entry.tab.id, entry.pr.key]));
+  const revisions = new Map(entries.map(({ tab }) => [tab.id, revisionOf(tab.id)]));
+  const visits = await withTabVisits(async (latest) => latest);
   const closed: Closed[] = [];
 
-  for (const id of tabsToClose(entries, states)) {
+  for (const id of tabsToClose(entries, states, visits)) {
     const key = keyById.get(id);
+    const revision = revisions.get(id) ?? 0;
 
-    if (key !== undefined && (await closeIfFinished(id, key, rules.org))) {
+    if (key !== undefined && (await closeIfFinished(id, { key, revision }, rules.org))) {
       closed.push({ key, state: states[key]?.state });
     }
   }
 
-  return closed;
+  return { closed, inView: activeFinished(entries, states, visits) };
 }
 
-function isFinished(entry: PrEntry, states: States): boolean {
-  const state = states[entry.pr.key]?.state;
+function isFinished(entry: PrEntry, states: States, visits: TabVisits): boolean {
+  const { tab, pr } = entry;
+  const state = states[pr.key];
 
-  return entry.tab.active && state !== undefined && FINISHED.has(state);
+  return (
+    tab.active &&
+    state?.state !== undefined &&
+    FINISHED.has(state.state) &&
+    closedDuringVisit(state, visits[tab.id], pr.key)
+  );
 }
 
-function activeFinished(entries: PrEntry[], states: States): PrKey[] {
-  return entries.filter((entry) => isFinished(entry, states)).map((entry) => entry.pr.key);
+function activeFinished(entries: PrEntry[], states: States, visits: TabVisits): PrKey[] {
+  return entries.filter((entry) => isFinished(entry, states, visits)).map((entry) => entry.pr.key);
 }
 
 async function groupEntries(rules: Rules, entries: PrEntry[], meta: Meta): Promise<void> {
@@ -569,8 +642,7 @@ async function applyStates(
   fetched: FetchedStates,
 ): Promise<CheckResult> {
   const { states, prs, checked, nextCursor } = fetched;
-  const closed = await closeFinished(rules, entries, states);
-  const inView = activeFinished(entries, states);
+  const { closed, inView } = await closeFinished(rules, entries, states);
 
   await updateMeta((meta) => recordStates(meta, states));
   await writeStored({ failures: 0, cursor: nextCursor });
@@ -584,8 +656,8 @@ function noTabsChecked(): CheckResult {
   return { tabs: 0, prs: 0, checked: 0, closed: [], inView: [] };
 }
 
-// Fetches the PR states in one host call, closes background tabs of merged or closed PRs and
-// reports what happened.
+// Fetches the PR states in one host call, closes background tabs whose PR merged or closed during
+// the tab's visit and reports what happened.
 async function checkOnce(): Promise<Reply<"checkNow">> {
   const rules = await loadRules();
   const entries = await prEntries(rules);
@@ -795,20 +867,63 @@ export function closePr(key: PrKey, tabId: TabId): Promise<Reply<"closePr">> {
   return serial(() => closeKnownPr(key, tabId));
 }
 
-// What the popup needs for the repo dropdown: the listed repos, the selected one, and whether to
-// show it.
+let repoNumbersRefresh: Promise<{ cache: RepoNumbersCache | null; failed: boolean }> | undefined;
+
+async function refreshRepoNumbers(
+  rules: Rules,
+): Promise<{ cache: RepoNumbersCache | null; failed: boolean }> {
+  const repos = effectiveRepos(rules);
+
+  if (!rules.org || !repos.length) {
+    return { cache: null, failed: false };
+  }
+
+  try {
+    const { newest } = await askHost({ type: "repoNumbers", org: rules.org, repos });
+
+    if (newest && typeof newest === "object") {
+      const cache = { newest };
+      await writeStored({ prTabsRepoNumbers: cache });
+
+      return { cache, failed: false };
+    }
+  } catch (error) {
+    warn(error);
+  }
+
+  return { cache: null, failed: true };
+}
+
+function refreshRepoNumbersNow(
+  rules: Rules,
+): Promise<{ cache: RepoNumbersCache | null; failed: boolean }> {
+  const refresh = (repoNumbersRefresh ??= refreshRepoNumbers(rules).finally(() => {
+    repoNumbersRefresh = undefined;
+  }));
+
+  return refresh;
+}
+
+// Repo choices for the popup; stored newest numbers fill in when no fresh fetch succeeds.
 export async function repoChoices(): Promise<RepoChoices> {
   const rules = await loadRules();
-  const stored = await readStored("prTabsRepo");
+  const [stored, cache] = await Promise.all([
+    readStored("prTabsRepo"),
+    readStored("prTabsRepoNumbers"),
+  ]);
+  const show = showRepoPicker(rules);
+  const refreshed = show ? await refreshRepoNumbersNow(rules) : { cache: null, failed: false };
 
   return {
     repos: effectiveRepos(rules),
     selected: pickedRepo(rules, stored),
-    show: showRepoPicker(rules),
+    show,
+    newest: refreshed.cache?.newest || cache.newest,
+    guessUnavailable: refreshed.failed,
   };
 }
 
-// Remembers the dropdown pick when it is a listed repo.
+// Remembers the repo pick when it is a listed repo.
 export async function pickRepo(repo?: RepoName): Promise<void> {
   const rules = await loadRules();
 
@@ -1099,6 +1214,17 @@ function handleTabSettled(tabId: TabId): void {
 }
 
 function handleTabUpdated(tabId: TabId, change: chrome.tabs.OnUpdatedInfo, tab: Tab): void {
+  if (change.url) {
+    const key = prKey(tab.pendingUrl || tab.url);
+    const known = tabKeys.get(tabId);
+
+    if (!known || known.key !== key) {
+      tabKeys.set(tabId, { key, revision: revisionOf(tabId) + 1 });
+    }
+
+    void visitTab(tabId, key);
+  }
+
   if (!tabUpdateMatters(change, tab, prTabIds.has(tabId))) {
     return;
   }
@@ -1110,6 +1236,7 @@ function handleTabUpdated(tabId: TabId, change: chrome.tabs.OnUpdatedInfo, tab: 
 function handleTabRemoved(tabId: TabId): void {
   clearTimeout(pending.get(tabId));
   pending.delete(tabId);
+  tabKeys.delete(tabId);
   ensureAlarm().catch(warn);
 }
 

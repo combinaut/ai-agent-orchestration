@@ -23,8 +23,30 @@ const IDENTIFIER_CHARACTERS = /[/:#.@*_\-$%<>=[\]{}()?&|\\~+^,;!]/;
 const CAMEL_CASE = /^[a-z]+(?:[A-Z][a-z0-9]*)+$/;
 
 // Plain words a file uses as codes (message types, states, colours, option names), by file. A word
-// is a code only in the files listed, so "search" in PrInput.vue is still text.
+// is a code only in the files listed, so "search" in another file is still text.
 const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
+  "files/content.ts": ["pagehide"],
+  "files/controller.ts": [
+    "div",
+    "span",
+    "button",
+    "flash mb-3",
+    "role",
+    "status",
+    "btn-link ml-2",
+    "click",
+  ],
+  "files/dom.ts": [
+    "h3",
+    "a code",
+    "href",
+    "#pr-file-tree [role='treeitem']:not([aria-expanded]), file-tree [role='treeitem']:not([aria-expanded])",
+    "#diff-comparison-viewer-container [data-testid='progressive-diffs-list']",
+  ],
+  "files/matcher.ts": ["u"],
+  "files/observe.ts": ["popstate"],
+  "files/settings.ts": ["object", "enabled", "patterns", "string", "sync", "source"],
+  "options/PatternItem.vue": ["remove"],
   "background.ts": [
     "MERGED",
     "CLOSED",
@@ -41,9 +63,6 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
     "panes",
     "opened",
   ],
-  "composables/useFuzzyFilter.ts": ["title", "label", "repo", "number", "branch"],
-  "highlight.ts": ["label", "title"],
-  "popup/components/PrSearch.vue": ["next", "go", "ArrowDown", "Enter", "Escape"],
   "composables/useOpeningProgress.ts": ["sync"],
   "composables/usePanes.ts": ["panes"],
   "composables/usePrPane.ts": [
@@ -77,16 +96,31 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   ],
   "i18n.ts": ["one", "other", "conjunction"],
   "messages.ts": ["error", "object", "message", "string", "type", "reply"],
-  "popup/components/ActionButton.vue": ["secondary", "run"],
-  "popup/components/GoToForm.vue": ["input", "repo", "go", "pick"],
+  "popup/App.vue": ["idle", "goto", "search", "repo", "pr", "nearest"],
+  "composables/useGroupItem.ts": ["grey"],
+  "composables/useRepoOptions.ts": ["grey"],
+  "composables/useSearchFilter.ts": ["title", "label", "repo", "number", "branch", "groupName"],
+  "popup/components/PopupField.vue": [
+    "input",
+    "goto",
+    "search",
+    "Enter",
+    "go",
+    "ArrowDown",
+    "next",
+    "ArrowUp",
+    "previous",
+    "Escape",
+    "clear",
+  ],
+  "popup/components/RepoOptionItem.vue": ["pick", "hover"],
+  "popup/components/StatusToast.vue": ["alert", "status", "success", "info"],
   "popup/components/OpeningProgress.vue": ["determinate", "indeterminate"],
-  "popup/components/GroupItem.vue": ["go", "close", "-mx-popup-padding px-popup-padding"],
-  "popup/components/GroupList.vue": ["go", "close", "list"],
-  "popup/components/PrItem.vue": ["go", "close"],
-  "popup/components/PrInput.vue": ["field"],
-  "popup/components/RepoSelect.vue": ["pick"],
+  "popup/components/GroupItem.vue": ["go", "close", "hover", "collapse", "ArrowLeft", "ArrowRight"],
+  "popup/components/GroupList.vue": ["go", "close", "hover", "collapse"],
+  "popup/components/PrItem.vue": ["go", "close", "hover", "Delete", "Backspace"],
   "popup/primevue.ts": ["none"],
-  "texts.ts": ["MERGED"],
+  "texts.ts": ["MERGED", "success", "info", "warning"],
 };
 
 function isMachineIdentifier(text: string, codes: ReadonlySet<string>): boolean {

@@ -313,6 +313,46 @@ class SignalTests(IsolatedTestCase):
         self.assertIn("question=Which?", "\n".join(events))
         self.assertEqual(w.reduce_workers(after, raw)[1], [])
 
+    def test_question_push_has_complete_payload_and_concrete_answer_command(self):
+        import alert_policy
+
+        q = self.record(timeout=60)
+        signals, records = s.collect(
+            [dict(pane_id="pane:1", workspace_id="worker")],
+            {"worker": "owner"},
+            q["at"],
+        )
+        _, events = w.reduce_workers(
+            None,
+            dict(
+                result=dict(agents=[]),
+                worker_signals=signals,
+                signal_events=records,
+            ),
+        )
+        notices = alert_policy.apply({}, [dict(mode="workers", events=events)], q["at"])
+        spec = importlib.util.spec_from_file_location(
+            "push_inbox", w.ROOT / "notify-inbox.py"
+        )
+        inbox = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inbox)
+        routed = inbox.native_messages(
+            argparse.Namespace(bindings_dir=self.base, binding=None),
+            ["stamp " + line for line in notices],
+            False,
+            [],
+        )
+        self.assertEqual(len(routed), 1)
+        self.assertEqual(routed[0][0], str(self.base / "architect-owner.json"))
+        for value in (
+            "pane:1",
+            "Which?",
+            "options=a,b",
+            q["id"],
+            f"orch-signal answer {q['id']} <text>",
+        ):
+            self.assertIn(value, routed[0][1])
+
     def test_invalid_id_cannot_escape_directory(self):
         with self.assertRaises(ValueError):
             s.question_path("../other")

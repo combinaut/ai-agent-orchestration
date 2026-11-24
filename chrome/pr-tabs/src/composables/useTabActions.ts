@@ -1,9 +1,10 @@
 import { useAsyncState } from "@vueuse/core";
 import { getPlainMessage } from "#/i18n";
 import { failed } from "#/messages";
-import { checkText, duplicateText, openAllText } from "#/texts";
+import { checkLine, duplicateLine, openAllLine } from "#/texts";
 import type {
   Replies,
+  StatusLine,
   TabAction,
   TabActionContext,
   TabActions,
@@ -33,7 +34,7 @@ function useTabAction<K extends TabActionType>(
     }
 
     await refresh();
-    status.info(spec.report(result));
+    status.show(spec.report(result));
   }
 
   const { isLoading: busy, executeImmediate } = useAsyncState(perform, undefined, {
@@ -47,13 +48,13 @@ function useTabAction<K extends TabActionType>(
   return { busy, run };
 }
 
-function reportDuplicates(result: Replies["closeDuplicates"]): string {
-  return duplicateText(result.closed);
+function reportDuplicates(result: Replies["closeDuplicates"]): StatusLine {
+  return duplicateLine(result.closed);
 }
 
 export function useTabActions(context: TabActionContext): TabActions {
-  function reportOpenAll(result: Replies["openAll"]): string {
-    return openAllText(result, context.status.statusText.value);
+  function reportOpenAll(result: Replies["openAll"]): StatusLine {
+    return openAllLine(result, context.status.statusText.value);
   }
 
   const openAll = useTabAction(context, {
@@ -73,7 +74,7 @@ export function useTabActions(context: TabActionContext): TabActions {
   const checkNow = useTabAction(context, {
     request: { type: "checkNow" },
     pending: getPlainMessage("pendingChecking"),
-    report: checkText,
+    report: checkLine,
   });
 
   const closeDuplicates = useTabAction(context, {

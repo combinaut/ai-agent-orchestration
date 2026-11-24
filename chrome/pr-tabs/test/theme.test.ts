@@ -29,9 +29,8 @@ test("popup entry imports the generated theme stylesheet", () => {
   assert.match(source, /\bimport\s*["']virtual:primevue-theme\.css["']/);
 });
 
-test("transitive ripple and virtualscroller styles stay registered", () => {
+test("transitive ripple styles stay registered", () => {
   assert.ok(COMPONENTS.includes("ripple"));
-  assert.ok(COMPONENTS.includes("virtualscroller"));
 });
 
 test("build emits Aura styles for initial, conditional and overlay components", async () => {
@@ -43,9 +42,7 @@ test("build emits Aura styles for initial, conditional and overlay components", 
     assert.ok(css.includes(selector), component);
   }
 
-  assert.match(css, /li\.p-select-option[^{}]*\{\s*transition:\s*none/);
   assert.match(css, /--p-primary-color:/);
-  assert.match(css, /--p-select-option-selected-background:/);
   assert.match(css, /prefers-color-scheme:\s*dark/);
   assert.match(css, /@layer primevue/);
   assert.match(css, /@layer theme,\s*base,\s*primevue,\s*components,\s*utilities;/);

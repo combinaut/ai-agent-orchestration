@@ -197,9 +197,16 @@ test("settings refuse a config that is not UTF-8, scoped wrong or broken", () =>
   assertRefused(settingsFor('[pr_tabs]\norg = "unterminated\n'), cannot);
 });
 
+const MERGED_ONE = {
+  state: "MERGED",
+  closedAt: "2026-01-01T00:00:00Z",
+  title: "One",
+  headRefName: "a",
+};
+
 test("states for many PRs take one gh call and come back keyed by PR", () => {
   const data = {
-    p0: { pullRequest: { state: "MERGED", title: "One", headRefName: "a" } },
+    p0: { pullRequest: MERGED_ONE },
     p1: { pullRequest: { state: "OPEN", title: "Two", headRefName: "b" } },
     p2: null,
   };
@@ -207,15 +214,51 @@ test("states for many PRs take one gh call and come back keyed by PR", () => {
   const { reply, calls } = ask({ type: "states", prs }, { reply: { data } });
 
   assert.equal(calls.length, 1);
+  assert.match(String(calls[0]), /pullRequest\(number: \$n0\) \{ state closedAt /);
   assert.deepEqual(reply, {
     ok: true,
     owners: {},
     prs: {
-      "acme/webapp#1": { state: "MERGED", title: "One", headRefName: "a" },
+      "acme/webapp#1": MERGED_ONE,
       "acme/webapp#2": { state: "OPEN", title: "Two", headRefName: "b" },
       "acme/webapp#3": null,
     },
   });
+});
+
+test("repo numbers return each repository's newest issue number in one gh call", () => {
+  const { reply, calls } = ask(
+    { type: "repoNumbers", org: "acme", repos: ["webapp", "api", "empty"] },
+    {
+      reply: {
+        data: {
+          r0: { issues: { nodes: [{ number: 520 }] }, pullRequests: { nodes: [{ number: 521 }] } },
+          r1: { issues: { nodes: [{ number: 2000 }] }, pullRequests: { nodes: [] } },
+          r2: { issues: { nodes: [] }, pullRequests: { nodes: [] } },
+        },
+      },
+    },
+  );
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(reply, { ok: true, newest: { webapp: 521, api: 2000 } });
+});
+
+test("repo numbers where no repository resolved return the GraphQL errors, not an empty success", () => {
+  const errors = [{ message: "Could not resolve to a Repository" }];
+  const { reply } = ask(
+    { type: "repoNumbers", org: "acme", repos: ["webapp", "api"] },
+    { reply: { data: { r0: null, r1: null }, errors }, status: 1 },
+  );
+
+  assert.deepEqual(reply, { ok: false, error: "Could not resolve to a Repository" });
+});
+
+test("repo number lookups reject invalid repositories before calling gh", () => {
+  const { reply, calls } = ask({ type: "repoNumbers", org: "acme", repos: ["bad repo"] });
+
+  assert.equal(reply.ok, false);
+  assert.equal(calls.length, 0);
 });
 
 test("partial GraphQL errors still return the PRs that resolved", () => {

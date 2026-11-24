@@ -11,41 +11,23 @@
   "goToLabel": {
     "message": "Zu einem PR gehen"
   },
-  "goToPlaceholder": {
-    "message": "2972 oder eine PR-URL"
-  },
-  "submitHintLabel": {
-    "message": "Eingabetaste drücken"
-  },
   "repoSelectLabel": {
     "message": "Repository für eine einzelne Nummer"
   },
-  "repoSelectedMessage": {
-    "message": "1 Repository ausgewählt"
+  "repoGuessUnavailable": {
+    "message": "Repository-Vorschlag nicht verfügbar: Host aktualisieren"
   },
-  "repoNoneSelectedMessage": {
-    "message": "Kein Repository ausgewählt"
-  },
-  "repoEmptyMessage": {
-    "message": "Keine Repositories verfügbar"
+  "actionMenuLabel": {
+    "message": "Aktionen"
   },
   "openAllButton": {
     "message": "Alle öffnen"
   },
-  "openAllHint": {
-    "message": "Alle meine offenen PRs öffnen"
-  },
   "checkNowButton": {
     "message": "Gemergte schließen"
   },
-  "checkNowHint": {
-    "message": "Gemergte PRs schließen"
-  },
   "closeDuplicatesButton": {
     "message": "Duplikate schließen"
-  },
-  "closeDuplicatesHint": {
-    "message": "Doppelte Tabs schließen"
   },
   "groupsLabel": {
     "message": "PR-Tab-Gruppen"
@@ -168,7 +150,7 @@
     }
   },
   "noneClosed_one": {
-    "message": "Kein gemergter oder geschlossener PR unter $COUNT$ geprüftem PR",
+    "message": "Nichts zu schließen unter $COUNT$ geprüftem PR",
     "placeholders": {
       "count": {
         "content": "$1"
@@ -176,7 +158,7 @@
     }
   },
   "noneClosed_other": {
-    "message": "Kein gemergter oder geschlossener PR unter $COUNT$ geprüften PRs",
+    "message": "Nichts zu schließen unter $COUNT$ geprüften PRs",
     "placeholders": {
       "count": {
         "content": "$1"
@@ -345,9 +327,6 @@
   "openReviewsButton": {
     "message": "Reviews öffnen"
   },
-  "openReviewsHint": {
-    "message": "PRs öffnen, für die meine Review angefordert wurde"
-  },
   "openingProgress": {
     "message": "$OPENED$ von $PLANNED$ geöffnet",
     "placeholders": {
@@ -365,32 +344,140 @@
   "errPrTabGone": {
     "message": "Dieser PR-Tab ist nicht mehr geöffnet."
   },
-  "prSearchLabel": {
-    "message": "PR-Tabs durchsuchen"
-  },
-  "prSearchEmpty": {
-    "message": "Keine passenden PRs"
-  },
-  "prSearchCount_one": {
-    "message": "$COUNT$ passende PR",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
-  "prSearchCount_other": {
-    "message": "$COUNT$ passende PRs",
-    "placeholders": {
-      "count": {
-        "content": "$1"
-      }
-    }
-  },
   "closePrTab": {
     "message": "Tab $PR$ schließen",
     "placeholders": {
       "pr": {
+        "content": "$1"
+      }
+    }
+  },
+  "fieldPlaceholder": {
+    "message": "PR-Nummer, Link oder offene Tabs durchsuchen"
+  },
+  "fieldNumberHint": {
+    "message": "PR-Nummer"
+  },
+  "fieldMatches_one": {
+    "message": "$COUNT$ Treffer",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "fieldMatches_other": {
+    "message": "$COUNT$ Treffer",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "footerFiltered": {
+    "message": "$MATCHES$ von $TOTAL$ PRs",
+    "placeholders": {
+      "matches": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "footerListHint": {
+    "message": "↑↓ auswählen · ↵ öffnen · esc leeren"
+  },
+  "footerGoToHint": {
+    "message": "↵ öffnen · ↑↓ Repository · esc schließen"
+  },
+  "emptyHint": {
+    "message": "Gib eine PR-Nummer wie 2972 ein oder füge einen PR-Link ein. Enter wählt das Repository, ein zweites Enter öffnet den PR."
+  },
+  "goToOpenIn": {
+    "message": "#$NUMBER$ öffnen in",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "goToMatching": {
+    "message": "Offene Tabs mit $NUMBER$",
+    "placeholders": {
+      "number": {
+        "content": "$1"
+      }
+    }
+  },
+  "alreadyOpen": {
+    "message": "bereits offen · ↵ wechseln"
+  },
+  "closeStatus": {
+    "message": "Schließen"
+  },
+  "hideFilesTitle": {
+    "message": "Dateien auf Pull-Request-Seiten ausblenden"
+  },
+  "hideFilesEnabled": {
+    "message": "Passende Dateien ausblenden"
+  },
+  "hideFilesHelp": {
+    "message": "Muster gelten für den vollständigen Pfad. * = beliebige Zeichen."
+  },
+  "filePattern": {
+    "message": "Glob-Muster"
+  },
+  "addPattern": {
+    "message": "Hinzufügen"
+  },
+  "removePattern": {
+    "message": "$PATTERN$ entfernen",
+    "placeholders": {
+      "pattern": {
+        "content": "$1"
+      }
+    }
+  },
+  "showHiddenFiles": {
+    "message": "Anzeigen"
+  },
+  "fileSettingsError": {
+    "message": "Einstellungen konnten nicht gespeichert oder geladen werden. Neu laden und erneut versuchen."
+  },
+  "settingsMenu": {
+    "message": "Einstellungen"
+  },
+  "filesHidden": {
+    "message": "$COUNT$ Dateien von PR Tabs ausgeblendet ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "settingsPageTitle": {
+    "message": "PR Tabs Einstellungen"
+  },
+  "filePatternsLabel": {
+    "message": "Dateimuster"
+  },
+  "filePatternPlaceholder": {
+    "message": "z. B. *.test.ts"
+  },
+  "filePatternEmpty": {
+    "message": "Ein Muster eingeben."
+  },
+  "filePatternDuplicate": {
+    "message": "Dieses Muster ist bereits in der Liste."
+  },
+  "hideHiddenFiles": {
+    "message": "Ausblenden"
+  },
+  "hiddenFilesShown": {
+    "message": "$COUNT$ ausgeblendete Dateien angezeigt ·",
+    "placeholders": {
+      "count": {
         "content": "$1"
       }
     }

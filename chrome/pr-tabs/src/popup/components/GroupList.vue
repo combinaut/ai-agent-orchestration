@@ -1,48 +1,39 @@
 <script setup lang="ts">
 import Accordion from "primevue/accordion";
-import { computed, ref, watch, useTemplateRef } from "vue";
+import { computed, watch } from "vue";
 import { lookupHeads } from "#/core";
 import { useMessages } from "#/composables/useMessages";
-import type { ComponentPublicInstance } from "vue";
-import type { GroupListProps, GroupRows, PrKey, TabId, PrRowEvents } from "#/types";
+import type { GroupEvents, GroupListProps, GroupRows, PrKey, TabId } from "#/types";
 import GroupItem from "./GroupItem.vue";
 
 const props = defineProps<GroupListProps>();
-const emit = defineEmits<PrRowEvents>();
+const emit = defineEmits<GroupEvents>();
 const { groupsLabel } = useMessages(["groupsLabel"]);
-const expanded = ref<string[]>([]);
-const filteredExpanded = ref<string[]>([]);
-const list = useTemplateRef<ComponentPublicInstance>("list");
-
-const accordionValue = computed({ get: readExpanded, set: handleExpandedSet });
 const groupRows = computed<GroupRows>(() =>
   Object.fromEntries(props.groups.map((group) => [`group-${group.id}`, group])),
 );
+const expanded = computed(() =>
+  props.groups.map((group) => group.id).filter((id) => !props.collapsed.has(id)),
+);
 
-function readExpanded(): string[] {
-  return props.filtering ? filteredExpanded.value : expanded.value;
+function isArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
 }
 
-function handleExpandedSet(value: string[]): void {
-  if (props.filtering) {
-    filteredExpanded.value = value;
-  } else {
-    expanded.value = value;
+function handleExpandedUpdate(value: unknown): void {
+  const open = new Set(isArray(value) ? value.map(String) : []);
+
+  for (const group of props.groups) {
+    const wasOpen = !props.collapsed.has(group.id);
+
+    if (wasOpen !== open.has(group.id)) {
+      emit("collapse", group.id, wasOpen);
+    }
   }
 }
 
-function handleGroupsUpdate(): void {
-  void props.panes.ensure(lookupHeads(props.groups));
-}
-
-function handleGroupsChanged(): void {
-  if (props.filtering) {
-    filteredExpanded.value = props.groups.map((group) => group.id);
-  }
-
-  if (props.filtering || expanded.value.length > 0) {
-    handleGroupsUpdate();
-  }
+function handleCollapse(id: string, collapsed: boolean): void {
+  emit("collapse", id, collapsed);
 }
 
 function handlePrGo(key: PrKey): void {
@@ -53,36 +44,37 @@ function handlePrClose(key: PrKey, tabId: TabId): void {
   emit("close", key, tabId);
 }
 
-function focusFirst(): void {
-  const root: unknown = list.value?.$el;
-  if (root instanceof HTMLElement) {
-    const panel = root.querySelector(".p-accordionpanel:has([aria-expanded=true])");
-    panel?.querySelector<HTMLButtonElement>("button[data-pr-tab]")?.focus();
-  }
+function handlePrHover(tabId: TabId): void {
+  emit("hover", tabId);
 }
 
-watch([() => props.groups, () => props.filtering], handleGroupsChanged, { immediate: true });
+function handleGroupsChanged(): void {
+  void props.panes.ensure(lookupHeads(props.groups));
+}
 
-defineExpose({ focusFirst });
+watch(() => props.groups, handleGroupsChanged, { immediate: true });
 </script>
 
 <template>
   <Accordion
     id="groups"
-    ref="list"
-    v-model:value="accordionValue"
-    class="mt-2"
+    class="group-list"
     multiple
+    :value="expanded"
     :aria-label="groupsLabel"
-    @update:value="handleGroupsUpdate"
+    @update:value="handleExpandedUpdate"
   >
     <GroupItem
       v-for="(group, id) in groupRows"
       :key="id"
       :group="group"
       :panes="panes"
+      :collapsed="collapsed"
+      :selected="selected"
+      @collapse="handleCollapse"
       @go="handlePrGo"
       @close="handlePrClose"
+      @hover="handlePrHover"
     />
   </Accordion>
 </template>

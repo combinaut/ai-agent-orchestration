@@ -3,13 +3,13 @@ import { test } from "vitest";
 import { useGroupItem } from "#/composables/useGroupItem";
 import type { GroupColor } from "#/types";
 
-test("a Chrome colour gets its dot; unknown and inherited names are grey", () => {
-  const grey = useGroupItem({ id: "1", title: "a", color: "grey", count: 1, prs: [] }).dotClass
+test("a Chrome colour gets its colour class; unknown and inherited names are grey", () => {
+  const grey = useGroupItem({ id: "1", title: "a", color: "grey", count: 1, prs: [] }).colorClass
     .value;
 
   assert.equal(
-    useGroupItem({ id: "2", title: "a", color: "blue", count: 1, prs: [] }).dotClass.value,
-    "bg-group-blue",
+    useGroupItem({ id: "2", title: "a", color: "blue", count: 1, prs: [] }).colorClass.value,
+    "group-blue",
   );
 
   // Colours Chrome does not have, as an older or broken extension state could hold.
@@ -17,7 +17,7 @@ test("a Chrome colour gets its dot; unknown and inherited names are grey", () =>
 
   for (const color of unknown) {
     assert.equal(
-      useGroupItem({ id: "3", title: "a", color, count: 1, prs: [] }).dotClass.value,
+      useGroupItem({ id: "3", title: "a", color, count: 1, prs: [] }).colorClass.value,
       grey,
       String(color),
     );

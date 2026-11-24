@@ -1,10 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import type { Closed, Entry, Meta, Opened, States } from "#/types";
+import type { Closed, Entry, Meta, Opened, States, TabVisits } from "#/types";
 import { checkText } from "#/texts";
-import { pruneMeta, recordStates, seedOpen, shouldClose, stillShowsPr, tabsToClose } from "#/core";
+import {
+  navigateVisit,
+  pruneMeta,
+  recordStates,
+  recordVisits,
+  seedOpen,
+  shouldClose,
+  stillShowsPr,
+  tabsToClose,
+} from "#/core";
 
 const background = { active: false };
+const SINCE = Date.parse("2026-01-01T00:00:00Z");
+const LATER = "2026-01-01T00:00:01Z";
 
 test("a merged or closed PR closes its tab", () => {
   assert.equal(shouldClose(background, "MERGED"), true);
@@ -31,13 +42,82 @@ test("every background tab of a merged or closed PR is closed, nothing else", ()
   ];
 
   const states: States = {
-    "acme/webapp#1": { state: "MERGED" },
-    "acme/webapp#2": { state: "OPEN" },
-    "acme/webapp#3": { state: "CLOSED" },
+    "acme/webapp#1": { state: "MERGED", closedAt: LATER },
+    "acme/webapp#2": { state: "OPEN", closedAt: LATER },
+    "acme/webapp#3": { state: "CLOSED", closedAt: LATER },
     "acme/webapp#4": null,
   };
+  const visits: TabVisits = Object.fromEntries(
+    entries.map(({ tab, pr }) => [tab.id, { key: pr.key, since: SINCE }]),
+  );
 
-  assert.deepEqual(tabsToClose(entries, states), [1, 2, 4]);
+  assert.deepEqual(tabsToClose(entries, states, visits), [1, 2, 4]);
+});
+
+test("a visit of another PR does not let a tab close", () => {
+  const entries: Entry[] = [{ tab: { id: 1, active: false }, pr: { key: "acme/webapp#2" } }];
+  const states: States = { "acme/webapp#2": { state: "MERGED", closedAt: LATER } };
+
+  assert.deepEqual(tabsToClose(entries, states, { 1: { key: "acme/webapp#1", since: SINCE } }), []);
+});
+
+test("a PR closed in the same millisecond its visit started keeps the tab", () => {
+  const entries: Entry[] = [{ tab: { id: 1, active: false }, pr: { key: "acme/webapp#1" } }];
+  const states: States = {
+    "acme/webapp#1": { state: "MERGED", closedAt: new Date(SINCE).toISOString() },
+  };
+
+  assert.deepEqual(tabsToClose(entries, states, { 1: { key: "acme/webapp#1", since: SINCE } }), []);
+});
+
+test("a scan keeps a visit on the same PR and starts one for a new or moved tab", () => {
+  const entries: Entry[] = [
+    { tab: { id: 1, active: false }, pr: { key: "acme/webapp#1" } },
+    { tab: { id: 2, active: false }, pr: { key: "acme/webapp#2" } },
+    { tab: { id: 3, active: false }, pr: { key: "acme/webapp#4" } },
+  ];
+  const visits: TabVisits = {
+    1: { key: "acme/webapp#1", since: 5 },
+    3: { key: "acme/webapp#3", since: 5 },
+  };
+
+  assert.deepEqual(recordVisits(visits, { entries, scannedAt: 10, moved: [] }, 20), {
+    1: { key: "acme/webapp#1", since: 5 },
+    2: { key: "acme/webapp#2", since: 20 },
+    3: { key: "acme/webapp#4", since: 20 },
+  });
+});
+
+test("a visit that started during a scan wins over that scan", () => {
+  const entries: Entry[] = [{ tab: { id: 1, active: false }, pr: { key: "acme/webapp#1" } }];
+  const visits: TabVisits = {
+    1: { key: "acme/webapp#2", since: 10 },
+    2: { key: "acme/webapp#3", since: 11 },
+  };
+
+  assert.deepEqual(recordVisits(visits, { entries, scannedAt: 10, moved: [] }, 20), visits);
+});
+
+test("a scan drops the older visit of a tab it did not find", () => {
+  assert.deepEqual(
+    recordVisits(
+      { 1: { key: "acme/webapp#1", since: 9 } },
+      { entries: [], scannedAt: 10, moved: [] },
+      20,
+    ),
+    {},
+  );
+});
+
+test("navigation keeps the visit on the same PR, restarts it on another and ends it off PRs", () => {
+  const visits: TabVisits = { 1: { key: "acme/webapp#1", since: 5 } };
+
+  assert.deepEqual(navigateVisit(visits, 1, { key: "acme/webapp#1", since: 20 }), visits);
+  assert.deepEqual(navigateVisit(visits, 1, { key: "acme/webapp#2", since: 20 }), {
+    1: { key: "acme/webapp#2", since: 20 },
+  });
+  assert.deepEqual(navigateVisit(visits, 1, null), {});
+  assert.deepEqual(visits, { 1: { key: "acme/webapp#1", since: 5 } });
 });
 
 test("a tab that moved to another page since the poll started is not closed", () => {
@@ -123,7 +203,7 @@ test("the check result names what was closed, what stayed in view and what waits
   );
   assert.equal(
     checkText({ tabs: 120, prs: 110, checked: 100, closed: [], inView: [] }),
-    "No merged or closed PRs among 100 PRs checked; 10 more next time.",
+    "Nothing to close among 100 PRs checked; 10 more next time.",
   );
   assert.equal(
     checkText({ tabs: 0, prs: 0, checked: 0, closed: [], inView: [] }),

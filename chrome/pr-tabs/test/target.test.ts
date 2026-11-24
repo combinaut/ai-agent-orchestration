@@ -18,6 +18,7 @@ import {
   MAX_PANE_LOOKUPS,
   effectiveRepos,
   pickedRepo,
+  suggestedRepo,
   showRepoPicker,
   duplicateTabIds,
   findOpenTab,
@@ -27,7 +28,6 @@ import {
   parsePrUrl,
   parseTarget,
   splitTargets,
-  hasBareNumber,
   summarize,
 } from "#/core";
 import { duplicateText, summaryText } from "#/texts";
@@ -348,7 +348,7 @@ test("defaultRepo is first in the effective repos, without repeats", () => {
   assert.deepEqual(effectiveRepos(rules), ["webapp"]);
 });
 
-test("the dropdown shows only with two or more repos", () => {
+test("repo options show only with two or more repos", () => {
   assert.equal(showRepoPicker(rules), false);
   assert.equal(showRepoPicker({ ...rules, repos: ["Webapp"] }), false);
   assert.equal(showRepoPicker(multi), true);
@@ -358,6 +358,40 @@ test("the selected repo is the last pick while listed, else defaultRepo", () => 
   assert.equal(pickedRepo(multi, "docs"), "docs");
   assert.equal(pickedRepo(multi, "gone"), "webapp");
   assert.equal(pickedRepo(multi, ""), "webapp");
+});
+
+test("a repo whose newest number is below the typed number never qualifies", () => {
+  const repos = ["infra", "sparkle"];
+  const newest = { infra: 520, sparkle: 34300 };
+
+  assert.equal(suggestedRepo(repos, 3999, { fallback: "infra", newest }), "sparkle");
+  assert.equal(
+    suggestedRepo(["infra"], 520, { fallback: "hub", newest: { infra: 520, hub: 111 } }),
+    "infra",
+  );
+});
+
+test("the selected repo is kept when its newest number reaches the typed number", () => {
+  const newest = { a: 1000, b: 5000 };
+
+  assert.equal(suggestedRepo(["a", "b"], 900, { fallback: "b", newest }), "b");
+});
+
+test("otherwise the qualifying repo with the smallest newest number wins", () => {
+  const newest = { a: 850, b: 5000, c: 2000 };
+
+  assert.equal(suggestedRepo(["a", "b", "c"], 900, { fallback: "a", newest }), "c");
+});
+
+test("with no qualifying repo the selected repo stays", () => {
+  assert.equal(suggestedRepo(["b", "a"], 999, { fallback: "a", newest: { a: 100, b: 200 } }), "a");
+  assert.equal(suggestedRepo(["b", "a"], 999, { fallback: "a", newest: {} }), "a");
+});
+
+test("repos without a cached newest number are skipped", () => {
+  const newest = { infra: 520, api: 2000 };
+
+  assert.equal(suggestedRepo(["hub", "infra", "api"], 999, { fallback: "hub", newest }), "api");
 });
 
 test("a bare number goes to the picked repo", () => {
@@ -402,11 +436,4 @@ test("a list keeps URLs and junk as items and counts a repeat once", () => {
     "foo",
     "api#9",
   ]);
-});
-
-test("a list needs the repo pick when any item is a bare number", () => {
-  assert.equal(hasBareNumber("76"), true);
-  assert.equal(hasBareNumber("https://github.com/acme/webapp/pull/1, 76"), true);
-  assert.equal(hasBareNumber("#76, api#2"), false);
-  assert.equal(hasBareNumber(""), false);
 });

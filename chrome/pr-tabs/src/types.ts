@@ -1,5 +1,5 @@
 // Every PR tabs type: domain, chrome messages, native host, storage and popup.
-import type { ComputedRef, Ref } from "vue";
+import type { ComputedRef, MaybeRefOrGetter, Ref } from "vue";
 import type en from "#locales/en/messages.json";
 
 export type OrgName = string;
@@ -28,6 +28,7 @@ export interface Rules {
 }
 
 export type RepoRules = Pick<Rules, "defaultRepo" | "repos">;
+export type RepoNumbers = Partial<Record<RepoName, PrNumber>>;
 
 export interface PrRef {
   owner: OrgName;
@@ -69,10 +70,27 @@ export interface PrHead {
 export interface PrState extends PrHead {
   state?: PrStateName;
   title?: string;
+  closedAt?: string | null;
 }
 
 export type States = Partial<Record<PrKey, PrState | null>>;
 export type Meta = Partial<Record<PrKey, PrState>>;
+
+// Start of the tab's current PR visit in epoch milliseconds; a move to another PR resets it.
+export interface TabVisit {
+  key: PrKey;
+  since: number;
+}
+
+export type TabVisits = Partial<Record<TabId, TabVisit>>;
+
+export interface TabScan {
+  entries: Entry[];
+  scannedAt: number;
+  // Tabs the scan found but did not record, because they navigated during it.
+  moved: TabId[];
+}
+
 export type Owners = Partial<Record<OwnerKey, GroupTitle>>;
 
 export interface SearchHit extends PrHead {
@@ -146,6 +164,9 @@ export interface GroupSummary {
   color?: GroupColor;
   count: number;
   prs: PrRow[];
+  // Set while a search filters the group: its PR count before filtering and matched title ranges.
+  total?: number;
+  titleMatches?: readonly MatchRange[];
 }
 
 export type GroupRows = Record<string, GroupSummary>;
@@ -265,6 +286,8 @@ export interface RepoChoices {
   readonly repos: readonly RepoName[];
   readonly selected: RepoName;
   readonly show: boolean;
+  readonly newest: RepoNumbers;
+  readonly guessUnavailable?: boolean;
 }
 
 export interface Opening {
@@ -341,8 +364,19 @@ export interface FocusPaneHostRequest extends BranchRef {
   type: "focusPane";
 }
 
+export interface RepoNumbersRequest {
+  type: "repoNumbers";
+  org: OrgName;
+  repos: RepoName[];
+}
+
 export type HostRequest =
-  SettingsRequest | StatesRequest | SearchRequest | PanesHostRequest | FocusPaneHostRequest;
+  | SettingsRequest
+  | StatesRequest
+  | SearchRequest
+  | PanesHostRequest
+  | FocusPaneHostRequest
+  | RepoNumbersRequest;
 
 export interface Ownership {
   owners?: Owners | null;
@@ -361,12 +395,17 @@ export interface PanesReply {
   panes: PaneLookup;
 }
 
+export interface RepoNumbersReply {
+  newest: RepoNumbers;
+}
+
 export interface HostReplies {
   settings: Partial<Rules>;
   states: StatesReply;
   search: SearchReply;
   panes: PanesReply;
   focusPane: FocusedPane;
+  repoNumbers: RepoNumbersReply;
 }
 
 export type HostOk<T> = { ok: true } & T;
@@ -378,6 +417,10 @@ export interface HostFailure {
 
 export type HostReply<T> = HostOk<T> | HostFailure;
 
+export interface RepoNumbersCache {
+  newest: RepoNumbers;
+}
+
 export interface StoredState {
   prTabsSettings: HostOk<Partial<Rules>> | null;
   owners: Owners;
@@ -385,6 +428,17 @@ export interface StoredState {
   failures: number;
   cursor: number;
   prTabsRepo: RepoName;
+  prTabsRepoNumbers: RepoNumbersCache;
+  prTabsCollapsed: string[];
+}
+
+export interface SessionState {
+  tabVisits: TabVisits;
+}
+
+export interface Closing {
+  key: PrKey;
+  revision: number;
 }
 
 export interface FetchedStates {
@@ -395,7 +449,7 @@ export interface FetchedStates {
 }
 
 // The popup's composables.
-export type StatusKind = "info" | "error";
+export type StatusKind = "success" | "info" | "warning" | "error";
 
 export interface StatusLine {
   readonly kind: StatusKind;
@@ -406,8 +460,10 @@ export type StatusRevision = number;
 
 export interface Status {
   statusText: ComputedRef<string>;
+  statusKind: ComputedRef<StatusKind>;
   isStatusError: ComputedRef<boolean>;
   revision: Readonly<Ref<StatusRevision>>;
+  show: (line: StatusLine, revision?: StatusRevision) => void;
   info: (text: string, revision?: StatusRevision) => void;
   error: (text: string, revision?: StatusRevision) => void;
 }
@@ -420,8 +476,10 @@ export interface RepoPicker {
   repos: ComputedRef<RepoName[]>;
   repo: Ref<RepoName>;
   available: ComputedRef<boolean>;
-  visible: ComputedRef<boolean>;
+  guessUnavailable: ComputedRef<boolean>;
   load: () => Promise<void>;
+  ready: () => Promise<void>;
+  suggest: () => void;
   pick: () => void;
 }
 
@@ -469,6 +527,8 @@ export type TagSeverity = "success" | "info" | "secondary" | "warn";
 
 export interface SummaryList {
   groups: Ref<GroupSummary[]>;
+  // The summary line of the last successful refresh.
+  text: Readonly<Ref<string>>;
   refresh: () => Promise<void>;
 }
 
@@ -476,7 +536,7 @@ export type TabActionType = OpenBatchAction | "checkNow" | "closeDuplicates";
 
 export interface TabActionContext {
   ask: Ask;
-  status: Pick<Status, "statusText" | "isStatusError" | "info" | "error" | "revision">;
+  status: Pick<Status, "statusText" | "isStatusError" | "show" | "info" | "error" | "revision">;
   refresh: () => Promise<void>;
 }
 
@@ -490,7 +550,7 @@ export interface TabActionSpec<K extends TabActionType> {
   request: PlainRequest<K>;
   pending: string;
   refreshOnFailure?: boolean;
-  report: (result: Replies[K]) => string;
+  report: (result: Replies[K]) => StatusLine;
 }
 
 export interface TabAction {
@@ -503,7 +563,7 @@ export type TabActions = Record<TabActionType, TabAction>;
 export interface GroupRow {
   title: ComputedRef<GroupTitle>;
   count: ComputedRef<number>;
-  dotClass: ComputedRef<string>;
+  colorClass: ComputedRef<string>;
   countLabel: ComputedRef<string>;
 }
 
@@ -514,60 +574,61 @@ export interface OpeningProgressProps {
   progress: OpeningProgress;
 }
 
-export interface ActionButtonProps {
-  label: string;
-  hint: string;
-  busy: boolean;
-  primary?: boolean;
-}
-
-export interface GoToFormProps {
-  busy: boolean;
-  repos: RepoName[];
-  showRepo: boolean;
-}
-
-export interface PrInputProps {
-  readonly: boolean;
-}
-
-export interface RepoSelectProps {
-  repos: RepoName[];
-}
-
-export interface StatusLineProps {
+export interface StatusToastProps {
   text: string;
-  error: boolean;
+  kind: StatusKind;
+  shown: boolean;
+  revision: number;
+  raised: boolean;
 }
 
 export interface GroupListProps {
-  filtering?: boolean;
   groups: GroupSummary[];
   panes: Panes;
+  collapsed: ReadonlySet<string>;
+  selected: string | null;
 }
 
 export interface GroupItemProps {
   group: GroupSummary;
   panes: Panes;
+  collapsed: ReadonlySet<string>;
+  selected: string | null;
 }
 
 export interface PrItemProps {
   pr: PrRow;
   panes: Panes;
+  selected: string | null;
+}
+
+export interface RepoOptionProps {
+  option: RepoOption;
+  selected: string | null;
+}
+
+export interface PopupFieldProps {
+  mode: "idle" | "goto" | "search";
+  matches: number;
+  busy: boolean;
+  expanded: boolean;
+  active: string | null;
+}
+
+export interface ActionMenuItem {
+  label: string;
+  icon: string;
+  busy: boolean;
+  separated?: boolean;
+  run: () => void;
 }
 
 // Component events.
-export interface ActionButtonEmits {
-  run: [];
-}
-
-export interface GoToFormEmits {
+export interface PopupFieldEmits {
   go: [];
-  pick: [];
-}
-
-export interface RepoSelectEmits {
-  pick: [];
+  next: [];
+  previous: [];
+  clear: [];
 }
 
 // Chrome i18n: keys and placeholders come from the English catalog.
@@ -616,38 +677,17 @@ export interface CatalogEntry {
 
 export type Labels<K extends PlainMessageKey> = Readonly<Record<K, string>>;
 
-export interface SearchPr {
-  label: string;
-  row: PrRow;
-  group: GroupSummary;
-  title: string;
-  repo: RepoName;
-  number: PrNumber;
-  branch: BranchName;
-  groupName: GroupTitle;
-}
-
-export interface FuzzyFilter {
-  groups: ComputedRef<GroupSummary[]>;
-  active: ComputedRef<boolean>;
-  count: ComputedRef<number>;
-  best: ComputedRef<PrKey | null>;
-}
-
-export interface PrSearchProps {
-  count: number;
-  active: boolean;
-}
-export interface PrSearchCommands {
-  go: [];
-  next: [];
-}
 export interface PrRowEvents {
   go: [key: PrKey];
   close: [key: PrKey, tabId: TabId];
+  hover: [tabId: TabId];
 }
-export interface GroupListControl {
-  focusFirst: () => void;
+export interface RepoOptionEvents {
+  pick: [option: RepoOption];
+  hover: [option: RepoOption];
+}
+export interface GroupEvents extends PrRowEvents {
+  collapse: [id: string, collapsed: boolean];
 }
 export type CloseFocus = () => void;
 export interface PrCloseContext {
@@ -665,10 +705,55 @@ export interface Segment {
   matched: boolean;
 }
 export interface PrHighlights {
-  label: readonly MatchRange[];
+  number: readonly MatchRange[];
   title: readonly MatchRange[];
-  queryLength: number;
 }
+
+export interface SearchPr {
+  label: string;
+  row: PrRow;
+  group: GroupSummary;
+  title: string;
+  repo: RepoName;
+  number: PrNumber;
+  branch: BranchName;
+  groupName: GroupTitle;
+}
+
+export interface SearchQuery {
+  text: string;
+  numberOnly: boolean;
+}
+
+export interface SearchFilter {
+  groups: ComputedRef<GroupSummary[]>;
+  active: ComputedRef<boolean>;
+  count: ComputedRef<number>;
+}
+
+export interface Collapsed {
+  collapsed: Readonly<Ref<ReadonlySet<string>>>;
+  load: () => Promise<void>;
+  set: (id: string, collapsed: boolean) => void;
+}
+
+export interface RepoOption {
+  readonly id: string;
+  readonly repo: RepoName;
+  readonly color: GroupColor;
+  readonly open: PrKey | null;
+}
+
+export interface RepoOptionSources {
+  groups: MaybeRefOrGetter<GroupSummary[]>;
+  repos: MaybeRefOrGetter<readonly RepoName[]>;
+  guessed: MaybeRefOrGetter<RepoName>;
+  number: MaybeRefOrGetter<PrNumber | null>;
+}
+
+export type Selectable =
+  | { readonly kind: "repo"; readonly id: string; readonly option: RepoOption }
+  | { readonly kind: "pr"; readonly id: string; readonly row: PrRow };
 export interface TextSegmentProps {
   segment: Segment;
 }
