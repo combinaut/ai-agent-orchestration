@@ -43,7 +43,8 @@ After an update, run the install command, then click the reload icon on the exte
 
 ## Hide files on pull request pages
 
-Open the extension's **Options** from its card at `chrome://extensions`. Under
+Open **Settings** from the popup's existing actions menu (or **Options** from its
+extension card at `chrome://extensions`). Under
 **Hide files on pull request pages**, enable **Hide matching files**. The default
 patterns are `*.stories.*`, `*_spec.rb`, and `*.spec.ts`. Add or remove patterns
 in the list; changes are saved in Chrome sync storage and apply to open PR pages.

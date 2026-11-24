@@ -164,7 +164,22 @@ const closingMenuItems = computed<ActionMenuItem[]>(() => [
     run: handleCloseDuplicatesRun,
   },
 ]);
-const actionMenuItems = computed(() => [...openingMenuItems.value, ...closingMenuItems.value]);
+const settingsMenuItem: ActionMenuItem = {
+  label: getMessage("settingsMenu"),
+  icon: "pi-cog",
+  busy: false,
+  separated: true,
+  run: handleSettingsRun,
+};
+const actionMenuItems = computed(() => [
+  ...openingMenuItems.value,
+  ...closingMenuItems.value,
+  settingsMenuItem,
+]);
+
+function handleSettingsRun(): void {
+  void chrome.runtime.openOptionsPage();
+}
 
 function resetSelection(): void {
   const selectsFirst = mode.value === "search" || shownRepoOptions.value.length > 0;

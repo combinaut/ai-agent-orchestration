@@ -9,6 +9,8 @@ import App from "#popup/App.vue";
 import { mountPopup, popupStubs } from "#test/components/mountPopup";
 import { createI18n } from "#test/i18n/catalog";
 
+const openOptionsPage = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
 const mounted: { unmount: () => void; vm: { $: { isUnmounted: boolean } } }[] = [];
 
 afterEach(() => {
@@ -20,6 +22,7 @@ afterEach(() => {
     delete stored[key];
   }
 
+  openOptionsPage.mockClear();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   document.body.replaceChildren();
@@ -96,7 +99,7 @@ async function popup(
   }
 
   vi.stubGlobal("chrome", {
-    runtime: { sendMessage: handleSendMessage },
+    runtime: { sendMessage: handleSendMessage, openOptionsPage },
     i18n: createI18n(),
     storage: { local: fakeLocalStorage() },
   });
@@ -338,10 +341,10 @@ test("actions live in the burger menu", async () => {
   await wrapper.find("#actions-menu").trigger("click");
   await flushPromises();
   const items = [...document.body.querySelectorAll<HTMLElement>(".p-menu-item-link")];
-  assert.equal(document.body.querySelectorAll(".p-menu-separator").length, 1);
+  assert.equal(document.body.querySelectorAll(".p-menu-separator").length, 2);
   assert.deepEqual(
     items.map((item) => item.textContent?.trim()),
-    ["Open all", "Open reviews", "Close merged", "Close duplicates"],
+    ["Open all", "Open reviews", "Close merged", "Close duplicates", "Settings"],
   );
   wrapper.unmount();
 });
@@ -815,4 +818,13 @@ test("closing the only filtered match refreshes counts and focuses search withou
   } finally {
     wrapper.unmount();
   }
+});
+
+test("Settings opens the extension options page from the existing menu", async () => {
+  const { wrapper, sent } = await popup([]);
+  const open = vi.spyOn(chrome.runtime, "openOptionsPage");
+  await runMenuAction(wrapper, "Settings");
+  assert.equal(open.mock.calls.length, 1);
+  assert.deepEqual(sent, []);
+  wrapper.unmount();
 });
