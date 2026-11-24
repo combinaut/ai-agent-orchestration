@@ -5,6 +5,7 @@ import ToggleSwitch from "primevue/toggleswitch";
 import { computed } from "vue";
 import { useFileSettings } from "#/composables/useFileSettings";
 import { getMessage } from "#/i18n";
+import RepositoriesSection from "./RepositoriesSection.vue";
 import PatternItem from "./PatternItem.vue";
 const {
   enabled,
@@ -89,5 +90,6 @@ function handleRemove(value: string): void {
       </fieldset>
       <p v-if="failed" class="settings-error" role="alert">{{ errorLabel }}</p>
     </section>
+    <RepositoriesSection />
   </main>
 </template>

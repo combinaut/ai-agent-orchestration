@@ -481,5 +481,37 @@
         "content": "$1"
       }
     }
+  },
+  "repositoriesTitle": {
+    "message": "Dépôts"
+  },
+  "repositoriesHelp": {
+    "message": "Ajoutez des dépôts en complément de ceux de votre configuration."
+  },
+  "repositoryLabel": {
+    "message": "Dépôt"
+  },
+  "repositoryPlaceholder": {
+    "message": "owner/name"
+  },
+  "addRepository": {
+    "message": "Ajouter"
+  },
+  "repositoryFromConfig": {
+    "message": "de la configuration"
+  },
+  "removeRepository": {
+    "message": "Supprimer $repo$",
+    "placeholders": {
+      "repo": {
+        "content": "$1"
+      }
+    }
+  },
+  "repositoryInvalid": {
+    "message": "Saisissez un dépôt valide au format owner/name."
+  },
+  "repositoryDuplicate": {
+    "message": "Ce dépôt figure déjà dans la liste."
   }
 }

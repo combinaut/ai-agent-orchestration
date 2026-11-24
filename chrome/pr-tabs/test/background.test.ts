@@ -613,7 +613,7 @@ test("the repo choice lists the repos and selects the remembered listed pick", a
   const multi = await multiRepoWorker("multi-repo-choices");
 
   assert.deepEqual(await multi.repoChoices(), {
-    repos: REPOS,
+    repos: ["api", "docs", "webapp"],
     selected: "webapp",
     show: true,
     newest: {},
@@ -624,7 +624,7 @@ test("the repo choice lists the repos and selects the remembered listed pick", a
 
   assert.equal(world.store.prTabsRepo, "api");
   assert.deepEqual(await multi.repoChoices(), {
-    repos: REPOS,
+    repos: ["api", "docs", "webapp"],
     selected: "api",
     show: true,
     newest: {},
@@ -646,7 +646,7 @@ test("an old host that rejects repo numbers preserves the pick and reports an un
   world.nativeHandler = async () => ({ ok: false, error: "unknown request type: 'repoNumbers'" });
 
   assert.deepEqual(await multi.repoChoices(), {
-    repos: REPOS,
+    repos: ["api", "docs", "webapp"],
     selected: "api",
     show: true,
     newest: {},

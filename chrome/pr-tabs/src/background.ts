@@ -1,4 +1,5 @@
 import {
+  allocateGroupColors,
   duplicateTabIds,
   prKey,
   findOpenTab,
@@ -30,6 +31,12 @@ import {
   MAX_PANE_LOOKUPS,
   MAX_PRS_PER_POLL,
 } from "#/core";
+import {
+  configuredRepositories,
+  recentRepositories,
+  repositoryName,
+  validRepository,
+} from "#/repositories";
 import { getMessage } from "#/i18n";
 import { errorText, messageListener } from "#/messages";
 import type {
@@ -54,7 +61,6 @@ import type {
   OpenAllPlan,
   OpenBatchAction,
   OpeningProgress,
-  OrgName,
   Owners,
   PaneLookup,
   Planned,
@@ -64,6 +70,7 @@ import type {
   PrRef,
   PrState,
   PrStateName,
+  RepositorySettings,
   RepoChoices,
   RepoName,
   RepoNumbersCache,
@@ -89,6 +96,9 @@ const STORED_DEFAULTS: StoredState = {
   meta: {},
   failures: 0,
   cursor: 0,
+  prTabsGroupColors: {},
+  prTabsAddedRepos: [],
+  prTabsRepoUsage: {},
   prTabsRepo: "",
   prTabsRepoNumbers: { newest: {} },
   prTabsCollapsed: [],
@@ -171,11 +181,24 @@ function handleRulesFailed(error: unknown): never {
   throw error;
 }
 
-function loadRules(): Promise<Rules> {
+async function configuredRules(): Promise<Rules> {
   expireRules();
   rulesPromise ||= fetchRules().catch(handleRulesFailed);
 
   return rulesPromise;
+}
+
+async function loadRules(): Promise<Rules> {
+  const rules = await configuredRules();
+  const added = await readStored("prTabsAddedRepos");
+
+  return {
+    ...rules,
+    repos: [
+      ...effectiveRepos(rules),
+      ...added.filter((repo) => !configuredRepositories(rules).includes(repo)),
+    ],
+  };
 }
 
 async function fetchRules(): Promise<Rules> {
@@ -283,17 +306,17 @@ async function openPrTabs(): Promise<IdTab[]> {
     .map((tab) => Object.assign({}, tab, { url: tab.pendingUrl || tab.url }));
 }
 
-function entryOf(tab: IdTab, org: OrgName): PrEntry[] {
+function entryOf(tab: IdTab, org: Pick<Rules, "org" | "repos">): PrEntry[] {
   const pr = parsePrUrl(tab.url, org);
 
   return pr ? [{ tab, pr }] : [];
 }
 
-export async function prEntries(rules: Pick<Rules, "org">): Promise<PrEntry[]> {
+export async function prEntries(rules: Pick<Rules, "org" | "repos">): Promise<PrEntry[]> {
   const scannedAt = Date.now();
   const revisions = new Map([...tabKeys].map(([id, { revision }]) => [id, revision]));
   const tabs = await openPrTabs();
-  const entries = tabs.flatMap((tab) => entryOf(tab, rules.org));
+  const entries = tabs.flatMap((tab) => entryOf(tab, rules));
 
   prTabIds.clear();
 
@@ -322,7 +345,7 @@ async function findTab(id: TabId): Promise<IdTab | null> {
   }
 }
 
-async function prTab(id: TabId, org: OrgName): Promise<PrEntry | null> {
+async function prTab(id: TabId, org: Pick<Rules, "org" | "repos">): Promise<PrEntry | null> {
   const tab = await findTab(id);
   const [entry] = tab ? entryOf(tab, org) : [];
 
@@ -437,12 +460,19 @@ async function groupTab(tab: IdTab, pr: Pr, meta: Meta): Promise<void> {
   const recorded: PrState = meta[pr.key] ?? {};
   const head = { branch: recorded.headRefName, headRepository: recorded.headRepository };
 
-  await moveIntoGroup(tab, groupForPr(known, { ...pr, ...head }));
+  const placement = groupForPr(known, { ...pr, ...head });
+  const groups = await chrome.tabGroups.query({});
+  const colors = allocateGroupColors(
+    [...groups.flatMap((group) => (group.title ? [group.title] : [])), placement.name],
+    await readStored("prTabsGroupColors"),
+  );
+  await writeStored({ prTabsGroupColors: colors });
+  await moveIntoGroup(tab, { ...placement, color: colors[placement.name] ?? "grey" });
 }
 
 async function groupTabId(tabId: TabId): Promise<void> {
   const rules = await loadRules();
-  const entry = await prTab(tabId, rules.org);
+  const entry = await prTab(tabId, rules);
 
   if (!entry) {
     return;
@@ -568,7 +598,11 @@ async function fetchStates(entries: PrEntry[]): Promise<FetchedStates | Failure>
   }
 }
 
-async function closeIfFinished(id: TabId, closing: Closing, org: OrgName): Promise<boolean> {
+async function closeIfFinished(
+  id: TabId,
+  closing: Closing,
+  org: Pick<Rules, "org" | "repos">,
+): Promise<boolean> {
   const tab = await findTab(id);
 
   if (
@@ -597,7 +631,7 @@ async function closeFinished(
     const key = keyById.get(id);
     const revision = revisions.get(id) ?? 0;
 
-    if (key !== undefined && (await closeIfFinished(id, { key, revision }, rules.org))) {
+    if (key !== undefined && (await closeIfFinished(id, { key, revision }, rules))) {
       closed.push({ key, state: states[key]?.state });
     }
   }
@@ -623,7 +657,7 @@ function activeFinished(entries: PrEntry[], states: States, visits: TabVisits): 
 
 async function groupEntries(rules: Rules, entries: PrEntry[], meta: Meta): Promise<void> {
   for (const { tab } of entries) {
-    const entry = await prTab(tab.id, rules.org);
+    const entry = await prTab(tab.id, rules);
 
     if (entry) {
       await groupTab(entry.tab, entry.pr, meta).catch(warn);
@@ -690,6 +724,7 @@ function openPr(planned: Planned, rules: Rules): Promise<boolean> {
     const tab = withId(await chrome.tabs.create({ url: pr.url, active: false }));
     const { title, headRefName, headRepository } = hit;
 
+    await rememberRepository(pr.repo, pr.owner);
     await groupTab(tab, pr, { [pr.key]: { title, headRefName, headRepository } });
 
     return true;
@@ -844,6 +879,7 @@ async function focusKnownPr(key: PrKey): Promise<Reply<"focusPr">> {
   }
 
   await focusTab(entry.tab);
+  await rememberRepository(entry.pr.repo, entry.pr.owner);
 
   return { focused: key };
 }
@@ -856,7 +892,7 @@ async function closeKnownPr(key: PrKey, tabId: TabId): Promise<Reply<"closePr">>
   const rules = await loadRules();
   const tab = await findTab(tabId);
 
-  if (!tab || parsePrUrl(tab.pendingUrl || tab.url, rules.org)?.key !== key) {
+  if (!tab || parsePrUrl(tab.pendingUrl || tab.url, rules)?.key !== key) {
     return { closed: 0 };
   }
 
@@ -907,15 +943,16 @@ function refreshRepoNumbersNow(
 // Repo choices for the popup; stored newest numbers fill in when no fresh fetch succeeds.
 export async function repoChoices(): Promise<RepoChoices> {
   const rules = await loadRules();
-  const [stored, cache] = await Promise.all([
+  const [stored, cache, usage] = await Promise.all([
     readStored("prTabsRepo"),
     readStored("prTabsRepoNumbers"),
+    readStored("prTabsRepoUsage"),
   ]);
   const show = showRepoPicker(rules);
   const refreshed = show ? await refreshRepoNumbersNow(rules) : { cache: null, failed: false };
 
   return {
-    repos: effectiveRepos(rules),
+    repos: recentRepositories(effectiveRepos(rules), usage, rules.org),
     selected: pickedRepo(rules, stored),
     show,
     newest: refreshed.cache?.newest || cache.newest,
@@ -924,12 +961,50 @@ export async function repoChoices(): Promise<RepoChoices> {
 }
 
 // Remembers the repo pick when it is a listed repo.
-export async function pickRepo(repo?: RepoName): Promise<void> {
-  const rules = await loadRules();
+async function rememberRepository(repo: string, org: string, selected?: string): Promise<void> {
+  const usage = await readStored("prTabsRepoUsage");
+  const key = repositoryName(repo, org);
+  await writeStored({
+    prTabsRepoUsage: { ...usage, [key]: Date.now() },
+    ...(selected ? { prTabsRepo: selected } : {}),
+  });
+}
 
-  if (repo && repo === pickedRepo(rules, repo)) {
-    await writeStored({ prTabsRepo: repo });
-  }
+export function pickRepo(repo?: RepoName): Promise<void> {
+  return serial(async () => {
+    const rules = await loadRules();
+    if (repo && repo === pickedRepo(rules, repo)) {
+      await rememberRepository(repo, rules.org, repo);
+    }
+  });
+}
+
+export async function repositorySettings(): Promise<RepositorySettings> {
+  const rules = await configuredRules();
+
+  return {
+    configured: configuredRepositories(rules),
+    added: await readStored("prTabsAddedRepos"),
+  };
+}
+
+export function editRepository(repo: string, remove = false): Promise<RepositorySettings> {
+  return serial(async () => {
+    const settings = await repositorySettings();
+    const value = repo.trim().toLowerCase();
+    if (!validRepository(value)) {
+      throw new Error(getMessage("repositoryInvalid"));
+    }
+    if (!remove && [...settings.configured, ...settings.added].includes(value)) {
+      throw new Error(getMessage("repositoryDuplicate"));
+    }
+    const added = remove
+      ? settings.added.filter((item) => item !== value)
+      : [...settings.added, value];
+    await writeStored({ prTabsAddedRepos: added });
+
+    return { ...settings, added };
+  });
 }
 
 function configProblem(rules: Rules, input: string | undefined): string | null {
@@ -991,12 +1066,17 @@ async function findOrOpen(input?: string, repo?: RepoName, quiet = false): Promi
   const entry = findOpenTab(await prEntries(rules), pr.key, focused);
 
   if (!entry) {
-    return openTarget(pr, !quiet);
+    const result = await openTarget(pr, !quiet);
+    await rememberRepository(pr.repo, pr.owner);
+
+    return result;
   }
 
   if (!quiet) {
     await focusTab(entry.tab);
   }
+
+  await rememberRepository(pr.repo, pr.owner);
 
   return { focused: pr.key };
 }
@@ -1297,6 +1377,9 @@ const handleRuntimeMessage = messageListener({
   goTo: handleGoToMessage,
   focusPr: handleFocusPrMessage,
   closePr: handleClosePrMessage,
+  repositorySettings,
+  addRepository: (message) => editRepository(message.repo),
+  removeRepository: (message) => editRepository(message.repo, true),
   repos: handleReposMessage,
   pickRepo: handlePickRepoMessage,
   summary: handleSummaryMessage,

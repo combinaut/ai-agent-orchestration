@@ -86,7 +86,7 @@ const closing = usePrClose({ ask, status, refresh });
 const picker = useRepoPicker(ask, input);
 const { repos, repo, guessUnavailable } = picker;
 const isRepoPickerOpen = ref(false);
-const repoOptions = useRepoOptions({ groups, repos, guessed: repo, number });
+const repoOptions = useRepoOptions({ groups, repos, number });
 const shownRepoOptions = computed(() =>
   isRepoPickerOpen.value && mode.value === "goto" ? repoOptions.value : [],
 );

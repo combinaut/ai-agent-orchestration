@@ -220,7 +220,13 @@ export interface OpeningProgress {
 }
 
 export type PlainRequestType =
-  "summary" | "repos" | OpenBatchAction | "openingProgress" | "checkNow" | "closeDuplicates";
+  | "summary"
+  | "repos"
+  | "repositorySettings"
+  | OpenBatchAction
+  | "openingProgress"
+  | "checkNow"
+  | "closeDuplicates";
 
 export interface PlainRequest<K extends PlainRequestType = PlainRequestType> {
   readonly type: K;
@@ -260,7 +266,18 @@ export interface FocusPaneRequest {
   readonly head: BranchRef;
 }
 
+export interface RepositorySettings {
+  configured: string[];
+  added: string[];
+}
+
+export interface EditRepositoryRequest {
+  readonly type: "addRepository" | "removeRepository";
+  readonly repo: string;
+}
+
 export type Request =
+  | EditRepositoryRequest
   | PlainRequest
   | PickRepoRequest
   | GoToRequest
@@ -271,7 +288,9 @@ export type Request =
 export type RequestType = Request["type"];
 export type RequestOf<K extends RequestType> = K extends PlainRequestType
   ? PlainRequest<K>
-  : Extract<Request, { readonly type: K }>;
+  : K extends "addRepository" | "removeRepository"
+    ? EditRepositoryRequest
+    : Extract<Request, { readonly type: K }>;
 
 export interface Failure {
   readonly error: string;
@@ -309,6 +328,9 @@ export interface FocusedPane {
 }
 
 export interface Replies {
+  readonly repositorySettings: RepositorySettings;
+  readonly addRepository: RepositorySettings;
+  readonly removeRepository: RepositorySettings;
   readonly summary: Summary;
   readonly repos: RepoChoices;
   readonly pickRepo: Readonly<Record<string, never>>;
@@ -427,6 +449,9 @@ export interface StoredState {
   meta: Meta;
   failures: number;
   cursor: number;
+  prTabsGroupColors: Record<GroupTitle, GroupColor>;
+  prTabsAddedRepos: RepoName[];
+  prTabsRepoUsage: Record<RepoName, number>;
   prTabsRepo: RepoName;
   prTabsRepoNumbers: RepoNumbersCache;
   prTabsCollapsed: string[];
@@ -747,7 +772,6 @@ export interface RepoOption {
 export interface RepoOptionSources {
   groups: MaybeRefOrGetter<GroupSummary[]>;
   repos: MaybeRefOrGetter<readonly RepoName[]>;
-  guessed: MaybeRefOrGetter<RepoName>;
   number: MaybeRefOrGetter<PrNumber | null>;
 }
 

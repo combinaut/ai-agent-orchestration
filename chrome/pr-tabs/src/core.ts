@@ -114,15 +114,35 @@ export function tabUpdateMatters(
   return isPrUrl(tab?.url) || knownPrTab;
 }
 
-// The PR a URL points at when it belongs to org, else null.
-export function parsePrUrl(url: string | null | undefined, org: OrgName | undefined): Pr | null {
+// Matches the configured owner or an explicitly listed repository.
+export function parsePrUrl(
+  url: string | null | undefined,
+  scope: OrgName | Pick<Rules, "org" | "repos"> | undefined,
+): Pr | null {
   const match = matchPrUrl(url);
 
-  if (!org || !match || match.number < 1 || match.owner.toLowerCase() !== org.toLowerCase()) {
+  if (!match || match.number < 1 || !repositoryInScope(match, scope)) {
     return null;
   }
 
-  return makePr(org, match.repo, match.number);
+  return makePr(match.owner, match.repo, match.number);
+}
+
+function repositoryInScope(
+  pr: PrRef,
+  scope: OrgName | Pick<Rules, "org" | "repos"> | undefined,
+): boolean {
+  const org = typeof scope === "string" ? scope : scope?.org;
+  if (pr.owner.toLowerCase() === org?.toLowerCase()) {
+    return true;
+  }
+
+  return (
+    typeof scope === "object" &&
+    Boolean(
+      scope.repos?.some((repo) => repo.toLowerCase() === `${pr.owner}/${pr.repo}`.toLowerCase()),
+    )
+  );
 }
 
 // Repos a bare number can go to: defaultRepo first, then rules.repos, without case-insensitive
@@ -200,12 +220,14 @@ export function showRepoPicker(rules: RepoRules): boolean {
   return effectiveRepos(rules).length >= 2;
 }
 
-const REPO_NUMBER = /^([A-Za-z0-9_.-]{1,100})#(\d{1,9})$/;
+const REPO_NUMBER = /^(?:([A-Za-z0-9-]{1,39})\/)?([A-Za-z0-9_.-]{1,100})#(\d{1,9})$/;
 
 function prIn(org: OrgName, repo: RepoName | null, digits: string | undefined): Pr | null {
   const number = Number(digits);
 
-  return repo && number > 0 ? makePr(org, repo, number) : null;
+  const [owner, name] = repo?.includes("/") ? repo.split("/") : [org, repo];
+
+  return owner && name && number > 0 ? makePr(owner, name, number) : null;
 }
 
 function isTarget(text: string): boolean {
@@ -241,10 +263,14 @@ export function parseTarget(
   const named = REPO_NUMBER.exec(text);
 
   if (named) {
-    return prIn(rules.org, listedRepo(rules, named[1]), named[2]);
+    return prIn(
+      rules.org,
+      listedRepo(rules, named[1] ? `${named[1]}/${named[2]}` : named[2]),
+      named[3],
+    );
   }
 
-  return parsePrUrl(text, rules.org);
+  return parsePrUrl(text, rules);
 }
 
 // The open tab for key, preferring one in the focused window.
@@ -305,25 +331,45 @@ export function isGroupColor(name: string | undefined): name is GroupColor {
   return GROUP_COLORS.some((color) => color === name);
 }
 
-// FNV-1a over the group name, independent of tab order and ownership refreshes.
-export function groupColor(name: GroupTitle): GroupColor {
-  let hash = 2166136261;
-
-  for (const char of name) {
-    hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 16777619) >>> 0;
-  }
-
-  return GROUP_COLORS[hash % GROUP_COLORS.length] ?? "grey";
+function leastUsedColor(uses: Map<GroupColor, number>): GroupColor {
+  return GROUP_COLORS.toSorted((a, b) => (uses.get(a) ?? 0) - (uses.get(b) ?? 0))[0] ?? "grey";
 }
 
-export function groupForPr(owners: Owners, pr: PrBranch): GroupPlacement {
+export function allocateGroupColors(
+  names: readonly GroupTitle[],
+  previous: Record<GroupTitle, GroupColor>,
+): Record<GroupTitle, GroupColor> {
+  const next = new Map<GroupTitle, GroupColor>();
+  const unique = [...new Set(names)].toSorted();
+  const uses = new Map(GROUP_COLORS.map((color) => [color, 0]));
+
+  for (const name of unique) {
+    const color = previous[name];
+    if (color && isGroupColor(color)) {
+      next.set(name, color);
+      uses.set(color, (uses.get(color) ?? 0) + 1);
+    }
+  }
+  for (const name of unique) {
+    if (next.has(name)) {
+      continue;
+    }
+    const color = leastUsedColor(uses);
+    next.set(name, color);
+    uses.set(color, (uses.get(color) ?? 0) + 1);
+  }
+
+  return Object.fromEntries(next);
+}
+
+export function groupForPr(owners: Owners, pr: PrBranch): Pick<GroupPlacement, "name"> {
   const { owner, repo, number, branch = "", headRepository } = pr;
   const repository = (headRepository?.nameWithOwner || `${owner}/${repo}`).toLowerCase();
   const statusKey = (`${owner}/${repo}`.toLowerCase() + `#${number}`) as PrKey;
   const name =
     (headRepository !== null && owners[`${repository}:${branch}`]) || owners[statusKey] || repo;
 
-  return { name, color: groupColor(name) };
+  return { name };
 }
 
 // A PR tab may close once its PR is merged or closed, unless it is the tab in view.
@@ -335,7 +381,7 @@ export function shouldClose(tab: Pick<TabLike, "active">, state: PrStateName | u
 export function stillShowsPr(
   tab: UrlTab | null | undefined,
   key: PrKey | undefined,
-  org: OrgName,
+  org: OrgName | Pick<Rules, "org" | "repos">,
 ): boolean {
   return parsePrUrl(tab?.url, org)?.key === key;
 }

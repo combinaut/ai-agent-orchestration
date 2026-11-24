@@ -4,8 +4,8 @@ Orch Tabs is a Chrome extension for PR tabs in `ORCH_PR_TABS_ORG`. It sorts PR t
 
 ## ✨ What it does
 
-- **Groups** every unpinned PR tab by the architect owning its checked-out head branch, or by repository name when no owner is available. Group colours are a stable hash of the name. Ownership changes are picked up on the existing check cadence. New tabs sort themselves when they load.
-- **Go to a PR**: paste a PR number or URL and press Enter. Paste a list (numbers and URLs, separated by commas, spaces or new lines) to open up to 20 at once, one tab each; a repeat counts once, the dropdown pick applies to every bare number, and one message names any item that could not be opened. In a list, new tabs open in the background, and the last one is focused only when every item worked. A number uses `ORCH_PR_TABS_ORG` and the repo picked in the dropdown below the field (`ORCH_PR_TABS_DEFAULT_REPO` until you pick; the dropdown shows while any item is a bare number and `ORCH_PR_TABS_REPOS` plus the default make two or more, and remembers your last pick); `repo#123` goes to a listed repo; a URL decides the repo, but only when its owner is `ORCH_PR_TABS_ORG`; a PR URL of another owner is rejected. An open tab for that PR is focused (its window comes forward, its group expands); otherwise the PR opens in its group.
+- **Groups** every unpinned PR tab by the architect owning its checked-out head branch, or by repository name when no owner is available. Group colours are stored by name: new groups take the first free Chrome colour, then the least-used colour once all nine are taken. A colour becomes available when its group disappears. Ownership changes are picked up on the existing check cadence. New tabs sort themselves when they load.
+- **Go to a PR**: paste a PR number or URL and press Enter. Paste a list (numbers and URLs, separated by commas, spaces or new lines) to open up to 20 at once, one tab each; a repeat counts once, the dropdown pick applies to every bare number, and one message names any item that could not be opened. In a list, new tabs open in the background, and the last one is focused only when every item worked. A number uses `ORCH_PR_TABS_ORG` and the repo picked in the dropdown below the field (`ORCH_PR_TABS_DEFAULT_REPO` until you pick; the dropdown shows while any item is a bare number and `ORCH_PR_TABS_REPOS` plus the default make two or more, and remembers your last pick); `repo#123` or `owner/repo#123` goes to a listed repo; a URL decides the repo when its owner is `ORCH_PR_TABS_ORG` or its full repository is listed in Settings. An open tab for that PR is focused (its window comes forward, its group expands); otherwise the PR opens in its group.
 - **Open PRs to review** opens up to 30 open PRs in the configured organization where your review is requested, using the native host’s GitHub login (`review-requested:@me`). It shares the cap, grouping and duplicate checks with **Open all my open PRs**.
 - Both opening actions show an indeterminate progress bar while searching, then an “opened N of M” count until the final summary. A planned PR that is already open counts toward completed progress. The PR count and groups refresh as tabs open and once more at completion. Only one batch runs at a time across both actions; repeated clicks share that batch. Opening also recognizes tabs still loading, HTTP URLs and owner/repo names in any case across windows and groups.
 - **Open all my open PRs** opens up to 30 PRs matching `ORCH_PR_TABS_OPEN_ALL`, in the order defined by that query, skipping ones already open. Over 30, the badge shows how many are left (`+N`), or an estimate (`~N`, "about N more") when not every search result was fetched. Click again for the next batch.
@@ -71,6 +71,18 @@ content script. No additional permissions are required.
 ## 🔩 Settings and ownership
 
 `pr_tabs.org` selects the organization, `pr_tabs.default_repo` is the repo for bare numbers, `pr_tabs.repos` adds more repos to pick from (environment form: comma-separated `ORCH_PR_TABS_REPOS`), `pr_tabs.open_all` is the GitHub search behind the button, and `pr_tabs.terminal_app` is the macOS app go to pane brings forward. Their environment overrides are `ORCH_PR_TABS_ORG`, `ORCH_PR_TABS_DEFAULT_REPO`, `ORCH_PR_TABS_REPOS`, `ORCH_PR_TABS_OPEN_ALL` and `ORCH_PR_TABS_TERMINAL_APP`. Reload the extension after changing settings.
+
+The **Repositories** section in Settings lists configured repositories as **from config**.
+Add an `owner/name` repository with **Add** or Enter; duplicates are rejected regardless
+of case. Added entries are stored in Chrome local storage and have a trash button.
+They participate in the popup picker, number guessing, grouping, polling, and PR
+navigation, including repositories belonging to another owner. Config entries can
+only be removed through configuration. The opening buttons keep their configured
+GitHub search queries.
+
+Popup repository lists put previously used repositories first, most recently used
+first, followed by unused repositories alphabetically. Opening or selecting a PR
+through the extension records its repository's use in local storage.
 
 The native host asks the selected env adapter, through shared open-work discovery, for checked-out branches and their workspace owners, then reads full `https://github.com/<owner>/<repo>/pull/<number>` URLs under a case-insensitive `## Open PRs` heading in matching architect status files. It caches the results for 30 seconds. Herdr resolves the worker workspace's `owner` token to the architect workspace label.
 
