@@ -17,6 +17,42 @@ from test_github_poll_round2 import ROOT, load_prs
 
 
 class PrsWatchTests(IsolatedTestCase):
+    def test_successive_cycles_allow_calls_longer_than_the_alarm_tick(self):
+        prs = load_prs()
+        waits = []
+
+        def fetch(_scope):
+            for duration in (2, 0.3):
+
+                def invoke(_env, _fds):
+                    time.sleep(duration)
+                    return subprocess.CompletedProcess(["gh"], 0, "", "")
+
+                prs.github_poll.run(["gh"], invoke, timeout=prs.GH_TIMEOUT_S)
+            return [], "reviewer"
+
+        def sleep(delay):
+            waits.append(delay)
+            if len(waits) == 3:
+                raise KeyboardInterrupt
+            time.sleep(0.3)
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(os.environ, GITHUB_POLL_STATE_DIR=directory),
+            patch.object(prs.github_poll, "SPACING", 0),
+            patch.object(prs, "load_state", return_value={}),
+            patch.object(prs, "fetch", side_effect=fetch),
+            patch.object(prs, "save_state") as save,
+            patch.object(prs, "time", SimpleNamespace(sleep=sleep)),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                prs.cmd_watch(SimpleNamespace(interval=1), "", "")
+        self.assertEqual(save.call_count, 3, output.getvalue())
+        self.assertEqual(waits, [1, 1, 1])
+        self.assertNotIn("failing", output.getvalue())
+
     def test_hung_child_is_killed_and_next_cycle_saves_a_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -26,6 +62,8 @@ class PrsWatchTests(IsolatedTestCase):
                 "import os, sys, time\n"
                 "from pathlib import Path\n"
                 f"pid = Path({str(root / 'hung.pid')!r})\n"
+                # Cross an alarm tick before readiness, regardless of spawn speed.
+                "time.sleep(0.4)\n"
                 "if not pid.exists():\n"
                 "    pid.write_text(str(os.getpid()))\n"
                 "    time.sleep(60)\n"
