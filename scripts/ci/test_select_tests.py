@@ -76,9 +76,16 @@ class SelectionTests(unittest.TestCase):
                 self.assertTrue(plan["macos"])
 
     def test_documentation_keeps_readers_on_linux(self):
-        plan = ci.select(["docs/settings.md", "skills/architect/SKILL.md"])
-        self.assertFalse(plan["macos"])
-        self.assertEqual(set(plan["suites"]), ci.DOC_READERS)
+        for path in [
+            "docs/settings.md",
+            "skills/architect/SKILL.md",
+            "docs/assets/pr-tabs-icon-sizes.png",
+            "skills/review-prs/references/finding-classes.txt",
+        ]:
+            with self.subTest(path=path):
+                plan = ci.select([path])
+                self.assertFalse(plan["macos"])
+                self.assertEqual(set(plan["suites"]), ci.DOC_READERS)
 
     def test_shell_bats_and_installer_fixture_coverage(self):
         self.assertTrue(ci.select(["tests/install.bats"])["macos"])

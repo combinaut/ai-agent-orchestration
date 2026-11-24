@@ -100,7 +100,14 @@ def select(paths, everything=False):
             suites |= {"units", "bats:install", "watchers"}
         elif path.startswith("coordinator/watchers/fixtures/"):
             suites |= {"watchers", "hog", "balance", "workers", "audit", "bats:install"}
-        elif path.endswith(".md") or path == "LICENSE":
+        elif (
+            path.endswith(".md")
+            or path == "LICENSE"
+            or path.startswith(("docs/", "skills/"))
+            and path.endswith(
+                (".txt", ".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".pdf")
+            )
+        ):
             suites |= DOC_READERS
         else:
             full = True

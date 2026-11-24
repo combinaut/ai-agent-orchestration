@@ -16,7 +16,7 @@
 | Hog/balance/workers/audit shell entrypoints | watcher Python suites, corresponding integration check, Linux units, installer Bats |
 | Watcher fixtures | watcher Python suites, installer Bats and hog/balance/workers/audit integration checks |
 | `*/service/linux/**` | Linux units, installer Bats, watcher Python suites |
-| Markdown and LICENSE | installer, review-prs, todo-pane, sweep-run Bats and watcher Python suites that read documentation |
+| Markdown, LICENSE, documentation/skill text and image assets | installer, review-prs, todo-pane, sweep-run Bats and watcher Python suites that read documentation |
 | Anything else, including broadly shared libraries, installer and CI infrastructure | full suite |
 
 macOS runs for shell scripts, hooks, native-host code, macOS service templates,
