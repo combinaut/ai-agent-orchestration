@@ -960,7 +960,6 @@ export async function repoChoices(): Promise<RepoChoices> {
   };
 }
 
-// Remembers the repo pick when it is a listed repo.
 async function rememberRepository(repo: string, org: string, selected?: string): Promise<void> {
   const usage = await readStored("prTabsRepoUsage");
   const key = repositoryName(repo, org);

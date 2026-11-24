@@ -85,3 +85,30 @@ test("Settings keep a failed load disabled and surface failed writes without los
   assert.equal(wrapper.get("fieldset").attributes("disabled"), undefined);
   wrapper.unmount();
 });
+
+test("a successful removal retry clears the earlier failure message", async () => {
+  let attempts = 0;
+  globalThis.chrome = {
+    ...original,
+    runtime: {
+      sendMessage: async (message: { type: string }) => {
+        if (message.type === "repositorySettings") {
+          return { configured: [], added: ["other/api"] };
+        }
+        attempts++;
+
+        return attempts === 1 ? { error: "Unavailable" } : { configured: [], added: [] };
+      },
+    },
+  } as unknown as typeof chrome;
+  const wrapper = mount(RepositoriesSection);
+  await flushPromises();
+  await wrapper.get('[aria-label="Remove other/api"]').trigger("click");
+  await flushPromises();
+  assert.equal(wrapper.get("#repository-feedback").text(), "Unavailable");
+  await wrapper.get('[aria-label="Remove other/api"]').trigger("click");
+  await flushPromises();
+  assert.equal(wrapper.findAll("li").length, 0);
+  assert.equal(wrapper.get("#repository-feedback").text(), "");
+  wrapper.unmount();
+});

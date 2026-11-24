@@ -37,6 +37,7 @@ function settingsWriter(state: SettingsState, ask: Ask) {
 
         return;
       }
+      state.feedback.value = "";
       state.settings.value = reply;
       if (!removing) {
         state.repository.value = "";
