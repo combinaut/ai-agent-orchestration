@@ -790,6 +790,12 @@ def waiting_line(key, entry, now, suffix=""):
     return f"WORKER WAITING {name}" + tail
 
 
+def review_line(entry, cleared=False):
+    return f"WORKER REVIEW {entry['pane']} owner={entry['owner']} waiting on review" + (
+        " cleared" if cleared else ""
+    )
+
+
 def reduce_review_waiting(previous, raw):
     owners = waiting_owners(raw)
     old = previous.get("review_waiting", {})
@@ -823,13 +829,9 @@ def reduce_review_waiting(previous, raw):
         if old.get(key) == current.get(key):
             continue
         if key in old:
-            events.append(
-                f"WORKER REVIEW {old[key]['pane']} owner={old[key]['owner']} waiting on review cleared"
-            )
+            events.append(review_line(old[key], cleared=True))
         if key in current:
-            events.append(
-                f"WORKER REVIEW {current[key]['pane']} owner={current[key]['owner']} waiting on review"
-            )
+            events.append(review_line(current[key]))
     return current, events
 
 

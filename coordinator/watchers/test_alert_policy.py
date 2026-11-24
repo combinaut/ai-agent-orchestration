@@ -2186,8 +2186,13 @@ class DeliveryTest(IsolatedTestCase):
             stderr.getvalue(),
         )
         outbox = json.loads((self.base / "deliver.cursor").read_text())["outbox"]
+        self.assertEqual(len(outbox), 2)
         self.assertEqual(
-            [(Path(entry["binding"]).name, entry["text"]) for entry in outbox],
+            [
+                (Path(entry["binding"]).name, entry["text"])
+                for entry in outbox
+                if Path(entry["binding"]).name == "architect-wMS.json"
+            ],
             [
                 (
                     "architect-wMS.json",
@@ -2195,6 +2200,13 @@ class DeliveryTest(IsolatedTestCase):
                 )
             ],
         )
+        coordinator = [
+            entry["text"]
+            for entry in outbox
+            if Path(entry["binding"]).name == "coordinator.json"
+        ]
+        self.assertEqual(len(coordinator), 1)
+        self.assertIn("bindings: BINDING STALE s wMS (start)", coordinator[0])
 
     def test_an_architect_recycle_goes_to_the_coordinator_not_an_architect(self):
         sent = self.deliver(

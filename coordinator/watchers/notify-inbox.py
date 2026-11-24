@@ -6,6 +6,7 @@ to their owning architect and action lines while no feed Monitor is attached. To
 
 import argparse
 import fcntl
+import hashlib
 import importlib.util
 import json
 import os
@@ -77,7 +78,7 @@ def send_to_socket(path, token, message):
         stream.shutdown(socket.SHUT_WR)
 
 
-def binding(path):
+def binding_data(path):
     info = path.lstat()
     if (
         not stat.S_ISREG(info.st_mode)
@@ -95,6 +96,12 @@ def binding(path):
         Path(f"/tmp/cc-socks-{os.getuid()}"),
     ):
         raise ValueError("not a native peer address")
+    return value
+
+
+def binding(path):
+    value = binding_data(path)
+    pid = int(value["pid"])
     os.kill(pid, 0)
     session = json.loads((Path.home() / ".claude/sessions" / f"{pid}.json").read_text())
     if (
@@ -103,7 +110,44 @@ def binding(path):
         or value["socket"] != session.get("messagingSocketPath")
     ):
         raise ValueError("session binding changed; owner must rebind")
-    return socket_path, value["token"]
+    return Path(value["socket"]), value["token"]
+
+
+def stale_binding_alerts(args, cursor):
+    if not args.bindings_dir:
+        return [], False
+    old = cursor.get("stale_bindings", {})
+    try:
+        paths = sorted(args.bindings_dir.iterdir())
+    except OSError:
+        return [], False
+    current, events = {}, []
+    for path in paths:
+        match = re.fullmatch(r"architect-([A-Za-z0-9_-]+)\.json", path.name)
+        if not match:
+            continue
+        try:
+            value = binding_data(path)
+            try:
+                os.kill(int(value["pid"]), 0)
+            except ProcessLookupError:
+                fingerprint = hashlib.sha256(
+                    json.dumps(value, sort_keys=True).encode()
+                ).hexdigest()
+                current[path.name] = fingerprint
+                if old.get(path.name) != fingerprint:
+                    architect = "_".join(str(value["session_id"]).split())
+                    events.append(
+                        f"bindings: BINDING STALE {architect} {match[1]} (start)"
+                    )
+        except (OSError, ValueError, KeyError, TypeError):
+            if path.name in old:
+                current[path.name] = old[path.name]
+    if current:
+        cursor["stale_bindings"] = current
+    else:
+        cursor.pop("stale_bindings", None)
+    return events, current != old
 
 
 def stamp(now, line):
@@ -561,6 +605,9 @@ def snapshot_lines(mode, before):
             for suffix in ("", "REPEAT", "ESCALATE")[: entry["stage"]]
         ]
         lines += [
+            w.review_line(entry) for entry in before.get("review_waiting", {}).values()
+        ]
+        lines += [
             w.idle_line(pane, entry["owner"])
             for pane, entry in sorted(before.get("idle", {}).items())
             if entry.get("state") == "fired"
@@ -852,9 +899,11 @@ def main():
                 else [],
                 now,
             )
+            stale, binding_changed = stale_binding_alerts(args, cursor)
+            messages += stale
             if messages:
                 deliver(args, cursor, messages, now, patterns)
-            elif line or started or started_modes:
+            elif line or started or started_modes or binding_changed:
                 commit(args, cursor)
             if cursor.get(OUTBOX_KEY) and flush_outbox(args, cursor, now):
                 commit(args, cursor)

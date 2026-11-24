@@ -69,6 +69,13 @@ Answer previews retain the watcher deadline without consuming submissions.
 Directory-read failures retain replay IDs. Failed pane setup closes the new pane
 through the intentional-close helper, leaving the question file available to retry.
 
+A dead architect binding emits `bindings: BINDING STALE <architect-session> <workspace>`
+to the Coordinator through the action feed and existing native fallback. The notifier
+checks bindings each pass and persists a fingerprint, so a stale binding alerts once
+across restarts. Rebinding replaces that identity; a later dead successor can alert again.
+Unreadable bindings retain known state. Architects bind themselves at startup and after
+reboot/resume or recycle, before taking over worker watches, and verify a native round-trip.
+
 ## 👷 Workers waiting
 
 A session in an owner-tagged workspace that stays `done` or `idle` for more than

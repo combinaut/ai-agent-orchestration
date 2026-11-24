@@ -109,6 +109,12 @@ class WaitingTests(IsolatedTestCase):
         self.assertTrue(any("waiting on review" in line for line in events))
         self.assertFalse(any("ESCALATE" in line for line in events))
         self.assertFalse(state["waiting"])
+        self.assertTrue(
+            any(
+                "waiting on review" in line
+                for line in inbox.snapshot_lines("workers", state)
+            )
+        )
 
     def test_review_wait_clears_on_work_and_failed_reads_preserve_it(self):
         def step(state, now, status="done", check=True):
