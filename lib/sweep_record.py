@@ -715,10 +715,12 @@ def gate_since(base, head):
 
 
 def comment_record(body):
-    """The orch-sweep record in a sweep comment's json block, else None."""
+    """The orch-sweep record in a sweep comment, else None."""
     if MARKER not in body:
         return None
-    block = re.search(r"```json\n(.*?)\n```", body, re.S)
+    block = re.search(r"<!-- orch-sweep-record\n(.*?)\n-->", body, re.S)
+    if not block:
+        block = re.search(r"```json\n(.*?)\n```", body, re.S)
     try:
         record = json.loads(block.group(1)) if block else None
     except ValueError:

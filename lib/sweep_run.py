@@ -761,12 +761,8 @@ def pr_data(repo, number):
 
 def sweep_outcomes(body):
     """The findings of the orch-sweep record in a sweep comment, else None when any is malformed."""
-    block = re.search(r"```json\n(.*?)\n```", body, re.S)
-    try:
-        record = json.loads(block.group(1)) if block else None
-    except ValueError:
-        return None
-    if not isinstance(record, dict) or record.get("tool") != "orch-sweep":
+    record = sweep_record.comment_record(body)
+    if record is None:
         return None
     items, dropped = record.get("items", []), record.get("dropped", [])
     if not isinstance(items, list) or not isinstance(dropped, list):
@@ -883,9 +879,11 @@ def comment_body(record, tables=("Kept", "Dropped"), indent=1):
         f"Raw findings {record['findings']}, kept {len(record['items'])}, open fix {record['open_fix']}."
         + (f" Verdicts: {counts}." if counts else ""),
         "",
-        "```json",
-        json.dumps(record, indent=indent, separators=None if indent else (",", ":")),
-        "```",
+        "<!-- orch-sweep-record",
+        json.dumps(
+            record, indent=indent, separators=None if indent else (",", ":")
+        ).replace("--", "\\u002d\\u002d"),
+        "-->",
         "",
         TRAILERS[record["runtime"]],
     ]
