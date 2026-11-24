@@ -76,7 +76,7 @@ export interface PrState extends PrHead {
 export type States = Partial<Record<PrKey, PrState | null>>;
 export type Meta = Partial<Record<PrKey, PrState>>;
 
-// When the extension first saw a tab showing a PR, in epoch milliseconds.
+// Start of the tab's current PR visit in epoch milliseconds; a move to another PR resets it.
 export interface TabVisit {
   key: PrKey;
   since: number;
