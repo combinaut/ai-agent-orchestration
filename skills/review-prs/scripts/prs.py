@@ -34,6 +34,8 @@ BOT_LOGINS = {"copilot-pull-request-reviewer", "copilot", "github-actions"}
 STATE_DIR = Path.home() / ".cache" / "review-prs"
 DISPATCH_FILE = STATE_DIR / "dispatched.json"
 GH_TIMEOUT_S = 45
+WATCH_TIMEOUT_S = 120
+WATCH_BACKOFF_MAX_S = 900
 DEPARTURE_CHECKS_MAX = 10
 DEPARTURE_MISSES_MAX = 5
 PROJECTS = Path.home() / "Projects"
@@ -764,30 +766,51 @@ def cmd_list(args, scope, label):
     print("\n".join(out).rstrip())
 
 
+class WatchTimeout(BaseException):
+    """Abort the whole cycle through per-PR recoverable read-error handlers."""
+
+
 def cmd_watch(args, scope, _label):
     fails = 0
     before = load_state(scope)
     while True:
         try:
-            nodes, login = fetch(scope)
-            after = snapshot(nodes, login)
-            if before is not None:
-                lines, still_open = changes(before, after, login)
-                after = {**after, **still_open}
-                if lines:
-                    print(
-                        "\n".join([*lines, f"now: {snapshot_counts(after)}"]),
-                        flush=True,
-                    )
+            try:
+                with github_poll.call_deadline(
+                    WATCH_TIMEOUT_S, expired_error=WatchTimeout
+                ):
+                    nodes, login = fetch(scope)
+                    after = snapshot(nodes, login)
+                    lines = []
+                    if before is not None:
+                        lines, still_open = changes(before, after, login)
+                        after = {**after, **still_open}
+                    save_state(scope, after)
+            except WatchTimeout:
+                raise RuntimeError(
+                    f"PR watch cycle timed out after {WATCH_TIMEOUT_S}s"
+                ) from None
             before = after
-            save_state(scope, after)
-            if fails >= 3:
+            if lines:
+                print(
+                    "\n".join([*lines, f"now: {snapshot_counts(after)}"]),
+                    flush=True,
+                )
+            if fails:
                 print("recovered: PR fetch works again", flush=True)
             fails = 0
         except (OSError, RuntimeError, ValueError, KeyError) as error:
             fails += 1
-            if fails == 3:
-                print(f"PR fetch failing 3x in a row: {error}", flush=True)
+            delay = min(
+                WATCH_BACKOFF_MAX_S,
+                max(1, args.interval) * 2 ** min(fails - 1, 10),
+            )
+            print(
+                f"PR fetch failing {fails}x in a row: {error}; retry in {delay}s",
+                flush=True,
+            )
+            time.sleep(delay)
+            continue
         time.sleep(args.interval)
 
 

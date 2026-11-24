@@ -155,7 +155,7 @@ class _Expired(BaseException):
 
 
 @contextmanager
-def call_deadline(seconds):
+def call_deadline(seconds, *, expired_error=_Expired):
     previous_handler = signal.getsignal(signal.SIGALRM)
     previous_timer = signal.getitimer(signal.ITIMER_REAL)
     started = time.time()
@@ -177,7 +177,7 @@ def call_deadline(seconds):
                 previous_handler(signum, frame)
             except TimeoutError as error:
                 raise _Expired from error
-        raise _Expired
+        raise expired_error
 
     signal.signal(signal.SIGALRM, expired)
     signal.setitimer(
