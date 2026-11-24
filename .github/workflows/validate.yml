@@ -28,7 +28,8 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.macos != 'false') }}
     runs-on: macos-latest
-    timeout-minutes: 40
+    # The full macOS Bats suite has completed in just under 40 minutes.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - run: brew install shellcheck bats-core ripgrep parallel
