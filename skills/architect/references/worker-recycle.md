@@ -61,7 +61,7 @@ Under 4,000 characters, overwritten (never appended), facts only:
 - **Code:** repo, branch, worktree, head SHA, pushed to which remote.
 - **PR:** number, state, CI, review decision; or "no PR yet".
 - **Open review threads:** one line each: thread id or URL, what it asks, status (fixed in `<sha>`, replied, open).
-- **Waits on:** the architect, CI, a bot review, a reviewer, or nothing.
+- **Waits on:** the architect, CI, a bot review when `pr.bot_reviewer_login` is configured, a reviewer, or nothing.
 - **Done:** one line each, with its proof (command and result).
 - **Next step:** the first thing to do.
 - **Decided, do not reopen:** choices made with the architect, dead ends.
