@@ -604,7 +604,7 @@ SETTINGS = [
         "ORCH_WAIT_REPEAT_S",
         "number",
         1800,
-        "Seconds between waiting alerts (minimum 60)",
+        "Seconds between repeated waiting alerts and to-do answer failure alerts (minimum 60)",
     ),
     _g(
         "workers.idle_s",

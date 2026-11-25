@@ -178,18 +178,23 @@ def repo_numbers(request):
         raise RequestError("invalid repository owner")
     if not isinstance(repos, list) or not 1 <= len(repos) <= MAX_REPOS:
         raise RequestError(f"repos must list 1 to {MAX_REPOS} repositories")
-    if any(not isinstance(repo, str) or not NAME.fullmatch(repo) for repo in repos):
+    if any(
+        not isinstance(repo, str)
+        or not re.fullmatch(r"(?:[A-Za-z0-9-]{1,39}/)?[A-Za-z0-9_.-]{1,100}", repo)
+        for repo in repos
+    ):
         raise RequestError("invalid repository name")
     declarations, fields, variables = [], [], []
     for i, repo in enumerate(repos):
-        declarations.append(f"$r{i}: String!")
+        repo_owner, repo_name = repo.split("/", 1) if "/" in repo else (owner, repo)
+        declarations.extend([f"$o{i}: String!", f"$r{i}: String!"])
         fields.append(
-            f"r{i}: repository(owner: $o, name: $r{i}) {{ issues(first: 1, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ number }} }} pullRequests(first: 1, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ number }} }} }}"
+            f"r{i}: repository(owner: $o{i}, name: $r{i}) {{ issues(first: 1, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ number }} }} pullRequests(first: 1, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ number }} }} }}"
         )
-        variables.append((f"r{i}", repo))
+        variables.extend([(f"o{i}", repo_owner), (f"r{i}", repo_name)])
     data, failure = gh_graphql(
-        f"query($o: String!, {', '.join(declarations)}) {{ {' '.join(fields)} }}",
-        [("o", owner), *variables],
+        f"query({', '.join(declarations)}) {{ {' '.join(fields)} }}",
+        variables,
     )
     if not any(isinstance(data.get(f"r{i}"), dict) for i in range(len(repos))):
         raise RequestError(failure)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live view of the user to-do list with Dismiss and Reminder buttons under every item."""
+"""Live view of the user to-do list with Dismiss, Reminder and Answer buttons under every item."""
 
 import codecs
 import fcntl
@@ -67,6 +67,7 @@ BUTTONS = (
     ("r", "remind", "Reminder"),
 )
 CANCEL = ("r", "cancel", "Cancel reminder")
+UNQUEUE = (("c", "unqueue", "Cancel answer"),)
 GUTTER = 2
 FOOTER = "↑↓ or 1-9 select · d dismiss · r reminder · s show reminders"
 SHOW_HINT = "s show reminders"
@@ -84,6 +85,15 @@ DEMO = [
         "## Architect::Setup.md",
         "- [now] Audit done: 12 fixes ranked; say which to start",
     ),
+]
+DEMO_QUEUED = [
+    {
+        "id": "todo-demo",
+        "architect": "Architect::Billing",
+        "text": "Ship the invoice fix now or after the audit?",
+        "answer": "after the audit",
+        "failure": "cannot reach Herdr",
+    }
 ]
 
 
@@ -118,7 +128,7 @@ def atomic_write(path, data):
 
 
 def feed_line(owner, text, now):
-    clean = " ".join("".join(c for c in text if c.isprintable() or c == " ").split())
+    clean = todo_answers.printable(text)
     stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now))
     return f"{stamp} todo: TODO DISMISSED {'_'.join(owner.split())}: {clean} (start)\n"
 
@@ -264,6 +274,7 @@ def fit(line, width):
 
 
 def label(text, flagged, note=""):
+    text = todo_answers.printable(text)
     m = TARGET.search(text)
     body = TARGET.sub("", text).rstrip()
     tag = ""
@@ -276,6 +287,15 @@ def label(text, flagged, note=""):
         tag = f"  [{short}]"
     mark = "reminder: " if flagged else ""
     return f"{mark}{body}{tag}" + (f"  ({note})" if note else "")
+
+
+def queued_label(record):
+    stamp = time.strftime("%H:%M", time.localtime(record["at"]))
+    reason = todo_answers.printable(record.get("failure") or "")
+    return (
+        f"{label(record['text'], False)}  → answer: {todo_answers.printable(record['answer'])}"
+        f"  (not delivered yet, queued {stamp}" + (f": {reason})" if reason else ")")
+    )
 
 
 def shorten(body, rows, width):
@@ -306,7 +326,8 @@ def answer_lines(editor, width):
         rows = wrap(editor.prompt(), width)
         return rows[-4:], []
     entries = tuple(
-        (key, "answer-" + key, value) for key, value in editor.options.items()
+        (key, "answer-" + key, todo_answers.printable(value))
+        for key, value in editor.options.items()
     ) + (("t", "answer-t", "Type answer"),)
     rows, spans = button_rows(width, False, True, entries, "answer")
     return ["Answer:"] + rows, [
@@ -325,9 +346,11 @@ def layout(
     height=None,
     popup=False,
 ):
-    """Screen lines (none wider than width) and mouse hits for the item rows (owner, text, flagged, note);
-    hits are (line, first, last, action, index) with 1-based lines and columns. With a height, the selected item's
-    owner line, buttons and picker stay whole and its message is cut to what is left."""
+    """Screen lines (none wider than width) and mouse hits for the item rows
+    (owner, text, flagged, note); an undelivered answer adds a fifth item, its
+    queue record. Hits are (line, first, last, action, index) with 1-based lines
+    and columns. With a height, the selected item's owner line, buttons and
+    picker stay whole and its message is cut to what is left."""
     open_count = len(rows) if open_count is None else open_count
     width = max(1, width)
     lines, hits = (
@@ -335,22 +358,37 @@ def layout(
         [],
     )
     room = max(1, width - GUTTER)
-    for index, (owner, text, flagged, note) in enumerate(rows):
+    for index, (owner, text, flagged, note, *queued) in enumerate(rows):
         picked = index == selected
         gutter = f"\033[38;5;141m▌{RESET} " if picked else "  "
         head = [
             f"\033[38;5;141m{row}{RESET}"
-            for row in wrap(f"{index + 1}. {owner}", room, indent=0)
+            for row in wrap(
+                f"{index + 1}. {todo_answers.printable(owner)}", room, indent=0
+            )
         ]
-        body = wrap(label(text, flagged, note), room - 1, indent=0)
-        entries = (
-            tuple(entry for entry in BUTTONS if entry[1] != "remind") + (CANCEL,)
-            if note
-            else BUTTONS
+        body = wrap(
+            queued_label(queued[0]) if queued else label(text, flagged, note),
+            room - 1,
+            indent=0,
         )
-        if todo_answers.choices(text):
-            entries += (("a", "answer", "Answer"),)
-        button_lines, spans = button_rows(room, picked, picked, entries)
+        entries = (
+            UNQUEUE
+            if queued
+            else (
+                tuple(entry for entry in BUTTONS if entry[1] != "remind") + (CANCEL,)
+                if note
+                else BUTTONS
+            )
+            + (
+                ()
+                if picker and picker["index"] == index
+                else (("a", "answer", "Answer"),)
+            )
+        )
+        button_lines, spans = button_rows(
+            room, picked, picked, entries, "cancel" if queued else None
+        )
         extra, extra_spans = (
             (
                 answer_lines(picker["answer"], room)
@@ -392,8 +430,10 @@ def layout(
             "Everything is snoozed." if hidden_count else "Nothing waits on you."
         )
     footer = footer_rows(width - 1, popup, hidden_count > 0)
-    if any(todo_answers.choices(text) for _, text, *_ in rows):
+    if any(len(row) == 4 for row in rows):
         footer += ["a answer selected item"]
+    if any(len(row) > 4 for row in rows):
+        footer += ["c cancel an answer not delivered yet"]
     if hidden_count:
         shown = f"[s] {'hide' if showing else 'show'} reminders ({hidden_count})"
         lines += [paint("show", shown, False), ""]
@@ -454,6 +494,16 @@ def answer_item(owner, text, answer, generation):
     return generator().answer_from_view(owner, text, answer, TODO, generation)
 
 
+def cancel_answer(record_id):
+    return todo_answers.cancel(record_id)
+
+
+def load_queued(demo):
+    if demo:
+        return [dict(record, at=time.time() - 300) for record in DEMO_QUEUED]
+    return todo_answers.undelivered()
+
+
 def report_count(pane, count):
     generator().report_metadata(pane, count)
 
@@ -490,6 +540,7 @@ def act(hidden, rows, items, action, index, run_jump=jump, until=None):
 
 KEYS = {hotkey: action for hotkey, action, _ in BUTTONS} | {
     "a": "answer",
+    "c": "unqueue",
     "s": "show",
     "q": "quit",
     "\r": "focus",
@@ -560,8 +611,9 @@ class App:
         report=report_count,
         popup=False,
         run_answer=answer_item,
+        run_cancel=cancel_answer,
     ):
-        self.run_answer = run_answer
+        self.run_answer, self.run_cancel, self.cancelled = run_answer, run_cancel, set()
         self.hidden, self.demo, self.out, self.size, self.run_jump = (
             hidden,
             demo,
@@ -590,7 +642,11 @@ class App:
         self.hidden.reload()
         self.items = load_items(self.demo)
         self.show = self.show and self.hidden.hidden_count(self.items) > 0
-        self.rows = self.hidden.visible(self.items, self.show)
+        self.rows = self.hidden.visible(self.items, self.show) + [
+            (record["architect"], record["text"], False, "", record)
+            for record in load_queued(self.demo)
+            if record["id"] not in self.cancelled
+        ]
         found = self.find(self.selected_key) if self.selected_key else None
         self.selected = (
             found
@@ -682,6 +738,8 @@ class App:
                 owner, text = self.picker["key"]
                 if self.find((owner, text)) is None:
                     self.status = "that item is gone"
+                elif self.demo:
+                    self.status, self.picker = "demo: the answer is not sent", None
                 else:
                     try:
                         self.status = self.run_answer(
@@ -693,20 +751,32 @@ class App:
             elif result == "cancel":
                 self.picker = None
             return
+        if action in ("dismiss", "remind", "cancel", "answer", "focus", "unqueue"):
+            chosen = self.selected if index is None else index
+            queued = 0 <= chosen < len(self.rows) and len(self.rows[chosen]) > 4
+            if action == "unqueue" or queued:
+                self.selected, self.picker = chosen, None
+                self.remember()
+                self.status = (
+                    self.cancel_queued(self.rows[chosen][4])
+                    if queued and action == "unqueue"
+                    else "this answer is not delivered yet; c cancels it"
+                    if queued
+                    else "select an answer that is not delivered yet"
+                )
+                return
         if action == "answer":
             self.selected = self.selected if index is None else index
             if 0 <= self.selected < len(self.rows):
                 self.remember()
-                options = todo_answers.choices(self.rows[self.selected][1])
-                if options:
-                    self.picker = {
-                        "key": self.selected_key,
-                        "mode": "answer",
-                        "generation": generator().answer_generation(*self.selected_key),
-                        "answer": todo_answers.AnswerInput(options),
-                    }
-                else:
-                    return
+                self.picker = {
+                    "key": self.selected_key,
+                    "mode": "answer",
+                    "generation": generator().answer_generation(*self.selected_key),
+                    "answer": todo_answers.AnswerInput(
+                        todo_answers.choices(self.rows[self.selected][1])
+                    ),
+                }
                 self.typed = ""
             return
         if action == "digit":
@@ -772,6 +842,17 @@ class App:
                 0 <= self.selected < len(self.rows)
                 and self.rows[self.selected][3] != ""
             )
+
+    def cancel_queued(self, record):
+        if self.demo:
+            self.cancelled.add(record["id"])
+            return "demo: answer cancelled; the item returns"
+        try:
+            return self.run_cancel(record["id"])
+        except TimeoutError:
+            return "answer queue busy (a delivery is in progress); press c again"
+        except (ValueError, OSError) as error:
+            return str(error)
 
     def escape(self):
         if self.picker and "answer" in self.picker:

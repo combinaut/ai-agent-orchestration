@@ -1017,14 +1017,14 @@ def reduce_workers(before, raw):
     events += waiting_events
     signal_events = raw.get("signal_events", [])
     signal_ids = (
-        [record["id"] for record in signal_events]
+        [worker_signals.event_key(record) for record in signal_events]
         if "signal_events" in raw
         else previous.get("signal_ids", [])
     )
     events += [
         worker_signals.event_line(record)
         for record in signal_events
-        if record["id"] not in previous.get("signal_ids", [])
+        if worker_signals.event_key(record) not in previous.get("signal_ids", [])
     ]
     result = dict(
         bad={key: value for key, value in bad.items() if key in present},
@@ -1633,16 +1633,12 @@ def collect_todo(before):
     except Exception:
         links = {}
     raw = module.merge(directory, output, state, links=links)
-    records, failed = todo_answers.collect(command)
+    records, notices, failures = todo_answers.collect(command)
     if todo_answers.directory().exists():
         raw["todo_answers"] = records
         raw["todo_pending_ids"] = list(todo_answers.pending_ids())
-        raw["todo_answer_notices"] = [
-            notice for notice in failed if notice.startswith("answer discarded:")
-        ]
-        raw["unreadable"] += [
-            notice for notice in failed if not notice.startswith("answer discarded:")
-        ]
+        raw["todo_answer_notices"] = notices
+        raw["todo_answer_failures"] = failures
     return raw
 
 
@@ -1708,6 +1704,29 @@ def reduce_todo_status(before, raw):
     }, events
 
 
+def answer_failure_events(before, failures, now):
+    """One READFAIL line per undelivered architect, repeated every ORCH_WAIT_REPEAT_S with its own count, and a RECOVERED line when it ends. A changed reason shows in the next repeat line."""
+    repeat = max(60, float(os.environ.get("ORCH_WAIT_REPEAT_S", 1800)))
+    state, events = {}, []
+    for failure in failures:
+        name, reason = failure["architect"], failure["reason"]
+        old = before.get(name)
+        if old:
+            entry = dict(old, reason=reason)
+            if now - old["sent_at"] >= repeat:
+                entry.update(n=old["n"] + 1, sent_at=now)
+                events.append(
+                    f"TODO READFAIL answer:{name}: {reason} (repeat {entry['n']})"
+                )
+        else:
+            entry = dict(reason=reason, n=0, sent_at=now)
+            events.append(f"TODO READFAIL answer:{name}: {reason}")
+        state[name] = entry
+    for name in sorted(set(before) - set(state)):
+        events.append(f"TODO READ RECOVERED answer:{name}: {before[name]['reason']}")
+    return state, events
+
+
 def reduce_todo(before, raw):
     after, events = reduce_todo_status(before, raw)
     events += [
@@ -1720,6 +1739,14 @@ def reduce_todo(before, raw):
     records = raw.get("todo_answers", [])
     previous = set((before or {}).get("todo_answer_ids", []))
     now = raw.get("observed_at", time.time())
+    fail_state, fail_events = answer_failure_events(
+        (before or {}).get("todo_answer_fail", {}),
+        raw.get("todo_answer_failures", []),
+        now,
+    )
+    events += fail_events
+    if fail_state:
+        after["todo_answer_fail"] = fail_state
     retries = (before or {}).get("todo_answer_retry_at", {})
     emitted = {
         record["id"]
@@ -2168,6 +2195,7 @@ def cycle_pass(base, mode, collector, failures, budget):
                         (
                             "WORKER DONE ",
                             "WORKER QUESTION ",
+                            "WORKER ANSWER ",
                             "TODO ANSWER ",
                             "TODO AUTO-CLOSED ",
                             "SLOT ",

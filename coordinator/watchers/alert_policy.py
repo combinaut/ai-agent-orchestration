@@ -255,9 +255,18 @@ def context_facts(line):
 
 
 def worker_facts(line):
-    signal = re.match(r"WORKER (?:DONE|QUESTION) \S+ owner=\S+ id=(\S+)", line)
+    signal = re.match(
+        r"WORKER (DONE|QUESTION|QUESTION TO USER|QUESTION EXPIRED|ANSWER LATE)"
+        r" \S+ owner=\S+ id=(\S+)",
+        line,
+    )
     if signal:
-        item = fact("workers:signal:" + signal.group(1), line, terminal=True)
+        kind = "" if signal.group(1) in ("DONE", "QUESTION") else ":" + signal.group(1)
+        item = fact(
+            "workers:signal:" + signal.group(2) + kind.replace(" ", "-"),
+            line,
+            terminal=True,
+        )
         item["text"] = line
         return [item]
     review = re.fullmatch(
@@ -383,10 +392,24 @@ def todo_facts(line):
         item = fact("todo:auto-closed:" + line, line, terminal=True)
         item["text"] = line
         return [item]
+    stage = re.match(r"TODO READFAIL (answer:.+?: ).* \(repeat [0-9]+\)$", line)
+    if stage:
+        key = "todo:readfail:" + line[len("TODO READFAIL ") :]
+        return [
+            dict(
+                kind="reset",
+                prefixes=("todo:readfail:" + stage.group(1),),
+                keep=(key,),
+            ),
+            fact(key, line, clearable=True),
+        ]
     if line.startswith("TODO READFAIL "):
         return [
             fact("todo:readfail:" + line[len("TODO READFAIL ") :], line, clearable=True)
         ]
+    answer_recovered = re.match(r"TODO READ RECOVERED (answer:.+?: )", line)
+    if answer_recovered:
+        return [clear("todo:readfail:" + answer_recovered.group(1))]
     if line.startswith("TODO READ RECOVERED "):
         return [
             clear("todo:readfail:" + line[len("TODO READ RECOVERED ") :], exact=True)
@@ -641,7 +664,12 @@ def apply(state, alerts, now, cfg=None, trace=None):
                     release(key, observed)
                 continue
             if item["kind"] == "reset":
-                for key in [key for key in keys if key.startswith(item["prefixes"])]:
+                for key in [
+                    key
+                    for key in keys
+                    if key.startswith(item["prefixes"])
+                    and key not in item.get("keep", ())
+                ]:
                     keys[key].pop("clearing_at", None)
                     keys[key].update(active=False, cleared_at=now)
                 continue

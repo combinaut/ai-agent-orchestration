@@ -771,7 +771,7 @@ test("Enter on a hovered open row of a bare number focuses its tab", async () =>
   wrapper.unmount();
 });
 
-test("the repo picker highlights the repo where the number is already open", async () => {
+test("the repo picker keeps recent order even when a PR is already open", async () => {
   const { wrapper } = await popup(["api", "webapp"], {
     summary: SEARCH_SUMMARY,
     repos: { repos: ["api", "webapp"], selected: "api", show: true, newest: {} },
@@ -781,7 +781,7 @@ test("the repo picker highlights the repo where the number is already open", asy
   await field.setValue("7");
   await field.trigger("keydown", { key: "Enter" });
   await flushPromises();
-  assert.equal(wrapper.find("[aria-selected=true] .repo-option-name").text(), "webapp");
+  assert.equal(wrapper.find("[aria-selected=true] .repo-option-name").text(), "api");
   wrapper.unmount();
 });
 

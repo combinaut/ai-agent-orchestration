@@ -47,7 +47,9 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   "files/observe.ts": ["popstate"],
   "files/settings.ts": ["object", "enabled", "patterns", "string", "sync", "source"],
   "options/PatternItem.vue": ["remove"],
+  "options/RepositoryItem.vue": ["remove"],
   "background.ts": [
+    "grey",
     "MERGED",
     "CLOSED",
     "settings",
@@ -80,6 +82,8 @@ const CODE_WORDS: Readonly<Record<string, readonly string[]>> = {
   "composables/useStatus.ts": ["info", "error"],
   "composables/useSummary.ts": ["summary"],
   "core.ts": [
+    "string",
+    "object",
     "complete",
     "MERGED",
     "CLOSED",

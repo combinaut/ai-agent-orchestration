@@ -4,7 +4,6 @@ import io
 import json
 import os
 import re
-import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -41,6 +40,20 @@ class SignalTests(IsolatedTestCase):
         adapter = patch.object(s.discovery, "open_work", return_value=self.work)
         adapter.start()
         self.addCleanup(adapter.stop)
+        caller = patch.object(
+            s.discovery.adapter(),
+            "caller_pane",
+            side_effect=lambda command, panes: next(
+                (
+                    row
+                    for row in panes
+                    if row["pane"] == os.environ.get("HERDR_PANE_ID")
+                ),
+                panes[0],
+            ),
+        )
+        caller.start()
+        self.addCleanup(caller.stop)
         opener = patch.object(s, "open_user_question", return_value=0)
         self.opener = opener.start()
         self.addCleanup(opener.stop)
@@ -48,11 +61,22 @@ class SignalTests(IsolatedTestCase):
     def record(self, **kw):
         return s.new_question(s.identity(), "Which?", "a,b", **kw)
 
-    def git_repo(self, name):
-        path = self.base / name
-        path.mkdir()
-        subprocess.run(["git", "init", "-q", path], check=True)
-        return path
+    def test_live_but_wrong_inherited_pane_cannot_steal_completion(self):
+        self.work["workspaces"].append(dict(id="other", owner="other-owner"))
+        self.work["panes"].append(dict(pane="other-pane", workspace="other"))
+        with (
+            patch.dict(
+                os.environ, HERDR_PANE_ID="other-pane", HERDR_WORKSPACE_ID="other"
+            ),
+            patch.object(
+                s.discovery.adapter(), "caller_pane", return_value=self.work["panes"][0]
+            ),
+        ):
+            record = s.record_signal(s.identity(), "done", outcome="succeeded")
+        self.assertEqual(record["pane"], "pane:1")
+        self.assertEqual(record["workspace"], "worker")
+        self.assertEqual(record["owner"], "owner")
+        self.assertFalse(s.pane_path("other-pane").exists())
 
     def test_pending_bound(self):
         self.record(timeout=60)
@@ -97,6 +121,162 @@ class SignalTests(IsolatedTestCase):
         self.assertEqual(s.wait_answer(q, 60), "a")
         self.assertFalse(s.question_path(q["id"]).exists())
         self.assertFalse(s.answer_path(q["id"]).exists())
+
+    def answered_codex_question(self):
+        self.work["panes"][0].update(agent="codex", status="idle")
+        q = s.new_question(s.identity(), "Which?", "a,b", 60)
+        with patch.dict(os.environ, HERDR_PANE_ID="architect"):
+            s.answer(q["id"], "a")
+        return q
+
+    def native_command(self, *args, **kwargs):
+        if args[1:3] == ("agent", "get"):
+            return json.dumps(
+                dict(
+                    result=dict(
+                        agent=dict(
+                            pane_id="pane:1",
+                            workspace_id="worker",
+                            agent="codex",
+                            agent_status=self.work["panes"][0]["status"],
+                            agent_session=dict(agent="codex", value="live-session"),
+                        )
+                    )
+                )
+            )
+        self.fail(f"unexpected command: {args}")
+
+    def test_idle_codex_wakes_once_after_waiter_consumes_answer(self):
+        q = self.answered_codex_question()
+        self.assertEqual(s.wait_answer(q, 60), "a")
+        with (
+            patch.object(w, "command", side_effect=self.native_command) as command,
+            patch.object(s, "queue_wakeup") as queue,
+        ):
+            s.collect_live(command, s.time.time())
+            s.collect_live(command, s.time.time())
+        queue.assert_called_once()
+        self.assertIn(q["id"], queue.call_args.args[1])
+        self.assertIn("write_stdin", queue.call_args.args[1])
+        self.assertFalse(s.question_path(q["id"]).exists())
+
+    def test_working_codex_does_not_receive_wakeup(self):
+        q = self.answered_codex_question()
+        self.work["panes"][0]["status"] = "working"
+        self.assertEqual(s.wait_answer(q, 60), "a")
+        with (
+            patch.object(w, "command", side_effect=self.native_command) as command,
+            patch.object(s, "queue_wakeup") as queue,
+        ):
+            s.collect_live(command, s.time.time())
+        command.assert_not_called()
+        queue.assert_not_called()
+
+    def test_restarted_codex_gets_answer_recovery_on_live_native_session(self):
+        q = self.answered_codex_question()
+        q = s.read(s.question_path(q["id"]))
+        q["asker_pid"] = 99999999
+        s.write(s.question_path(q["id"]), q)
+        with (
+            patch.object(w, "command", side_effect=self.native_command) as command,
+            patch.object(s, "queue_wakeup") as queue,
+        ):
+            s.collect_live(command, s.time.time())
+        queue.assert_called_once()
+        self.assertEqual(queue.call_args.args[0], "live-session")
+        self.assertIn("no longer readable", queue.call_args.args[1])
+        self.assertTrue(queue.call_args.args[1].endswith("Recovery answer: a"))
+        self.assertEqual(s.wait_answer(q, 60), "a")
+
+    def test_native_failure_retains_receipt_for_retry(self):
+        q = self.answered_codex_question()
+        self.assertEqual(s.wait_answer(q, 60), "a")
+        with (
+            patch.object(w, "command", side_effect=self.native_command) as command,
+            patch.object(
+                s, "queue_wakeup", side_effect=[OSError("offline"), None]
+            ) as queue,
+            patch("sys.stderr", new_callable=io.StringIO) as stderr,
+        ):
+            s.collect_live(command, s.time.time())
+            self.assertIn("native wake-up failed", stderr.getvalue())
+            self.assertTrue(s.question_path(q["id"]).exists())
+            s.collect_live(command, s.time.time())
+            s.collect_live(command, s.time.time())
+        self.assertEqual(queue.call_count, 2)
+        self.assertFalse(s.question_path(q["id"]).exists())
+
+    def test_unverified_or_changed_native_session_is_not_queued(self):
+        self.answered_codex_question()
+        for change in (
+            dict(workspace_id="other"),
+            dict(agent_status="working"),
+            dict(agent_session=dict(agent="claude", value="other")),
+            dict(agent_session={}),
+        ):
+            reply = json.loads(self.native_command("herdr", "agent", "get"))
+            reply["result"]["agent"].update(change)
+            with (
+                patch.object(w, "command", return_value=json.dumps(reply)) as command,
+                patch.object(s, "queue_wakeup") as queue,
+            ):
+                s.collect_live(command, s.time.time())
+            queue.assert_not_called()
+
+    def test_expired_consumed_receipt_is_pruned_without_wakeup(self):
+        q = self.answered_codex_question()
+        self.assertEqual(s.wait_answer(q, 60), "a")
+        with patch.object(s, "queue_wakeup") as queue:
+            s.collect_live(w.command, q["deadline"] + 1)
+        queue.assert_not_called()
+        self.assertFalse(s.question_path(q["id"]).exists())
+
+    def test_native_queue_accepts_success_without_stdout(self):
+        import subprocess
+
+        import watcher_runtime as runtime
+
+        with patch.object(
+            runtime, "run", return_value=subprocess.CompletedProcess([], 0, "", "")
+        ) as run:
+            s.queue_wakeup("live-session", "resume")
+        self.assertEqual(
+            run.call_args.args[0],
+            ["codex", "queue", "--thread", "live-session", "--message", "resume"],
+        )
+
+    def test_delayed_answer_survives_tool_wait_yield_with_default_timeout(self):
+        import subprocess
+        import sys
+        import time
+
+        code = 'import worker_signals as s; s.identity=lambda:dict(pane="pane:1",workspace="worker",owner="owner"); raise SystemExit(s.main())'
+        process = subprocess.Popen(
+            [sys.executable, "-c", code, "ask", "--question", "Which?"],
+            cwd=Path(s.__file__).parent,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            deadline = time.monotonic() + 5
+            paths = []
+            while not paths and time.monotonic() < deadline:
+                paths = list(s.directory().glob("signal-*.json"))
+                time.sleep(0.01)
+            self.assertTrue(paths)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                process.communicate(timeout=0.05)
+            self.assertIsNone(process.poll())
+            with patch.dict(os.environ, HERDR_PANE_ID="architect"):
+                s.answer(paths[0].stem, "delayed answer")
+            stdout, stderr = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 0)
+            self.assertEqual(stdout, b"delayed answer\n")
+            self.assertEqual(stderr, b"")
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.communicate(timeout=5)
 
     def test_foreign_answer_refused(self):
         q = self.record(timeout=60)
@@ -357,204 +537,22 @@ class SignalTests(IsolatedTestCase):
         with self.assertRaises(ValueError):
             s.question_path("../other")
 
-    def test_identity_requires_environment_and_owner(self):
-        with patch.dict(os.environ, HERDR_PANE_ID=""):
-            with self.assertRaises(ValueError):
-                s.worker_identity(s.identity())
+    def test_identity_uses_verified_workspace_and_requires_owner(self):
+        with patch.dict(os.environ, HERDR_PANE_ID="", HERDR_WORKSPACE_ID=""):
+            self.assertEqual(
+                s.identity(), dict(pane="pane:1", workspace="worker", owner="owner")
+            )
         self.work["workspaces"][0]["owner"] = None
         with self.assertRaises(ValueError):
             s.worker_identity(s.identity())
 
-    def test_identity_recovers_a_missing_stale_pane_from_its_worktree(self):
-        worktree = self.git_repo("worker")
-        pane_cwd = worktree / "lib"
-        caller_cwd = worktree / "app/models"
-        pane_cwd.mkdir(parents=True)
-        caller_cwd.mkdir(parents=True)
-        self.work["panes"] = [
-            dict(
-                pane="live-pane",
-                workspace="worker",
-                cwd=str(pane_cwd),
-                agent="codex",
-            ),
-            dict(pane="architect", workspace="owner", cwd=str(self.git_repo("owner"))),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value=str(caller_cwd)),
+    def test_identity_fails_closed_when_process_cannot_be_verified(self):
+        with patch.object(
+            s.discovery.adapter(), "caller_pane", side_effect=ValueError("unverified")
         ):
-            self.assertEqual(
-                s.identity(recover=True),
-                dict(
-                    pane="live-pane",
-                    workspace="worker",
-                    owner="owner",
-                    recovered_from="stale-pane",
-                ),
-            )
-
-    def test_identity_does_not_recover_a_present_pane_in_another_workspace(self):
-        root = self.git_repo("worker")
-        self.work["panes"] = [
-            dict(pane="pane:1", workspace="worker", cwd=str(root), agent="codex"),
-            dict(pane="architect", workspace="owner", cwd=str(self.git_repo("owner"))),
-        ]
-        with (
-            patch.dict(os.environ, HERDR_WORKSPACE_ID="owner"),
-            patch.object(s.os, "getcwd", return_value=str(root)),
-        ):
-            with self.assertRaisesRegex(
-                ValueError,
-                "pane='pane:1' is in workspace='worker'.*socket=.*panes=2",
-            ):
-                s.identity(recover=True)
-
-    def test_identity_does_not_recover_a_non_codex_worktree_match(self):
-        self.work["panes"] = [
-            dict(pane="live-pane", workspace="worker", cwd="/worktree", agent="claude"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value="/worktree/subdirectory"),
-            patch.object(s, "worktree_of", return_value="/worktree"),
-        ):
-            with self.assertRaisesRegex(ValueError, "worktree_matches=1"):
-                s.identity(recover=True)
-
-    def test_identity_reports_ambiguous_stale_pane_recovery(self):
-        self.work["panes"] = [
-            dict(pane="one", workspace="worker", cwd="/worktree", agent="codex"),
-            dict(pane="two", workspace="owner", cwd="/worktree", agent="codex"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-                HERDR_SOCKET_PATH="/socket",
-            ),
-            patch.object(s.os, "getcwd", return_value="/worktree"),
-            patch.object(s, "worktree_of", return_value="/worktree"),
-        ):
-            with self.assertRaisesRegex(
-                ValueError,
-                "pane='stale-pane'.*workspace='stale-workspace'.*socket='/socket'.*panes=2.*worktree_matches=2",
-            ):
-                s.identity(recover=True)
-
-    def test_identity_does_not_recover_a_codex_pane_in_another_worktree(self):
-        caller, other = self.git_repo("caller"), self.git_repo("other")
-        self.work["panes"] = [
-            dict(pane="live-pane", workspace="worker", cwd=str(other), agent="codex"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value=str(caller)),
-        ):
-            with self.assertRaisesRegex(ValueError, "worktree_matches=0"):
-                s.identity(recover=True)
-
-    def test_identity_does_not_recover_when_caller_or_pane_is_not_in_git(self):
-        caller, pane = self.base / "caller", self.base / "pane"
-        caller.mkdir()
-        pane.mkdir()
-        self.work["panes"] = [
-            dict(pane="live-pane", workspace="worker", cwd=str(pane), agent="codex"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value=str(caller)),
-        ):
-            with self.assertRaisesRegex(
-                ValueError, "worktree=None.*worktree_matches=0"
-            ):
-                s.identity(recover=True)
-
-    def test_identity_does_not_recover_from_a_workspace_repo_root(self):
-        root = self.git_repo("main-clone")
-        self.work["workspaces"][0]["repo_root"] = str(root)
-        self.work["panes"] = [
-            dict(pane="live-pane", workspace="worker", cwd=str(root), agent="codex"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value=str(root)),
-        ):
-            with self.assertRaisesRegex(
-                ValueError, "worktree is a workspace repo_root"
-            ):
-                s.identity(recover=True)
-
-    def test_worktree_of_times_out_and_ignores_git_environment(self):
-        timeout = subprocess.TimeoutExpired(["git"], 5)
-        with (
-            patch.dict(os.environ, GIT_DIR="/wrong", GIT_WORK_TREE="/wrong"),
-            patch.object(s.subprocess, "run", side_effect=timeout) as run,
-        ):
-            self.assertIsNone(s.worktree_of("/repo"))
-        self.assertEqual(run.call_args.kwargs["timeout"], 5)
-        self.assertFalse(
-            any(key.startswith("GIT_") for key in run.call_args.kwargs["env"])
-        )
-
-    def test_worktree_of_propagates_the_worker_deadline(self):
-        with patch.object(s.subprocess, "run", side_effect=TimeoutError("deadline")):
-            with self.assertRaisesRegex(TimeoutError, "deadline"):
-                s.worktree_of("/repo")
-
-    def test_strict_identity_does_not_recover_stale_panes(self):
-        root = self.git_repo("worker")
-        self.work["panes"] = [
-            dict(pane="live-pane", workspace="worker", cwd=str(root), agent="codex"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value=str(root)),
-        ):
-            with self.assertRaisesRegex(ValueError, "pane='stale-pane' is not live"):
-                s.identity()
-
-    def test_answer_does_not_recover_a_stale_codex_pane(self):
-        question = self.record(timeout=60)
-        root = self.git_repo("architect")
-        self.work["panes"] = [
-            dict(pane="live-pane", workspace="owner", cwd=str(root), agent="codex"),
-        ]
-        with (
-            patch.dict(
-                os.environ,
-                HERDR_PANE_ID="stale-pane",
-                HERDR_WORKSPACE_ID="stale-workspace",
-            ),
-            patch.object(s.os, "getcwd", return_value=str(root)),
-        ):
-            with self.assertRaisesRegex(ValueError, "caller pane does not belong"):
-                s.answer(question["id"], "a")
+            with self.assertRaisesRegex(s.discovery.Unavailable, "unverified"):
+                s.record_signal(s.identity(), "heartbeat")
+        self.assertFalse(s.directory().exists())
 
     def test_completion_backlog_bound_and_expiry(self):
         ident = s.identity()
@@ -1000,6 +998,8 @@ class SignalTests(IsolatedTestCase):
             text = (root / relative).read_text()
             self.assertIn("run_in_background", text)
             self.assertIn("above `--timeout`", text)
+            self.assertIn("`write_stdin`", text)
+            self.assertIn("never end the turn while it runs", text)
         skill = (root / "skills/architect/SKILL.md").read_text()
         self.assertIn("SLOT: go", skill)
         self.assertIn("may not answer", skill)
@@ -1118,30 +1118,334 @@ class SignalTests(IsolatedTestCase):
             events += lines
         self.assertTrue(any("WORKER WAITING" in line for line in events))
 
-    def test_escalated_user_answer_to_dead_asker_is_discarded_with_one_notice(self):
-        record = self.record(timeout=60)
+    def escalate(self, q):
         with patch.dict(
             os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
         ):
-            s.answer(record["id"], None, to_user=True)
-        record["asker_pid"] = 999999999
-        s.write(s.question_path(record["id"]), record)
+            s.answer(q["id"], None, to_user=True)
+
+    def live(self, now):
+        return s.collect(
+            [dict(pane_id="pane:1", workspace_id="worker")], {"worker": "owner"}, now
+        )
+
+    def route(self, state, records):
+        return w.reduce_workers(
+            state,
+            dict(result=dict(agents=[]), worker_signals={}, signal_events=records),
+        )
+
+    def test_to_user_escalation_emits_one_coordinator_event(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        file = s.questions_directory() / (q["id"] + ".md")
+        _, records = self.live(q["at"])
+        state, lines = self.route(None, records)
+        mine = [line for line in lines if "QUESTION TO USER" in line]
+        self.assertEqual(len(mine), 1)
+        self.assertTrue(
+            mine[0].startswith(
+                f"WORKER QUESTION TO USER pane:1 owner=owner id={q['id']} file={file}"
+            ),
+            mine[0],
+        )
+        _, records = self.live(q["at"] + 5)
+        self.assertEqual(self.route(state, records)[1], [])
+
+    def test_escalation_seen_first_after_the_waiter_deadline_still_emits_the_event(
+        self,
+    ):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        _, records = self.live(q["deadline"] + 5)
+        _, lines = self.route(None, records)
+        self.assertEqual(
+            [line for line in lines if line.startswith("WORKER QUESTION TO USER ")],
+            [
+                f"WORKER QUESTION TO USER pane:1 owner=owner id={q['id']} "
+                f"file={s.questions_directory() / (q['id'] + '.md')}"
+            ],
+        )
+
+    def test_escalated_question_outlives_waiter_and_late_answer_reaches_owner(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        panel = s.questions_directory() / (q["id"] + ".md")
+        with self.assertRaisesRegex(ValueError, "timed out"):
+            s.wait_answer(q, 0.01)
+        self.assertTrue(panel.exists())
+        self.assertFalse(s.read(s.question_path(q["id"])).get("cleanup"))
+        later = q["deadline"] + 10
+        with patch.object(s.time, "time", return_value=later):
+            self.live(later)
+            self.assertTrue(panel.exists())
+            self.assertIsNone(s.bridge_user_answer(q["id"], "b\nc\x1b"))
+        self.assertFalse(s.answer_path(q["id"]).exists())
+        self.opener.reset_mock()
+        _, records = self.live(later + 1)
+        state, lines = self.route(None, records)
+        late = [line for line in lines if line.startswith("WORKER ANSWER LATE ")]
+        self.assertEqual(
+            late, [f"WORKER ANSWER LATE pane:1 owner=owner id={q['id']} answer=b c"]
+        )
+        self.opener.assert_called_once_with("close", q["id"], timeout=s.CLEANUP_SECONDS)
+        self.assertFalse(panel.exists())
+        _, records = self.live(later + 2)
+        self.assertEqual(self.route(state, records)[1], [])
+        self.live(later + 1 + s.DONE_EVENTS_KEEP_SECONDS + 1)
+        self.assertFalse(s.question_path(q["id"]).exists())
+
+    def test_escalated_question_expires_after_bound_with_one_event(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        panel = s.questions_directory() / (q["id"] + ".md")
+        escalated = s.read(s.question_path(q["id"]))["to_user"]
+        before = escalated + s.ESCALATED_RETAIN_SECONDS - 1
+        _, records = self.live(before)
+        self.assertTrue(panel.exists())
+        self.assertFalse(any(r.get("event") == "expired" for r in records))
+        after = escalated + s.ESCALATED_RETAIN_SECONDS + 1
+        _, records = self.live(after)
+        state, lines = self.route(None, records)
+        self.assertEqual(
+            [line for line in lines if "EXPIRED" in line],
+            [f"WORKER QUESTION EXPIRED pane:1 owner=owner id={q['id']}"],
+        )
+        self.assertFalse(panel.exists())
+        _, records = self.live(after + 5)
+        self.assertEqual(self.route(state, records)[1], [])
+
+    def test_failed_panel_open_exits_non_zero_and_keeps_the_retry(self):
+        q = self.record(timeout=60)
+        panel = s.questions_directory() / (q["id"] + ".md")
+        for code, expected in ((1, 1), (73, 0), (0, 0)):
+            self.opener.return_value = code
+            stderr = io.StringIO()
+            with (
+                patch.dict(
+                    os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
+                ),
+                patch.object(
+                    s.sys, "argv", ["orch-signal", "answer", q["id"], "--to-user"]
+                ),
+                patch.object(s.sys, "stderr", stderr),
+            ):
+                self.assertEqual(s.main(), expected)
+            if code == 1:
+                self.assertEqual(len(stderr.getvalue().splitlines()), 1)
+                self.assertTrue(panel.with_suffix(".remind").exists())
+
+    def test_plain_question_still_closes_at_its_deadline(self):
+        q = self.record(timeout=60)
+        (s.questions_directory() / (q["id"] + ".md")).write_text("panel")
+        with self.assertRaisesRegex(ValueError, "timed out"):
+            s.wait_answer(q, 0.01)
+        self.assertTrue(s.read(s.question_path(q["id"]))["cleanup"])
+
+    def test_new_ask_from_the_pane_leaves_an_escalated_question_open(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        panel = s.questions_directory() / (q["id"] + ".md")
+        with patch.object(s.time, "time", return_value=q["deadline"] + 1):
+            other = self.record(timeout=10)
+        self.assertNotEqual(other["id"], q["id"])
+        self.assertTrue(panel.exists())
+        self.assertTrue(s.question_path(q["id"]).exists())
+
+    def test_worker_signal_lines_get_one_fact_each_kind(self):
+        import alert_policy
+
+        keys = {}
+        for kind, line in (
+            ("", "WORKER QUESTION p owner=o id=signal-x"),
+            ("to-user", "WORKER QUESTION TO USER p owner=o id=signal-x file=f"),
+            ("late", "WORKER ANSWER LATE p owner=o id=signal-x answer=b"),
+            ("expired", "WORKER QUESTION EXPIRED p owner=o id=signal-x"),
+        ):
+            keys[kind] = alert_policy.worker_facts(line)[0]["key"]
+        self.assertEqual(len(set(keys.values())), 4, keys)
+        self.assertTrue(
+            all(k.startswith("workers:signal:signal-x") for k in keys.values()), keys
+        )
+
+    def test_late_answer_line_routes_to_owner_only(self):
+        import alert_policy
+
+        q = self.record(timeout=60)
+        self.escalate(q)
+        later = q["deadline"] + 10
+        with patch.object(s.time, "time", return_value=later):
+            s.bridge_user_answer(q["id"], "b")
+        _, records = self.live(later + 1)
+        _, lines = self.route(None, records)
+        notices = alert_policy.apply({}, [dict(mode="workers", events=lines)], later)
+        self.assertTrue(any(f"id={q['id']}" in n and "LATE" in n for n in notices))
+        routed = self.inbox().native_messages(
+            argparse.Namespace(bindings_dir=self.base, binding=None),
+            ["stamp " + line for line in notices],
+            False,
+            [],
+        )
+        self.assertEqual(len(routed), 1)
+        self.assertEqual(routed[0][0], str(self.base / "architect-owner.json"))
+        self.assertIn("WORKER ANSWER LATE", routed[0][1])
+        self.assertIn("native message channel", routed[0][1])
+        self.assertNotIn("herdr agent prompt", routed[0][1])
+
+    def test_escalated_user_answer_to_dead_asker_is_late_not_discarded(self):
+        record = self.record(timeout=60)
+        self.escalate(record)
+        current = s.read(s.question_path(record["id"]))
+        current["asker_pid"] = 999999999
+        s.write(s.question_path(record["id"]), current)
         (s.questions_directory() / (record["id"] + ".answer")).write_text("user choice")
         state = self.base / "watcher-state"
         result = json.loads(w.cycle(state, "answers", w.collect_answers))
         self.assertFalse(s.answer_path(record["id"]).exists())
-        notices = [
-            line
-            for line in result["events"]
-            if "ANSWERS READFAIL" in line and "discarded" in line
-        ]
-        self.assertEqual(len(notices), 1)
-        self.assertIn(record["id"], notices[0])
-        self.assertIn("asker is gone", notices[0])
-        self.assertIn("user choice", notices[0])
-        repeated = json.loads(
-            w.cycle(state, "answers", w.collect_answers) or '{"events": []}'
+        self.assertFalse(any("discarded" in line for line in result["events"]))
+        _, records = self.live(s.time.time())
+        lines = [s.event_line(r) for r in records if r.get("event") == "late"]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("answer=user choice", lines[0])
+
+    def inbox(self):
+        spec = importlib.util.spec_from_file_location(
+            "push_inbox", w.ROOT / "notify-inbox.py"
         )
-        self.assertFalse(any("discarded" in line for line in repeated["events"]))
-        self.assertIsNone(s.bridge_user_answer(record["id"], "user choice"))
-        self.assertFalse(s.answer_path(record["id"]).exists())
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_to_user_line_is_a_coordinator_action_with_a_native_target(self):
+        import alert_policy
+        import feed_actions
+
+        q = self.record(timeout=60)
+        self.escalate(q)
+        _, records = self.live(q["at"])
+        _, lines = self.route(None, records)
+        notices = alert_policy.apply({}, [dict(mode="workers", events=lines)], q["at"])
+        patterns = feed_actions.action_patterns()
+        stamped = ["stamp " + n for n in notices if "QUESTION TO USER" in n]
+        self.assertEqual(len(stamped), 1)
+        self.assertTrue(feed_actions.is_action(stamped[0], patterns))
+        coordinator = self.base / "coordinator.json"
+        routed = self.inbox().native_messages(
+            argparse.Namespace(bindings_dir=self.base, binding=coordinator),
+            stamped,
+            True,
+            patterns,
+        )
+        self.assertIn(str(coordinator), [target for target, _ in routed])
+
+    def test_late_and_expired_lines_stay_owner_only(self):
+        import feed_actions
+
+        patterns = feed_actions.action_patterns()
+        for line in (
+            "stamp workers: WORKER ANSWER LATE p owner=o id=signal-x answer=b (start)",
+            "stamp workers: WORKER QUESTION EXPIRED p owner=o id=signal-x (start)",
+        ):
+            self.assertFalse(feed_actions.is_action(line, patterns), line)
+
+    def test_new_ask_while_the_escalated_waiter_is_alive_is_refused(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        with self.assertRaisesRegex(ValueError, "pending question"):
+            self.record(timeout=60)
+        self.assertTrue(s.question_path(q["id"]).exists())
+
+    def test_failed_close_after_the_holder_time_keeps_the_record_and_retries(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        panel = s.questions_directory() / (q["id"] + ".md")
+        later = q["deadline"] + 10
+        with patch.object(s.time, "time", return_value=later):
+            s.bridge_user_answer(q["id"], "b")
+        self.opener.return_value = 1
+        self.live(later + 1)
+        self.live(later + 1 + s.DONE_EVENTS_KEEP_SECONDS + 1)
+        self.assertTrue(s.question_path(q["id"]).exists())
+        self.assertTrue(panel.exists())
+        self.opener.return_value = 0
+        self.live(later + 1 + s.DONE_EVENTS_KEEP_SECONDS + 2)
+        self.assertFalse(panel.exists())
+        self.assertFalse(s.question_path(q["id"]).exists())
+
+    def test_one_panel_that_will_not_close_does_not_starve_another(self):
+        self.work["panes"].append(dict(pane="pane:2", workspace="worker"))
+        rows = [
+            dict(pane_id="pane:1", workspace_id="worker"),
+            dict(pane_id="pane:2", workspace_id="worker"),
+        ]
+        first = self.record(timeout=60)
+        self.escalate(first)
+        with patch.dict(os.environ, HERDR_PANE_ID="pane:2"):
+            second = self.record(timeout=60)
+        self.escalate(second)
+        later = max(first["deadline"], second["deadline"]) + 10
+        with patch.object(s.time, "time", return_value=later):
+            for q in (first, second):
+                s.bridge_user_answer(q["id"], "b")
+        bad, good = sorted([first["id"], second["id"]])
+        self.opener.side_effect = lambda a, b, timeout=None: 1 if b == bad else 0
+        for step in (1, 2):
+            s.collect(rows, {"worker": "owner"}, later + step)
+        self.assertFalse((s.questions_directory() / (good + ".md")).exists())
+
+    def test_answer_first_seen_after_the_bound_expires_instead_of_late(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        after = (
+            s.read(s.question_path(q["id"]))["to_user"] + s.ESCALATED_RETAIN_SECONDS + 1
+        )
+        with patch.object(s.time, "time", return_value=after):
+            s.bridge_user_answer(q["id"], "b")
+        _, records = self.live(after)
+        _, lines = self.route(None, records)
+        self.assertEqual([line for line in lines if "ANSWER LATE" in line], [])
+        self.assertEqual(
+            [line for line in lines if line.startswith("WORKER QUESTION EXPIRED ")],
+            [f"WORKER QUESTION EXPIRED pane:1 owner=owner id={q['id']}"],
+        )
+
+    def test_answer_written_then_asker_dies_sends_late_not_expired(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        s.answer_path(q["id"]).write_text("b")
+        current = s.read(s.question_path(q["id"]))
+        current["asker_pid"] = 999999999
+        s.write(s.question_path(q["id"]), current)
+        escalated = current["to_user"]
+        _, records = self.live(escalated + s.ESCALATED_RETAIN_SECONDS + 1)
+        kinds = [r.get("event") for r in records]
+        self.assertIn("late", kinds)
+        self.assertNotIn("expired", kinds)
+
+    def test_answer_given_to_a_live_waiter_never_becomes_a_late_line(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        s.bridge_user_answer(q["id"], "b")
+        state, lines = self.route(None, self.live(q["at"] + 0.5)[1])
+        self.assertEqual([line for line in lines if "ANSWER LATE" in line], [])
+        self.assertEqual(s.wait_answer(q, 5), "b")
+        current = s.read(s.question_path(q["id"]))
+        current["asker_pid"] = 999999999
+        s.write(s.question_path(q["id"]), current)
+        for step in (1, 2, 3):
+            _, records = self.live(q["at"] + 1 + step)
+            state, lines = self.route(state, records)
+            self.assertEqual([line for line in lines if "ANSWER LATE" in line], [])
+        self.assertFalse(s.question_path(q["id"]).exists())
+        self.assertFalse((s.questions_directory() / (q["id"] + ".md")).exists())
+
+    def test_new_ask_after_the_escalated_asker_died_leaves_the_escalation_open(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        current = s.read(s.question_path(q["id"]))
+        current["asker_pid"] = 999999999
+        s.write(s.question_path(q["id"]), current)
+        other = self.record(timeout=60)
+        self.assertNotEqual(other["id"], q["id"])
+        self.assertFalse(s.read(s.question_path(q["id"])).get("cleanup"))
+        self.assertTrue((s.questions_directory() / (q["id"] + ".md")).exists())

@@ -78,8 +78,6 @@ async function closedBy(worker: typeof Background): Promise<Closed[]> {
   return result.closed;
 }
 
-beforeEach(() => {});
-
 beforeEach(() => {
   resetWorld();
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

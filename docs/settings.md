@@ -111,7 +111,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `hog.git_age_s` | `ORCH_HOG_GIT_AGE_S` | `180` | Hog watcher: git process age in seconds |
 | `workers.ask_timeout_s` | `ORCH_ASK_TIMEOUT_S` | `1800` | Maximum seconds a worker question waits for an answer |
 | `workers.wait_s` | `ORCH_WAIT_S` | `600` | Seconds idle or done before WORKER WAITING |
-| `workers.wait_repeat_s` | `ORCH_WAIT_REPEAT_S` | `1800` | Seconds between waiting alerts (minimum 60) |
+| `workers.wait_repeat_s` | `ORCH_WAIT_REPEAT_S` | `1800` | Seconds between repeated waiting alerts and to-do answer failure alerts (minimum 60) |
 | `workers.idle_s` | `ORCH_WORKER_IDLE_S` | `7200` | Seconds idle or done before WORKER IDLE (no open PR) |
 | `pr_tabs.org` | `ORCH_PR_TABS_ORG` | empty | Organization the PR tabs extension manages; empty turns org actions off |
 | `pr_tabs.default_repo` | `ORCH_PR_TABS_DEFAULT_REPO` | empty | Repo name for bare PR numbers; number jumps are off when pr_tabs.repos is empty too |

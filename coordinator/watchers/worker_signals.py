@@ -22,6 +22,7 @@ POLL_SECONDS = 1
 HEARTBEAT_MIN_SECONDS = 30
 HEARTBEAT_FRESH_SECONDS = 300
 QUESTION_RETAIN_SECONDS = 3600
+ESCALATED_RETAIN_SECONDS = 86400
 QUESTIONS_MAX = 200
 CLEANUP_MAX = 1
 CLEANUP_SECONDS = 2
@@ -83,97 +84,30 @@ def escalation_directory(error):
     return None
 
 
-def worktree_of(path):
-    try:
-        result = subprocess.run(
-            ["git", "-C", path, "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            env={
-                key: value
-                for key, value in os.environ.items()
-                if not key.startswith("GIT_")
-            },
-        )
-    except TimeoutError:
-        raise
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return os.path.realpath(result.stdout.strip()) if result.returncode == 0 else None
-
-
-def identity(recover=False):
+def identity():
     from watchers import command
 
-    pane, workspace = (
-        os.environ.get("HERDR_PANE_ID"),
-        os.environ.get("HERDR_WORKSPACE_ID"),
-    )
-    if not pane or not workspace:
-        raise ValueError("HERDR_PANE_ID and HERDR_WORKSPACE_ID are required")
     work = discovery.open_work(command)
-    panes = work["panes"]
-    recovered_from = None
-    if not any(row["pane"] == pane and row["workspace"] == workspace for row in panes):
-        claimed_pane = next((row for row in panes if row["pane"] == pane), None)
-        if claimed_pane is None and recover:
-            cwd, worktree = os.getcwd(), worktree_of(os.getcwd())
-            candidates = [
-                row
-                for row in panes
-                if row.get("agent")
-                and worktree
-                and row.get("cwd")
-                and worktree_of(row["cwd"]) == worktree
-            ]
-            shared_root = any(
-                row.get("repo_root") and os.path.realpath(row["repo_root"]) == worktree
-                for row in work["workspaces"]
-            )
-            if (
-                len(candidates) == 1
-                and candidates[0].get("agent") == "codex"
-                and not shared_root
-            ):
-                recovered_from, pane, workspace = (
-                    pane,
-                    candidates[0]["pane"],
-                    candidates[0]["workspace"],
-                )
-                print(
-                    f"orch-signal: recovered stale pane {recovered_from!r} as {pane!r}",
-                    file=sys.stderr,
-                )
-            else:
-                root_detail = (
-                    "; worktree is a workspace repo_root" if shared_root else ""
-                )
-                raise ValueError(
-                    "caller pane does not belong to its workspace "
-                    f"(pane={pane!r}, workspace={workspace!r}, "
-                    f"socket={os.environ.get('HERDR_SOCKET_PATH', '<default>')!r}, "
-                    f"panes={len(panes)}, cwd={cwd!r}, worktree={worktree!r}, "
-                    f"worktree_matches={len(candidates)}{root_detail})"
-                )
-        else:
-            location = (
-                f"pane={pane!r} is in workspace={claimed_pane['workspace']!r}, "
-                f"not workspace={workspace!r}"
-                if claimed_pane
-                else f"pane={pane!r} is not live; expected workspace={workspace!r}"
-            )
-            raise ValueError(
-                "caller pane does not belong to its workspace "
-                f"({location}; recovery={'disabled' if not recover else 'unavailable'}; "
-                f"socket={os.environ.get('HERDR_SOCKET_PATH', '<default>')!r}, "
-                f"panes={len(panes)})"
-            )
+    try:
+        caller = discovery.adapter().caller_pane(command, work["panes"])
+    except TimeoutError:
+        raise
+    except discovery.READ_ERRORS as error:
+        raise discovery.Unavailable(str(error)) from error
+    pane, workspace = caller["pane"], caller["workspace"]
+    inherited = os.environ.get("HERDR_PANE_ID")
+    recovered_from = inherited if inherited and inherited != pane else None
+    if recovered_from:
+        print(
+            f"orch-signal: verified caller pane {pane!r}; ignored inherited pane {inherited!r}",
+            file=sys.stderr,
+        )
     row = next((row for row in work["workspaces"] if row["id"] == workspace), {})
     return dict(
         pane=pane,
         workspace=workspace,
         owner=row.get("owner"),
+        **({"agent": caller["agent"]} if caller.get("agent") else {}),
         **({"recovered_from": recovered_from} if recovered_from else {}),
     )
 
@@ -223,11 +157,13 @@ def record_signal(ident, kind, new_job=False, **fields):
         return record
 
 
-def remove_question(record, close_panel=True, close_timeout=CLEANUP_SECONDS):
+def remove_question(
+    record, close_panel=True, close_timeout=CLEANUP_SECONDS, keep_record=False
+):
     """Waiters defer Q closure; the workers poll retries failed closes with the record intact."""
     identifier = record["id"]
     panel = questions_directory() / (identifier + ".md")
-    if panel.exists():
+    if panel.exists() or (not close_panel and record.get("resume_answer")):
         if not close_panel:
             record["cleanup"] = True
             write(question_path(identifier), record)
@@ -239,7 +175,8 @@ def remove_question(record, close_panel=True, close_timeout=CLEANUP_SECONDS):
                 return False
         except (OSError, subprocess.SubprocessError):
             return False
-    question_path(identifier).unlink(missing_ok=True)
+    if not keep_record:
+        question_path(identifier).unlink(missing_ok=True)
     answer_path(identifier).unlink(missing_ok=True)
     questions = questions_directory()
     for suffix in (
@@ -286,6 +223,12 @@ def new_question(ident, question, options, timeout, deadline=None):
                 old = read(path)
                 if old["pane"] == ident["pane"]:
                     alive = asker_alive(old)
+                    if (
+                        old.get("to_user")
+                        and not old.get("cleanup")
+                        and (old["deadline"] <= now or not alive)
+                    ):
+                        continue
                     if old.get("cleanup") and not alive:
                         continue
                     if old.get("cleanup"):
@@ -328,11 +271,14 @@ def wait_answer(record, timeout, deadline=None):
                 path = answer_path(record["id"])
                 if path.exists():
                     text = read_text(path).strip()
-                    remove_question(record, close_panel=False)
+                    current = read(question_path(record["id"])) or record
+                    remove_question(current, close_panel=False)
                     return text
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    remove_question(record, close_panel=False)
+                    current = read(question_path(record["id"]))
+                    if not (current and current.get("to_user")):
+                        remove_question(record, close_panel=False)
                     break
             time.sleep(min(POLL_SECONDS, remaining))
     except TimeoutError:
@@ -377,12 +323,26 @@ def answer(identifier, text, to_user=False):
                 ),
             )
             write_remind(target, time.time())
-            if open_user_question(identifier, target) in (0, 73):
-                target.with_suffix(".remind").unlink(missing_ok=True)
+            record.setdefault("to_user", time.time())
+            write(question_path(identifier), record)
+            opened = open_user_question(identifier, target)
+            if opened not in (0, 73):
+                raise ValueError(
+                    f"question panel did not open (exit {opened}); the reminder retries it"
+                )
+            target.with_suffix(".remind").unlink(missing_ok=True)
         else:
             if not text or not text.strip():
                 raise ValueError("answer text is required")
-            atomic_write(answer_path(identifier), text)
+            publish_answer(record, text)
+
+
+def publish_answer(record, text):
+    # Retain a receipt even if the CLI consumes its output before the model reads it.
+    if record.get("agent") == "codex":
+        record["resume_answer"] = text
+        write(question_path(record["id"]), record)
+    atomic_write(answer_path(record["id"]), text)
 
 
 def bridge_user_answer(identifier, text):
@@ -390,6 +350,17 @@ def bridge_user_answer(identifier, text):
     if not ID.fullmatch(identifier):
         return
     record = read(question_path(identifier))
+    if (
+        record
+        and record.get("to_user")
+        and not record.get("cleanup")
+        and not record.get("notice")
+        and record.get("late_answer") is None
+        and time.time() <= record["to_user"] + ESCALATED_RETAIN_SECONDS
+        and (record["deadline"] <= time.time() or not asker_alive(record))
+    ):
+        write(question_path(identifier), dict(record, late_answer=text))
+        return
     if (
         record
         and not record.get("cleanup")
@@ -402,10 +373,10 @@ def bridge_user_answer(identifier, text):
                 write(question_path(identifier), record)
                 return f"ANSWERS READFAIL answer discarded: {identifier}: {text} (asker is gone)"
             return
-        atomic_write(answer_path(identifier), text)
+        publish_answer(record, text)
 
 
-def collect(rows, owners, now, snapshot_at=None):
+def collect(rows, owners, now, snapshot_at=None, resume=None):
     """Read and prune only after a successful pane AND owner snapshot; never infer closed from a failed read."""
     if not directory().exists():
         return {}, []
@@ -420,7 +391,9 @@ def collect(rows, owners, now, snapshot_at=None):
         saved = [(path, read(path)) for path in directory().glob("*.json")]
         saved.sort(
             key=lambda item: (
-                item[1].get("cleanup_tried", 0) if item[1] else 0,
+                max(item[1].get("cleanup_tried", 0), item[1].get("resume_tried", 0))
+                if item[1]
+                else 0,
                 item[0].name,
             )
         )
@@ -440,10 +413,57 @@ def collect(rows, owners, now, snapshot_at=None):
             )
             if record["kind"] == "question":
                 answered = answer_path(record["id"]).exists()
+                if record.get("to_user") and not record.get("cleanup"):
+                    if (
+                        record.get("late_answer") is None
+                        and answered
+                        and not asker_alive(record)
+                    ):
+                        record["late_answer"] = read_text(
+                            answer_path(record["id"])
+                        ).strip()
+                    if not record.get("notice") and not closed:
+                        notice = (
+                            "late"
+                            if record.get("late_answer") is not None
+                            else "expired"
+                            if now > record["to_user"] + ESCALATED_RETAIN_SECONDS
+                            else None
+                        )
+                        if notice:
+                            record.update(notice=notice, notice_at=now)
+                            write(path, record)
+                    if record.get("notice"):
+                        panel = questions_directory() / (record["id"] + ".md")
+                        if panel.exists() and cleanup_used < CLEANUP_MAX:
+                            cleanup_used += 1
+                            if not remove_question(record, keep_record=True):
+                                record["cleanup_tried"] = now
+                                write(path, record)
+                        if now > record["notice_at"] + DONE_EVENTS_KEEP_SECONDS:
+                            if remove_question(record, close_panel=False):
+                                path.unlink(missing_ok=True)
+                        else:
+                            events.append(dict(record, event=record["notice"]))
+                        continue
+                pending_resume = record.get("resume_answer")
+                if (
+                    pending_resume
+                    and (answered or record.get("cleanup"))
+                    and not closed
+                    and now < record["deadline"]
+                ):
+                    if resume is None or not resume(record):
+                        continue
+                    record.pop("resume_answer")
+                    write(path, record)
                 if (
                     record.get("cleanup")
                     or closed
-                    or now > record["deadline"] + QUESTION_RETAIN_SECONDS
+                    or (
+                        now > record["deadline"] + QUESTION_RETAIN_SECONDS
+                        and not record.get("to_user")
+                    )
                 ):
                     panel = questions_directory() / (record["id"] + ".md")
                     if panel.exists():
@@ -454,8 +474,11 @@ def collect(rows, owners, now, snapshot_at=None):
                         record.update(cleanup=True, cleanup_tried=now)
                         write(path, record)
                     remove_question(record)
-                elif not answered and now < record["deadline"]:
-                    events.append(record)
+                else:
+                    if not answered and now < record["deadline"]:
+                        events.append(record)
+                    if record.get("to_user") and not answered:
+                        events.append(dict(record, event="to_user"))
             elif closed:
                 events.extend(
                     event
@@ -489,7 +512,84 @@ def collect_live(command, now):
         owners = {row["id"]: row.get("owner") for row in work["workspaces"]}
     except discovery.Unavailable:
         rows, owners = None, None
-    return collect(rows, owners, now, snapshot_at)
+        work = {"panes": []}
+
+    resume_used = False
+
+    def resume(record):
+        nonlocal resume_used
+        pane = next((p for p in work["panes"] if p["pane"] == record["pane"]), {})
+        if pane.get("agent") != "codex" or pane.get("status") not in ("idle", "done"):
+            return bool(record.get("cleanup") and pane.get("status") == "working")
+        if resume_used:
+            return False
+        resume_used = True
+        record["resume_tried"] = now
+        write(question_path(record["id"]), record)
+        try:
+            session = idle_codex_session(command, record)
+            if not session:
+                return False
+            message = (
+                f"Answer ready for {record['id']}. Read the running ask session's output "
+                "with write_stdin and empty input, then continue. If you already read "
+                "the answer, ignore this wake-up. If that session is no longer readable "
+                "after a restart, use the recovery answer below instead.\n"
+                f"Recovery answer: {record['resume_answer']}"
+            )
+            queue_wakeup(session, message)
+            return True
+        except discovery.READ_ERRORS as error:
+            print(
+                f"orch-signal: native wake-up failed for {record['id']}: {error}",
+                file=sys.stderr,
+            )
+            return False
+
+    result = collect(rows, owners, now, snapshot_at, resume)
+    if rows is not None and owners is not None and not resume_used:
+        import codex_subagents
+
+        with answers_lock():
+            codex_subagents.poll(
+                work,
+                directory() / "subagent-wakes",
+                lambda pane: idle_codex_session(command, pane),
+                queue_wakeup,
+            )
+    return result
+
+
+def idle_codex_session(command, pane):
+    agent = json.loads(
+        command(
+            discovery.adapter().herdr_bin(),
+            "agent",
+            "get",
+            pane["pane"],
+            timeout=2,
+        )
+    )["result"]["agent"]
+    session = agent.get("agent_session") or {}
+    if (
+        agent.get("pane_id") == pane["pane"]
+        and agent.get("workspace_id") == pane["workspace"]
+        and agent.get("agent_status") in ("idle", "done")
+        and session.get("agent") == "codex"
+    ):
+        return session.get("value")
+    return None
+
+
+def queue_wakeup(session, message):
+    import watcher_runtime as runtime
+
+    argv = ["codex", "queue", "--thread", session, "--message", message]
+    result = runtime.run(argv, timeout=2)
+    if result.returncode:
+        raise subprocess.CalledProcessError(
+            result.returncode, argv, stderr=result.stderr
+        )
 
 
 def suppressed(row, raw):
@@ -511,7 +611,21 @@ def suppressed(row, raw):
     )
 
 
+def event_key(record):
+    return record["id"] + (":" + record["event"] if record.get("event") else "")
+
+
 def event_line(record):
+    event = record.get("event")
+    head = f"{record['pane']} owner={record['owner']} id={record['id']}"
+    if event == "to_user":
+        return f"WORKER QUESTION TO USER {head} file={questions_directory() / (record['id'] + '.md')}"
+    if event == "late":
+        return f"WORKER ANSWER LATE {head} answer=" + strip_controls(
+            " ".join(str(record["late_answer"]).split())
+        )
+    if event == "expired":
+        return f"WORKER QUESTION EXPIRED {head}"
     fields = (
         ("outcome", "report", "summary")
         if record["kind"] == "done"
@@ -571,7 +685,7 @@ def main():
                 try:
                     with runtime.deadline(args.timeout, "orch-signal ask", soft=True):
                         record = new_question(
-                            identity(recover=True),
+                            identity(),
                             args.question,
                             args.options,
                             args.timeout,
@@ -611,7 +725,7 @@ def main():
         else:
             fields = vars(args).copy()
             fields.pop("action")
-            record_signal(identity(recover=True), args.action, **fields)
+            record_signal(identity(), args.action, **fields)
         return 0
     except OSError as error:
         denied = escalation_directory(error)

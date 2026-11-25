@@ -10,47 +10,54 @@ import type {
   RepoOptionSources,
 } from "#/types";
 
-function repoOf(key: PrKey): RepoName {
-  return key.split("#")[0]?.split("/").at(-1) ?? "";
+function matchesRepo(key: PrKey, repo: RepoName, listed: readonly RepoName[]): boolean {
+  const full = key.split("#")[0]?.toLowerCase() ?? "";
+  const name = repo.toLowerCase();
+  if (name.includes("/")) {
+    return full === name;
+  }
+
+  return full.endsWith(`/${name}`) && !listed.some((item) => item.toLowerCase() === full);
 }
 
-function colorOf(groups: GroupSummary[], repo: RepoName): GroupColor {
+function colorOf(groups: GroupSummary[], repo: RepoName, listed: readonly RepoName[]): GroupColor {
   const group =
     groups.find((candidate) => candidate.title === repo) ??
-    groups.find((candidate) => candidate.prs.some((row) => repoOf(row.key) === repo));
+    groups.find((candidate) => candidate.prs.some((row) => matchesRepo(row.key, repo, listed)));
 
   return isGroupColor(group?.color) ? group.color : "grey";
 }
 
-function openKey(groups: GroupSummary[], repo: RepoName, number: PrNumber): PrKey | null {
+function openKey(
+  groups: GroupSummary[],
+  repo: RepoName,
+  { number, listed }: { number: PrNumber; listed: readonly RepoName[] },
+): PrKey | null {
   const rows = groups.flatMap((group) => group.prs);
-  const row = rows.find((candidate) => candidate.key.endsWith(`/${repo}#${number}`));
+  const row = rows.find(
+    (candidate) => matchesRepo(candidate.key, repo, listed) && candidate.key.endsWith(`#${number}`),
+  );
 
   return row?.key ?? null;
 }
 
-// The go-to repository choices for a PR number: a repo with it open first, else the guessed one.
-export function useRepoOptions({ groups, repos, guessed, number }: RepoOptionSources) {
+// Repository choices keep the background's recent-use order.
+export function useRepoOptions({ groups, repos, number }: RepoOptionSources) {
   return computed<RepoOption[]>(() => {
     const target = toValue(number);
-    const first = toValue(guessed);
     const listed = toValue(repos);
 
     if (target === null) {
       return [];
     }
 
-    const ordered = listed.includes(first)
-      ? [first, ...listed.filter((repo) => repo !== first)]
-      : [...listed];
-
-    const options = ordered.map((repo) => ({
+    const options = listed.map((repo) => ({
       id: `repo-${repo}`,
       repo,
-      color: colorOf(toValue(groups), repo),
-      open: openKey(toValue(groups), repo, target),
+      color: colorOf(toValue(groups), repo, listed),
+      open: openKey(toValue(groups), repo, { number: target, listed }),
     }));
 
-    return options.toSorted((a, b) => Number(b.open !== null) - Number(a.open !== null));
+    return options;
   });
 }

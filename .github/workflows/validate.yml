@@ -28,7 +28,8 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.macos != 'false') }}
     runs-on: macos-latest
-    timeout-minutes: 40
+    # The full macOS suite currently takes about 40 minutes.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - run: brew install shellcheck bats-core ripgrep parallel

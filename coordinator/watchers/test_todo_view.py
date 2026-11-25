@@ -296,7 +296,7 @@ class ClickTest(ViewCase):
                 self.assertEqual(self.click(hits, line, last + 1), [])
                 label = shown[line - 1][first - 1 : last].strip().split("] ")[-1]
                 self.assertTrue(
-                    label in ("Dismiss", "Reminder")
+                    label in ("Dismiss", "Reminder", "Answer")
                     or label.startswith(("show", "hide")),
                     label,
                 )
@@ -310,11 +310,11 @@ class ClickTest(ViewCase):
         )
         self.assertIn("Dismiss", self.plain(lines)[by_action["dismiss"] - 1])
 
-    def test_two_actions_and_the_toggle_are_reachable(self):
+    def test_the_actions_and_the_toggle_are_reachable(self):
         _lines, hits = self.layout(80)
         self.assertEqual(
             {action for _l, _f, _t, action, _i in hits if _i == 0},
-            {"dismiss", "remind"},
+            {"dismiss", "remind", "answer"},
         )
         self.assertIn("show", [action for _l, _f, _t, action, _i in hits])
 
@@ -401,7 +401,7 @@ class NoOpenTest(ViewCase):
         _lines, hits = self.layout(rows, index, True)
         self.assertEqual(
             {hit[3] for hit in hits if hit[4] == index and hit[3] != "focus"},
-            {"dismiss", "cancel"},
+            {"dismiss", "cancel", "answer"},
         )
 
 

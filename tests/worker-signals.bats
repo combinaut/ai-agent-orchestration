@@ -9,12 +9,26 @@ setup() {
   mkdir -p "$HOME" "$TMP/bin"
   printf '[workers]\nask_timeout_s = 1\n' >"$ORCH_CONFIG"
   export HERDR_PANE_ID=worker-pane HERDR_WORKSPACE_ID=worker
+  unset SIGNAL_TEST_CALLER_PANE SIGNAL_TEST_DENY_PS
+  export PATH="$TMP/bin:$PATH"
+  cat >"$TMP/bin/ps" <<'SH'
+#!/bin/sh
+[ -z "${SIGNAL_TEST_DENY_PS:-}" ] || exit 1
+printf '%s 1\n1 0\n' "$PPID"
+SH
+  chmod +x "$TMP/bin/ps"
   export HERDR_BIN_PATH="$TMP/bin/herdr"
   cat >"$HERDR_BIN_PATH" <<'SH'
 #!/bin/sh
 case "$1 $2" in
  'workspace list') printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"worker","tokens":{"owner":"architect"}},{"workspace_id":"architect"}]}}' ;;
  'pane list') printf '%s\n' '{"result":{"panes":[{"pane_id":"worker-pane","workspace_id":"worker"},{"pane_id":"architect-pane","workspace_id":"architect"}]}}' ;;
+ 'pane process-info')
+   caller=${SIGNAL_TEST_CALLER_PANE:-$HERDR_PANE_ID}
+   pid=99999999
+   [ "$4" != "$caller" ] || pid=$PPID
+   printf '{"result":{"process_info":{"pane_id":"%s","foreground_processes":[{"pid":%s}]}}}\n' "$4" "$pid"
+   ;;
  *) exit 1 ;;
 esac
 SH
@@ -374,4 +388,27 @@ except OSError as error:
   chmod 555 "$HOME/.claude"
   run "$ROOT/orch-signal" heartbeat --new-job
   assert_escalate "$HOME/.claude/coordinator/worker-signals"
+}
+
+@test "worker signals verifies live caller when inherited pane belongs to another worker" {
+  export SIGNAL_TEST_CALLER_PANE=worker-pane
+  run env HERDR_PANE_ID=architect-pane HERDR_WORKSPACE_ID=architect "$ROOT/orch-signal" "done" --outcome succeeded --report /tmp/report --summary passed
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ignored inherited pane 'architect-pane'"* ]]
+  run "$PYTHON" -c '
+import glob, json, os
+paths = glob.glob(os.path.expanduser("~/.claude/coordinator/worker-signals/pane-*.json"))
+assert len(paths) == 1
+record = json.load(open(paths[0]))
+assert (record["pane"], record["workspace"], record["owner"]) == ("worker-pane", "worker", "architect")
+assert record["done_events"][0]["pane"] == "worker-pane"
+'
+  [ "$status" -eq 0 ]
+}
+
+@test "worker signals refuses to write when ancestry cannot be read" {
+  run env SIGNAL_TEST_DENY_PS=1 "$ROOT/orch-signal" heartbeat --new-job
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot read caller process ancestry"*"run this command escalated"* ]]
+  [ ! -d "$HOME/.claude/coordinator/worker-signals" ]
 }

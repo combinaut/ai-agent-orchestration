@@ -179,7 +179,7 @@ git_age_s = 180
 ask_timeout_s = 1800
 # Seconds idle or done before WORKER WAITING
 wait_s = 600
-# Seconds between waiting alerts (minimum 60)
+# Seconds between repeated waiting alerts and to-do answer failure alerts (minimum 60)
 wait_repeat_s = 1800
 # Seconds idle or done before WORKER IDLE (no open PR)
 idle_s = 7200

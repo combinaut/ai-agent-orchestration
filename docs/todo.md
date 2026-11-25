@@ -8,7 +8,7 @@ python3 ~/.claude/coordinator/user-todo.py --follow
 
 `user-todo.py` without `--follow` writes the file once. In the pane, press a number then Enter (or click) to jump to the item. `n` and `p` change page. A jump removes the item from the list. An empty list reads `Nothing waits on you.`
 
-For buttons instead, run `python3 ~/.claude/coordinator/user-todo-view.py` (`--demo` shows sample items). Clicking an item's architect heading or pressing Enter on its selected item focuses that architect's pane. Each item has Dismiss and Reminder buttons (click, or `d` `r` on the selected item; `↑↓` or a number selects). Dismiss hides the item for good: it returns only when the architect writes a new or changed item. One `todo: TODO DISMISSED <architect>: <text> (start)` line goes to the feed for the record; it is not an action line, and the action itself stays wanted. Reminder asks when (`1`-`5` for 15m, 1h, 2h, 4h, tomorrow 9:00; `t` types `30m` or `3h`) and hides the item until then; reminders are listed under `s` and come back marked `reminder:`; on a reminder item the button reads Cancel reminder. The top line reads `<n> open · <m> on reminder`. The `[s]` toggle and the `s show reminders` footer hint appear only while at least one reminder exists; the list closes when the last one goes. State is in `~/.claude/coordinator/user-todo-state.json` (not the generator's `user-todo.state.json`); it stores `dismissed`, and an old `ignored` key is still read.
+For buttons instead, run `python3 ~/.claude/coordinator/user-todo-view.py` (`--demo` shows sample items). Clicking an item's architect heading or pressing Enter on its selected item focuses that architect's pane. Each item has Dismiss, Reminder and Answer buttons (click, or `d` `r` `a` on the selected item; see "Answer an item" below for Answer; `↑↓` or a number selects). Dismiss hides the item for good: it returns only when the architect writes a new or changed item. One `todo: TODO DISMISSED <architect>: <text> (start)` line goes to the feed for the record; it is not an action line, and the action itself stays wanted. Reminder asks when (`1`-`5` for 15m, 1h, 2h, 4h, tomorrow 9:00; `t` types `30m` or `3h`) and hides the item until then; reminders are listed under `s` and come back marked `reminder:`; on a reminder item the button reads Cancel reminder. The top line reads `<n> open · <m> on reminder`. The `[s]` toggle and the `s show reminders` footer hint appear only while at least one reminder exists; the list closes when the last one goes. State is in `~/.claude/coordinator/user-todo-state.json` (not the generator's `user-todo.state.json`); it stores `dismissed`, and an old `ignored` key is still read.
 
 An item is stale when its `-> <target>` is one GitHub PR or issue URL (`github.com/<owner>/<repo>/pull|issues/<n>`, with `http://`, `https://` or no scheme, with or without `www.`, in any letter case; looked up and cached as one lowercase `https://` URL) and that PR is merged or closed, or that issue is closed. URLs in the item text are ignored. An item with answer choices (any `[<n>:` marker in the text, valid or not), or with any other target (an architect, a pane, a non-GitHub URL), is never stale. One item per PR or issue: an item closes when its target resolves, whatever its text says, so a wait that must outlive the PR (a follow-up after a merge, a question about it) points at a session name instead. The watcher then writes one `todo: TODO AUTO-CLOSED <architect>: <text> (<url> merged|closed) (start)` line to the feed, naming the target and its state; it is not an action line. The item is dismissed in the generator's `user-todo.state.json` (the state a jump uses, not the Dismiss file) only after that line is handed off; a failed hand-off keeps the item and repeats the line next cycle. An open target or a failed lookup keeps the item. It returns when the architect writes a new or changed item whose target is not resolved, or when its target is reopened after a `closed` auto-close. Lookups use `gh api`, at most 5 and 10 seconds in total per cycle; never-checked and least recently checked links go first, and links left over count as not stale until the next cycle. Only `merged` is cached for good. `open` and failed states are checked again after 300 seconds. A `closed` state is never served to an item that is still shown, so a rewritten or new item sees a reopened PR or issue at once. An item auto-closed on `closed` has its target checked again after 300 seconds and returns when the PR or issue is open. The cache is the `links` key in `user-todo.state.json`.
 
@@ -41,9 +41,10 @@ Architects can add consecutive numbered choices, from 1 to 9, before the target:
 - Deploy the release? [1: deploy now] [2: wait until tomorrow] -> Architect::Tooling
 ```
 
-Select that item with the existing number keys or arrows in the buttons view,
-then press **a** (or click **Answer**). In answer mode, press its choice number,
-or **t** to type a free-text answer and **Enter** to send. **Esc** cancels the
+Every item takes an answer. Select it with the existing number keys or arrows in
+the buttons view, then press **a** (or click **Answer**). An item with choices
+opens in choice mode: press its choice number, or **t** to type a free-text
+answer. An item without choices opens in text mode. **Enter** sends. **Esc** cancels the
 answer; in a popup it stays open. The simple `user-todo.py --follow` list also
 supports `a`: type the item number, press `a`, then choose or type. Outside answer
 mode, number/Enter jumps, n/p paging, mouse clicks, Dismiss and Reminder keep their
@@ -70,7 +71,17 @@ queued and raises a to-do read warning; it is never sent by typing into a pane.
 Runtime queue records live under `~/.claude/coordinator/todo-answers/`. Accepted
 delivered records are retained for the retention window to prevent a second stale view
 from submitting the same item again. The ordinary dismissal state preserves
-removal after that window. No choices means no new buttons or answer mode.
+removal after that window.
+
+A queued answer that is not delivered and not discarded shows in the buttons view
+as its own row: the architect, the item, your answer, "not delivered yet" with the
+queue time, and the `failure` reason when the record has one. It disappears once
+delivered. If its status item changes or goes away first, the record is marked
+discarded and the row leaves without a delivery. Select it and press **c** (or
+click **Cancel answer**) to remove the record and bring the item back unanswered;
+an answer delivered in the meantime stays. On that row **d**, **r**, **a** and
+**Enter** do not act; the status line points to **c**. The `--follow` list shows
+one line per undelivered, non-discarded answer, with no cancel.
 
 Undelivered answers retry through the same notifier after its outbox retention window.
 A status-item change includes a new `first_seen` generation when an identical line
@@ -79,6 +90,7 @@ to-do state and preserves records when that state is unreadable.
 Dropping an undelivered answer after a status-item change also removes its dismissal
 and emits one `TODO READFAIL answer discarded:` notice with the affected item and answer.
 Pending discard notices share the existing 200-record queue cap and leave the queue on collection.
+An answer that cannot be delivered stays queued with `failure` (one line, at most 200 characters: the Herdr error, `no live architect named <name>` or `ambiguous: …`) and `failed_at` (first failure) on its record; delivery clears both. The watcher writes `TODO READFAIL answer:<architect>: <reason>` once, repeats it as `… (repeat <n>)` every `ORCH_WAIT_REPEAT_S` (default 1800) seconds while the answer stays undelivered, and writes `TODO READ RECOVERED answer:<architect>: <reason>` when the answer stops failing (delivered, discarded or no longer listed). An answer to an architect whose name contains `: ` is refused when submitted, because the `TODO READFAIL answer:<architect>: <reason>` line could not tell the name from the reason. A reason that changes between repeats is not announced; the next `(repeat <n>)` line carries the current reason. Every watcher service runs with `HERDR_BIN_PATH`, `HERDR_ENV=1` and `HERDR_SOCKET_PATH` so it can find the live architects; re-run `install.sh` to apply this to installed services.
 Unavailable status files retain the answer. The legacy answer editor ignores whole CSI
 key sequences, including arrows, so they cannot cancel or insert text into an answer.
 Incomplete CSI sequences stay buffered across reads, including modifier sequences

@@ -286,6 +286,16 @@ class RuntimeTests(IsolatedTestCase):
             self.assertIn("StartLimitIntervalSec=0", unit, path.name)
             self.assertNotIn("StartLimitIntervalSec=", service, path.name)
 
+    def test_every_watcher_service_template_carries_the_herdr_block(self):
+        templates = sorted((w.ROOT / "service").glob("*/*.template"))
+        self.assertTrue(templates)
+        for template in templates:
+            text = template.read_text()
+            for variable in ("HERDR_BIN_PATH", "HERDR_ENV", "HERDR_SOCKET_PATH"):
+                self.assertIn(variable, text, f"{template.name} lacks {variable}")
+            self.assertIn("@ORCH_HERDR_BIN@", text, template.name)
+            self.assertIn("@ORCH_HERDR_SOCKET@", text, template.name)
+
     def test_macos_services_cap_stderr_at_restart(self):
         import plistlib
 

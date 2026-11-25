@@ -899,3 +899,14 @@ mark {
     padding: 20px;
   }
 }
+
+#file-settings .settings-card + .settings-card {
+  margin-top: 20px;
+}
+#file-settings .settings-repositories {
+  margin-bottom: 20px;
+}
+#file-settings .settings-pattern .settings-help {
+  margin: 8px 0;
+  font-size: 12px;
+}

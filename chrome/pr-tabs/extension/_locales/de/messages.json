@@ -481,5 +481,37 @@
         "content": "$1"
       }
     }
+  },
+  "repositoriesTitle": {
+    "message": "Repositorys"
+  },
+  "repositoriesHelp": {
+    "message": "Füge zusätzlich zu den konfigurierten Repositorys weitere hinzu."
+  },
+  "repositoryLabel": {
+    "message": "Repository"
+  },
+  "repositoryPlaceholder": {
+    "message": "owner/name"
+  },
+  "addRepository": {
+    "message": "Hinzufügen"
+  },
+  "repositoryFromConfig": {
+    "message": "aus Konfiguration"
+  },
+  "removeRepository": {
+    "message": "$repo$ entfernen",
+    "placeholders": {
+      "repo": {
+        "content": "$1"
+      }
+    }
+  },
+  "repositoryInvalid": {
+    "message": "Gib ein gültiges Repository im Format owner/name ein."
+  },
+  "repositoryDuplicate": {
+    "message": "Dieses Repository ist bereits aufgeführt."
   }
 }

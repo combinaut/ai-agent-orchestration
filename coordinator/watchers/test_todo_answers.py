@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import importlib.util
 import json
 import os
@@ -53,6 +54,10 @@ class TodoAnswerTests(IsolatedTestCase):
                 a.submit(OWNER, TEXT, text)
         a.submit(OWNER, TEXT, "x" * 512)
 
+    def test_architect_name_with_colon_space_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "invalid architect name"):
+            a.submit("Architect: Ops", TEXT, "now")
+
     def test_one_pending_answer_per_item(self):
         a.submit(OWNER, TEXT, "now")
         with self.assertRaisesRegex(ValueError, "already queued"):
@@ -74,10 +79,9 @@ class TodoAnswerTests(IsolatedTestCase):
                 a.submit(OWNER, other, "later")
         self.assertEqual(len(list(a.directory().glob("*.json"))), 1)
 
-    def test_stale_and_plain_items_cannot_be_answered(self):
-        for text in ["No choices", TEXT + " changed"]:
-            with self.assertRaises(ValueError):
-                a.submit(OWNER, text, "now")
+    def test_changed_item_and_bad_owner_cannot_be_answered(self):
+        with self.assertRaises(ValueError):
+            a.submit(OWNER, TEXT + " changed", "now")
         with self.assertRaisesRegex(ValueError, "invalid architect"):
             a.submit("../other", TEXT, "now")
 
@@ -90,6 +94,31 @@ class TodoAnswerTests(IsolatedTestCase):
             editor.feed(char)
         self.assertEqual(editor.feed("\n"), ("answer", "custom reply"))
         self.assertEqual(editor.feed("\x1b"), ("cancel", None))
+
+    def test_undelivered_lists_only_open_answers_and_shows_the_reason(self):
+        record = a.submit(OWNER, TEXT, "now")
+        self.assertEqual([r["id"] for r in a.undelivered()], [record["id"]])
+        self.assertNotIn("cannot reach", a.describe(record))
+        failed = dict(record, failure="cannot reach Herdr")
+        self.assertIn("(cannot reach Herdr)", a.describe(failed))
+        a.mark_delivered(a.event_line(dict(record, owner="workspace")))
+        self.assertEqual(a.undelivered(), [])
+
+    def test_cancel_removes_the_record_and_returns_the_item(self):
+        module = w.todo_module()
+        output = self.base / "todo.md"
+        state = self.base / "todo.state.json"
+        module.merge(self.base / "status", output, state)
+        module.answer_item(
+            module.rendered_items(output, state)[0], "now", state, output
+        )
+        self.assertEqual(module.rendered_items(output, state), [])
+        record = a.records()[0]
+        with patch.dict(os.environ, ORCH_USER_TODO_STATE=str(state)):
+            self.assertIn("cancelled", a.cancel(record["id"]))
+        self.assertEqual(a.records(), [])
+        module.merge(self.base / "status", output, state)
+        self.assertEqual(len(module.rendered_items(output, state)), 1)
 
     def test_answer_editor_buffer_bound(self):
         editor = a.AnswerInput(a.choices(TEXT))
@@ -105,8 +134,8 @@ class TodoAnswerTests(IsolatedTestCase):
 
     def test_existing_producer_routes_and_dedupes_answer(self):
         a.submit(OWNER, TEXT, "now")
-        records, failed = a.collect(w.command)
-        self.assertEqual(failed, [])
+        records, notices, _ = a.collect(w.command)
+        self.assertEqual(notices, [])
         raw = dict(now=[], unreadable=[], read=[], scanned=True, todo_answers=records)
         after, lines = w.reduce_todo(None, raw)
         self.assertEqual(len(lines), 1)
@@ -142,9 +171,10 @@ class TodoAnswerTests(IsolatedTestCase):
             "architect_owners",
             side_effect=a.discovery.Unavailable("offline"),
         ):
-            records, failed = a.collect(w.command)
+            records, notices, failures = a.collect(w.command)
         self.assertEqual(records, [])
-        self.assertTrue(failed)
+        self.assertEqual(notices, [])
+        self.assertEqual([entry["reason"] for entry in failures], ["offline"])
         self.assertEqual(len(list(a.directory().glob("*.json"))), 1)
 
     def test_answer_submission_dismisses_like_successful_jump(self):
@@ -192,7 +222,7 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertEqual(a.records(), [])
         app.feed("a2")
         self.assertEqual(a.records()[0]["answer"], "later")
-        self.assertEqual(app.rows, [])
+        self.assertEqual([len(row) for row in app.rows], [5])
 
     def test_buttons_view_free_text_and_escape_preserve_popup_keys(self):
         app, _ = self.view_app(popup=True)
@@ -212,8 +242,139 @@ class TodoAnswerTests(IsolatedTestCase):
         app.feed("1")
         self.assertEqual(a.records()[0]["answer"], "now")
 
+    def test_buttons_view_answers_plain_item_and_cancels_the_queued_row(self):
+        plain = "Audit done; say which to start -> Architect::Tooling"
+        path = self.base / "status" / f"{OWNER}.md"
+        path.write_text("## Waits on the user\n- " + plain + "\n")
+        app, view = self.view_app()
+        self.assertTrue(any(hit[3] == "answer" for hit in app.hits))
+        app.feed("afix 3 first\n")
+        self.assertEqual(a.records()[0]["answer"], "fix 3 first")
+        queued = [row for row in app.rows if len(row) > 4]
+        self.assertEqual(len(queued), 1)
+        lines, hits = view.layout(app.rows, 80, 0)
+        self.assertIn("not delivered yet", "\n".join(lines))
+        self.assertTrue(any(hit[3] == "unqueue" for hit in hits))
+        app.feed("c")
+        self.assertEqual(a.records(), [])
+        w.todo_module().merge(
+            self.base / "status", self.base / "todo.md", self.base / "todo.state.json"
+        )
+        app.refresh()
+        self.assertEqual([row[1] for row in app.rows], [plain])
+
+    def test_queued_row_ignores_dismiss_and_shows_the_failure_reason(self):
+        app, view = self.view_app()
+        app.feed("a1")
+        record = a.records()[0]
+        a.write(
+            a.directory() / (record["key"] + ".json"), dict(record, failure="no route")
+        )
+        app.refresh()
+        self.assertIn("no route", "\n".join(view.layout(app.rows, 80, 0)[0]))
+        app.feed("d")
+        self.assertEqual(app.hidden.dismissed, set())
+        self.assertEqual(len(a.records()), 1)
+        self.assertEqual(len(app.rows), 1)
+
+    def test_control_characters_never_reach_the_screen(self):
+        import re
+
+        _, view = self.view_app()
+        record = dict(
+            a.submit(OWNER, TEXT, "now"),
+            answer="\x1b[31mred\x07 ok",
+            failure="bad\x07\x1b]0;x\x07 reason",
+            architect="Arch\x1bitect",
+            text="Deploy \x1b[2J release [1: \x1b[31mnow] [2: later\x7f] -> Architect::Tooling",
+        )
+        editor = a.AnswerInput({"1": "\x1b[31mnow", "2": "late\x07r"})
+        rows = [(record["architect"], record["text"], False, "", record)]
+        shown = [
+            a.describe(record),
+            view.queued_label(record),
+            editor.prompt(),
+            *view.layout(rows, 80, 0)[0],
+            *view.answer_lines(editor, 80)[0],
+        ]
+        for line in shown:
+            for payload in ("\x1b[31m", "\x1b[2J", "\x1b]0", "\x07", "\x7f"):
+                self.assertNotIn(payload, line)
+            plain = re.sub(r"\x1b\[[0-9;]*m", "", line)
+            self.assertNotRegex(plain, r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", line)
+        self.assertIn("reason", a.describe(record))
+
+    def test_follow_list_strips_control_characters_from_items(self):
+        import io
+
+        module = w.todo_module()
+        (self.base / "status" / f"{OWNER}.md").write_text(
+            "## Waits on the user\n- Audit \x1b[31mred\x07 done [1: \x1b[2Jyes] -> Architect::Tooling\n"
+        )
+        output = self.base / "todo.md"
+        state = self.base / "todo.state.json"
+        module.merge(self.base / "status", output, state)
+        args = argparse.Namespace(output=output, state=state, pane=None)
+        buffer = io.StringIO()
+        with (
+            contextlib.redirect_stdout(buffer),
+            patch.object(module.os, "isatty", return_value=False),
+        ):
+            module.follow(
+                args,
+                wait=lambda *_: ([0], [], []),
+                read=lambda *_: b"",
+                run_jump=lambda *_: self.fail("must not jump"),
+                report=lambda *_: None,
+            )
+        self.assertIn("Audit", buffer.getvalue())
+        for payload in ("\x1b[31m", "\x07", "\x1b[2Jyes"):
+            self.assertNotIn(payload, buffer.getvalue())
+
+    def test_demo_has_a_plain_item_and_an_undelivered_answer(self):
+        _, view = self.view_app()
+        app = view.App(
+            view.Hidden(self.base / "d.json", self.base / "d.log"),
+            True,
+            __import__("io").StringIO(),
+            lambda: os.terminal_size((80, 24)),
+            report=lambda *_: None,
+        )
+        app.refresh()
+        text = "\n".join(view.layout(app.rows, 80, 0)[0])
+        self.assertIn("cannot reach Herdr", text)
+        self.assertTrue(any(not a.choices(row[1]) for row in app.rows if len(row) == 4))
+
+    def test_legacy_list_shows_undelivered_and_answers_plain_item(self):
+        import io
+
+        plain = "Audit done; say which to start -> Architect::Tooling"
+        (self.base / "status" / f"{OWNER}.md").write_text(
+            "## Waits on the user\n- " + plain + "\n"
+        )
+        module = w.todo_module()
+        output = self.base / "todo.md"
+        state = self.base / "todo.state.json"
+        module.merge(self.base / "status", output, state)
+        args = argparse.Namespace(output=output, state=state, pane=None)
+        keys = iter([b"1afix 3\n", b""])
+        buffer = io.StringIO()
+        with (
+            contextlib.redirect_stdout(buffer),
+            patch.object(module.os, "isatty", return_value=False),
+        ):
+            module.follow(
+                args,
+                wait=lambda *_: ([0], [], []),
+                read=lambda *_: next(keys),
+                run_jump=lambda *_: self.fail("answer must not jump"),
+                report=lambda *_: None,
+            )
+        self.assertEqual(a.records()[0]["answer"], "fix 3")
+        self.assertIn("Not delivered yet", buffer.getvalue())
+        self.assertIn("a answer selected item", buffer.getvalue().split("\x1b[2J")[1])
+
     def test_legacy_list_answers_choice_and_free_text(self):
-        import contextlib
         import io
 
         module = w.todo_module()
@@ -270,7 +431,7 @@ class TodoAnswerTests(IsolatedTestCase):
         with patch.object(
             a.time, "time", return_value=record["at"] + a.KEEP_SECONDS + 1
         ):
-            self.assertEqual(a.collect(w.command), ([], []))
+            self.assertEqual(a.collect(w.command), ([], [], []))
         self.assertEqual(a.records(), [])
 
     def test_submission_lock_wait_is_bounded(self):
@@ -333,7 +494,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertEqual(a.records()[0]["text"], other)
 
     def test_disappearing_question_cannot_retarget_legacy_input(self):
-        import contextlib
         import io
 
         module = w.todo_module()
@@ -400,7 +560,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertEqual(len(module.rendered_items(output, state)), 1)
 
     def follow_screens(self, keys, error=None):
-        import contextlib
         import io
 
         module = w.todo_module()
@@ -445,7 +604,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertEqual(received, ["x" * 61 + "界 café"])
 
     def test_buttons_main_preserves_utf8_answer_split_across_reads(self):
-        import contextlib
         import io
 
         app, view = self.view_app()
@@ -473,7 +631,7 @@ class TodoAnswerTests(IsolatedTestCase):
             self.assertEqual(a.collect(w.command)[0], [])
             self.assertEqual(a.records()[0]["answer"], "now")
         with patch.object(a.time, "time", return_value=now):
-            ready, _ = a.collect(w.command)
+            ready, _, _ = a.collect(w.command)
             raw = dict(
                 now=[],
                 unreadable=[],
@@ -532,6 +690,100 @@ class TodoAnswerTests(IsolatedTestCase):
         ):
             a.collect(w.command)
         self.assertEqual(a.records(), [])
+
+    def test_cancel_during_a_send_waits_and_finds_the_answer_delivered(self):
+        import threading
+
+        record = a.submit(OWNER, TEXT, "now")
+        spec = importlib.util.spec_from_file_location(
+            "answer_race", w.ROOT / "notify-inbox.py"
+        )
+        inbox = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inbox)
+        outcome = []
+        started = threading.Thread(
+            target=lambda: outcome.append(a.cancel(record["id"]))
+        )
+
+        def send(*_):
+            started.start()
+            started.join(0.3)
+
+        with (
+            patch.object(a, "LOCK_SECONDS", 30),
+            patch.object(inbox, "binding", return_value=("/socket", "token")),
+            patch.object(inbox, "send_to_socket", side_effect=send),
+        ):
+            self.assertTrue(
+                inbox.send_line(
+                    self.base / "architect-workspace.json",
+                    a.event_line(dict(record, owner="workspace")),
+                )
+            )
+        started.join(5)
+        self.assertEqual(len(outcome), 1)
+        self.assertIn("already delivered", outcome[0])
+        self.assertTrue(a.records()[0].get("delivered_at"))
+
+    def test_send_line_filters_sends_and_marks_under_one_lock(self):
+        record = a.submit(OWNER, TEXT, "now")
+        spec = importlib.util.spec_from_file_location(
+            "lock_span", w.ROOT / "notify-inbox.py"
+        )
+        inbox = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inbox)
+        real_lock, held, seen, enters = a.queue_lock, [], [], []
+
+        @contextlib.contextmanager
+        def lock():
+            enters.append(1)
+            with real_lock():
+                held.append(1)
+                try:
+                    yield
+                finally:
+                    held.pop()
+
+        def probe(name, fn):
+            def run(*args, **kwargs):
+                seen.append((name, bool(held)))
+                return fn(*args, **kwargs)
+
+            return run
+
+        with (
+            patch.object(a, "queue_lock", lock),
+            patch.object(a, "filter_canceled", probe("filter", a.filter_canceled)),
+            patch.object(
+                a, "mark_delivered_locked", probe("mark", a.mark_delivered_locked)
+            ),
+            patch.object(inbox, "binding", return_value=("/socket", "token")),
+            patch.object(
+                inbox, "send_to_socket", side_effect=probe("send", lambda *_: None)
+            ),
+        ):
+            self.assertTrue(
+                inbox.send_line(
+                    self.base / "architect-workspace.json",
+                    a.event_line(dict(record, owner="workspace")),
+                )
+            )
+        self.assertEqual(enters, [1])
+        self.assertEqual(seen, [("filter", True), ("send", True), ("mark", True)])
+
+    def test_panel_cancel_hitting_the_lock_timeout_says_the_queue_is_busy(self):
+        app, _ = self.view_app()
+        app.feed("a1")
+        self.assertEqual(len(a.records()), 1)
+
+        def busy(_):
+            raise TimeoutError("question lock wait timed out")
+
+        app.run_cancel = busy
+        app.feed("c")
+        self.assertIn("busy", app.status)
+        self.assertNotIn("question lock", app.status)
+        self.assertEqual(len(a.records()), 1)
 
     def test_legacy_answer_drops_whole_csi_sequences(self):
         received = []
@@ -616,14 +868,14 @@ class TodoAnswerTests(IsolatedTestCase):
         # An unreadable state cannot establish a generation change: preserve the answer.
         saved = state.read_text()
         state.write_text("{")
-        ready, notices = a.collect(w.command)
+        ready, notices, _ = a.collect(w.command)
         self.assertEqual([record["id"] for record in ready], [obsolete["id"]])
         self.assertEqual(notices, [])
         state.write_text(saved)
         module.answer_item(
             module.rendered_items(output, state)[0], "later", state, output
         )
-        ready, notices = a.collect(w.command)
+        ready, notices, _ = a.collect(w.command)
         self.assertEqual([record["answer"] for record in ready], ["later"])
         self.assertEqual(ready[0]["generation"], 102)
         self.assertEqual(len(notices), 1)
@@ -644,7 +896,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertEqual(received, ["beforeafter"])
 
     def answer_replacement_race(self, view, during_submit):
-        import contextlib
         import io
 
         module = w.todo_module()
@@ -778,7 +1029,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertFalse(app.closing)
 
     def test_legacy_complete_escape_cancels_before_following_keys(self):
-        import contextlib
         import io
 
         module = w.todo_module()

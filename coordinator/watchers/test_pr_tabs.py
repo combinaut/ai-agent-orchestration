@@ -29,6 +29,31 @@ host = load("pr_tabs_host_test", ROOT / "chrome/pr-tabs/host/pr_tabs_host.py")
 
 
 class PrTabsTest(IsolatedTestCase):
+    def test_repo_numbers_supports_qualified_and_configured_repositories(self):
+        data = {
+            "r0": {"pullRequests": {"nodes": [{"number": 10}]}},
+            "r1": {"issues": {"nodes": [{"number": 20}]}},
+        }
+        with patch.object(host, "gh_graphql", return_value=(data, "")) as graphql:
+            result = host.repo_numbers(
+                {"org": "acme", "repos": ["webapp", "other/api"]}
+            )
+        self.assertEqual(
+            result, {"ok": True, "newest": {"webapp": 10, "other/api": 20}}
+        )
+        query, variables = graphql.call_args.args
+        self.assertIn("repository(owner: $o0, name: $r0)", query)
+        self.assertIn("repository(owner: $o1, name: $r1)", query)
+        self.assertEqual(
+            variables,
+            [("o0", "acme"), ("r0", "webapp"), ("o1", "other"), ("r1", "api")],
+        )
+        with patch.object(host, "gh_graphql") as graphql:
+            for repo in ["other/api/extra", "other/", "other/a b"]:
+                with self.assertRaises(host.RequestError):
+                    host.repo_numbers({"org": "acme", "repos": [repo]})
+            graphql.assert_not_called()
+
     def test_adapter_scopes_branch_to_repo_and_resolves_owner_label(self):
         work = {
             "workspaces": [

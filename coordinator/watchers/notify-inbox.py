@@ -5,6 +5,7 @@ to their owning architect and action lines while no feed Monitor is attached. To
 """
 
 import argparse
+import contextlib
 import fcntl
 import hashlib
 import importlib.util
@@ -53,7 +54,7 @@ WAIT_OWNER = re.compile(
     r"^workers: WORKER WAITING .+ pane=\S+ owner=([A-Za-z0-9_-]+) \d+m session=\S+"
 )
 OWNER = re.compile(
-    r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER(?:-SOFT|-HARD)? \S+|workers: WORKER IDLE \S+|workers: WORKER (?:DONE|QUESTION) \S+) owner=([A-Za-z0-9_-]+) "
+    r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER(?:-SOFT|-HARD)? \S+|workers: WORKER IDLE \S+|workers: WORKER (?:DONE|QUESTION(?: TO USER| EXPIRED)?|ANSWER LATE) \S+) owner=([A-Za-z0-9_-]+) "
 )
 
 spec = importlib.util.spec_from_file_location("reader", w.ROOT / "read-alerts.py")
@@ -99,17 +100,24 @@ def binding_data(path):
     return value
 
 
-def binding(path):
-    value = binding_data(path)
-    pid = int(value["pid"])
-    os.kill(pid, 0)
-    session = json.loads((Path.home() / ".claude/sessions" / f"{pid}.json").read_text())
+def owns_session(value):
+    session = json.loads(
+        (Path.home() / ".claude/sessions" / f"{int(value['pid'])}.json").read_text()
+    )
+    if not isinstance(session, dict):
+        raise ValueError("session file is not an object")
     if (
         value["session_id"] != session.get("sessionId")
         or value["proc_start"] != session.get("procStart")
         or value["socket"] != session.get("messagingSocketPath")
     ):
         raise ValueError("session binding changed; owner must rebind")
+
+
+def binding(path):
+    value = binding_data(path)
+    os.kill(int(value["pid"]), 0)
+    owns_session(value)
     return Path(value["socket"]), value["token"]
 
 
@@ -130,7 +138,10 @@ def stale_binding_alerts(args, cursor):
             value = binding_data(path)
             try:
                 os.kill(int(value["pid"]), 0)
-            except ProcessLookupError:
+                owns_session(value)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                raise
+            except (ProcessLookupError, ValueError, FileNotFoundError):
                 fingerprint = hashlib.sha256(
                     json.dumps(value, sort_keys=True).encode()
                 ).hexdigest()
@@ -140,7 +151,14 @@ def stale_binding_alerts(args, cursor):
                     events.append(
                         f"bindings: BINDING STALE {architect} {match[1]} (start)"
                     )
-        except (OSError, ValueError, KeyError, TypeError):
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            OverflowError,
+            RecursionError,
+        ):
             if path.name in old:
                 current[path.name] = old[path.name]
     if current:
@@ -245,17 +263,20 @@ def batch_written(path, inode, offset, data):
 
 
 def send_line(binding_path, text):
+    answers = "TODO ANSWER " in text
     try:
-        if "TODO ANSWER " in text:
-            text = w.todo_answers.filter_canceled(text)
-            if not text:
-                return True
-        path, token = binding(binding_path)
-        send_to_socket(path, token, text)
-        if binding_path.name.startswith("architect-"):
-            w.todo_answers.mark_delivered(
-                text, binding_path.stem.removeprefix("architect-")
-            )
+        # A cancel takes the same lock, so it cannot land between the filter and the delivery mark.
+        with w.todo_answers.queue_lock() if answers else contextlib.nullcontext():
+            if answers:
+                text = w.todo_answers.filter_canceled(text)
+                if not text:
+                    return True
+            path, token = binding(binding_path)
+            send_to_socket(path, token, text)
+            if answers and binding_path.name.startswith("architect-"):
+                w.todo_answers.mark_delivered_locked(
+                    text, binding_path.stem.removeprefix("architect-")
+                )
         return True
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(
@@ -295,6 +316,7 @@ def native_messages(args, stamped, fallback, patterns):
                 or " WORKER IDLE " in line
                 or " WORKER DONE " in line
                 or " WORKER QUESTION " in line
+                or " WORKER ANSWER " in line
                 or " TODO ANSWER " in line
                 or (args.bindings_dir / f"architect-{owner.group(1)}.json").exists()
             )
@@ -303,8 +325,17 @@ def native_messages(args, stamped, fallback, patterns):
             by_owner.setdefault(owner.group(1), []).append(
                 native(line.split(" ", 1)[1])
                 + (
-                    f". Answer with orch-signal answer {question_id[1]} <text>."
-                    if body.startswith("workers: WORKER QUESTION ") and question_id
+                    ". Relay it to the worker through its native message channel."
+                    if body.startswith("workers: WORKER ANSWER LATE ")
+                    else f". Answer with orch-signal answer {question_id[1]} <text>."
+                    if body.startswith("workers: WORKER QUESTION ")
+                    and not body.startswith(
+                        (
+                            "workers: WORKER QUESTION TO USER ",
+                            "workers: WORKER QUESTION EXPIRED ",
+                        )
+                    )
+                    and question_id
                     else ". No reply needed."
                 )
             )
@@ -767,7 +798,12 @@ def history(base, cursor, modes, now, late=None):
                 ).update(seq=0, reset=state["reset"])
                 seen = 0
         if mode in ("workers", "todo") and late is not None:
-            prefixes = ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ")
+            prefixes = (
+                "WORKER DONE ",
+                "WORKER QUESTION ",
+                "WORKER ANSWER ",
+                "TODO ANSWER ",
+            )
             unread = [
                 event for event in events if event["seq"] > (0 if fresh else seen)
             ]
@@ -809,7 +845,12 @@ def history(base, cursor, modes, now, late=None):
                         line
                         for line in alert.get("events", [])
                         if not line.startswith(
-                            ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ")
+                            (
+                                "WORKER DONE ",
+                                "WORKER QUESTION ",
+                                "WORKER ANSWER ",
+                                "TODO ANSWER ",
+                            )
                         )
                     ]
                 if unseen_reset and any(

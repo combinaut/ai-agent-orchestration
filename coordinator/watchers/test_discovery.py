@@ -587,3 +587,92 @@ class FocusStatusTest(IsolatedTestCase):
             focus_check.os, "stat", side_effect=FileNotFoundError("gone")
         ):
             self.assertTrue(focus_check.status_dir_absent())
+
+
+class CallerPaneTests(IsolatedTestCase):
+    def setUp(self):
+        self.adapter = discovery.adapter()
+        self.panes = [
+            dict(pane="other-pane", workspace="other", cwd="/same", agent="codex"),
+            dict(pane="own-pane", workspace="worker", cwd="/same", agent="codex"),
+        ]
+        self.probes = []
+
+    def command(self, *args, timeout=None):
+        if args[0] == "ps":
+            self.assertEqual(args, ("ps", "-A", "-o", "pid=,ppid="))
+            self.assertEqual(timeout, 5)
+            return f"{os.getpid()} 20\n20 10\n10 1\n1 0\n"
+        self.assertEqual(args[1:4], ("pane", "process-info", "--pane"))
+        pane = args[4]
+        self.probes.append(pane)
+        return json.dumps(
+            dict(
+                result=dict(
+                    process_info=dict(
+                        pane_id=pane,
+                        foreground_processes=[
+                            dict(pid=10 if pane == "own-pane" else 99)
+                        ],
+                    )
+                )
+            )
+        )
+
+    def test_live_process_overrides_wrong_or_absent_environment(self):
+        for hint in ("other-pane", "deleted-pane", ""):
+            with self.subTest(hint=hint), patch.dict(os.environ, HERDR_PANE_ID=hint):
+                self.assertEqual(
+                    self.adapter.caller_pane(self.command, self.panes), self.panes[1]
+                )
+
+    def test_verified_hint_avoids_unrelated_process_probes(self):
+        with patch.dict(os.environ, HERDR_PANE_ID="own-pane"):
+            self.assertEqual(
+                self.adapter.caller_pane(self.command, self.panes), self.panes[1]
+            )
+        self.assertEqual(self.probes, ["own-pane"])
+
+    def test_no_ancestor_match_refuses_live_hint_and_shared_cwd(self):
+        with patch.dict(os.environ, HERDR_PANE_ID="other-pane"):
+            with self.assertRaisesRegex(ValueError, "cannot verify caller pane"):
+                self.adapter.caller_pane(self.command, self.panes[:1])
+
+    def test_denied_ps_requests_escalation_and_never_probes_a_pane(self):
+        for error in (
+            PermissionError("denied"),
+            subprocess.CalledProcessError(1, "ps"),
+        ):
+            with self.subTest(error=error):
+                with self.assertRaisesRegex(ValueError, "run this command escalated"):
+                    self.adapter.caller_pane(
+                        lambda *a, **kw: self.raise_error(error), self.panes
+                    )
+        self.assertEqual(self.probes, [])
+
+    @staticmethod
+    def raise_error(error):
+        raise error
+
+    def test_worker_deadline_propagates(self):
+        with self.assertRaisesRegex(TimeoutError, "deadline"):
+            self.adapter.caller_pane(
+                lambda *a, **kw: self.raise_error(TimeoutError("deadline")), self.panes
+            )
+
+    def test_closed_pane_does_not_hide_callers_live_pane(self):
+        def command(*args, **kwargs):
+            if args[-1] == "other-pane":
+                raise subprocess.CalledProcessError(1, args)
+            return self.command(*args, **kwargs)
+
+        self.assertEqual(self.adapter.caller_pane(command, self.panes), self.panes[1])
+
+    def test_inconsistent_process_response_is_rejected(self):
+        def command(*args, **kwargs):
+            value = self.command(*args, **kwargs)
+            return value.replace('"other-pane"', '"different-pane"')
+
+        with patch.dict(os.environ, HERDR_PANE_ID="other-pane"):
+            with self.assertRaisesRegex(ValueError, "identity changed"):
+                self.adapter.caller_pane(command, self.panes)

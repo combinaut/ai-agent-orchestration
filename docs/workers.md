@@ -12,16 +12,17 @@ How the roles fit together: [`architecture.md`](architecture.md).
 
 ## Explicit worker signals
 
-`orch-signal` works for Claude, Codex, pi and cursor. Identity is the caller's
-`HERDR_PANE_ID`, `HERDR_WORKSPACE_ID` and the workspace's `owner` token, read
-through the env adapter. It needs no Claude session ID. A shared Codex
-app-server daemon can retain a dead pane environment for later tool shells.
-When that stale pane ID is absent from Herdr, `orch-signal` recovers only a
-single live Codex pane whose Git worktree matches the shell's current directory;
-a present pane in another workspace is still refused. Identity failures name the
-claimed pane, workspace, Herdr socket and pane count.
-Recovery applies only to worker `heartbeat`, `done` and `ask` signals, never to
-the architect-facing `answer` or `list` commands.
+`orch-signal` works for Claude, Codex, pi and cursor. The Herdr env adapter
+verifies the caller's process ancestry against live pane foreground processes,
+then reads the pane's workspace and its `owner` token. Inherited pane IDs only
+prioritize the lookup: cached shell environments and session IDs can belong to
+another terminal after a restart or concurrent session resume. A corrected pane
+is logged and preserved as `recovered_from` in the signal record. Neither a
+matching working directory nor a live inherited pane proves caller identity.
+All commands, including architect `answer` and `list`, require a verified caller;
+an unverifiable caller fails without writing a signal. If the sandbox blocks
+process inspection, run the command escalated. Tool shells must descend from
+the pane's foreground process (Codex workers start with `--no-daemon`).
 
 `orch-signal` writes `~/.claude/coordinator`, outside the Codex sandbox. Codex
 workers run every `orch-signal` command as an escalated command, like
@@ -38,6 +39,23 @@ orch-signal answer signal-<id> "v2"
 orch-signal answer signal-<id> --to-user
 ```
 
+`answer --to-user` opens the Q panel. The workers watcher then sends the
+Coordinator one `WORKER QUESTION TO USER <pane> owner=<ws> id=<id> file=<question file>`
+line at its next poll (the command does not send it), unless the question is already
+answered or closed, and the Coordinator treats it
+as the architect's `QUESTION <slug> <file>` registration. The command exits non-zero
+(one stderr line) when the panel did not open. The escalated question stays open after
+the worker's ask times out, until the user answers or 24 hours after
+`answer --to-user`. A user answer after the ask ended reaches the owning architect as
+`WORKER ANSWER LATE <pane> owner=<ws> id=<id> answer=<text>`; the architect relays it
+once through the worker runtime's native message channel (the Messages rule in
+`skills/architect/SKILL.md`). At 24 hours the owner gets
+`WORKER QUESTION EXPIRED <pane> owner=<ws> id=<id>`. A closed worker pane, an owner
+change or a cancelled ask (SIGINT, SIGTERM or SIGHUP) closes the question with no new
+line, unless a LATE or EXPIRED line was already sent. Lines already sent stand. An escalated
+ask whose worker was killed with SIGKILL stays open until a LATE or EXPIRED line. The architect still adds a
+`## Waits on the user` item.
+
 A **current job** begins with `heartbeat --new-job` and ends with `done`; every
 follow-up brief in a reused pane must begin a new job. Identical done calls are
 idempotent and print a no-op notice to stderr. A changed report, summary or outcome
@@ -50,14 +68,40 @@ calls less than 30 seconds apart are ignored. Ordinary heartbeats cannot undo do
 Completion and question messages go through the workers producer, shared notifier,
 `bindings/architect-<owner>.json` and its existing outbox. Delivery is normally
 within one workers poll (60 seconds). There is no second notifier or cursor.
+Codex workers must keep polling a running `exec_command` session with `write_stdin`
+and empty input until `ask` exits; never end the turn while it runs. The tool
+yielding a session ID does not mean the command completed.
 Claude workers run `ask` with `run_in_background` or a Bash timeout above the
 command's `--timeout`. SIGTERM/SIGINT/SIGHUP cancel the question under the answers lock;
-a re-ask replaces a record whose recorded asker PID is dead. `answer` refuses
+a re-ask replaces a record whose recorded asker PID is dead, except an escalated question, which stays open. `answer` refuses
 a dead asker with `asker is gone`, including escalation.
+For Codex answers, a bounded receipt survives CLI consumption until the workers
+poll observes the model working or sends one native wake-up to its verified live
+session while idle/done. The wake-up names the ask ID and tells the worker to read
+its running session output; it includes the answer for recovery if the tool
+session is no longer readable after a restart. A worker that already read the
+answer ignores the wake-up. No pane input is injected. Failed native sends are
+reported on stderr and retried by the next workers poll; receipt retention ends
+at the question deadline. At most one wake-up is attempted per workers poll;
+failed attempts rotate behind other pending receipts. The CLI remains the normal
+answer channel.
+Codex subagent waits are also bounded: `No agents completed yet` or a wait
+timeout does not establish completion. Check `list_agents` and keep calling
+`wait_agent` until the required children finish; never end the turn with pending
+children. As a fallback, the workers poll reads only a verified idle worker's own
+session metadata and child completion events, then sends a native wake-up for
+new child completions after the parent's idle turn ended. Active parents and old
+completions do not trigger it. Receipts are scoped to the live parent session,
+bounded to 64 recent children, and pruned when the pane closes.
+The Codex SQLite/rollout store is undocumented and may change. Unknown schemas or
+rollout shapes disable this fallback and log once per failure episode;
+`test_codex_store_shape_wakes_idle_parent_once` in `test_codex_subagents.py` pins
+the supported shape. Subagent answers remain in their native threads.
+
 An owner may answer or escalate a question. Escalation uses the existing questions
 directory, answers lock, reminders and Q panel; the answers watcher forwards the
 user's answer to the blocked worker. If the asker has died, the bridge discards
-the answer and emits one `ANSWERS READFAIL answer discarded:` notice instead. If opening the panel fails, a due reminder
+the answer and emits one `ANSWERS READFAIL answer discarded:` notice instead, except for an escalated question: its answer becomes a `WORKER ANSWER LATE` line for the owner. If opening the panel fails, a due reminder
 retries. If `orch-signal` fails, a worker must finish with `DONE: <report path>`
 or ask with `QUESTION: <text>` so its owner can recover the result; plain
 `QUESTION:` is also the fallback when `ask` times out. `NEED SLOT:` is
@@ -65,15 +109,15 @@ unchanged. No picker opens in the worker pane.
 
 | Resource | Bound |
 |---|---|
-| Pending questions | One per pane; at most 200 question records machine-wide, including deferred panel cleanup; further asks fail clearly |
+| Pending questions | One per pane, plus any escalated question kept open after its ask ended; at most 200 question records machine-wide, including deferred panel cleanup; further asks fail clearly |
 | Ask wait | `workers.ask_timeout_s` / `ORCH_ASK_TIMEOUT_S`, default 1800 seconds; positive finite override `--timeout` |
 | Waiting ask polling | At most once per second, last sleep capped by remaining time |
 | Heartbeats | One accepted per 30 seconds; fresh for 300 seconds |
 | Pane records | One per live pane; removed after a successful snapshot confirms pane closed or owner changed |
-| Question/answer files | Worker consumption returns immediately; Q closure is deferred to the workers poll. Removed when consumed, replaced, closed, or at deadline + 3600 seconds; a failed Q close retains a retry record; live askers wait for cleanup, while dead askers can be replaced |
+| Question/answer files | Worker consumption returns immediately; Q closure is deferred to the workers poll. Removed when consumed (Codex receipts remain until wake-up, observed working, or deadline), replaced, closed, or at deadline + 3600 seconds (an escalated question is kept up to 24 hours after `answer --to-user`, then for the notice window); a failed Q close retains a retry record; live askers wait for cleanup, while dead askers can be replaced |
 | Completion handoff | Latest 200 completions per pane for 3600 seconds; oldest dropped beyond cap; remaining events are emitted once before pruning a closed or re-tagged pane |
 | Q-panel cleanup | At most one close attempt per workers poll, 2-second execution timeout with bounded process-group teardown; failed attempts rotate behind other pending panels |
-| Signal dedupe state | IDs from retained live completions and unexpired pending questions only |
+| Signal dedupe state | IDs from retained live completions and unexpired pending questions and escalated questions kept open |
 | Native outbox | Existing 200 entries; merge overflow by target, drop oldest beyond cap; retry every 60 seconds, expire after 3600 seconds |
 
 Files live under `~/.claude/coordinator/worker-signals/`, never in the repo.

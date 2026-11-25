@@ -559,7 +559,8 @@ def cell_width(char):
 
 
 def item_line(index, item):
-    return f"{index + 1}. {item['source']}: {item_display(item)}"
+    shown = todo_answers.printable(f"{item['source']}: {item_display(item)}")
+    return f"{index + 1}. {shown}"
 
 
 def wrapped_rows(line, width):
@@ -696,7 +697,11 @@ def follow(
                 if answering
                 else []
             )
-            list_height = size.lines - max(0, len(answer_rows) - 1)
+            queued = [
+                clip_rows(line, max(1, size.columns - 1), 1)
+                for line in map(todo_answers.describe, todo_answers.undelivered())
+            ][: max(0, size.lines - 6)]
+            list_height = size.lines - max(0, len(answer_rows) - 1) - len(queued)
             starts = page_starts(items, size.columns, list_height)
             page = min(page, len(starts) - 1)
             visible, rows = visible_items(
@@ -713,16 +718,16 @@ def follow(
                 if len(starts) > 1
                 else footer
             )
-            if (
-                not answering
-                and 0 <= selected < len(items)
-                and todo_answers.choices(items[selected]["text"])
-            ):
+            if not answering and 0 <= selected < len(items):
                 status += " · a answer selected item"
-            screen += [""] + (
-                answer_rows
-                if answering
-                else [clip_rows(status, max(1, size.columns - 1), 1)]
+            screen += (
+                queued
+                + [""]
+                + (
+                    answer_rows
+                    if answering
+                    else [clip_rows(status, max(1, size.columns - 1), 1)]
+                )
             )
             print("\033[2J\033[H" + "\n".join(screen), flush=True)
             readable, _, _ = wait([fd], [], [], 1)
@@ -788,19 +793,19 @@ def follow(
                             number_selection(typed, len(items)) if typed else selected
                         )
                         if choice is not None and 0 <= choice < len(items):
-                            options = todo_answers.choices(items[choice]["text"])
-                            if options:
-                                typed = ""
-                                selected = choice
-                                answering = {
-                                    "item": dict(items[choice]),
-                                    "generation": answer_generation(
-                                        items[choice]["source"].removesuffix(".md"),
-                                        items[choice]["text"],
-                                        state_path,
-                                    ),
-                                    "editor": todo_answers.AnswerInput(options),
-                                }
+                            typed = ""
+                            selected = choice
+                            answering = {
+                                "item": dict(items[choice]),
+                                "generation": answer_generation(
+                                    items[choice]["source"].removesuffix(".md"),
+                                    items[choice]["text"],
+                                    state_path,
+                                ),
+                                "editor": todo_answers.AnswerInput(
+                                    todo_answers.choices(items[choice]["text"])
+                                ),
+                            }
                         continue
                     if char.isdigit():
                         typed += char
