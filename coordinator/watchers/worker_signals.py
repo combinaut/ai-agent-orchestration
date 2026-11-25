@@ -106,6 +106,7 @@ def identity():
         pane=pane,
         workspace=workspace,
         owner=row.get("owner"),
+        **({"agent": caller["agent"]} if caller.get("agent") else {}),
         **({"recovered_from": recovered_from} if recovered_from else {}),
     )
 
@@ -159,7 +160,7 @@ def remove_question(record, close_panel=True, close_timeout=CLEANUP_SECONDS):
     """Waiters defer Q closure; the workers poll retries failed closes with the record intact."""
     identifier = record["id"]
     panel = questions_directory() / (identifier + ".md")
-    if panel.exists():
+    if panel.exists() or (not close_panel and record.get("resume_answer")):
         if not close_panel:
             record["cleanup"] = True
             write(question_path(identifier), record)
@@ -260,7 +261,8 @@ def wait_answer(record, timeout, deadline=None):
                 path = answer_path(record["id"])
                 if path.exists():
                     text = read_text(path).strip()
-                    remove_question(record, close_panel=False)
+                    current = read(question_path(record["id"])) or record
+                    remove_question(current, close_panel=False)
                     return text
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -314,7 +316,15 @@ def answer(identifier, text, to_user=False):
         else:
             if not text or not text.strip():
                 raise ValueError("answer text is required")
-            atomic_write(answer_path(identifier), text)
+            publish_answer(record, text)
+
+
+def publish_answer(record, text):
+    # Retain a receipt even if the CLI consumes its output before the model reads it.
+    if record.get("agent") == "codex":
+        record["resume_answer"] = text
+        write(question_path(record["id"]), record)
+    atomic_write(answer_path(record["id"]), text)
 
 
 def bridge_user_answer(identifier, text):
@@ -334,10 +344,10 @@ def bridge_user_answer(identifier, text):
                 write(question_path(identifier), record)
                 return f"ANSWERS READFAIL answer discarded: {identifier}: {text} (asker is gone)"
             return
-        atomic_write(answer_path(identifier), text)
+        publish_answer(record, text)
 
 
-def collect(rows, owners, now, snapshot_at=None):
+def collect(rows, owners, now, snapshot_at=None, resume=None):
     """Read and prune only after a successful pane AND owner snapshot; never infer closed from a failed read."""
     if not directory().exists():
         return {}, []
@@ -352,7 +362,9 @@ def collect(rows, owners, now, snapshot_at=None):
         saved = [(path, read(path)) for path in directory().glob("*.json")]
         saved.sort(
             key=lambda item: (
-                item[1].get("cleanup_tried", 0) if item[1] else 0,
+                max(item[1].get("cleanup_tried", 0), item[1].get("resume_tried", 0))
+                if item[1]
+                else 0,
                 item[0].name,
             )
         )
@@ -372,6 +384,17 @@ def collect(rows, owners, now, snapshot_at=None):
             )
             if record["kind"] == "question":
                 answered = answer_path(record["id"]).exists()
+                pending_resume = record.get("resume_answer")
+                if (
+                    pending_resume
+                    and (answered or record.get("cleanup"))
+                    and not closed
+                    and now < record["deadline"]
+                ):
+                    if resume is None or not resume(record):
+                        continue
+                    record.pop("resume_answer")
+                    write(path, record)
                 if (
                     record.get("cleanup")
                     or closed
@@ -421,7 +444,67 @@ def collect_live(command, now):
         owners = {row["id"]: row.get("owner") for row in work["workspaces"]}
     except discovery.Unavailable:
         rows, owners = None, None
-    return collect(rows, owners, now, snapshot_at)
+        work = {"panes": []}
+
+    resume_used = False
+
+    def resume(record):
+        nonlocal resume_used
+        pane = next((p for p in work["panes"] if p["pane"] == record["pane"]), {})
+        if pane.get("agent") != "codex" or pane.get("status") not in ("idle", "done"):
+            return bool(record.get("cleanup") and pane.get("status") == "working")
+        if resume_used:
+            return False
+        resume_used = True
+        record["resume_tried"] = now
+        write(question_path(record["id"]), record)
+        try:
+            agent = json.loads(
+                command(
+                    discovery.adapter().herdr_bin(),
+                    "agent",
+                    "get",
+                    record["pane"],
+                    timeout=2,
+                )
+            )["result"]["agent"]
+            session = agent.get("agent_session") or {}
+            if (
+                agent.get("pane_id") != record["pane"]
+                or agent.get("workspace_id") != record["workspace"]
+                or agent.get("agent_status") not in ("idle", "done")
+                or session.get("agent") != "codex"
+                or not session.get("value")
+            ):
+                return False
+            message = (
+                f"Answer ready for {record['id']}. Read the running ask session's output "
+                "with write_stdin and empty input, then continue. If you already read "
+                "the answer, ignore this wake-up. If that session is no longer readable "
+                "after a restart, use the recovery answer below instead.\n"
+                f"Recovery answer: {record['resume_answer']}"
+            )
+            queue_wakeup(session["value"], message)
+            return True
+        except discovery.READ_ERRORS as error:
+            print(
+                f"orch-signal: native wake-up failed for {record['id']}: {error}",
+                file=sys.stderr,
+            )
+            return False
+
+    return collect(rows, owners, now, snapshot_at, resume)
+
+
+def queue_wakeup(session, message):
+    import watcher_runtime as runtime
+
+    argv = ["codex", "queue", "--thread", session, "--message", message]
+    result = runtime.run(argv, timeout=2)
+    if result.returncode:
+        raise subprocess.CalledProcessError(
+            result.returncode, argv, stderr=result.stderr
+        )
 
 
 def suppressed(row, raw):

@@ -122,6 +122,162 @@ class SignalTests(IsolatedTestCase):
         self.assertFalse(s.question_path(q["id"]).exists())
         self.assertFalse(s.answer_path(q["id"]).exists())
 
+    def answered_codex_question(self):
+        self.work["panes"][0].update(agent="codex", status="idle")
+        q = s.new_question(s.identity(), "Which?", "a,b", 60)
+        with patch.dict(os.environ, HERDR_PANE_ID="architect"):
+            s.answer(q["id"], "a")
+        return q
+
+    def native_command(self, *args, **kwargs):
+        if args[1:3] == ("agent", "get"):
+            return json.dumps(
+                dict(
+                    result=dict(
+                        agent=dict(
+                            pane_id="pane:1",
+                            workspace_id="worker",
+                            agent="codex",
+                            agent_status=self.work["panes"][0]["status"],
+                            agent_session=dict(agent="codex", value="live-session"),
+                        )
+                    )
+                )
+            )
+        self.fail(f"unexpected command: {args}")
+
+    def test_idle_codex_wakes_once_after_waiter_consumes_answer(self):
+        q = self.answered_codex_question()
+        self.assertEqual(s.wait_answer(q, 60), "a")
+        with (
+            patch.object(w, "command", side_effect=self.native_command) as command,
+            patch.object(s, "queue_wakeup") as queue,
+        ):
+            s.collect_live(command, s.time.time())
+            s.collect_live(command, s.time.time())
+        queue.assert_called_once()
+        self.assertIn(q["id"], queue.call_args.args[1])
+        self.assertIn("write_stdin", queue.call_args.args[1])
+        self.assertFalse(s.question_path(q["id"]).exists())
+
+    def test_working_codex_does_not_receive_wakeup(self):
+        q = self.answered_codex_question()
+        self.work["panes"][0]["status"] = "working"
+        self.assertEqual(s.wait_answer(q, 60), "a")
+        with (
+            patch.object(w, "command", side_effect=self.native_command) as command,
+            patch.object(s, "queue_wakeup") as queue,
+        ):
+            s.collect_live(command, s.time.time())
+        command.assert_not_called()
+        queue.assert_not_called()
+
+    def test_restarted_codex_gets_answer_recovery_on_live_native_session(self):
+        q = self.answered_codex_question()
+        q = s.read(s.question_path(q["id"]))
+        q["asker_pid"] = 99999999
+        s.write(s.question_path(q["id"]), q)
+        with (
+            patch.object(w, "command", side_effect=self.native_command) as command,
+            patch.object(s, "queue_wakeup") as queue,
+        ):
+            s.collect_live(command, s.time.time())
+        queue.assert_called_once()
+        self.assertEqual(queue.call_args.args[0], "live-session")
+        self.assertIn("no longer readable", queue.call_args.args[1])
+        self.assertTrue(queue.call_args.args[1].endswith("Recovery answer: a"))
+        self.assertEqual(s.wait_answer(q, 60), "a")
+
+    def test_native_failure_retains_receipt_for_retry(self):
+        q = self.answered_codex_question()
+        self.assertEqual(s.wait_answer(q, 60), "a")
+        with (
+            patch.object(w, "command", side_effect=self.native_command) as command,
+            patch.object(
+                s, "queue_wakeup", side_effect=[OSError("offline"), None]
+            ) as queue,
+            patch("sys.stderr", new_callable=io.StringIO) as stderr,
+        ):
+            s.collect_live(command, s.time.time())
+            self.assertIn("native wake-up failed", stderr.getvalue())
+            self.assertTrue(s.question_path(q["id"]).exists())
+            s.collect_live(command, s.time.time())
+            s.collect_live(command, s.time.time())
+        self.assertEqual(queue.call_count, 2)
+        self.assertFalse(s.question_path(q["id"]).exists())
+
+    def test_unverified_or_changed_native_session_is_not_queued(self):
+        self.answered_codex_question()
+        for change in (
+            dict(workspace_id="other"),
+            dict(agent_status="working"),
+            dict(agent_session=dict(agent="claude", value="other")),
+            dict(agent_session={}),
+        ):
+            reply = json.loads(self.native_command("herdr", "agent", "get"))
+            reply["result"]["agent"].update(change)
+            with (
+                patch.object(w, "command", return_value=json.dumps(reply)) as command,
+                patch.object(s, "queue_wakeup") as queue,
+            ):
+                s.collect_live(command, s.time.time())
+            queue.assert_not_called()
+
+    def test_expired_consumed_receipt_is_pruned_without_wakeup(self):
+        q = self.answered_codex_question()
+        self.assertEqual(s.wait_answer(q, 60), "a")
+        with patch.object(s, "queue_wakeup") as queue:
+            s.collect_live(w.command, q["deadline"] + 1)
+        queue.assert_not_called()
+        self.assertFalse(s.question_path(q["id"]).exists())
+
+    def test_native_queue_accepts_success_without_stdout(self):
+        import subprocess
+
+        import watcher_runtime as runtime
+
+        with patch.object(
+            runtime, "run", return_value=subprocess.CompletedProcess([], 0, "", "")
+        ) as run:
+            s.queue_wakeup("live-session", "resume")
+        self.assertEqual(
+            run.call_args.args[0],
+            ["codex", "queue", "--thread", "live-session", "--message", "resume"],
+        )
+
+    def test_delayed_answer_survives_tool_wait_yield_with_default_timeout(self):
+        import subprocess
+        import sys
+        import time
+
+        code = 'import worker_signals as s; s.identity=lambda:dict(pane="pane:1",workspace="worker",owner="owner"); raise SystemExit(s.main())'
+        process = subprocess.Popen(
+            [sys.executable, "-c", code, "ask", "--question", "Which?"],
+            cwd=Path(s.__file__).parent,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            deadline = time.monotonic() + 5
+            paths = []
+            while not paths and time.monotonic() < deadline:
+                paths = list(s.directory().glob("signal-*.json"))
+                time.sleep(0.01)
+            self.assertTrue(paths)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                process.communicate(timeout=0.05)
+            self.assertIsNone(process.poll())
+            with patch.dict(os.environ, HERDR_PANE_ID="architect"):
+                s.answer(paths[0].stem, "delayed answer")
+            stdout, stderr = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 0)
+            self.assertEqual(stdout, b"delayed answer\n")
+            self.assertEqual(stderr, b"")
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.communicate(timeout=5)
+
     def test_foreign_answer_refused(self):
         q = self.record(timeout=60)
         with self.assertRaisesRegex(ValueError, "owner architect"):
@@ -842,6 +998,8 @@ class SignalTests(IsolatedTestCase):
             text = (root / relative).read_text()
             self.assertIn("run_in_background", text)
             self.assertIn("above `--timeout`", text)
+            self.assertIn("`write_stdin`", text)
+            self.assertIn("never end the turn while it runs", text)
         skill = (root / "skills/architect/SKILL.md").read_text()
         self.assertIn("SLOT: go", skill)
         self.assertIn("may not answer", skill)
