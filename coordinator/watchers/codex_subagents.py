@@ -106,6 +106,10 @@ def warn_once(path, session, error):
     print(f"orch-signal: subagent wake unavailable: {message}", file=sys.stderr)
 
 
+def receipt_path(state, pane):
+    return state / (hashlib.sha256(pane["pane"].encode()).hexdigest() + ".json")
+
+
 def poll(work, state, session_for, send):
     root = store_root().resolve()
     databases = [
@@ -122,15 +126,23 @@ def poll(work, state, session_for, send):
         for path in state.glob(pattern):
             if path.stem not in live:
                 path.unlink(missing_ok=True)
-    for pane in work["panes"]:
+
+    def receipt_age(pane):
+        try:
+            return receipt_path(state, pane).stat().st_mtime_ns
+        except OSError:
+            return 0
+
+    for pane in sorted(work["panes"], key=receipt_age):
         if (
             pane.get("agent") != "codex"
             or pane.get("status") not in ("idle", "done")
             or not owners.get(pane["workspace"])
         ):
             continue
-        path = state / (hashlib.sha256(pane["pane"].encode()).hexdigest() + ".json")
+        path = receipt_path(state, pane)
         session = "unknown"
+        attempted = False
         try:
             session = session_for(pane)
             if not session:
@@ -149,6 +161,21 @@ def poll(work, state, session_for, send):
             if pending:
                 if session_for(pane) != session:
                     continue
+                atomic_write(
+                    path,
+                    json.dumps(
+                        dict(
+                            pane=pane["pane"],
+                            session=session,
+                            seen={
+                                child: mark
+                                for child, mark in seen.items()
+                                if child in done
+                            },
+                        )
+                    ),
+                )
+                attempted = True
                 send(
                     session,
                     "Subagent completed while you were idle: "
@@ -164,3 +191,5 @@ def poll(work, state, session_for, send):
                 return
         except READ_ERRORS as error:
             warn_once(path, session, error)
+            if attempted:
+                return

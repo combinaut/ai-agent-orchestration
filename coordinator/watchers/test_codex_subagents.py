@@ -72,14 +72,20 @@ class SubagentWakeTests(IsolatedTestCase):
 
     def command(self, *args, **kwargs):
         self.assertEqual(args[1:3], ("agent", "get"))
+        pane = next(
+            (p for p in self.work["panes"] if p["pane"] == args[-1]),
+            self.work["panes"][0],
+        )
         return json.dumps(
             dict(
                 result=dict(
                     agent=dict(
-                        pane_id="pane",
+                        pane_id=pane["pane"],
                         workspace_id="worker",
-                        agent_status=self.work["panes"][0]["status"],
-                        agent_session=dict(agent="codex", value="parent"),
+                        agent_status=pane["status"],
+                        agent_session=dict(
+                            agent="codex", value=pane.get("session", "parent")
+                        ),
                     )
                 )
             )
@@ -162,6 +168,23 @@ class SubagentWakeTests(IsolatedTestCase):
             self.poll()
             self.poll()
         self.assertEqual(self.queue.call_count, 2)
+
+    def test_failed_send_consumes_poll_budget_and_rotates_between_parents(self):
+        self.lifecycle("parent-2", "task_complete", 100)
+        self.lifecycle("child-2", "task_complete", 101, parent="parent-2")
+        self.work["panes"].append(
+            dict(self.work["panes"][0], pane="pane-2", session="parent-2")
+        )
+        self.queue.side_effect = [OSError("offline"), None, None]
+        with patch("sys.stderr", new_callable=io.StringIO):
+            self.poll()
+            self.queue.assert_called_once()
+            self.poll()
+            self.assertEqual(self.queue.call_count, 2)
+            self.assertEqual(self.queue.call_args.args[0], "parent-2")
+            self.poll()
+        self.assertEqual(self.queue.call_count, 3)
+        self.assertEqual(self.queue.call_args.args[0], "parent")
 
     def test_receipts_and_warnings_are_pruned_with_closed_session(self):
         self.poll()
