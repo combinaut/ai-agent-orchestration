@@ -459,23 +459,8 @@ def collect_live(command, now):
         record["resume_tried"] = now
         write(question_path(record["id"]), record)
         try:
-            agent = json.loads(
-                command(
-                    discovery.adapter().herdr_bin(),
-                    "agent",
-                    "get",
-                    record["pane"],
-                    timeout=2,
-                )
-            )["result"]["agent"]
-            session = agent.get("agent_session") or {}
-            if (
-                agent.get("pane_id") != record["pane"]
-                or agent.get("workspace_id") != record["workspace"]
-                or agent.get("agent_status") not in ("idle", "done")
-                or session.get("agent") != "codex"
-                or not session.get("value")
-            ):
+            session = idle_codex_session(command, record)
+            if not session:
                 return False
             message = (
                 f"Answer ready for {record['id']}. Read the running ask session's output "
@@ -484,7 +469,7 @@ def collect_live(command, now):
                 "after a restart, use the recovery answer below instead.\n"
                 f"Recovery answer: {record['resume_answer']}"
             )
-            queue_wakeup(session["value"], message)
+            queue_wakeup(session, message)
             return True
         except discovery.READ_ERRORS as error:
             print(
@@ -493,7 +478,39 @@ def collect_live(command, now):
             )
             return False
 
-    return collect(rows, owners, now, snapshot_at, resume)
+    result = collect(rows, owners, now, snapshot_at, resume)
+    if rows is not None and owners is not None and not resume_used:
+        import codex_subagents
+
+        with answers_lock():
+            codex_subagents.poll(
+                work,
+                directory() / "subagent-wakes",
+                lambda pane: idle_codex_session(command, pane),
+                queue_wakeup,
+            )
+    return result
+
+
+def idle_codex_session(command, pane):
+    agent = json.loads(
+        command(
+            discovery.adapter().herdr_bin(),
+            "agent",
+            "get",
+            pane["pane"],
+            timeout=2,
+        )
+    )["result"]["agent"]
+    session = agent.get("agent_session") or {}
+    if (
+        agent.get("pane_id") == pane["pane"]
+        and agent.get("workspace_id") == pane["workspace"]
+        and agent.get("agent_status") in ("idle", "done")
+        and session.get("agent") == "codex"
+    ):
+        return session.get("value")
+    return None
 
 
 def queue_wakeup(session, message):

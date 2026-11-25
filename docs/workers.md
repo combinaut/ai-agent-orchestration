@@ -68,6 +68,19 @@ reported on stderr and retried by the next workers poll; receipt retention ends
 at the question deadline. At most one wake-up is attempted per workers poll;
 failed attempts rotate behind other pending receipts. The CLI remains the normal
 answer channel.
+Codex subagent waits are also bounded: `No agents completed yet` or a wait
+timeout does not establish completion. Check `list_agents` and keep calling
+`wait_agent` until the required children finish; never end the turn with pending
+children. As a fallback, the workers poll reads only a verified idle worker's own
+session metadata and child completion events, then sends a native wake-up for
+new child completions after the parent's idle turn ended. Active parents and old
+completions do not trigger it. Receipts are scoped to the live parent session,
+bounded to 64 recent children, and pruned when the pane closes.
+The Codex SQLite/rollout store is undocumented and may change. Unknown schemas or
+rollout shapes disable this fallback and log once per failure episode;
+`test_codex_store_shape_wakes_idle_parent_once` in `test_codex_subagents.py` pins
+the supported shape. Subagent answers remain in their native threads.
+
 An owner may answer or escalate a question. Escalation uses the existing questions
 directory, answers lock, reminders and Q panel; the answers watcher forwards the
 user's answer to the blocked worker. If the asker has died, the bridge discards
