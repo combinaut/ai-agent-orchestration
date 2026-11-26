@@ -851,8 +851,32 @@ def context(pr, comments, threads, reviews):
     return "\n\n".join(parts)
 
 
+def code(text):
+    """Literal text as a <code> element; GitHub reads no Markdown or HTML in it."""
+    line = " ".join(text.splitlines())
+    escaped = re.sub(r"[^\w ]|_", lambda m: f"&#{ord(m[0])};", line)
+    return f"<code>{escaped}</code>"
+
+
 def cell(text):
-    return str(text).replace("|", "\\|").replace("\n", " ")
+    """One table cell: code spans become <code>, and no `<`, `&` or `|` stays raw."""
+
+    def render(m):
+        backslashes, special, ticks, span = m.groups()
+        if special:
+            shown = {"<": "&lt;", "&": "&amp;", "|": "\\|"}[special]
+            return "&#92;" * len(backslashes) + shown
+        if span is None:
+            return m[0]
+        if span.strip() and span[0] == span[-1] == " ":
+            span = span[1:-1]
+        return code(span)
+
+    return re.sub(
+        r"(\\*)([<&|])|\\[\\`]|(`+)(?:(?!`)(.+?)(?<!`)\3(?!`))?",
+        render,
+        " ".join(str(text).splitlines()),
+    )
 
 
 def comment_body(record, tables=("Kept", "Dropped"), indent=1):
@@ -868,8 +892,14 @@ def comment_body(record, tables=("Kept", "Dropped"), indent=1):
     for title, rows in (("Kept", record["items"]), ("Dropped", record["dropped"])):
         if not rows or title not in tables:
             continue
+        folded = title == "Dropped"
+        heading = (
+            f"<details><summary>{title} ({len(rows)})</summary>"
+            if folded
+            else f"**{title}**"
+        )
         lines += [
-            f"**{title}**",
+            heading,
             "",
             "| id | class | where | category | verdict | finding | reason |",
             "|---|---|---|---|---|---|---|",
@@ -877,9 +907,11 @@ def comment_body(record, tables=("Kept", "Dropped"), indent=1):
         for i in rows:
             where = f"{i['file']}:{i['line']}" if i["line"] else i["file"]
             lines.append(
-                f"| {i['id']} | {i['class']} | `{cell(where)}` | {cell(i['category'])} | {i['verdict']} | {cell(i['summary'])} | {cell(i.get('reason', ''))} |"
+                f"| {i['id']} | {i['class']} | {code(where)} | {cell(i['category'])} | {i['verdict']} | {cell(i['summary'])} | {cell(i.get('reason', ''))} |"
             )
         lines.append("")
+        if folded:
+            lines += ["</details>", ""]
     if not record["items"] and not record["dropped"]:
         lines += ["No findings.", ""]
     elif len(tables) < 2:

@@ -455,7 +455,7 @@ assert json.loads(block) == record
 assert "```json" not in body
 assert body.rstrip().endswith("*(Generated using Codex)*"), body
 assert "**Kept**" in body and "| fix |" in body
-assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_SHA"
+assert "<details>" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_SHA"
   [ -f "$XDG_CACHE_HOME/review-prs/sweeps/acme/app/7/$HEAD_SHA.json" ]
 }
 
@@ -627,8 +627,52 @@ for argv in codex:
   [ "$status" -eq 0 ]
   python3 -c 'import json,sys
 body = json.load(open(sys.argv[1]))["body"]
-assert "**Dropped**" in body and "**Kept**" not in body, body
+assert "<summary>Dropped (4)</summary>" in body and "**Kept**" not in body, body
 assert body.count("| FALSE |") == 4, body' "$TMP/posted.json"
+}
+
+@test "the comment folds the dropped table and leaves the kept table open" {
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,re,sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+record = json.load(open(sys.argv[2]))
+record["dropped"] = [dict(record["items"].pop(), verdict="FALSE")]
+body = sweep_run.comment_body(record)
+folded = re.findall(r"<details><summary>Dropped \(1\)</summary>\n\n(\|.*?\|)\n\n</details>\n", body, re.S)
+assert len(folded) == 1 and "| FALSE |" in folded[0], body
+assert body.index("**Kept**") < body.index("<details>"), body
+assert body.count("<details>") == body.count("</details>") == 1, body
+sweep_run.COMMENT_LIMIT = len(body) - 1
+compact = sweep_run.fitting_body(record)
+assert "</details>" in compact and len(compact) <= sweep_run.COMMENT_LIMIT, compact
+sweep_run.COMMENT_LIMIT = len(compact) - 1
+cut = sweep_run.fitting_body(record)
+assert "**Kept**" in cut and "details>" not in cut and "<summary>" not in cut, cut
+assert "Tables left out" in cut, cut' "$ROOT/lib" "$TMP/record.json"
+}
+
+@test "finding text with HTML stays text in its cell and keeps the fold intact" {
+  FAKE_FINDINGS=1 FAKE_VERDICT=FALSE run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+record = json.load(open(sys.argv[2]))
+record["dropped"] = record["dropped"][:1]
+hostile = ["stray </details>", "&lt; `<b> & </details>`", "\\\\`x`</details>`", "[a](`)</details>`", "\\<i> \\| a|b <!--"]
+record["dropped"][0].update(file="a`<|.py", line=3, summary=" ".join(hostile), reason="first\rsecond\n`__init__` `` a`b ``")
+visible = sweep_run.comment_body(record).split("<!-- orch-sweep-record")[0]
+table, end, after = visible.partition("|\n\n</details>\n")
+assert end and "details>" not in after, visible
+row = table.splitlines()[-1]
+assert "<" not in row.replace("<code>", "").replace("</code>", ""), row
+assert row.startswith("| " + record["dropped"][0]["id"] + " ") and row.count(" | ") == 6, row
+assert "| <code>a&#96;&#60;&#124;&#46;py&#58;3</code> |" in row, row
+assert "| stray &lt;/details> &amp;lt; <code>&#60;b&#62; &#38; &#60;&#47;details&#62;</code> " in row, row
+assert "&#92;&lt;i> &#92;\\| a\\|b &lt;!--" in row and row.endswith("| first second <code>&#95;&#95;init&#95;&#95;</code> <code>a&#96;b</code> "), row
+assert visible.count("\n</details>\n") == 1, visible' "$ROOT/lib" "$TMP/record.json"
 }
 
 @test "a record path inside the checkout stops before any agent starts" {
