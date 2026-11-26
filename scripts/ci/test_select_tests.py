@@ -78,6 +78,12 @@ class SelectionTests(unittest.TestCase):
     def test_poll_deadline_code_runs_on_macos(self):
         self.assertTrue(ci.select(["lib/github_poll.py"])["macos"])
 
+    def test_watch_loop_runs_on_macos(self):
+        self.assertTrue(ci.select(["skills/review-prs/scripts/prs.py"])["macos"])
+
+    def test_watch_loop_tests_run_on_macos(self):
+        self.assertTrue(ci.select(["coordinator/watchers/test_prs_watch.py"])["macos"])
+
     def test_documentation_keeps_readers_on_linux(self):
         for path in [
             "docs/settings.md",

@@ -58,6 +58,8 @@ def platform_sensitive(path):
             "tests/setup_suite.bash",
             "coordinator/watchers/watcher_platform.py",
             "lib/github_poll.py",
+            "skills/review-prs/scripts/prs.py",
+            "coordinator/watchers/test_prs_watch.py",
         }
     )
 

@@ -23,8 +23,10 @@ macOS runs for shell scripts, hooks, native-host code, macOS service templates,
 platform adapters, test isolation helpers, shell Bats suites (except the Python
 sweep suites) and CI infrastructure. Unknown paths
 also enable macOS unless they are Python or documentation. Pure Python changes,
-extension UI changes and prose run on Linux. Suite selection applies on both
-platforms; Linux-only integrations stay on Linux.
+extension UI changes and prose run on Linux. The PR watch loop
+(`skills/review-prs/scripts/prs.py`) and its test
+(`coordinator/watchers/test_prs_watch.py`) also run on macOS. Suite selection
+applies on both platforms; Linux-only integrations stay on Linux.
 
 PRs compare their head with the merge base of the PR's base and head. Pushes to
 main compare the event's previous and new main SHAs. Renames include both the old

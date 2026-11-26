@@ -176,6 +176,7 @@ def call_deadline(seconds, *, expired_error=_Expired):
         nonlocal inherited_fired
         if time.time() < expires and time.monotonic() < monotonic_expires:
             return
+        expired._fired = True
         signal.setitimer(signal.ITIMER_REAL, 0)
         if inherited and callable(previous_handler):
             inherited_fired = True
@@ -183,6 +184,7 @@ def call_deadline(seconds, *, expired_error=_Expired):
                 previous_handler(signum, frame)
             except TimeoutError as error:
                 raise _Expired from error
+            inherited_fired = False
         raise expired_error
 
     expired._poll_deadline = (expires, monotonic_expires)
@@ -201,7 +203,7 @@ def call_deadline(seconds, *, expired_error=_Expired):
         else:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, previous_handler)
-            if previous_timer[0]:
+            if previous_timer[0] and not getattr(previous_handler, "_fired", False):
                 signal.setitimer(
                     signal.ITIMER_REAL,
                     max(
@@ -221,7 +223,7 @@ def call_deadline(seconds, *, expired_error=_Expired):
     finally:
         try:
             restore()
-        except _Expired:
+        except BaseException:
             restore()
             raise
 
