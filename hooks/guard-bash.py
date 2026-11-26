@@ -2264,7 +2264,6 @@ GUARDED_EXECUTABLES = {
     "pi",
     "git",
     "gh",
-    "github-write",
     "pkill",
     "pgrep",
     "killall",
