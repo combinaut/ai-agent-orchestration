@@ -515,6 +515,45 @@ for bad in ("not base64!", pack(payload), pack(stream[:-4]), pack(stream + b"x")
     assert read(bad) is None, bad[:80]' "$ROOT/lib"
 }
 
+@test "no compressed record is posted that readers would reject as too large" {
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys
+sys.path.insert(0, sys.argv[1])
+import sweep_record, sweep_run
+record = json.load(open(sys.argv[2]))
+record["items"][0]["reason"] = "long " * 20000
+size = len(json.dumps(record, separators=(",", ":")))
+sweep_record.RECORD_LIMIT = size
+assert sweep_record.comment_record(sweep_run.fitting_body(record)) == record
+sweep_record.RECORD_LIMIT = size - 1
+try:
+    sweep_run.fitting_body(record)
+except sweep_run.Failure as failure:
+    assert f"needs {size} bytes" in str(failure), failure
+else:
+    raise AssertionError("posted an unreadable record")' "$ROOT/lib" "$TMP/record.json"
+}
+
+@test "the sweep history reads only the latest sweep comments, oldest first" {
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+record = json.load(open(sys.argv[2]))
+def sweep(n):
+    item = dict(record["items"][0], summary=f"outcome-{n}")
+    body = sweep_run.comment_body(dict(record, items=[item], dropped=[]))
+    return {"body": body, "author_association": "OWNER", "user": {"login": "me"}}
+others = [{"body": f"plain-{n}", "user": {"login": "x"}} for n in (1, 2)]
+sweep_run.HISTORY_SWEEPS = 2
+text = sweep_run.context({"title": "t", "body": ""}, [others[0], sweep(1), sweep(2), others[1], sweep(3)], [], [])
+assert "outcome-1" not in text and "orch-sweep" not in text, text
+assert text.index("outcome-2") < text.index("outcome-3"), text
+assert text.index("plain-1") < text.index("plain-2"), text' "$ROOT/lib" "$TMP/record.json"
+}
+
 @test "both record readers accept visible legacy and hidden comment records" {
   PATH="/opt/homebrew/bin:$PATH" python3 -c 'import json,sys
 sys.path.insert(0, sys.argv[1])

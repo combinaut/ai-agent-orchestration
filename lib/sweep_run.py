@@ -36,6 +36,7 @@ GH_TIMEOUT = 45
 GH_MAX_BYTES = 32 * 1024 * 1024
 STOP_GRACE = 5
 HISTORY_LIMIT = 60000
+HISTORY_SWEEPS = 50
 OUTCOME_FIELDS = {"who": 40, "file": 200, "category": 60, "summary": 300, "reason": 500}
 COMMENT_LIMIT = 65536
 MARKER = "<!-- orch-sweep v1 -->"
@@ -817,21 +818,28 @@ def history(outcomes):
 
 
 def context(pr, comments, threads, reviews):
-    """The PR text, earlier sweep outcomes, and the latest 50 other comments, thread comments and review summaries."""
+    """The PR text, outcomes of the latest HISTORY_SWEEPS sweep comments, and the latest 50 other comments, thread comments and review summaries."""
     parts = [f"Title: {pr['title']}", f"Body:\n{pr['body'] or ''}"]
-    others, outcomes = [], []
-    for c in comments:
+    others, outcomes, sweeps = [], [], 0
+    for c in reversed(comments):
         body = c.get("body") or ""
         trusted = c.get("author_association") in {
             "OWNER",
             "MEMBER",
             "COLLABORATOR",
         } or (c.get("user") or {}).get("login") == pr.get("user", {}).get("login")
-        found = sweep_outcomes(body) if trusted and MARKER in body else None
+        found = None
+        if trusted and MARKER in body:
+            if sweeps == HISTORY_SWEEPS:
+                continue
+            sweeps += 1
+            found = sweep_outcomes(body)
         if found is None:
             others.append(c)
         else:
             outcomes.append(((c.get("user") or {}).get("login", "?"), found))
+    others.reverse()
+    outcomes.reverse()
     if outcomes:
         parts.append(
             "Earlier sweep outcomes and their verdicts, by comment author:\n"
@@ -885,6 +893,11 @@ def record_block(record, indent, compressed):
     """The record in an HTML comment: JSON, or compact JSON as base64 of its zlib stream."""
     text = json.dumps(record, indent=indent, separators=None if indent else (",", ":"))
     if compressed:
+        if len(text) > sweep_record.RECORD_LIMIT:
+            raise Failure(
+                f"the sweep record needs {len(text)} bytes; a compressed record may hold {sweep_record.RECORD_LIMIT}; the record is kept locally",
+                5,
+            )
         packed = base64.b64encode(zlib.compress(text.encode(), 9)).decode()
         return ["<!-- orch-sweep-record-z", packed, "-->"]
     return ["<!-- orch-sweep-record", text.replace("--", "\\u002d\\u002d"), "-->"]

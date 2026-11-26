@@ -888,7 +888,7 @@ def gate(url, head, review_body=None, record_info=None):
     pages = gh_json(
         "api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"
     )
-    order = []
+    latest = None
     for comment in (c for page in pages for c in page):
         if (comment.get("user") or {}).get("login") not in trusted:
             continue
@@ -899,10 +899,10 @@ def gate(url, head, review_body=None, record_info=None):
             and record.get("head") == head
             and record.get("kind") == "full"
         ):
-            order.append((record, comment.get("id")))
-    if not order:
+            latest = (record, comment.get("id"))
+    if not latest:
         return f"no full orch-sweep comment by the reviewer or PR author for the exact head {head}"
-    record, cid = order[-1]
+    record, cid = latest
     why = record_problem(record, head)
     if why:
         return why
