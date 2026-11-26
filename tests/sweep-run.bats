@@ -653,6 +653,28 @@ assert "**Kept**" in cut and "details>" not in cut and "<summary>" not in cut, c
 assert "Tables left out" in cut, cut' "$ROOT/lib" "$TMP/record.json"
 }
 
+@test "finding text with HTML stays text in its cell and keeps the fold intact" {
+  FAKE_FINDINGS=1 FAKE_VERDICT=FALSE run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+record = json.load(open(sys.argv[2]))
+record["dropped"] = record["dropped"][:1]
+hostile = ["stray </details>", "&lt; `<b> & </details>`", "\\\\`x`</details>`", "[a](`)</details>`", "\\<i> \\| a|b <!--"]
+record["dropped"][0].update(file="a`<|.py", line=3, summary=" ".join(hostile), reason="first\rsecond\n`__init__` `` a`b ``")
+visible = sweep_run.comment_body(record).split("<!-- orch-sweep-record")[0]
+table, end, after = visible.partition("|\n\n</details>\n")
+assert end and "details>" not in after, visible
+row = table.splitlines()[-1]
+assert "<" not in row.replace("<code>", "").replace("</code>", ""), row
+assert row.startswith("| " + record["dropped"][0]["id"] + " ") and row.count(" | ") == 6, row
+assert "| <code>a&#96;&#60;&#124;&#46;py&#58;3</code> |" in row, row
+assert "| stray &lt;/details> &amp;lt; <code>&#60;b&#62; &#38; &#60;&#47;details&#62;</code> " in row, row
+assert "&#92;&lt;i> &#92;\\| a\\|b &lt;!--" in row and row.endswith("| first second <code>&#95;&#95;init&#95;&#95;</code> <code>a&#96;b</code> "), row
+assert visible.count("\n</details>\n") == 1, visible' "$ROOT/lib" "$TMP/record.json"
+}
+
 @test "a record path inside the checkout stops before any agent starts" {
   sweep run --pr "$PR" --head "$HEAD_SHA" --base-ref main --no-comment --record "$REPO/lib/alpha.py"
   [ "$status" -eq 1 ]
