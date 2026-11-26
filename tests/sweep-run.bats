@@ -455,7 +455,7 @@ assert json.loads(block) == record
 assert "```json" not in body
 assert body.rstrip().endswith("*(Generated using Codex)*"), body
 assert "**Kept**" in body and "| fix |" in body
-assert "**Dropped**" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_SHA"
+assert "<details>" not in body' "$TMP/posted.json" "$TMP/record.json" "$HEAD_SHA"
   [ -f "$XDG_CACHE_HOME/review-prs/sweeps/acme/app/7/$HEAD_SHA.json" ]
 }
 
@@ -627,8 +627,30 @@ for argv in codex:
   [ "$status" -eq 0 ]
   python3 -c 'import json,sys
 body = json.load(open(sys.argv[1]))["body"]
-assert "**Dropped**" in body and "**Kept**" not in body, body
+assert "<summary>Dropped (4)</summary>" in body and "**Kept**" not in body, body
 assert body.count("| FALSE |") == 4, body' "$TMP/posted.json"
+}
+
+@test "the comment folds the dropped table and leaves the kept table open" {
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,re,sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+record = json.load(open(sys.argv[2]))
+record["dropped"] = [dict(record["items"].pop(), verdict="FALSE")]
+body = sweep_run.comment_body(record)
+folded = re.findall(r"<details><summary>Dropped \(1\)</summary>\n\n(\|.*?\|)\n\n</details>\n", body, re.S)
+assert len(folded) == 1 and "| FALSE |" in folded[0], body
+assert body.index("**Kept**") < body.index("<details>"), body
+assert body.count("<details>") == body.count("</details>") == 1, body
+sweep_run.COMMENT_LIMIT = len(body) - 1
+compact = sweep_run.fitting_body(record)
+assert "</details>" in compact and len(compact) <= sweep_run.COMMENT_LIMIT, compact
+sweep_run.COMMENT_LIMIT = len(compact) - 1
+cut = sweep_run.fitting_body(record)
+assert "**Kept**" in cut and "details>" not in cut and "<summary>" not in cut, cut
+assert "Tables left out" in cut, cut' "$ROOT/lib" "$TMP/record.json"
 }
 
 @test "a record path inside the checkout stops before any agent starts" {

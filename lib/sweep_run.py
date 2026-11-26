@@ -868,8 +868,14 @@ def comment_body(record, tables=("Kept", "Dropped"), indent=1):
     for title, rows in (("Kept", record["items"]), ("Dropped", record["dropped"])):
         if not rows or title not in tables:
             continue
+        folded = title == "Dropped"
+        heading = (
+            f"<details><summary>{title} ({len(rows)})</summary>"
+            if folded
+            else f"**{title}**"
+        )
         lines += [
-            f"**{title}**",
+            heading,
             "",
             "| id | class | where | category | verdict | finding | reason |",
             "|---|---|---|---|---|---|---|",
@@ -880,6 +886,8 @@ def comment_body(record, tables=("Kept", "Dropped"), indent=1):
                 f"| {i['id']} | {i['class']} | `{cell(where)}` | {cell(i['category'])} | {i['verdict']} | {cell(i['summary'])} | {cell(i.get('reason', ''))} |"
             )
         lines.append("")
+        if folded:
+            lines += ["</details>", ""]
     if not record["items"] and not record["dropped"]:
         lines += ["No findings.", ""]
     elif len(tables) < 2:
