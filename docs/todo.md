@@ -105,3 +105,45 @@ leaves the replacement decision visible. Escape and reopen Answer to respond to 
 A complete Escape cancels answer mode before the next key in the same terminal read
 is processed. A trailing incomplete Escape still waits for its existing timeout,
 so split control sequences retain their normal handling.
+
+## Answering from a claude.ai panel
+
+`/todo-panel` (run by the Coordinator) publishes the to-do list as a private claude.ai
+Artifact. Each item shows its text and an answer control: option buttons for an item with
+`[n: label]` choices, a text box (at most 512 characters) for any other item. One Submit
+button sends every item that has an answer; those items leave the panel. The panel only
+answers: Dismiss and reminders stay in the terminal view.
+
+Files:
+
+| File | Role |
+|---|---|
+| `coordinator/todo-panel.py` | `render` writes the page data; `apply <file>` queues submitted answers |
+| `coordinator/todo-panel.html`, `coordinator/todo-panel.js` | The fixed page; no build step |
+| `~/.claude/coordinator/todo-panel/` | Local state: `manifest.json`, `items.json`, `errors.json`, `applied.json`, `panel.json` |
+
+Flow:
+
+1. `render` lists the items the terminal view shows (no dismissed or snoozed items). Each
+   gets a key, a hash of owner, text and the `first_seen` generation captured at render.
+   The manifest maps key to owner, text and generation and stays on disk. `items.json`
+   holds only the render time, and per item the key, owner name, display text, choices and the last error.
+2. The first publish declares the `artifact` and `comments` capabilities. Submit publishes only `answers.json`
+   (`{"answers": [{"id", "key", "answer"}]}`), merged with answers already pending, and
+   hides those items at once. A publish starts no turn, so the page then sends a comment to Claude
+   (`comments` capability, `sendToClaude`: "N answers submitted on the to-do panel. Run /todo-panel.").
+   That comment reaches the session that watches the artifact. If sending is not available, the
+   answers stay saved and the next `/todo-panel` run applies them.
+3. The Coordinator reads `answers.json` to a local file and runs `apply`. Each entry needs a
+   known key and an answer of 1-512 characters, and for a choice item one of its choices (sent
+   as the label, as the view does). `apply` calls `answer_from_view` with the manifest
+   generation, so an item that changed since the render is rejected as stale.
+4. A queued item is dismissed by the same call and is gone from the next render. A failed
+   answer keeps its reason, shown on the item after the next render, except a stale one: the
+   changed item has a new key, so it comes back without the reason (apply prints it). An answer id among
+   the latest 1,000 applied is skipped, so it is not queued again.
+5. `render` and a files publish with `answers.json: null` replace the panel data.
+
+Free text for an item without choices is queued like a choice answer.
+
+Page logic that needs no browser (`todo-panel.js`) is tested with `node --test tests/todo-panel.test.js`.
