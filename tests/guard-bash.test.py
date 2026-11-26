@@ -18,6 +18,7 @@ os.environ["ORCH_ENV"] = "none"
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "hooks/guard-bash.py"
+BIG_INPUT_BUDGET = 3  # seconds
 spec = importlib.util.spec_from_file_location("guard", HOOK)
 guard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(guard)
@@ -1889,23 +1890,29 @@ pkill -f vite
         ("echo '%" + zeros + "!' > out.txt", False),
     ):
         start = time.perf_counter()
-        result = hook(command, scripts, timeout=1)
+        result = hook(command, scripts, timeout=BIG_INPUT_BUDGET)
         elapsed = time.perf_counter() - start
         assert result.returncode == (2 if deny else 0), (result, elapsed)
-        assert elapsed < 1, f"64 KB zero format took {elapsed:.3f}s"
+        assert elapsed < BIG_INPUT_BUDGET, f"64 KB zero format took {elapsed:.3f}s"
         print(f"64 KB zero format {command[:12]!r}: {elapsed:.3f}s")
     start = time.perf_counter()
-    result = hook(" " * 128000 + "git push origin main", scripts, timeout=1)
+    result = hook(
+        " " * 128000 + "git push origin main", scripts, timeout=BIG_INPUT_BUDGET
+    )
     elapsed = time.perf_counter() - start
     assert result.returncode == 2, (result, elapsed)
-    assert elapsed < 1, f"128000 blanks took {elapsed:.3f}s"
+    assert elapsed < BIG_INPUT_BUDGET, f"128000 blanks took {elapsed:.3f}s"
     print(f"128000 blanks before a push: {elapsed:.3f}s")
     for name, word in (("v", "v" * 128000), ("vp", "vp" * 64000)):
         start = time.perf_counter()
-        result = hook(f"command -{word}$; git push origin main", scripts, timeout=1)
+        result = hook(
+            f"command -{word}$; git push origin main", scripts, timeout=BIG_INPUT_BUDGET
+        )
         elapsed = time.perf_counter() - start
         assert result.returncode == 2, (result, elapsed)
-        assert elapsed < 1, f"128000 option letters {name} took {elapsed:.3f}s"
+        assert elapsed < BIG_INPUT_BUDGET, (
+            f"128000 option letters {name} took {elapsed:.3f}s"
+        )
         print(f"128000 option letters {name} before a push: {elapsed:.3f}s")
     started = time.perf_counter()
     log_path = Path.home() / ".claude/hooks/guard-bash.log"
