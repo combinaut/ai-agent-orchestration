@@ -474,6 +474,47 @@ assert json.loads(block) == record
 assert json.loads(block)["items"][0]["summary"] == "finding --> --!> stays intact"' "$ROOT/lib" "$TMP/record.json"
 }
 
+@test "a record too big for a plain comment is posted compressed and the gate reads it back" {
+  FAKE_FINDINGS=1 run_sweep
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,os,sys
+sys.path.insert(0, sys.argv[1])
+import sweep_record, sweep_run
+posted = os.path.join(sys.argv[2], "posted.json")
+record = sweep_record.comment_record(json.load(open(posted))["body"])
+for item in record["items"]:
+    item.update({"class": "nit", "reason": "long -- reason " * 5000})
+record["open_fix"] = 0
+body = sweep_run.fitting_body(record)
+assert len(body) <= sweep_run.COMMENT_LIMIT and "<!-- orch-sweep-record-z\n" in body, len(body)
+assert "<!-- orch-sweep-record\n" not in body and "Tables left out" in body, body
+assert sweep_record.comment_record(body) == record
+assert sweep_run.sweep_outcomes(body) is not None
+json.dump({"body": body}, open(posted, "w"))' "$ROOT/lib" "$TMP"
+  as_comment
+  gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RECORD_COMMENT 1"* ]]
+}
+
+@test "a corrupt, truncated or oversized compressed record yields no record" {
+  PATH="/opt/homebrew/bin:$PATH" python3 -c 'import base64,json,sys,zlib
+sys.path.insert(0, sys.argv[1])
+import sweep_record
+def read(packed):
+    return sweep_record.comment_record(f"<!-- orch-sweep v1 -->\n<!-- orch-sweep-record-z\n{packed}\n-->")
+def pack(data):
+    return base64.b64encode(data).decode()
+record = {"tool": "orch-sweep"}
+payload = json.dumps(record).encode()
+stream = zlib.compress(payload, 9)
+assert read(pack(stream)) == record
+fill = sweep_record.RECORD_LIMIT - len(payload)
+assert read(pack(zlib.compress(payload + b" " * fill))) == record
+for bad in ("not base64!", pack(payload), pack(stream[:-4]), pack(stream + b"x"), pack(zlib.compress(b"\xff")), pack(zlib.compress(b"[" * 100000)), pack(zlib.compress(payload + b" " * (fill + 1)))):
+    assert read(bad) is None, bad[:80]' "$ROOT/lib"
+}
+
 @test "both record readers accept visible legacy and hidden comment records" {
   PATH="/opt/homebrew/bin:$PATH" python3 -c 'import json,sys
 sys.path.insert(0, sys.argv[1])
@@ -647,8 +688,10 @@ assert body.count("<details>") == body.count("</details>") == 1, body
 sweep_run.COMMENT_LIMIT = len(body) - 1
 compact = sweep_run.fitting_body(record)
 assert "</details>" in compact and len(compact) <= sweep_run.COMMENT_LIMIT, compact
-sweep_run.COMMENT_LIMIT = len(compact) - 1
+assert "<!-- orch-sweep-record\n" in compact, compact
+sweep_run.COMMENT_LIMIT = len(sweep_run.comment_body(record, indent=None, compressed=True)) - 1
 cut = sweep_run.fitting_body(record)
+assert "<!-- orch-sweep-record-z\n" in cut, cut
 assert "**Kept**" in cut and "details>" not in cut and "<summary>" not in cut, cut
 assert "Tables left out" in cut, cut' "$ROOT/lib" "$TMP/record.json"
 }
@@ -1021,15 +1064,16 @@ json.dump([big], open(sys.argv[1], "w"))' "$TMP/comments.json"
 @test "a large sweep still posts one comment under the size limit that carries the whole record" {
   FAKE_FINDINGS=25 FAKE_PAD=300 run_sweep
   [ "$status" -eq 0 ]
-  python3 -c 'import json,re,sys
+  python3 -c 'import json,sys
+sys.path.insert(0, sys.argv[3])
+import sweep_record
 body = json.load(open(sys.argv[1]))["body"]
 assert len(body) <= 65536, len(body)
-block = re.search(r"<!-- orch-sweep-record\n(.*?)\n-->", body, re.S).group(1)
-assert json.loads(block) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$TMP/record.json"
+assert sweep_record.comment_record(body) == json.load(open(sys.argv[2]))' "$TMP/posted.json" "$TMP/record.json" "$ROOT/lib"
 }
 
 @test "a record too large for one comment fails before posting and keeps the record" {
-  FAKE_FINDINGS=40 FAKE_PAD=1500 run_sweep
+  FAKE_FINDINGS=40 FAKE_NOISE=750 run_sweep
   [ "$status" -eq 5 ]
   [[ "$stderr" == "ERROR: the sweep comment needs"*"characters; GitHub allows 65536"* ]]
   [ ! -e "$TMP/posted.json" ]
