@@ -37,6 +37,7 @@ GH_MAX_BYTES = 32 * 1024 * 1024
 STOP_GRACE = 5
 HISTORY_LIMIT = 60000
 HISTORY_SWEEPS = 50
+HISTORY_BYTES = 8 * 1024 * 1024
 OUTCOME_FIELDS = {"who": 40, "file": 200, "category": 60, "summary": 300, "reason": 500}
 COMMENT_LIMIT = 65536
 MARKER = "<!-- orch-sweep v1 -->"
@@ -818,9 +819,9 @@ def history(outcomes):
 
 
 def context(pr, comments, threads, reviews):
-    """The PR text, outcomes of the latest HISTORY_SWEEPS sweep comments, and the latest 50 other comments, thread comments and review summaries."""
+    """The PR text, outcomes of the latest sweep comments within HISTORY_SWEEPS and HISTORY_BYTES, and the latest 50 other comments, thread comments and review summaries."""
     parts = [f"Title: {pr['title']}", f"Body:\n{pr['body'] or ''}"]
-    others, outcomes, sweeps = [], [], 0
+    others, outcomes, size, full = [], [], 0, False
     for c in reversed(comments):
         body = c.get("body") or ""
         trusted = c.get("author_association") in {
@@ -828,16 +829,14 @@ def context(pr, comments, threads, reviews):
             "MEMBER",
             "COLLABORATOR",
         } or (c.get("user") or {}).get("login") == pr.get("user", {}).get("login")
-        found = None
-        if trusted and MARKER in body:
-            if sweeps == HISTORY_SWEEPS:
-                continue
-            sweeps += 1
-            found = sweep_outcomes(body)
+        found = sweep_outcomes(body) if trusted and MARKER in body else None
         if found is None:
             others.append(c)
-        else:
-            outcomes.append(((c.get("user") or {}).get("login", "?"), found))
+        elif not full:
+            size += len(json.dumps(found, separators=(",", ":")))
+            full = len(outcomes) == HISTORY_SWEEPS or size > HISTORY_BYTES
+            if not full:
+                outcomes.append(((c.get("user") or {}).get("login", "?"), found))
     others.reverse()
     outcomes.reverse()
     if outcomes:

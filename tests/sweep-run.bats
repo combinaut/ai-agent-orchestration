@@ -554,6 +554,46 @@ assert text.index("outcome-2") < text.index("outcome-3"), text
 assert text.index("plain-1") < text.index("plain-2"), text' "$ROOT/lib" "$TMP/record.json"
 }
 
+@test "malformed sweep comments stay ordinary comments and leave the sweep history window alone" {
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys
+sys.path.insert(0, sys.argv[1])
+import sweep_run
+record = json.load(open(sys.argv[2]))
+def sweep(n):
+    item = dict(record["items"][0], summary=f"outcome-{n}")
+    body = sweep_run.comment_body(dict(record, items=[item], dropped=[]))
+    return {"body": body, "author_association": "OWNER", "user": {"login": "me"}}
+def broken(n):
+    return dict(sweep(0), body=f"{sweep_run.MARKER}\nbroken-{n}")
+sweep_run.HISTORY_SWEEPS = 2
+text = sweep_run.context({"title": "t", "body": ""}, [broken(1), sweep(1), sweep(2), broken(2), broken(3)], [], [])
+assert "outcome-1" in text and "outcome-2" in text, text
+assert all(f"broken-{n}" in text for n in (1, 2, 3)), text' "$ROOT/lib" "$TMP/record.json"
+}
+
+@test "compressed sweep records share one byte budget in the sweep history" {
+  FAKE_FINDINGS=1 run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys
+sys.path.insert(0, sys.argv[1])
+import sweep_record, sweep_run
+record = json.load(open(sys.argv[2]))
+def sweep(n, pad):
+    item = dict(record["items"][0], summary=f"outcome-{n}", reason="x" * pad)
+    body = sweep_run.comment_body(dict(record, items=[item], dropped=[]), (), None, True)
+    return {"body": body, "author_association": "OWNER", "user": {"login": "me"}}
+big = sweep_record.RECORD_LIMIT - 10000
+comments = [sweep(1, 10), sweep(2, big), sweep(3, big), sweep(4, big)]
+assert all(len(c["body"]) < sweep_run.COMMENT_LIMIT for c in comments)
+assert all(sweep_record.comment_record(c["body"]) for c in comments)
+text = sweep_run.context({"title": "t", "body": ""}, comments, [], [])
+assert "outcome-4" in text and "outcome-3" in text, text[:2000]
+assert "outcome-2" not in text and "outcome-1" not in text, text[:2000]
+assert "orch-sweep" not in text, text[:2000]' "$ROOT/lib" "$TMP/record.json"
+}
+
 @test "both record readers accept visible legacy and hidden comment records" {
   PATH="/opt/homebrew/bin:$PATH" python3 -c 'import json,sys
 sys.path.insert(0, sys.argv[1])
