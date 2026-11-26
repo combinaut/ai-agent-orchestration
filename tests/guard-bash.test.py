@@ -2290,6 +2290,11 @@ pkill -f vite
         f"python3 {ROOT}/lib/github_write.py pr create --title Fix --body Details",
     )
     case(
+        "github-write PR attribution after an unknown wrapper option",
+        'sudo --unknown x github-write pr create --body "Generated with Codex"',
+        True,
+    )
+    case(
         "ruff mentions wrapper source",
         f"python3 -m ruff check {ROOT}/lib/github_write.py --fix",
     )

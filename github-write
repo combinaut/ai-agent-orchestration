@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Run the installed GitHub write admission wrapper from any repository.
+set -euo pipefail
+
+source=${BASH_SOURCE[0]}
+while [ -L "$source" ]; do
+  directory=$(cd -P "$(dirname "$source")" && pwd)
+  source=$(readlink "$source")
+  case "$source" in /*) ;; *) source=$directory/$source ;; esac
+done
+directory=$(cd -P "$(dirname "$source")" && pwd)
+exec python3 "$directory/lib/github_write.py" "$@"
