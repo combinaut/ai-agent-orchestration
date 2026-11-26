@@ -13,7 +13,7 @@ setup() {
     ln -s "$ROOT/tests/fixtures/sweep-agent.py" "$TMP/bin/$agent"
   done
   stub_gh
-  export HERDR_PANE_ID=test-pane
+  export HERDR_PANE_ID=test-pane ORCH_HERDR_SESSION_TIMEOUT_S=120
   cat >"$TMP/bin/herdr" <<'EOF'
 #!/usr/bin/env bash
 [ "$*" = 'agent get test-pane' ] || exit 1
@@ -1060,6 +1060,37 @@ json.dump(r,open(sys.argv[1],"w"))' "$TMP/record.json" "$mutation" "$runtime"
   [ ! -e "$TMP/agent.calls" ]
   FAKE_NO_SESSION=1 run_sweep --no-comment --no-transcripts
   [ "$status" -eq 0 ]
+}
+
+@test "ORCH_HERDR_SESSION_TIMEOUT_S is how long the herdr session lookup may take" {
+  cat >"$TMP/bin/herdr" <<'EOF'
+#!/usr/bin/env bash
+[ "$*" = 'agent get test-pane' ] || exit 1
+sleep 2
+echo '{"result":{"agent":{"agent_session":{"value":"worker-session"}}}}'
+EOF
+  chmod +x "$TMP/bin/herdr"
+  ORCH_HERDR_SESSION_TIMEOUT_S=1 run_sweep --no-comment
+  [ "$status" -eq 1 ] || { printf 'status=%s\n%s\n' "$status" "$stderr"; return 1; }
+  [[ "$stderr" == *'timed out after 1 second'* ]] || { printf '%s\n' "$stderr"; return 1; }
+  [ ! -e "$TMP/agent.calls" ]
+  ORCH_HERDR_SESSION_TIMEOUT_S=120 run_sweep --no-comment
+  [ "$status" -eq 0 ] || { printf 'status=%s\n%s\n' "$status" "$stderr"; return 1; }
+}
+
+@test "a bad ORCH_HERDR_SESSION_TIMEOUT_S stops the run even without transcripts" {
+  ORCH_HERDR_SESSION_TIMEOUT_S=0 run_sweep --no-comment --no-transcripts
+  [ "$status" -eq 1 ] || { printf 'status=%s\n%s\n' "$status" "$stderr"; return 1; }
+  [[ "$stderr" == *'ORCH_HERDR_SESSION_TIMEOUT_S must be a positive integer'* ]] || { printf '%s\n' "$stderr"; return 1; }
+  [ ! -e "$TMP/agent.calls" ]
+  ORCH_HERDR_SESSION_TIMEOUT_S=abc run_sweep --no-comment --no-transcripts
+  [ "$status" -eq 1 ] || { printf 'status=%s\n%s\n' "$status" "$stderr"; return 1; }
+  [[ "$stderr" == *'ORCH_HERDR_SESSION_TIMEOUT_S must be a positive integer'* ]] || { printf '%s\n' "$stderr"; return 1; }
+  [ ! -e "$TMP/agent.calls" ]
+  ORCH_HERDR_SESSION_TIMEOUT_S=2147484 run_sweep --no-comment --no-transcripts
+  [ "$status" -eq 1 ] || { printf 'status=%s\n%s\n' "$status" "$stderr"; return 1; }
+  [[ "$stderr" == *'ORCH_HERDR_SESSION_TIMEOUT_S must be a positive integer of at most 86400'* ]] || { printf '%s\n' "$stderr"; return 1; }
+  [ ! -e "$TMP/agent.calls" ]
 }
 
 @test "validator reasons survive the record comment and bounded outcome history" {

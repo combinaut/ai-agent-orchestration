@@ -926,6 +926,15 @@ def cache_path(repo, number, head):
 
 
 def worker_session(no_transcripts):
+    bad_timeout = (
+        "ORCH_HERDR_SESSION_TIMEOUT_S must be a positive integer of at most 86400"
+    )
+    try:
+        timeout = int(os.environ.get("ORCH_HERDR_SESSION_TIMEOUT_S", "10"))
+    except ValueError:
+        raise Failure(bad_timeout) from None
+    if not 0 < timeout <= 86400:
+        raise Failure(bad_timeout)
     try:
         pane = os.environ.get("HERDR_PANE_ID")
         if not pane:
@@ -934,7 +943,7 @@ def worker_session(no_transcripts):
             ["herdr", "agent", "get", pane],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=timeout,
         )
         if done.returncode:
             raise ValueError("Herdr could not identify the worker")

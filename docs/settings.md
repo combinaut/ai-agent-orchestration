@@ -187,6 +187,7 @@ These are read from the environment and never from a file.
 | `ORCH_PYTHON_FALLBACKS` | `/opt/homebrew/bin/python3 /usr/local/bin/python3` | Absolute interpreters the loader and the installer try after `python3` on `PATH`; empty tries none |
 | `ORCH_LAUNCHD_WAIT_TRIES`, `ORCH_LAUNCHD_WAIT_SLEEP` | `40`, `0.5` | macOS: how often and how long (seconds) the installer waits for launchd to unload a job |
 | `ORCH_RADAR_WAIT_TRIES`, `ORCH_RADAR_WAIT_SLEEP` | `40`, `0.5` | How often and how long (seconds) the herdr env waits for the old Radar daemon to exit and the new one to answer |
+| `ORCH_HERDR_SESSION_TIMEOUT_S` | `10` | Seconds `orch-sweep run` waits for Herdr to give the worker session. Must be an integer from 1 to 86400 |
 
 ## 🚚 Moving from `orchestration.env`
 

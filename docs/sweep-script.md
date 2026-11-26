@@ -16,6 +16,8 @@ The transcript check catches skipped sweeps and evidence reused from another hea
 
 An automated dispatcher inherits its invoking worker's Herdr pane context. Run `/review-prs` from a live Herdr worker so `run` can resolve that worker's session; a plain shell with no owning agent cannot supply transcript evidence. `--no-transcripts` remains CI attestation and cannot replace that session at the architect gate.
 
+`ORCH_HERDR_SESSION_TIMEOUT_S` is how many seconds that Herdr session lookup may take; the default is 10, and it must be an integer from 1 to 86400.
+
 ## Agents
 
 Each slice starts one `finalize-code-comments` agent and one `finalize-change-footprint` agent; one more agent checks the PR title and body. Then one validator per 40 findings (at least 1 with findings, at most 12) gives each finding a verdict and a class, `fix` or `nit`. The prompts carry the sub-skill text and the report-only rules.
