@@ -64,6 +64,7 @@ KILL_GRACE=${ORCH_HEAVY_SLOTS_KILL_GRACE:-10}
 LONG_RUN=${ORCH_HEAVY_SLOTS_LONG_RUN:-1800}
 EVENTS_FILE="$SLOT_DIR/.events"
 NOTES_DIR="$SLOT_DIR/.notes"
+IDS_DIR="$SLOT_DIR/.ids"
 JOB_NAME=
 NOTE=-
 JOB_START=
@@ -81,7 +82,7 @@ case $LONG_RUN in ''|*[!0-9]*) printf 'heavy-slot: ORCH_HEAVY_SLOTS_LONG_RUN mus
 LONG_RUN=$((10#$LONG_RUN))
 
 usage() {
-  printf 'usage: heavy-slot {count|list|take <architect>-<job> [--wait-max seconds] [--note text] -- <command> [args...]}\n       take exits 73 when the slot directory is not writable' >&2
+  printf 'usage: heavy-slot {count|list|stop <name>|take <architect>-<job> [--wait-max seconds] [--note text] -- <command> [args...]}\n       take exits 73 when the slot directory is not writable' >&2
   exit 64
 }
 
@@ -307,7 +308,7 @@ cleanup() {
     if [ "$slot_pid" = "$CHILD_PID" ]; then
       pid_group=${pid_group:-$CHILD_PID}
       terminate_group "$pid_group"
-      rm -f "$SLOT_FILE" "$NOTES_DIR/$JOB_NAME"
+      rm -f "$SLOT_FILE" "$NOTES_DIR/$JOB_NAME" "$IDS_DIR/$JOB_NAME"
     fi
     release_lock
   else
@@ -347,6 +348,84 @@ valid_name() {
     .*|*[!A-Za-z0-9_.-]*|*/*|*' '*|-*|*-) return 1 ;;
   esac
   case $1 in *-*-*) ;; *-*) return 0 ;; *) return 1 ;; esac
+}
+
+# Prints `<start> <name>`.
+process_identity() {
+  orch_python >/dev/null 2>&1 || return 1
+  "$ORCH_LOADER_PYTHON" -I "$(dirname "$(orch_settings_module)")/process_identity.py" "$1" 2>/dev/null
+}
+
+record_identity() {
+  local start='' rest=''
+  read -r start rest < <(process_identity "$2")
+  mkdir -p "$IDS_DIR" 2>/dev/null && printf '%s %s\n' "$2" "$start" >"$IDS_DIR/$1" 2>/dev/null
+}
+
+# Succeeds when the slot's pid is the process take started; sets STOP_PID, else STOP_REASON.
+verify_slot_process() {
+  local name=$1 pid='' rest='' recorded_pid='' recorded_start='' start=''
+  STOP_PID=
+  STOP_COMMAND=
+  read -r pid rest 2>/dev/null <"$SLOT_DIR/$name" || true
+  is_pid_live "$pid" || { STOP_REASON="pid ${pid:-missing} is not running"; return 1; }
+  read -r recorded_pid recorded_start 2>/dev/null <"$IDS_DIR/$name" || true
+  [ -n "$recorded_start" ] || { STOP_REASON="no start time is recorded for pid $pid"; return 1; }
+  [ "$recorded_pid" = "$pid" ] || { STOP_REASON="the start time record is for pid $recorded_pid, the slot holds pid $pid"; return 1; }
+  read -r start STOP_COMMAND < <(process_identity "$pid")
+  [ "$start" = "$recorded_start" ] || { STOP_REASON="pid $pid has another start time (pid reused)"; return 1; }
+  STOP_PID=$pid
+}
+
+stop_say() { printf 'heavy-slot: stop %s: %s\n' "$JOB_NAME" "$1"; }
+
+stop_refuse() {
+  stop_say "refused: $1; nothing signalled" >&2
+  exit 65
+}
+
+stop_lock() {
+  take_lock "$(( $(date +%s) + LOCK_MAX_AGE ))" && return 0
+  stop_say "the slot lock stayed busy" >&2
+  exit 75
+}
+
+stop_slot() {
+  local name=$1 pid deadline held='' rest=''
+  JOB_NAME=$name
+  [ -f "$SLOT_DIR/$name" ] || die "no slot named $name"
+  trap '[ "$LOCK_HELD" -eq 0 ] || release_lock' EXIT
+  stop_lock
+  verify_slot_process "$name" || stop_refuse "$STOP_REASON"
+  pid=$STOP_PID
+  kill -TERM "$pid" 2>/dev/null || stop_refuse "cannot signal pid $pid"
+  release_lock
+  stop_say "sent TERM to pid $pid (${STOP_COMMAND:-name unknown})"
+  deadline=$(( $(date +%s) + KILL_GRACE ))
+  while is_pid_live "$pid" && [ "$(date +%s)" -lt "$deadline" ]; do sleep 1; done
+  if is_pid_live "$pid"; then
+    stop_lock
+    if verify_slot_process "$name" && [ "$STOP_PID" = "$pid" ]; then
+      kill -KILL "$pid" 2>/dev/null || true
+      release_lock
+      stop_say "sent KILL to pid $pid after ${KILL_GRACE}s"
+    else
+      release_lock
+      stop_say "no KILL: the slot no longer matches pid $pid" >&2
+      exit 65
+    fi
+  fi
+  # The take wrapper ends the rest of the job's process group, then removes the slot file.
+  deadline=$(( $(date +%s) + KILL_GRACE + 5 ))
+  while :; do
+    held=
+    read -r held rest 2>/dev/null <"$SLOT_DIR/$name" || true
+    [ "$held" = "$pid" ] || { stop_say "pid $pid stopped; slot removed"; return 0; }
+    [ "$(date +%s)" -lt "$deadline" ] || break
+    sleep 1
+  done
+  stop_say "slot file still holds pid $pid; check heavy-slot list and process group $pid" >&2
+  exit 1
 }
 
 take_slot() {
@@ -390,6 +469,7 @@ take_slot() {
         release_lock
         die "cannot write $SLOT_FILE"
       fi
+      record_identity "$name" "$CHILD_PID"
       release_lock
       if [ "$LONG_RUN" -gt 0 ]; then
         start_watch "$CHILD_PID"
@@ -428,6 +508,11 @@ case $1 in
   list)
     [ "$#" -eq 1 ] || usage
     list_slots
+    ;;
+  stop)
+    [ "$#" -eq 2 ] || usage
+    valid_name "$2" || die "name must be <architect>-<job> and contain no spaces or /"
+    stop_slot "$2"
     ;;
   take)
     shift

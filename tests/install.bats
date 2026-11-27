@@ -319,11 +319,12 @@ raise SystemExit(result.returncode)
   jq -e '.statusLine.command == "mine" and .hooks.Stop[0].hooks[0].command == "stop" and ([.hooks.SessionStart[]?.hooks[]?.command] | index("bash ~/.claude/hooks/orch-update-check.sh"))' "$HOME/.claude/settings.json" >/dev/null
 }
 
-# bind_rules <claude dir>: the two bind-self.py allow rules for that install, one per line.
+# bind_rules <claude dir>: the allow rules for that install, one per line.
 bind_rules() {
   printf '%s\n' \
     'Bash(python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/*)' \
-    "Bash(python3 $1/coordinator/watchers/bind-self.py --output $1/coordinator/watchers/bindings/*)"
+    "Bash(python3 $1/coordinator/watchers/bind-self.py --output $1/coordinator/watchers/bindings/*)" \
+    'Bash(heavy-slot stop *)'
 }
 
 @test "bind-self allow rules are added to a missing settings file" {
@@ -337,7 +338,7 @@ bind_rules() {
   fresh_install
   printf '{}\n' >"$HOME/.claude/settings.json"
   install_ok
-  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 2 ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
 }
 
 @test "bind-self allow rules keep existing allow entries in order" {
@@ -346,7 +347,7 @@ bind_rules() {
   install_ok
   [ "$(jq -c '.permissions.allow[:2]' "$HOME/.claude/settings.json")" = '["Bash(ls *)","Read(~/x)"]' ]
   [ "$(jq -c '.permissions.deny' "$HOME/.claude/settings.json")" = '["Bash(rm *)"]' ]
-  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 4 ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 5 ]
 }
 
 @test "a second run adds no bind-self allow rule" {
@@ -355,26 +356,27 @@ bind_rules() {
   before=$(cat "$HOME/.claude/settings.json")
   install_ok
   [ "$(cat "$HOME/.claude/settings.json")" = "$before" ]
-  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 2 ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
 }
 
 @test "hand-added bind-self allow rules are recognized" {
   fresh_install
   jq -n --arg abs "$HOME/.claude" '{permissions: {allow: [
     "Bash(python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/*)",
-    "Bash(python3 \($abs)/coordinator/watchers/bind-self.py --output \($abs)/coordinator/watchers/bindings/*)"]}}' >"$HOME/.claude/settings.json"
+    "Bash(python3 \($abs)/coordinator/watchers/bind-self.py --output \($abs)/coordinator/watchers/bindings/*)",
+    "Bash(heavy-slot stop *)"]}}' >"$HOME/.claude/settings.json"
   before=$(jq -S . "$HOME/.claude/settings.json")
   install_ok
   [ "$(jq -S '.permissions' "$HOME/.claude/settings.json")" = "$(jq -S '.permissions' <<<"$before")" ]
-  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 2 ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
 }
 
 @test "only the missing bind-self allow rule is added" {
   fresh_install
   jq -n '{permissions: {allow: ["Bash(python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/*)"]}}' >"$HOME/.claude/settings.json"
   install_ok
-  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 2 ]
-  [ "$(jq -r '.permissions.allow[1]' "$HOME/.claude/settings.json")" = "$(bind_rules "$HOME/.claude" | tail -n 1)" ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
+  [ "$(jq -r '.permissions.allow[1]' "$HOME/.claude/settings.json")" = "$(bind_rules "$HOME/.claude" | sed -n 2p)" ]
 }
 
 @test "bind-self absolute allow rule follows the installed HOME" {
@@ -382,7 +384,7 @@ bind_rules() {
   mkdir -p "$other"
   use_home "$other"
   fresh_install
-  [ "$(jq -r '.permissions.allow[1]' "$other/.claude/settings.json")" = "$(bind_rules "$other/.claude" | tail -n 1)" ]
+  [ "$(jq -r '.permissions.allow[1]' "$other/.claude/settings.json")" = "$(bind_rules "$other/.claude" | sed -n 2p)" ]
   [ "$(jq -r '.permissions.allow[]' "$other/.claude/settings.json" | grep -cF "$TMP/home/")" -eq 0 ]
 }
 
@@ -443,7 +445,7 @@ EOF
   install_ok
   mode=$(python3 -c 'import os, sys; print(format(os.stat(sys.argv[1]).st_mode & 0o777, "o"))' "$HOME/.claude/settings.json")
   [ "$mode" = 640 ]
-  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 4 ]
 }
 
 @test "bind-self allow rules are written through a symlinked settings.json" {
@@ -453,7 +455,7 @@ EOF
   ln -s "$TMP/real-settings.json" "$HOME/.claude/settings.json"
   install_ok
   [ -L "$HOME/.claude/settings.json" ]
-  [ "$(jq '.permissions.allow | length' "$TMP/real-settings.json")" -eq 3 ]
+  [ "$(jq '.permissions.allow | length' "$TMP/real-settings.json")" -eq 4 ]
 }
 
 @test "settings with a non-list permissions.allow are left alone" {

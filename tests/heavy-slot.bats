@@ -44,6 +44,12 @@ raise SystemExit(result.returncode)
 ' "$@"
 }
 
+refused_and_alive() {
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"refused: $1"*"nothing signalled"* ]]
+  kill -0 "$FAKE_PID"
+}
+
 @test "a missing configuration file keeps the default slot limit" {
   run env -u ORCH_HEAVY_SLOTS_MAX -u ORCH_CONFIG HOME="$TMP" "$HELPER" count
   [ "$status" -eq 0 ]
@@ -1008,4 +1014,103 @@ twice_signal() {
   kill -KILL -- "-$child"
   wait "$pid" || true
   [ "$(grep -c ' SLOT KILLED' "$(EVENTS)")" -eq 1 ]
+}
+
+# start_job <name> <script>: runs a slot job in the background and waits until it can be stopped.
+start_job() {
+  "$HELPER" take "$1" -- bash -c "$2" job "$TMP/ready" >"$TMP/take.log" 2>&1 3>&- &
+  TAKE_PID=$!
+  wait_for_file "$TMP/ready"
+  wait_for_file "$ORCH_HEAVY_SLOTS_DIR/.ids/$1"
+  JOB_PID=$(cat "$ORCH_HEAVY_SLOTS_DIR/$1")
+}
+
+# fake_slot <name>: a slot file for a process of this test that take did not start.
+fake_slot() {
+  sleep 30 3>&- &
+  FAKE_PID=$!
+  printf '%s\n' "$FAKE_PID" >"$ORCH_HEAVY_SLOTS_DIR/$1"
+  mkdir -p "$ORCH_HEAVY_SLOTS_DIR/.ids"
+}
+
+@test "stop ends a slot job with TERM and the take removes the slot" {
+  # shellcheck disable=SC2016 # The job's bash expands these.
+  start_job agent-stop 'echo ready >"$1"; exec sleep 30'
+  run "$HELPER" stop agent-stop
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sent TERM to pid $JOB_PID (sleep)"* ]]
+  [[ "$output" == *"pid $JOB_PID stopped; slot removed"* ]]
+  [[ "$output" != *KILL* ]]
+  if kill -0 "$JOB_PID" 2>/dev/null; then return 1; fi
+  [ ! -e "$ORCH_HEAVY_SLOTS_DIR/agent-stop" ]
+  [ ! -e "$ORCH_HEAVY_SLOTS_DIR/.ids/agent-stop" ]
+  run wait "$TAKE_PID"
+  [ "$status" -eq 143 ]
+}
+
+@test "stop sends KILL to a job that ignores TERM" {
+  # shellcheck disable=SC2016 # The job's bash expands these.
+  start_job agent-stubborn 'trap "" TERM; echo ready >"$1"; exec sleep 30'
+  run env ORCH_HEAVY_SLOTS_KILL_GRACE=1 "$HELPER" stop agent-stubborn
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sent KILL to pid $JOB_PID after 1s"* ]]
+  [[ "$output" == *"slot removed"* ]]
+  run wait "$TAKE_PID"
+  [ "$status" -eq 137 ]
+}
+
+@test "stop sends no KILL when the identity record changes during the grace" {
+  export IDS_FILE="$ORCH_HEAVY_SLOTS_DIR/.ids/agent-changed"
+  # shellcheck disable=SC2016 # The job's bash expands these.
+  start_job agent-changed 'trap "echo \"\$\$ changed\" >\"\$IDS_FILE\"" TERM; echo ready >"$1"; while :; do sleep 0.1; done'
+  run env ORCH_HEAVY_SLOTS_KILL_GRACE=1 "$HELPER" stop agent-changed
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"no KILL: the slot no longer matches pid $JOB_PID"* ]]
+  kill -0 "$JOB_PID"
+  kill "$TAKE_PID"
+}
+
+@test "stop refuses a reused pid with another start time" {
+  fake_slot agent-reused
+  read -r start _ < <(python3 -I "$ROOT/lib/process_identity.py" "$FAKE_PID")
+  [ -n "$start" ]
+  last=${start: -1}
+  printf '%s %s%s\n' "$FAKE_PID" "${start%?}" "$(((last + 1) % 10))" >"$ORCH_HEAVY_SLOTS_DIR/.ids/agent-reused"
+  run "$HELPER" stop agent-reused
+  refused_and_alive "pid $FAKE_PID has another start time"
+}
+
+@test "stop refuses a slot with no recorded start time" {
+  fake_slot agent-norecord
+  run "$HELPER" stop agent-norecord
+  refused_and_alive "no start time is recorded"
+}
+
+@test "stop refuses a record made for another pid" {
+  fake_slot agent-otherpid
+  read -r start _ < <(python3 -I "$ROOT/lib/process_identity.py" "$FAKE_PID")
+  [ -n "$start" ]
+  printf '999999 %s\n' "$start" >"$ORCH_HEAVY_SLOTS_DIR/.ids/agent-otherpid"
+  run "$HELPER" stop agent-otherpid
+  refused_and_alive "the start time record is for pid 999999"
+}
+
+@test "stop refuses a stale slot whose pid is not running" {
+  printf '999999\n' >"$ORCH_HEAVY_SLOTS_DIR/agent-stale"
+  run "$HELPER" stop agent-stale
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"refused: pid 999999 is not running; nothing signalled"* ]]
+}
+
+@test "stop refuses an unknown name" {
+  run "$HELPER" stop agent-unknown
+  [ "$status" -eq 64 ]
+  [ "$output" = "heavy-slot: no slot named agent-unknown" ]
+}
+
+@test "stop refuses a name that leaves the slot directory" {
+  : >"$TMP/outside-slot"
+  run "$HELPER" stop ../outside-slot
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"name must be <architect>-<job>"* ]]
 }

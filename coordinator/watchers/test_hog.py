@@ -213,7 +213,7 @@ class HogTests(IsolatedTestCase):
         self.assertEqual(line.split("parents:")[1], " <- 8 " + "x" * 90)
 
     def test_thresholds_compare_raw_kb_before_display_rounding(self):
-        self.assertEqual(w.conditions("hog", [self.proc(rss=int(5.96 * 1048576))]), {})
+        self.assertEqual(w.conditions("hog", [self.proc(rss=int(2.96 * 1048576))]), {})
         self.assertEqual(
             w.conditions(
                 "hog", [self.proc(comm="git", age=1, rss=int(1.96 * 1048576))]

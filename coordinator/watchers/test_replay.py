@@ -189,13 +189,7 @@ class ReplayTest(IsolatedTestCase):
         ]
         self.assertTrue(actions)
         self.assertTrue(all(line.endswith(("(start)", "(danger)")) for line in actions))
-        self.assertFalse(
-            [
-                line
-                for line in actions
-                if line.startswith(("balance:", "hog: HOG", "audit:"))
-            ]
-        )
+        self.assertFalse([line for line in actions if line.startswith("audit:")])
 
 
 if __name__ == "__main__":

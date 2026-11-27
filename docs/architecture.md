@@ -169,6 +169,7 @@ Many sessions share one machine, and running out of open file handles has crashe
 - Every heavy command runs through [`heavy-slot`](../heavy-slot): `heavy-slot take <architect>-<job> [--note <what the job is>] -- <command> [args...]`. It admits the job atomically, so two jobs cannot both take the last slot.
 - A slot is a file `~/.claude/heavy-slots/<owner>-<job>` holding the pid of the child. The helper writes it and removes it on completion or a handled signal. A slot is a file, never a directory.
 - `heavy-slot count` and `heavy-slot list` show live slots, with names, pids, ages, notes and stale records.
+- [`heavy-slot stop <name>`](heavy-slot.md#stopping-a-job) stops one slot job; it refuses a pid whose start time does not match.
 - When the cap is full, `take` waits up to 1800 seconds and then prints `NEED SLOT`. The worker ends its turn with a plain `NEED SLOT: …` line and stops; `SLOT: go` from the architect means run now. A worker never opens an interactive question box.
 - A worker takes its slot itself. It does not wait for the architect.
 - Stale slot files raise `STALESLOT`, directories raise `SLOTDIR`, from the audit. Too many slots or busy worktrees raise `BALANCE`.
