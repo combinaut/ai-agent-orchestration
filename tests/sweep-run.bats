@@ -375,6 +375,25 @@ for line in open(sys.argv[1]):
   [ "$status" -eq 0 ]
 }
 
+@test "--max-slices 50 runs a 50-slice plan" {
+  for n in $(seq 1 48); do write "d$n/x.py" 1; done
+  commit wide
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  run_sweep --no-comment --max-slices 50 --concurrency 8
+  [ "$status" -eq 0 ]
+  [ "$(field 'r["slices"]')" = 50 ]
+}
+
+@test "a 51-slice plan with --max-slices 50 stops before any agent starts" {
+  for n in $(seq 1 49); do write "d$n/x.py" 1; done
+  commit wide
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  run_sweep --no-comment --max-slices 50
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == "ERROR: 51 slices; the limit is 50; "* ]]
+  [ ! -e "$TMP/agent.calls" ]
+}
+
 @test "--max-slices outside 1 to 50 is a usage error" {
   for n in 0 51; do
     run_sweep --no-comment --max-slices "$n"
