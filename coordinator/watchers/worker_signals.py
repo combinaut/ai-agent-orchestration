@@ -23,7 +23,6 @@ HEARTBEAT_FRESH_SECONDS = 300
 QUESTION_RETAIN_SECONDS = 3600
 QUESTIONS_MAX = 200
 CLEANUP_MAX = 1
-CLEANUP_SECONDS = 2
 DONE_EVENTS_MAX = 200
 DONE_EVENTS_KEEP_SECONDS = 3600
 ID = re.compile(r"signal-[a-f0-9]{32}\Z")
@@ -155,8 +154,8 @@ def record_signal(ident, kind, new_job=False, **fields):
         return record
 
 
-def remove_question(record, close_panel=True, close_timeout=CLEANUP_SECONDS):
-    """Waiters defer Q closure; the workers poll retries failed closes with the record intact."""
+def remove_question(record, close_panel=True):
+    """Remove a worker question record and its answer files."""
     identifier = record["id"]
     panel = questions_directory() / (identifier + ".md")
     if panel.exists() or (not close_panel and record.get("resume_answer")):

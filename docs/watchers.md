@@ -10,7 +10,7 @@ The watchers write alerts to files. One notifier turns them into a feed at `~/.c
 | host | Memory, swap, processes, open files, load |
 | hog | Big processes and long or big `git` processes |
 | balance | Worktree CPU and memory against the heavy-slot cap |
-| workers | `WORKER QUESTION` (pane, question, options, ask id and answer command), `WORKER ANSWER LATE`, `WORKER QUESTION EXPIRED` (see [Workers](workers.md)) and `WORKER DONE` pushed to the owner architect through the shared notifier/outbox; `WORKER REVIEW` for completed workers waiting on requested review. Blocked, errored or vanished agents; finished workers waiting on their architect; sends `WORKER IDLE` (worker idle or done for `workers.idle_s`, 2 h by default, with no open PR) to the owning architect |
+| workers | `WORKER QUESTION` (pane, question, options, ask id and answer command; see [Workers](workers.md)) and `WORKER DONE` pushed to the owner architect through the shared notifier/outbox; `WORKER REVIEW` for completed workers waiting on requested review. Blocked, errored or vanished agents; finished workers waiting on their architect; sends `WORKER IDLE` (worker idle or done for `workers.idle_s`, 2 h by default, with no open PR) to the owning architect |
 | user-todo | What waits on you (see [The to-do pane](todo.md)) |
 
 ## 🔔 With services
