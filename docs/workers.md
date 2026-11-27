@@ -12,7 +12,7 @@ How the roles fit together: [`architecture.md`](architecture.md).
 
 ## Explicit worker signals
 
-`orch-signal` works for Claude, Codex, pi and cursor; for gemini it is untested until a live agy worker runs (see the Gemini workers section). The Herdr env adapter
+`orch-signal` works for Claude, Codex, pi and cursor; for gemini it runs outside agy's terminal sandbox, and agy asks once to start and once to finish a job (see the Gemini workers section). The Herdr env adapter
 verifies the caller's process ancestry against live pane foreground processes,
 then reads the pane's workspace and its `owner` token. Inherited pane IDs only
 prioritize the lookup: cached shell environments and session IDs can belong to
@@ -174,4 +174,4 @@ Any sandboxed command of any gemini worker can read those files and change any r
 
 agy reads global skills and rules only from `~/.gemini/config/`, not from `~/.claude` or `~/.agents/skills`. `install.sh` builds the plugin `~/.gemini/config/plugins/ai-agent-orchestration/` with the orch skills, your `~/.claude/CLAUDE.md` as `rules/AGENTS.md`, and each `~/.claude/rules/<name>.md` without `paths:` as an always-on include (see the [file table](installer.md#-files-linked-into-claude)), so a gemini worker gets the orch skills and your global rules in every repo. `install.sh` also links `snippets/agy-sandbox.md` as `rules/orch-agy-sandbox.md`. `gemini-start.sh` refuses to start while `plugin.json`, `rules/AGENTS.md` or `rules/orch-agy-sandbox.md` is missing or dangling; run `install.sh`.
 
-Three things are untested and stay so until a live agy worker runs: agy may show its workspace trust dialog in a new worktree, so the user trusts the worktree root or a parent folder once before the first gemini worker; `orch-signal` from inside agy's terminal sandbox is untested, so the first gemini worker runs `orch-signal heartbeat --new-job` and `orch-signal done` as its first check; and agy loading the plugin (it follows the links and expands the includes) is untested, so the first gemini worker lists its skills and quotes one line of each rule file.
+agy shows its workspace trust dialog for each new folder, so the user trusts the worktree root or a parent folder before the first gemini worker there. agy loads the plugin's skills and rules (it follows the links and expands the includes). `orch-signal` runs outside the sandbox, and Auto's check asks once for `orch-signal heartbeat --new-job` and once for `orch-signal done` per worker ("writes a signal file outside the workspace"); the user presses "Yes, run command", never an "always" option.
