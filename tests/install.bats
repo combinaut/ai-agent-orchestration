@@ -23,7 +23,7 @@ load test_helper
   fresh_install
   settings="$HOME/.claude/settings.json"
   cp "$settings" "$TMP/settings-before.json"
-  find "$HOME" -path "$CLONE" -prune -o -path "$HOME/.claude/.orch-links" -prune -o -type f -exec cksum {} \; | LC_ALL=C sort >"$TMP/home-before.cksum"
+  find "$HOME" -path "$CLONE" -prune -o -path "$HOME/.claude/.orch-links" -prune -o -path "$HOME/.gemini/config/plugins/ai-agent-orchestration/rules" -prune -o -type f -exec cksum {} \; | LC_ALL=C sort >"$TMP/home-before.cksum"
   : >"$LAUNCHCTL_CALLS"
   : >"$SYSTEMCTL_CALLS"
   : >"$HERDR_CALLS"
@@ -39,8 +39,10 @@ load test_helper
   [ -L "$HOME/.claude/rules/links-only.md" ]
   [ "$HOME/.claude/rules/links-only.md" -ef "$CLONE/rules/links-only.md" ]
   [ ! -e "$HOME/.claude/rules/links-only-old.md" ]
+  [ -f "$HOME/.gemini/config/plugins/ai-agent-orchestration/rules/claude-links-only.md" ]
+  [ ! -e "$HOME/.gemini/config/plugins/ai-agent-orchestration/rules/claude-links-only-old.md" ]
   cmp "$TMP/settings-before.json" "$settings"
-  find "$HOME" -path "$CLONE" -prune -o -path "$HOME/.claude/.orch-links" -prune -o -type f -exec cksum {} \; | LC_ALL=C sort >"$TMP/home-after.cksum"
+  find "$HOME" -path "$CLONE" -prune -o -path "$HOME/.claude/.orch-links" -prune -o -path "$HOME/.gemini/config/plugins/ai-agent-orchestration/rules" -prune -o -type f -exec cksum {} \; | LC_ALL=C sort >"$TMP/home-after.cksum"
   cmp "$TMP/home-before.cksum" "$TMP/home-after.cksum"
   [ ! -s "$LAUNCHCTL_CALLS" ]
   [ ! -s "$SYSTEMCTL_CALLS" ]
@@ -1658,4 +1660,49 @@ TOML
 @test "the finalize and pr-defend skills carry no repo-specific names" {
   run grep -rniE 'spar''kle|combinaut|sleistner|stagehand|rubocop|mise run|\.ai/' "$ROOT/skills/finalize-sweep" "$ROOT/skills/finalize-change-footprint" "$ROOT/skills/finalize-code-comments" "$ROOT/skills/pr-defend"
   [ "$status" -eq 1 ]
+}
+
+@test "install builds the agy plugin from the clone skills and the Claude rules" {
+  mkdir -p "$HOME/.claude/rules"
+  printf 'always rule\n' >"$HOME/.claude/rules/always.md"
+  fresh_install
+  plugin="$HOME/.gemini/config/plugins/ai-agent-orchestration"
+  clone=$(cd "$CLONE" && pwd -P)
+  [ "$(readlink "$plugin/plugin.json")" = "$clone/snippets/agy-plugin.json" ]
+  for skill in "$clone"/skills/*/; do
+    name=$(basename "$skill")
+    [ "$(readlink "$plugin/skills/$name")" = "$clone/skills/$name" ]
+  done
+  [ "$(readlink "$plugin/rules/AGENTS.md")" = "$HOME/.claude/CLAUDE.md" ]
+  grep -qF 'orchestration:start' "$plugin/rules/AGENTS.md"
+  [ "$(cat "$plugin/rules/claude-always.md")" = "$(printf -- '---\ntrigger: always_on\n---\n@[always.md](%s)' "$HOME/.claude/rules/always.md")" ]
+  install_ok
+  contains "$output" "already set     $plugin/rules/claude-always.md"
+  rm "$HOME/.claude/rules/always.md"
+  install_ok
+  [ ! -e "$plugin/rules/claude-always.md" ]
+  contains "$output" "removed stale   $plugin/rules/claude-always.md"
+}
+
+@test "a path-scoped Claude rule is not given to agy" {
+  mkdir -p "$HOME/.claude/rules"
+  printf -- '---\npaths: "src/**"\n---\nscoped\n' >"$HOME/.claude/rules/scoped.md"
+  printf -- '---\ndescription: plain\n---\nunscoped\n' >"$HOME/.claude/rules/plain.md"
+  fresh_install
+  plugin="$HOME/.gemini/config/plugins/ai-agent-orchestration"
+  [ ! -e "$plugin/rules/claude-scoped.md" ]
+  [ -f "$plugin/rules/claude-plain.md" ]
+  contains "$output" "skipped         $HOME/.claude/rules/scoped.md for agy"
+}
+
+@test "install warns when agy would cut or demote the rules" {
+  mkdir -p "$HOME/.claude/rules"
+  head -c 24001 /dev/zero | tr '\0' x >"$HOME/.claude/rules/big.md"
+  fresh_install
+  contains "$output" "$HOME/.claude/rules/big.md is 24001 bytes; agy cuts a rule file at 24000 bytes"
+  not_contains "$output" "token budget"
+  for n in 1 2 3; do head -c 20000 /dev/zero | tr '\0' x >"$HOME/.claude/rules/r$n.md"; done
+  install_ok
+  contains "$output" "over agy's 20000-token budget"
+  not_contains "$output" "r1.md is"
 }
