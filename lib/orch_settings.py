@@ -92,6 +92,13 @@ PROVIDERS = [
         "one",
         default_on=False,
     ),
+    # Gemini through the agy CLI. Off by default until a model is set, unlike codex.
+    Provider(
+        "gemini",
+        ["ORCH_GEMINI_WORKER_MODEL", "ORCH_GEMINI_SMART_MODEL"],
+        "one",
+        default_on=False,
+    ),
 ]
 REQUIRED_PROVIDERS = ["claude"]
 CLAUDE_TIERS = ["haiku", "sonnet", "opus", "fable"]
@@ -213,7 +220,7 @@ SETTINGS = [
         "ORCH_PROVIDERS",
         "list",
         [],
-        "Worker families this machine uses (claude, codex, pi, cursor); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi or cursor when a model of that family is set. A family left out is never started or asked for, and its model settings may stay empty",
+        "Worker families this machine uses (claude, codex, pi, cursor, gemini); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi, cursor or gemini when a model of that family is set. A family left out is never started or asked for, and its model settings may stay empty",
         sep=",",
         choices=[p.name for p in PROVIDERS],
         required=REQUIRED_PROVIDERS,
@@ -333,6 +340,20 @@ SETTINGS = [
         "str",
         "",
         "Cursor CLI model for hard work (for example grok-4.7-high); empty or a placeholder means cursor_worker serves it too. With cursor on, set at least one of the two",
+    ),
+    _g(
+        "models.gemini_worker",
+        "ORCH_GEMINI_WORKER_MODEL",
+        "str",
+        "",
+        "Gemini model for routine work through the agy CLI (for example gemini-4-neon-medium); empty or a placeholder means gemini_smart serves it too. With gemini on, set at least one of the two",
+    ),
+    _g(
+        "models.gemini_smart",
+        "ORCH_GEMINI_SMART_MODEL",
+        "str",
+        "",
+        "Gemini model for hard work through the agy CLI (for example gemini-4-neon-high); empty or a placeholder means gemini_worker serves it too. With gemini on, set at least one of the two",
     ),
     _g(
         "remote_control.architects",

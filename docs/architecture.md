@@ -14,6 +14,7 @@ flowchart TD
     A1 -.-> R["reviewer (short-lived)"]
     A2 --> W3["worker (cursor / Grok)"]
     A2 --> W4["worker (pi / DeepSeek)"]
+    A2 --> W5["worker (gemini / agy)"]
 ```
 
 | Role | Count | Owns | Never does |
@@ -80,6 +81,7 @@ flowchart LR
 | Worker, hard | Codex at `ORCH_CODEX_SMART_MODEL`, reasoning effort `ORCH_CODEX_SMART_REASONING_EFFORT` (default `medium`) |
 | Worker on a local or DeepSeek model | pi at `ORCH_PI_WORKER_MODEL` (routine), `ORCH_PI_SMART_MODEL` (hard) or one entry of `ORCH_PI_MODELS`; only when set. DeepSeek only in repos that opted in |
 | Worker on Grok / Cursor models | cursor at `ORCH_CURSOR_WORKER_MODEL` (routine) or `ORCH_CURSOR_SMART_MODEL` (hard); only when set. One model serves both tiers |
+| Worker on Gemini models | gemini at `ORCH_GEMINI_WORKER_MODEL` (routine) or `ORCH_GEMINI_SMART_MODEL` (hard) through the `agy` CLI; only when set. One model serves both tiers |
 | Worker where Codex cannot do the step | Claude: the lightest allowed tier that does the task well (Haiku mechanical, Sonnet implementation and review, Opus hard, Fable only for the hardest); only tiers `providers.claude` allows |
 | Reviewer | The family that did not write the code |
 
@@ -89,9 +91,10 @@ A Claude session also gets `--effort` from `ORCH_COORDINATOR_EFFORT`, `ORCH_ARCH
 - The architect picks Claude or Codex per task for quality; Codex is the default for routine work. Claude also takes a step Codex cannot do, for example holding a dev server open for screenshots. `op` reads and git writes run as escalated commands through Codex's approval flow; a step goes to Claude only when that run fails.
 - pi is a third family, available only when its model settings are filled in. DeepSeek (named in the provider or the model id) runs only in a repo whose `.orchestration.local.toml` sets `pi.deepseek = true`. pi has no native channel, so follow-ups go through `herdr agent prompt`.
 - cursor is a fourth family (Cursor CLI, typically Grok), available only when `models.cursor_worker` or `models.cursor_smart` is set. Start with `cursor-start.sh`. No native cross-session channel: follow-ups go through `herdr agent prompt`.
+- gemini is a fifth family (the `agy` CLI), available only when `models.gemini_worker` or `models.gemini_smart` is set. Start with `gemini-start.sh`. No native cross-session channel: follow-ups go through `herdr agent prompt`.
 - A provider that refuses work for quota is replaced by another enabled family for new work; with only one family on, new work goes to another tier of that family. The architect says so once.
 - A live session never changes model. A tier change happens through a recycle onto the new model.
-- The model settings of each enabled family (`providers.enabled`: both claude models, at least one codex model, at least one cursor model when cursor is on) must be filled in `~/.claude/orchestration.toml`; the skills stop while one is missing. One codex or cursor model serves both tiers of that family. A family left out of the list needs none.
+- The model settings of each enabled family (`providers.enabled`: both claude models, at least one codex model, at least one cursor model when cursor is on, at least one gemini model when gemini is on) must be filled in `~/.claude/orchestration.toml`; the skills stop while one is missing. One codex, cursor or gemini model serves both tiers of that family. A family left out of the list needs none.
 
 ## 🔁 Context recycle
 

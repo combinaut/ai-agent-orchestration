@@ -971,7 +971,7 @@ class ProvidersTest(SettingsTest):
         path = self.write("g.toml", text)
         return s.resolved_global(path, environ)
 
-    def test_the_default_is_claude_and_codex_plus_pi_or_cursor_where_a_model_is_set(
+    def test_the_default_is_claude_and_codex_plus_pi_cursor_or_gemini_where_a_model_is_set(
         self,
     ):
         self.assertEqual(self.resolve()["ORCH_PROVIDERS"], "claude,codex")
@@ -984,6 +984,12 @@ class ProvidersTest(SettingsTest):
                 "ORCH_PROVIDERS"
             ],
             "claude,codex,cursor",
+        )
+        self.assertEqual(
+            self.resolve('[models]\ngemini_worker = "gemini-4-neon-medium"\n')[
+                "ORCH_PROVIDERS"
+            ],
+            "claude,codex,gemini",
         )
         self.assertEqual(
             s.required_models(self.resolve()),
@@ -1038,8 +1044,8 @@ class ProvidersTest(SettingsTest):
 
     def test_an_unknown_provider_is_an_error(self):
         self.assertIn(
-            'providers.enabled: unknown entry "gemini"; known: claude, codex, pi, cursor',
-            self.error('[providers]\nenabled = ["claude", "gemini"]\n'),
+            'providers.enabled: unknown entry "grok"; known: claude, codex, pi, cursor, gemini',
+            self.error('[providers]\nenabled = ["claude", "grok"]\n'),
         )
         with self.assertRaisesRegex(s.ConfigError, 'unknown entry ""'):
             self.resolve(ORCH_PROVIDERS="claude,")
@@ -1151,6 +1157,47 @@ class ProvidersTest(SettingsTest):
                 "ORCH_ARCHITECT_MODEL",
                 "ORCH_CURSOR_WORKER_MODEL",
                 "ORCH_CURSOR_SMART_MODEL",
+            ],
+        )
+
+    def test_one_gemini_model_is_enough_and_serves_both_tiers(self):
+        for worker, smart in (
+            ("gemini-w", ""),
+            ("", "gemini-s"),
+        ):
+            values = self.resolve(
+                '[providers]\nenabled = ["claude", "gemini"]\n'
+                f'[models]\ngemini_worker = "{worker}"\ngemini_smart = "{smart}"\n'
+                'codex_worker = ""\ncodex_smart = ""\n'
+            )
+            model = worker if s.filled(worker) else smart
+            kept = (
+                "ORCH_GEMINI_WORKER_MODEL"
+                if s.filled(worker)
+                else "ORCH_GEMINI_SMART_MODEL"
+            )
+            self.assertEqual(values["ORCH_PROVIDERS"], "claude,gemini")
+            self.assertEqual(
+                s.required_models(values),
+                ["ORCH_COORDINATOR_MODEL", "ORCH_ARCHITECT_MODEL", kept],
+            )
+            self.assertEqual(s.tier_model(values, "ORCH_GEMINI_WORKER_MODEL"), model)
+            self.assertEqual(s.tier_model(values, "ORCH_GEMINI_SMART_MODEL"), model)
+
+    def test_gemini_listed_without_models_requires_both(self):
+        values = self.resolve(
+            '[providers]\nenabled = ["claude", "gemini"]\n'
+            '[models]\ngemini_worker = ""\ngemini_smart = ""\n'
+            'codex_worker = ""\ncodex_smart = ""\n'
+        )
+        self.assertEqual(values["ORCH_PROVIDERS"], "claude,gemini")
+        self.assertEqual(
+            s.required_models(values),
+            [
+                "ORCH_COORDINATOR_MODEL",
+                "ORCH_ARCHITECT_MODEL",
+                "ORCH_GEMINI_WORKER_MODEL",
+                "ORCH_GEMINI_SMART_MODEL",
             ],
         )
 

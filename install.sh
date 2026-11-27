@@ -548,6 +548,13 @@ ask_config_keys() {
         *) families=$families,cursor; break ;;
       esac
     done
+    for key in ORCH_GEMINI_WORKER_MODEL ORCH_GEMINI_SMART_MODEL; do
+      value=$(unset ORCH_GEMINI_WORKER_MODEL ORCH_GEMINI_SMART_MODEL && config_value "$key")
+      case "$value" in
+        "" | "<"*">") ;;
+        *) families=$families,gemini; break ;;
+      esac
+    done
     write_config_key ORCH_PROVIDERS "$families"
     printf -v ORCH_PROVIDERS '%s' "$families"
   fi

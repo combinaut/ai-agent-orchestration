@@ -111,6 +111,9 @@ class RecoveryLineTests(IsolatedTestCase):
                 "resume: cursor-agent --resume abc"
             )
         )
+        self.assertTrue(
+            self.line(agent="agy").endswith("resume: agy --conversation abc")
+        )
         self.assertTrue(self.line(agent="pi").endswith("resume: session abc"))
         self.assertTrue(self.line(agent="").endswith("resume: session abc"))
 

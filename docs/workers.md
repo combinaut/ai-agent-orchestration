@@ -3,7 +3,7 @@
 - A **worker** does one task in its own pane and worktree, and writes a report to the path in its brief. You can watch it and type into its pane.
 - Every worker carries an `owner` tag naming its architect. Herdr groups panes by repo, so without the tag a worker shows under the wrong architect. Radar groups workers under their architects from the tags.
 - A **recycle** replaces a session that has used `ORCH_RECYCLE_TOKENS` tokens. An architect writes a bounded handoff file to its memory, a fresh session starts from that file, and the watchers keep sending to the new session once it runs `bind-self.py` again. A worker never recycles itself: its owning architect gets `RECYCLE-WORKER-SOFT` (300k) to ask NOW or FINISH in tokens, then `RECYCLE-WORKER-HARD` (450k, capped at 60% of a known model window) to order a handoff at the next call boundary. An unknown window leaves hard unclamped and never below soft. Silence means re-ask at idle/done; a live heavy slot delays even HARD until release. The architect orders the handoff to `<report dir>/<name>-handoff.md` and starts the successor ([`worker-recycle.md`](../skills/architect/references/worker-recycle.md)); workers do not bind. With `ORCH_PARK_IDLE="1"`, an idle architect writes its handoff and exits, and the Coordinator restarts it when work arrives.
-- A worker that is done is closed by its architect with `close-worker.sh`, which leaves a recovery line (pane, task, report, branch, worktree, and the resume command of its agent: `claude --resume <id>`, `codex resume <id>`, else `session <id>`) in the architect's status file. After `workers.idle_s` seconds (2 h) idle or done with no open PR, the architect gets `WORKER IDLE <pane> owner=<workspace>` and checks the worker ([`worker-close.md`](../skills/architect/references/worker-close.md)).
+- A worker that is done is closed by its architect with `close-worker.sh`, which leaves a recovery line (pane, task, report, branch, worktree, and the resume command of its agent: `claude --resume <id>`, `codex resume <id>`, `cursor-agent --resume <id>`, `agy --conversation <id>`, else `session <id>`) in the architect's status file. After `workers.idle_s` seconds (2 h) idle or done with no open PR, the architect gets `WORKER IDLE <pane> owner=<workspace>` and checks the worker ([`worker-close.md`](../skills/architect/references/worker-close.md)).
 - Claude worker and reviewer panes set `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` before the start, so they show no prompt suggestions; architect and Coordinator sessions keep theirs.
 - To switch models, recycle onto the new model. A live session is never switched.
 - A worker runs each `review.finalize_commands` command (by default the shipped `/finalize-sweep`) over the complete PR diff before calling its PR done or ready, and again after every merge or rebase of the base into the PR branch. It sends the architect each findings table, waits for approval, and applies only the approved findings. With commands set, a PR, and `review.finalize_comment` not `false`, it then posts one PR comment with one table per configured command (every finding, approved or rejected, what changed, the commit SHA) ending with the tool's attribution trailer. `/finalize-sweep` writes a record with `head`, `base`, `findings`, and `validator_ids`; the worker reports its path and `orch-sweep-record check --record <path> --head <sha> [--base <sha>] --session <worker-session-id>` must pass. Its validator contract is defined in `/finalize-sweep` sections 5 (Validate) and 6 (Report, steps 4–5). The session id is `.result.agent.agent_session.value` from `herdr agent get "$HERDR_PANE_ID"`. `--no-transcripts` is CI attestation only. A worker can use `orch-sweep` for the headless script flow described in [the sweep script](sweep-script.md); its script record is checked in full, including every sweep-agent transcript even when there are no findings.
@@ -12,7 +12,7 @@ How the roles fit together: [`architecture.md`](architecture.md).
 
 ## Explicit worker signals
 
-`orch-signal` works for Claude, Codex, pi and cursor. The Herdr env adapter
+`orch-signal` works for Claude, Codex, pi and cursor; for gemini it is untested until a live agy worker runs (see the Gemini workers section). The Herdr env adapter
 verifies the caller's process ancestry against live pane foreground processes,
 then reads the pane's workspace and its `owner` token. Inherited pane IDs only
 prioritize the lookup: cached shell environments and session IDs can belong to
@@ -132,3 +132,29 @@ successful `ask` prints only its answer to stdout; timeout exits nonzero with on
 clear line. The architect should use `list` to recover pending IDs after recycle.
 
 Codex has no automatic watcher usage sensor; its architect checks native context readings at idle/done and before new work, and sends asks through `codex queue`. Model-window lookup and the complete decision procedure are in [`worker-recycle.md`](../skills/architect/references/worker-recycle.md).
+
+## Gemini workers (agy)
+
+A gemini worker runs the `agy` CLI through `gemini-start.sh`, which starts `herdr agent start --kind agy` with `--model` from settings and `--mode auto`, and takes no extra arguments. It never passes `--dangerously-skip-permissions` (no gate at all), `--remote-agent` or `--remote-control`. agy sends the code a worker reads and the prompts it gets to Google; see docs/settings.md.
+
+`--mode auto` is the safest mode in which a worker can still edit, test and commit. Per agy's docs (not run here), `--mode auto` auto-approves workspace file edits and runs terminal commands inside the terminal sandbox without prompting; a command that would leave the sandbox is automatically evaluated by agy itself, which lets safe, reversible ones through and prompts for irreversible or high-risk actions (destructive Git and file commands), unless the command matches an `allow` rule, which switches off that check. `--mode accept-edits` approves edits but still asks before every terminal command, so a worker cannot run tests or commits unattended; `--sandbox` alone (in the default mode) still asks before every edit. Auto mode turns the terminal sandbox on automatically, so `gemini-start.sh` passes no `--sandbox`. Auto mode needs the terminal sandbox and is not available for business or enterprise accounts; without it agy silently starts in default mode and asks before every edit, so a worker stalls — a gemini worker needs a personal account and a sandbox-capable host.
+
+Merge this `permissions` object into `~/.gemini/antigravity-cli/settings.json`, keeping its other keys (`model`, `trustedWorkspaces`) and any `allow` rule you already set (the block adds none) (`command(prefix)` matches any command whose leading tokens are that prefix):
+
+```json
+{
+  "permissions": {
+    "deny": [
+      "command(git push --force)",
+      "command(git push -f)",
+      "command(git reset --hard)",
+      "command(git clean)",
+      "command(gh pr merge)"
+    ]
+  }
+}
+```
+
+An `allow` rule switches off Auto's check for every command it matches, and matching is by token prefix, so a flag cannot be excluded: `git fetch --upload-pack`, `git log|diff|show --output`, and `gh pr … --body-file` each run any program, write any path, or post a local file. No `allow` rule is shipped, so Auto's check sees every command that leaves the sandbox, including every `orch-signal` call; do not add `command(orch-signal)`, because orch-signal runs the program the caller's environment names (`ORCH_LOADER_PYTHON`, `ORCH_PYTHON3`, `PATH`). If a prompt stalls on an `orch-signal` call, the user approves that one call in the pane; no rule fixes it safely. Add a rule only after a prompt stalls a worker, knowing it removes the check for every form of that command. Do not edit agy's own settings files; a worker asks the user for the rules it needs. For `close_worker.py`'s recovery line to carry the agy conversation id instead of `unknown`, run `herdr integration install antigravity-cli`.
+
+Two things are untested and stay so until a live agy worker runs: agy may show its workspace trust dialog in a new worktree, so the user trusts the worktree root or a parent folder once before the first gemini worker; and `orch-signal` from inside agy's terminal sandbox is untested, so the first gemini worker runs `orch-signal heartbeat --new-job` and `orch-signal done` as its first check.

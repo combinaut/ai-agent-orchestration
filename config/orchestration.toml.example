@@ -41,7 +41,7 @@ kill_grace = 10
 long_run = 1800
 
 [providers]
-# Worker families this machine uses (claude, codex, pi, cursor); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi or cursor when a model of that family is set. A family left out is never started or asked for, and its model settings may stay empty
+# Worker families this machine uses (claude, codex, pi, cursor, gemini); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi, cursor or gemini when a model of that family is set. A family left out is never started or asked for, and its model settings may stay empty
 enabled = []
 # Claude worker tiers the architects may pick (haiku, sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings
 claude = ["haiku", "sonnet", "opus", "fable"]
@@ -75,6 +75,10 @@ pi_models = []
 cursor_worker = ""
 # Cursor CLI model for hard work (for example grok-4.7-high); empty or a placeholder means cursor_worker serves it too. With cursor on, set at least one of the two
 cursor_smart = ""
+# Gemini model for routine work through the agy CLI (for example gemini-4-neon-medium); empty or a placeholder means gemini_smart serves it too. With gemini on, set at least one of the two
+gemini_worker = ""
+# Gemini model for hard work through the agy CLI (for example gemini-4-neon-high); empty or a placeholder means gemini_worker serves it too. With gemini on, set at least one of the two
+gemini_smart = ""
 
 [remote_control]
 # Give architect sessions Remote Control on start and recycle
