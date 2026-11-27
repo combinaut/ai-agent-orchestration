@@ -29,7 +29,7 @@ if [ "${#bats_files[@]}" -gt 0 ]; then
     bats "${bats_files[@]}"
   fi
 fi
-case " $suites " in *' all '*|*' guard '*) python3 tests/guard-bash.test.py ;; esac
+case " $suites " in *' all '*|*' guard '*) python3 tests/guard-bash.test.py; python3 tests/guard-bash-agy.test.py ;; esac
 case " $suites " in *' all '*|*' todo-panel '*) node --test tests/todo-panel.test.js ;; esac
 case " $suites " in
   *' all '*|*' watchers '*) (cd coordinator/watchers && python3 run_tests.py) ;;
