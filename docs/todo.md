@@ -24,7 +24,7 @@ width = "80%"
 height = "80%"
 ```
 
-The Coordinator opens this view itself at start, in a pane labelled `To-do` beside its own (`~/.claude/coordinator/todo-pane.sh`). A recycled Coordinator moves a pane with that label into its tab and opens no second one. It runs without `--popup`, so nothing closes it.
+The Coordinator opens this view itself at start, in a pane labelled `To-do` beside its own (`~/.claude/coordinator/todo-pane.sh`). A recycled Coordinator moves a pane with that label into its tab and opens no second one. It runs without `--popup`, so nothing closes it. If you only want the popup, set `todo_pane = false` under `[herdr]` (or untick it in the [settings popup](settings.md#-edit-in-a-popup)). The script then opens no pane, closes every pane labelled `To-do` and exits 0 (1 when a close fails); this applies at the next Coordinator start or recycle. The `prefix+t` popup does not change. The to-do count in the pane metadata and tab bar comes from a running to-do view, so with the pane off it is not kept up to date.
 
 ![The to-do view in the popup, with demo items](todo-view.png)
 

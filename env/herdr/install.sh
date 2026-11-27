@@ -234,21 +234,33 @@ env_install() {
     radar_daemon_wait start "$path" "$known" || die "Radar daemon is not running after state-start; run install.sh again, or see: $HERDR_EXE plugin log"
   fi
   say "running" "Radar daemon (mise Node $RADAR_NODE)"
-  install_todo_popup
+  install_popups
 }
 
-TODO_ID="combinaut.todo"
-TODO_KEY_START="# >>> ai-agent-orchestration to-do key (managed by install.sh; edits inside are replaced)"
-TODO_KEY_END="# <<< ai-agent-orchestration to-do key"
-
-todo_key_block() {
-  printf '%s\n[[keys.command]]\nkey = "prefix+t"\ntype = "plugin_action"\ncommand = "%s.open"\ndescription = "to-do list"\n%s\n' "$TODO_KEY_START" "$TODO_ID" "$TODO_KEY_END"
+# popup_select <todo|settings>: sets the popup the functions below work on.
+popup_select() {
+  case "$1" in
+    todo)
+      POPUP_NAME="to-do" POPUP_ID="combinaut.todo" POPUP_DIR=todo-plugin POPUP_KEY="prefix+t"
+      POPUP_DESCRIPTION="to-do list" POPUP_SETTING=ORCH_HERDR_TODO_POPUP
+      ;;
+    settings)
+      POPUP_NAME="settings" POPUP_ID="combinaut.settings" POPUP_DIR=settings-plugin POPUP_KEY="prefix+shift+s"
+      POPUP_DESCRIPTION="orchestration settings" POPUP_SETTING=ORCH_HERDR_SETTINGS_POPUP
+      ;;
+  esac
+  KEY_START="# >>> ai-agent-orchestration $POPUP_NAME key (managed by install.sh; edits inside are replaced)"
+  KEY_END="# <<< ai-agent-orchestration $POPUP_NAME key"
 }
 
-# todo_key_markers_ok <file>: succeeds when the file has no key block markers or exactly one start followed by one end.
+popup_key_block() {
+  printf '%s\n[[keys.command]]\nkey = "%s"\ntype = "plugin_action"\ncommand = "%s.open"\ndescription = "%s"\n%s\n' "$KEY_START" "$POPUP_KEY" "$POPUP_ID" "$POPUP_DESCRIPTION" "$KEY_END"
+}
+
+# popup_key_markers_ok <file>: succeeds when the file has no key block markers or exactly one start followed by one end.
 # Marker lines match with trailing whitespace or a carriage return.
-todo_key_markers_ok() {
-  awk -v start="$TODO_KEY_START" -v end="$TODO_KEY_END" '
+popup_key_markers_ok() {
+  awk -v start="$KEY_START" -v end="$KEY_END" '
     { line = $0; sub(/[ \t\r]+$/, "", line) }
     line == start { starts++ }
     line == end { ends++; if (!starts) end_first = 1 }
@@ -256,17 +268,21 @@ todo_key_markers_ok() {
   ' "$1"
 }
 
-# todo_config_check: ends the install before anything changes when the key block markers in Herdr's config.toml are unpaired.
-todo_config_check() {
-  local target
+# popup_config_check: ends the install before anything changes when a popup's key block markers in Herdr's config.toml are unpaired.
+popup_config_check() {
+  local target name
   target=$(resolve_link_path "$(herdr_config_file)") || die "cannot resolve $(herdr_config_file)"
-  [ ! -f "$target" ] || todo_key_markers_ok "$target" || die "$target has an unpaired '$TODO_KEY_START' or '$TODO_KEY_END' marker; fix or remove it, then run install.sh again (the file is unchanged)"
+  [ -f "$target" ] || return 0
+  for name in todo settings; do
+    popup_select "$name"
+    popup_key_markers_ok "$target" || die "$target has an unpaired '$KEY_START' or '$KEY_END' marker; fix or remove it, then run install.sh again (the file is unchanged)"
+  done
 }
 
-# todo_config_without_key <file>: the file without our key block and the blank line before it; the markers must be paired.
+# popup_config_without_key <file>: the file without our key block and the blank line before it; the markers must be paired.
 # Every other line keeps its bytes.
-todo_config_without_key() {
-  awk -v start="$TODO_KEY_START" -v end="$TODO_KEY_END" '
+popup_config_without_key() {
+  awk -v start="$KEY_START" -v end="$KEY_END" '
     { line = $0; sub(/[ \t\r]+$/, "", line) }
     line == start { skip = 1; held = ""; next }
     skip { if (line == end) skip = 0; next }
@@ -276,21 +292,36 @@ todo_config_without_key() {
   ' "$1"
 }
 
-# todo_config_want <enabled> <target> <snap> <want>: builds <want> from <snap>, a copy of <target>; CRLF files get a CRLF block.
-todo_config_want() {
-  todo_config_without_key "$3" >"$4" || return 1
+# popup_current_block <file>: the key block in the file, without carriage returns.
+popup_current_block() {
+  awk -v start="$KEY_START" -v end="$KEY_END" '
+    { line = $0; sub(/[ \t\r]+$/, "", line) }
+    line == start { inside = 1 }
+    inside { sub(/\r$/, ""); print }
+    line == end { inside = 0 }
+  ' "$1"
+}
+
+# popup_config_want <enabled> <target> <snap> <want>: builds <want> from <snap>, a copy of <target>; CRLF files get a CRLF block.
+# A current block stays where it is.
+popup_config_want() {
+  if [ "$1" = 1 ] && [ "$(popup_current_block "$3")" = "$(popup_key_block)" ]; then
+    cp "$3" "$4"
+    return
+  fi
+  popup_config_without_key "$3" >"$4" || return 1
   [ "$1" = 1 ] || return 0
   if head -n 1 "$3" | grep -q "$(printf '\r')\$"; then
-    { printf '\n'; todo_key_block; } | sed "s/\$/$(printf '\r')/" >>"$4"
+    { printf '\n'; popup_key_block; } | sed "s/\$/$(printf '\r')/" >>"$4"
   else
-    { printf '\n'; todo_key_block; } >>"$4"
+    { printf '\n'; popup_key_block; } >>"$4"
   fi
 }
 
-# todo_config_sync <enabled>: the prefix+t block is in Herdr's config.toml when enabled and absent otherwise.
+# popup_config_sync <enabled>: the selected popup's key block is in Herdr's config.toml when enabled and absent otherwise.
 # Returns 0 when the file changed, 1 when it did not; any failure ends the install and leaves the file as it was.
 # Another writer changing the file before the rename restarts the edit from the fresh content, up to three times.
-todo_config_sync() {
+popup_config_sync() {
   local target snap want tmp backup mode attempt
   target=$(resolve_link_path "$(herdr_config_file)") || die "cannot resolve $(herdr_config_file)"
   if [ ! -f "$target" ]; then
@@ -299,14 +330,14 @@ todo_config_sync() {
     : >"$target" || die "cannot create $target"
   fi
   for attempt in 1 2 3; do
-    snap=$(mktemp "${TMPDIR:-/tmp}/orch-todo-key.XXXXXX") || die "cannot create a temporary file for $target"
-    want=$(mktemp "${TMPDIR:-/tmp}/orch-todo-key.XXXXXX") || { rm -f "$snap"; die "cannot create a temporary file for $target"; }
+    snap=$(mktemp "${TMPDIR:-/tmp}/orch-popup-key.XXXXXX") || die "cannot create a temporary file for $target"
+    want=$(mktemp "${TMPDIR:-/tmp}/orch-popup-key.XXXXXX") || { rm -f "$snap"; die "cannot create a temporary file for $target"; }
     cp "$target" "$snap" || { rm -f "$snap" "$want"; die "cannot read $target"; }
-    todo_key_markers_ok "$snap" || { rm -f "$snap" "$want"; die "$target has an unpaired '$TODO_KEY_START' or '$TODO_KEY_END' marker; fix or remove it, then run install.sh again (the file is unchanged)"; }
-    todo_config_want "$1" "$target" "$snap" "$want" || { rm -f "$snap" "$want"; die "cannot prepare the new $target"; }
+    popup_key_markers_ok "$snap" || { rm -f "$snap" "$want"; die "$target has an unpaired '$KEY_START' or '$KEY_END' marker; fix or remove it, then run install.sh again (the file is unchanged)"; }
+    popup_config_want "$1" "$target" "$snap" "$want" || { rm -f "$snap" "$want"; die "cannot prepare the new $target"; }
     if cmp -s "$want" "$snap"; then
       rm -f "$snap" "$want"
-      say "already set" "$target: to-do key block"
+      say "already set" "$target: $POPUP_NAME key block"
       return 1
     fi
     mode=$(claude_md_mode "$target") || { rm -f "$snap" "$want"; die "cannot read the mode of $target"; }
@@ -321,7 +352,7 @@ todo_config_sync() {
       say "backed up" "$target -> $backup"
       mv "$tmp" "$target" || { rm -f "$snap" "$want" "$tmp"; die "cannot write $target (backup: $backup)"; }
       rm -f "$snap" "$want"
-      if [ "$1" = 1 ]; then say "added" "$target: prefix+t opens the to-do popup"; else say "removed" "$target: to-do key block"; fi
+      if [ "$1" = 1 ]; then say "added" "$target: $POPUP_KEY opens the $POPUP_NAME popup"; else say "removed" "$target: $POPUP_NAME key block"; fi
       return 0
     fi
     rm -f "$snap" "$want" "$tmp"
@@ -330,28 +361,37 @@ todo_config_sync() {
   die "$target keeps changing; run install.sh again (the file is unchanged)"
 }
 
-# install_todo_popup: the to-do plugin and the prefix+t block are installed unless herdr.todo_popup is false, which removes both.
-install_todo_popup() {
-  local enabled plugin source changed=0
-  enabled=$(config_value ORCH_HERDR_TODO_POPUP)
+# install_popup: the selected popup's plugin and key block are installed unless its setting is false, which removes both.
+# Returns 0 when the config file changed.
+install_popup() {
+  local enabled plugin source
+  enabled=$(config_value "$POPUP_SETTING")
   [ "$enabled" = 0 ] || enabled=1
-  todo_config_check
-  plugin="$ORCH_REPO/env/herdr/todo-plugin"
-  source=$("$HERDR_EXE" plugin list | sed -n "s/^- $TODO_ID .*\[\(.*\)\]\$/\1/p")
+  plugin="$ORCH_REPO/env/herdr/$POPUP_DIR"
+  source=$("$HERDR_EXE" plugin list | sed -n "s/^- $POPUP_ID .*\[\(.*\)\]\$/\1/p")
   source=$(printf '%s' "$source" | sed 's/; [0-9][0-9]* warning(s)$//')
   if [ "$enabled" = 1 ]; then
     if [ "$source" != "local:$plugin" ]; then
-      [ -z "$source" ] || "$HERDR_EXE" plugin unlink "$TODO_ID" >/dev/null
+      [ -z "$source" ] || "$HERDR_EXE" plugin unlink "$POPUP_ID" >/dev/null
       "$HERDR_EXE" plugin link "$plugin" >/dev/null
-      say "linked" "Herdr plugin $TODO_ID -> $plugin"
+      say "linked" "Herdr plugin $POPUP_ID -> $plugin"
     else
-      say "already linked" "Herdr plugin $TODO_ID -> $plugin"
+      say "already linked" "Herdr plugin $POPUP_ID -> $plugin"
     fi
   elif [ -n "$source" ]; then
-    "$HERDR_EXE" plugin unlink "$TODO_ID" >/dev/null
-    say "unlinked" "Herdr plugin $TODO_ID"
+    "$HERDR_EXE" plugin unlink "$POPUP_ID" >/dev/null
+    say "unlinked" "Herdr plugin $POPUP_ID"
   fi
-  if todo_config_sync "$enabled"; then changed=1; fi
+  popup_config_sync "$enabled"
+}
+
+install_popups() {
+  local name changed=0
+  popup_config_check
+  for name in todo settings; do
+    popup_select "$name"
+    if install_popup; then changed=1; fi
+  done
   [ "$changed" = 0 ] || "$HERDR_EXE" server reload-config >/dev/null 2>&1 || say "note" "Herdr did not reload its config; run: $HERDR_EXE server reload-config"
 }
 

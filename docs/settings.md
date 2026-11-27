@@ -14,6 +14,30 @@ A repo key in the global file (except the two `review.*` keys above), a global k
 
 `orch-settings` prints every resolved global setting as one `ORCH_NAME=value` line: the built-in default, then the global file (`ORCH_CONFIG` or `~/.claude/orchestration.toml`), then an exported variable. With no argument, a missing default file prints the defaults; a missing `ORCH_CONFIG` file, an explicit file that does not exist, an argument that starts with `-` and a value with a control character are errors (exit 2). Sessions run it at startup instead of reading the commented TOML. `orch-agents` is its companion for Herdr: one line per agent (name, pane, kind, status, workspace, owner, role, cwd), for a session that would otherwise read the `herdr agent list` JSON; it exits 2 with herdr's own message when herdr fails or answers in an unexpected shape. The installer links both into `~/.local/bin`.
 
+## 🎛️ Edit in a popup
+
+With the herdr env, `prefix+shift+s` opens a popup titled "Settings" that edits the global file. `herdr.settings_popup = false` plus a run of `install.sh` removes the key and the plugin; `python3 ~/.claude/coordinator/settings-view.py` runs the same editor in any terminal.
+
+It lists every setting the global file accepts, grouped by table, with the setting's description and when a change takes effect. A value the file does not set reads `default`. Repo-only settings are not listed.
+
+| Setting type | How to change it |
+|---|---|
+| on/off | Space or Enter |
+| a fixed set of values (effort levels) | ← and → |
+| a list of fixed values (providers) | Enter, Space to tick, `s` to save |
+| text and numbers | Enter, type, Enter. Ctrl-U clears the field |
+| other lists | Enter, then `a` add, Enter edit, `x` delete, `J`/`K` move, `s` save |
+
+`u` writes the default. `/` filters by key. Esc leaves a field, then a list, then the filter, then closes the popup; `q` closes it from the main list. Clicking a row selects it; clicking its value changes it.
+
+- A value is checked before it is written: its type, its allowed values, and that the whole file still loads. The popup also checks number ranges (finite and not negative; `audit.page_prs` and `audit.page_nodes` 1-100; `alerts.escalate_ratio` above 1; `workers.wait_repeat_s` at least 60; `host.pressure_min_pct` and `recycle.pct` at most 100; `heavy_slots.max` at least 1) and refuses control characters.
+- Only the changed value is rewritten. Comments, other lines, line endings, the file mode and a symlink stay. Comments inside a multi-line list you change move above its key. A key written in a form that cannot be changed in place (such as an inline table) is refused; edit it by hand.
+- A file that does not load is shown with its error and is not edited. A missing default file is created from the example on the first change; a missing `ORCH_CONFIG` file is an error.
+- A setting overridden by an `ORCH_*` variable shows that value and cannot be changed. The popup sees only the environment Herdr runs it in: a variable exported in another shell or service is not shown.
+- The popup never runs `install.sh` and restarts nothing.
+
+Limits: file 1 MiB, text field 4096 characters, list 200 entries, filter 64 characters, 3 write attempts when another program changes the file. One settings popup per Herdr session.
+
 ## 📁 Repo files
 
 Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestration.local.toml`, an exported variable. A later file replaces a key of an earlier one; a list is replaced, not merged.
@@ -97,6 +121,8 @@ A family left out is never started: the installer does not ask for its models, a
 | `herdr.bin` | `ORCH_HERDR_BIN` | empty | Absolute path of the Herdr executable |
 | `herdr.socket` | `ORCH_HERDR_SOCKET` | empty | Absolute path of the Herdr socket |
 | `herdr.todo_popup` | `ORCH_HERDR_TODO_POPUP` | `true` | install.sh links a Herdr plugin that opens the to-do view in a popup titled "Your to-do" on prefix+t, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env |
+| `herdr.todo_pane` | `ORCH_HERDR_TODO_PANE` | `true` | The Coordinator keeps a to-do pane open beside its own; `false` makes `todo-pane.sh` open none and close an open one. The to-do popup is separate |
+| `herdr.settings_popup` | `ORCH_HERDR_SETTINGS_POPUP` | `true` | install.sh links a Herdr plugin that opens a settings editor for this file in a popup on prefix+shift+s, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env |
 | `user_todo.status_dir` | `ORCH_USER_TODO_STATUS_DIR` | empty | To-do status directory; empty means ~/.claude/coordinator/status |
 | `user_todo.output` | `ORCH_USER_TODO_OUTPUT` | empty | To-do output file; empty means ~/.claude/coordinator/user-todo.md |
 | `user_todo.state` | `ORCH_USER_TODO_STATE` | empty | To-do state file; empty means ~/.claude/coordinator/user-todo.state.json |

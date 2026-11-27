@@ -197,6 +197,174 @@ class SetKeyTest(SettingsTest):
                 self.assertTrue(path.read_text().startswith("# mine\n"))
 
 
+class WriteSettingTest(SettingsTest):
+    def edit(self, text, key, value, **options):
+        path = self.write("c.toml", "")
+        path.write_bytes(text.encode())
+        s.edit_setting(path, s.BY_KEY[key], value, {}, **options)
+        return path.read_bytes().decode()
+
+    def test_a_trailing_comment_on_the_changed_line_stays(self):
+        self.assertEqual(
+            self.edit('[pr]\nauthor = "a#b"  # me\n', "pr.author", "c#d"),
+            '[pr]\nauthor = "c#d"  # me\n',
+        )
+
+    def test_crlf_line_endings_stay(self):
+        self.assertEqual(
+            self.edit('[pr]\r\nauthor = "a"\r\n# x\r\n', "pr.author", "b"),
+            '[pr]\r\nauthor = "b"\r\n# x\r\n',
+        )
+
+    def test_a_missing_final_newline_stays_missing(self):
+        self.assertEqual(
+            self.edit('[pr]\nauthor = "a"', "pr.author", "b"), '[pr]\nauthor = "b"'
+        )
+
+    def test_a_multi_line_list_is_replaced_and_its_comments_move_above_the_key(self):
+        text = '[watchers]\n# top\npath = [\n  "/a", # first ]\n  # second\n  "/b#c",\n] # end\nservice = false\n'
+        self.assertEqual(
+            self.edit(text, "watchers.path", ["/z"]),
+            '[watchers]\n# top\n# first ]\n# second\npath = ["/z"] # end\nservice = false\n',
+        )
+
+    def test_a_long_list_is_written_over_several_lines_with_the_file_line_ending(self):
+        entries = [f"/directory/number/{n:03}" for n in range(8)]
+        text = self.edit("[watchers]\r\npath = []\r\n", "watchers.path", entries)
+        self.assertNotIn("\n", text.replace("\r\n", ""))
+        self.assertEqual(s.parse(text, "t")["watchers"]["path"], entries)
+
+    def test_key_looking_lines_inside_a_multi_line_value_are_not_edited(self):
+        text = '[pr]\nsince = """\nauthor = "inside"\n"""\nauthor = "a"\n'
+        self.assertEqual(
+            self.edit(text, "pr.author", "b"),
+            '[pr]\nsince = """\nauthor = "inside"\n"""\nauthor = "b"\n',
+        )
+
+    def test_a_commented_example_line_is_left_as_it_is(self):
+        self.assertEqual(
+            self.edit('[pr]\n# author = "old"\n', "pr.author", "b"),
+            '[pr]\nauthor = "b"\n# author = "old"\n',
+        )
+
+    def test_a_symlinked_file_stays_a_link_and_keeps_its_mode(self):
+        real = self.write("real.toml", '[pr]\nauthor = "a"\n')
+        real.chmod(0o640)
+        link = real.with_name("link.toml")
+        link.symlink_to(real)
+        s.edit_setting(link, s.BY_KEY["pr.author"], "b", {})
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(real.read_text(), '[pr]\nauthor = "b"\n')
+        self.assertEqual(real.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(
+            sorted(p.name for p in real.parent.glob("*.toml*")),
+            ["link.toml", "real.toml"],
+        )
+
+    def test_a_change_by_another_writer_is_kept(self):
+        path = self.write("c.toml", '[pr]\nauthor = "a"\n')
+        real_check, calls = s.check_resolves, []
+
+        def check(candidate, label):
+            calls.append(label)
+            if len(calls) == 1:
+                path.write_text('[pr]\nauthor = "a"\nsince = "other"\n')
+            real_check(candidate, label)
+
+        with patch.object(s, "check_resolves", check):
+            s.edit_setting(path, s.BY_KEY["pr.author"], "b", {})
+        self.assertEqual(path.read_text(), '[pr]\nauthor = "b"\nsince = "other"\n')
+
+    def test_a_file_that_keeps_changing_is_left_to_the_other_writer(self):
+        path = self.write("c.toml", '[pr]\nauthor = "a"\n')
+        real_check, calls = s.check_resolves, []
+
+        def check(candidate, label):
+            calls.append(label)
+            path.write_text(f'[pr]\nauthor = "{len(calls)}"\n')
+            real_check(candidate, label)
+
+        with patch.object(s, "check_resolves", check):
+            with self.assertRaisesRegex(s.ConfigError, "keeps changing"):
+                s.edit_setting(path, s.BY_KEY["pr.author"], "b", {})
+        self.assertEqual((len(calls), path.read_text()), (3, '[pr]\nauthor = "3"\n'))
+
+    def refuses(self, key, value, pattern, text="[pr]\n"):
+        path = self.write("c.toml", text)
+        with self.assertRaisesRegex(s.ConfigError, pattern):
+            s.edit_setting(path, s.BY_KEY[key], value, {})
+        self.assertEqual(path.read_text(), text)
+
+    def test_a_value_the_schema_rejects_writes_nothing(self):
+        for key, value, pattern in (
+            ("models.worker_effort", "huge", "unknown value"),
+            ("models.codex_smart_reasoning_effort", "Very High", "lowercase"),
+            ("providers.enabled", ["codex"], "claude"),
+            ("providers.claude", [], "at least|must name"),
+            ("pr_tabs.repos", ["a,b"], "separates entries"),
+            ("recycle.tokens", "5", "must be an integer"),
+        ):
+            with self.subTest(key=key):
+                self.refuses(key, value, pattern)
+
+    def test_numbers_outside_their_range_write_nothing(self):
+        for key, value in (
+            ("recycle.tokens", -1),
+            ("host.load_max", float("nan")),
+            ("host.load_max", float("inf")),
+            ("audit.page_prs", 0),
+            ("audit.page_prs", 101),
+            ("audit.page_nodes", 101),
+            ("alerts.escalate_ratio", 1),
+            ("workers.wait_repeat_s", 59),
+            ("host.pressure_min_pct", 101),
+            ("recycle.pct", 101),
+            ("heavy_slots.max", 0),
+        ):
+            with self.subTest(key=key, value=value):
+                self.refuses(key, value, "must be")
+
+    def test_a_control_character_writes_nothing(self):
+        for key, value in (("pr.author", "a\nb"), ("pr_tabs.repos", ["a\x1bb"])):
+            with self.subTest(key=key):
+                self.refuses(key, value, "control character")
+
+    def test_a_file_that_already_fails_to_load_is_not_written(self):
+        self.refuses("pr.author", "b", "unknown key", "[pr]\nnope = 1\n")
+
+    def test_an_exported_variable_blocks_the_write(self):
+        path = self.write("c.toml", "[pr]\n")
+        with self.assertRaisesRegex(s.ConfigError, "ORCH_PR_AUTHOR wins"):
+            s.edit_setting(path, s.BY_KEY["pr.author"], "b", {"ORCH_PR_AUTHOR": ""})
+        self.assertEqual(path.read_text(), "[pr]\n")
+
+    def test_a_value_that_cannot_be_set_in_place_writes_nothing(self):
+        self.refuses("pr.author", "b", "by hand", 'pr = { author = "a" }\n')
+
+    def test_an_oversized_file_is_refused(self):
+        self.refuses("pr.author", "b", "too large", "#" * (1 << 20) + "\n")
+
+    def test_a_missing_file_starts_from_the_example_when_asked(self):
+        path = self.write("c.toml", "")
+        path.unlink()
+        s.edit_setting(path, s.BY_KEY["herdr.todo_pane"], False, {}, create=True)
+        self.assertEqual(
+            path.read_text(),
+            (REPO / "config/orchestration.toml.example")
+            .read_text()
+            .replace("todo_pane = true", "todo_pane = false"),
+        )
+
+    def test_one_edit_of_the_example_changes_one_line(self):
+        before = (REPO / "config/orchestration.toml.example").read_text()
+        after = self.edit(before, "recycle.park_idle", True)
+        self.assertEqual(
+            [(a, b) for a, b in zip(before.split("\n"), after.split("\n")) if a != b],
+            [("park_idle = false", "park_idle = true")],
+        )
+        self.assertEqual(len(before.split("\n")), len(after.split("\n")))
+
+
 class DropKeysTest(SettingsTest):
     def test_drop_removes_every_form_and_its_comment_and_keeps_the_rest(self):
         text = (

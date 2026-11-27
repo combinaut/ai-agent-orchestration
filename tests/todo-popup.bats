@@ -5,6 +5,7 @@ load test_helper
 
 setup() {
   setup_fixture
+  export ORCH_HERDR_SETTINGS_POPUP=0
   HCONF="$HOME/.config/herdr/config.toml"
   mkdir -p "$(dirname "$HCONF")"
   printf '[ui]\nsidebar_width = 40\n' >"$HCONF"

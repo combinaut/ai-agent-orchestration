@@ -1,12 +1,14 @@
 """Every orchestration setting, its TOML key and scope; the readers of the global and repo files."""
 
 import json
+import math
 import os
 import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -39,6 +41,9 @@ class Setting:
         shared=False,
         pattern=None,
         pattern_doc="",
+        minimum=0,
+        maximum=None,
+        above=None,
     ):
         self.key, self.env, self.kind, self.default = key, env, kind, default
         self.scope, self.doc, self.sep, self.paths = scope, doc, sep, paths
@@ -51,6 +56,8 @@ class Setting:
         self.nonempty = nonempty
         self.shared = shared
         self.pattern, self.pattern_doc = pattern, pattern_doc
+        # Number range, enforced by edit_setting.
+        self.minimum, self.maximum, self.above = minimum, maximum, above
 
     @property
     def table(self):
@@ -156,6 +163,8 @@ SETTINGS = [
         "int",
         80,
         "PR search page size (1-100)",
+        minimum=1,
+        maximum=100,
     ),
     _g(
         "audit.page_nodes",
@@ -163,6 +172,8 @@ SETTINGS = [
         "int",
         100,
         "Nested GitHub query page size (1-100); a cut-off result prints TRUNCATED",
+        minimum=1,
+        maximum=100,
     ),
     _g(
         "legacy.scans_max",
@@ -192,6 +203,7 @@ SETTINGS = [
         "int",
         4,
         "Most heavy jobs at once on the machine",
+        minimum=1,
     ),
     _g(
         "heavy_slots.dir",
@@ -396,6 +408,7 @@ SETTINGS = [
         "number",
         55,
         "Context percentage used when the token sensor is absent",
+        maximum=100,
     ),
     _g(
         "recycle.park_idle",
@@ -504,6 +517,20 @@ SETTINGS = [
         'install.sh links a Herdr plugin that opens the to-do view in a popup titled "Your to-do" on prefix+t, with a marked `[[keys.command]]` block in Herdr\'s `config.toml`; `false` removes both. Needs the herdr env',
     ),
     _g(
+        "herdr.todo_pane",
+        "ORCH_HERDR_TODO_PANE",
+        "bool",
+        True,
+        "The Coordinator keeps a to-do pane open beside its own; `false` makes `todo-pane.sh` open none and close an open one. The to-do popup is separate",
+    ),
+    _g(
+        "herdr.settings_popup",
+        "ORCH_HERDR_SETTINGS_POPUP",
+        "bool",
+        True,
+        "install.sh links a Herdr plugin that opens a settings editor for this file in a popup on prefix+shift+s, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env",
+    ),
+    _g(
         "user_todo.status_dir",
         "ORCH_USER_TODO_STATUS_DIR",
         "str",
@@ -541,6 +568,7 @@ SETTINGS = [
         "number",
         20,
         "Host watcher: lowest free memory percentage",
+        maximum=100,
     ),
     _g(
         "host.swap_max_mb",
@@ -576,6 +604,7 @@ SETTINGS = [
         "number",
         1.5,
         "Feed: ratio between severity steps; greater than 1",
+        above=1,
     ),
     _g(
         "alerts.digest_s",
@@ -626,6 +655,7 @@ SETTINGS = [
         "number",
         1800,
         "Seconds between repeated waiting alerts and to-do answer failure alerts (minimum 60)",
+        minimum=60,
     ),
     _g(
         "workers.idle_s",
@@ -1826,28 +1856,79 @@ def migrate(env_path, toml_path, snippet_dir):
     return [f"converted {env_path} -> {toml_path}"] + report
 
 
-def set_key(path, env, text):
-    """Sets one global setting in the file from its ORCH_* string form, keeping every other line."""
-    setting = BY_ENV[env]
-    value = from_env(setting, text)
-    value = [] if value is None else value
+MAX_FILE_BYTES = 1 << 20
+WRITE_ATTEMPTS = 3
+EXAMPLE_FILE = Path(__file__).resolve().parents[1] / "config/orchestration.toml.example"
+CONTROL = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
+
+
+def comment_columns(text):
+    """(line, column) of every TOML comment in text."""
+    found, quote, index, line, start = [], None, 0, 0, 0
+    while index < len(text):
+        char = text[index]
+        if char == "\n":
+            line, start = line + 1, index + 1
+        elif quote:
+            if char == "\\" and quote[0] == '"':
+                if text[index + 1 : index + 2] != "\n":
+                    index += 1
+            elif text.startswith(quote, index):
+                index += len(quote) - 1
+                quote = None
+        elif char in "\"'":
+            quote = char * 3 if text.startswith(char * 3, index) else char
+            index += len(quote) - 1
+        elif char == "#":
+            found.append((line, index - start))
+            end = text.find("\n", index)
+            index = len(text) if end < 0 else end
+            continue
+        index += 1
+    return found
+
+
+def value_end(lines, start):
+    """The line after the key/value that starts at lines[start]: the shortest run of lines that parses."""
+    for end in range(start + 1, len(lines) + 1):
+        try:
+            parse("\n".join(line.rstrip("\r") for line in lines[start:end]), "value")
+        except ConfigError:
+            continue
+        return end
+    return None
+
+
+def spliced(label, text, setting, value):
+    """The file text with one setting set to value; every other line keeps its bytes."""
     rendered = toml_value(value)
-    lines = Path(path).read_text().splitlines()
+    lines = text.split("\n")
 
     def name(part):
         return rf'(?:"{part}"|\'{part}\'|{part})'
 
-    header = re.compile(r'^\s*\[\s*("?)([A-Za-z0-9_-]+)\1\s*\]\s*(#.*)?$')
-    plain = re.compile(rf"^\s*{name(setting.name)}\s*=")
-    dotted = re.compile(rf"^\s*{name(setting.table)}\s*\.\s*{name(setting.name)}\s*=")
+    header = re.compile(r'^\s*\[\s*(["\']?)([A-Za-z0-9_-]+)\1\s*\]\s*(#.*)?$')
+    plain = re.compile(rf"^\s*{name(setting.name)}\s*=[ \t]*")
+    dotted = re.compile(
+        rf"^\s*{name(setting.table)}\s*\.\s*{name(setting.name)}\s*=[ \t]*"
+    )
     dotted_table = re.compile(rf"^\s*{name(setting.table)}\s*\.")
-    table, start, done, last_dotted = None, None, False, None
-    for index, current in enumerate(lines):
-        match = header.match(current)
-        if match:
-            table = match[2]
-            start = index if table == setting.table else start
+    table, start, last_dotted, index = None, None, None, 0
+    while index < len(lines):
+        current = lines[index]
+        stripped = current.strip()
+        if not stripped or stripped.startswith("#"):
+            index += 1
             continue
+        if stripped.startswith("["):
+            match = header.match(current)
+            table = match[2] if match else ""
+            start = index if table == setting.table else start
+            index += 1
+            continue
+        end = value_end(lines, index)
+        if end is None:
+            raise ConfigError(f"{label}: {setting.key}: edit it by hand")
         found = (
             plain.match(current)
             if table == setting.table
@@ -1856,36 +1937,159 @@ def set_key(path, env, text):
             else None
         )
         if found:
-            if current.rstrip().endswith(("[", "{")):
-                raise ConfigError(
-                    f"{path}: {setting.key}: spans several lines; edit it by hand"
-                )
-            key = (
-                setting.name
-                if table == setting.table
-                else f"{setting.table}.{setting.name}"
-            )
-            lines[index], done = f"{key} = {rendered}", True
-            break
+            old = [line.rstrip("\r") for line in lines[index:end]]
+            eol = "\r" if lines[end - 1].endswith("\r") else ""
+            indent = current[: len(current) - len(current.lstrip())]
+            above, tail = [], ""
+            for line, column in comment_columns("\n".join(old)):
+                if line == len(old) - 1:
+                    before = old[line][:column]
+                    tail = before[len(before.rstrip()) :] + old[line][column:]
+                else:
+                    above.append(indent + old[line][column:])
+            new = (found[0] + rendered + tail).split("\n")
+            lines[index:end] = [line + eol for line in above + new]
+            return "\n".join(lines)
         if table is None and dotted_table.match(current):
-            last_dotted = index
-    if not done and start is not None:
-        lines.insert(start + 1, f"{setting.name} = {rendered}")
-    elif not done and last_dotted is not None:
-        lines.insert(last_dotted + 1, f"{setting.table}.{setting.name} = {rendered}")
-    elif not done:
-        lines += (
-            ["", f"[{setting.table}]", f"{setting.name} = {rendered}"]
-            if lines
-            else [f"[{setting.table}]", f"{setting.name} = {rendered}"]
+            last_dotted = end - 1
+        index = end
+    eol = "\r" if "\r\n" in text else ""
+    final_newline = lines[-1] == ""
+    if final_newline:
+        lines.pop()
+
+    def added(*new):
+        return [line + eol for part in new for line in part.split("\n")]
+
+    if start is not None:
+        lines[start + 1 : start + 1] = added(f"{setting.name} = {rendered}")
+    elif last_dotted is not None:
+        lines[last_dotted + 1 : last_dotted + 1] = added(f"{setting.key} = {rendered}")
+    else:
+        lines += added(
+            *([""] if lines else []),
+            f"[{setting.table}]",
+            f"{setting.name} = {rendered}",
         )
-    text_out = "\n".join(lines) + "\n"
-    written = validate(parse(text_out, str(path)), str(path), "global")
-    if written.get(setting) != value:
-        raise ConfigError(
-            f"{path}: {setting.key}: cannot be set in place; edit it by hand"
-        )
-    Path(path).write_text(text_out)
+    return "\n".join(lines) + ("\n" if final_newline or not text else "")
+
+
+def without(data, setting):
+    """Parsed TOML minus one setting and any table that leaves empty."""
+    result = {
+        table: dict(entries) if isinstance(entries, dict) else entries
+        for table, entries in data.items()
+    }
+    if isinstance(result.get(setting.table), dict):
+        result[setting.table].pop(setting.name, None)
+    return {table: entries for table, entries in result.items() if entries != {}}
+
+
+def changed_text(label, text, setting, value):
+    """spliced(), proven to parse, to hold value and to differ in nothing else."""
+    before = parse(text, label)
+    validate(before, label, "global")
+    new = spliced(label, text, setting, value)
+    problem = ConfigError(
+        f"{label}: {setting.key}: cannot be set in place; edit it by hand"
+    )
+    try:
+        after = parse(new, label)
+    except ConfigError:
+        raise problem from None
+    written = validate(after, label, "global")
+    if written.get(setting) != value or without(after, setting) != without(
+        before, setting
+    ):
+        raise problem
+    return new
+
+
+def check_resolves(candidate, label):
+    """Raise ConfigError unless the candidate file resolves on its own."""
+    try:
+        resolved_global(candidate, {})
+    except ConfigError as error:
+        raise ConfigError(str(error).replace(str(candidate), label)) from None
+
+
+def read_bytes(path):
+    """The file's bytes, None when it is missing."""
+    try:
+        with open(path, "rb") as stream:
+            data = stream.read(MAX_FILE_BYTES + 1)
+    except FileNotFoundError:
+        return None
+    if len(data) > MAX_FILE_BYTES:
+        raise ConfigError(f"{path}: too large to edit (over {MAX_FILE_BYTES} bytes)")
+    return data
+
+
+def write_value(path, setting, value, check=None, create=False):
+    """Atomically sets one setting in the file (through a symlink, keeping its mode); starts over when another writer changed the file."""
+    label = os.fspath(path)
+    target = Path(os.path.realpath(path))
+    for _ in range(WRITE_ATTEMPTS):
+        original = read_bytes(target)
+        if original is None and not create:
+            raise ConfigError(f"{label}: cannot read: no such file")
+        source = original if original is not None else EXAMPLE_FILE.read_bytes()
+        try:
+            text = source.decode()
+        except UnicodeDecodeError as error:
+            raise ConfigError(f"{label}: cannot read: {error}") from None
+        new = changed_text(label, text, setting, value)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(new.encode())
+            if original is not None:
+                os.chmod(name, target.stat().st_mode & 0o7777)
+            if check:
+                check(name, label)
+            if read_bytes(target) == original:
+                os.replace(name, target)
+                return
+        finally:
+            Path(name).unlink(missing_ok=True)
+    raise ConfigError(f"{label}: the file keeps changing; nothing written")
+
+
+def value_problem(setting, value):
+    """Why value is out of the setting's range or holds a control character, else None."""
+    if setting.kind in ("int", "number"):
+        if not math.isfinite(value):
+            return "must be a finite number"
+        if setting.above is not None and not value > setting.above:
+            return f"must be more than {setting.above}"
+        if value < setting.minimum:
+            return f"must be at least {setting.minimum}"
+        if setting.maximum is not None and value > setting.maximum:
+            return f"must be at most {setting.maximum}"
+    for item in value if isinstance(value, list) else [value]:
+        if isinstance(item, str) and CONTROL.search(item):
+            return "contains a control character"
+    return None
+
+
+def edit_setting(path, setting, value, environ, create=False):
+    """One user edit of the global file: refused when a variable overrides it or the result would not load."""
+    if setting.env in environ:
+        raise ConfigError(f"{setting.key}: env {setting.env} wins; nothing written")
+    if not check_type(setting, value):
+        raise ConfigError(f"{setting.key}: must be {TYPE_NAMES[setting.kind]}")
+    problem = value_problem(setting, value)
+    if problem:
+        raise ConfigError(f"{setting.key}: {problem}")
+    write_value(path, setting, value, check=check_resolves, create=create)
+
+
+def set_key(path, env, text):
+    """Sets one global setting in the file from its ORCH_* string form, keeping every other line."""
+    setting = BY_ENV[env]
+    value = from_env(setting, text)
+    write_value(path, setting, [] if value is None else value)
 
 
 def drop_removed_keys(path):
