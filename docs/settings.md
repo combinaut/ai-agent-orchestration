@@ -109,7 +109,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `alerts.escalate_ratio` | `ORCH_ALERT_ESCALATE_RATIO` | `1.5` | Feed: ratio between severity steps; greater than 1 |
 | `alerts.digest_s` | `ORCH_ALERT_DIGEST_S` | `1800` | Feed: seconds between digest lines |
 | `alerts.quiet_s` | `ORCH_ALERT_QUIET_S` | `1800` | Feed: seconds a condition stays clear before its clear line |
-| `hog.gb` | `ORCH_HOG_GB` | `6` | Hog watcher: process size in GB |
+| `hog.gb` | `ORCH_HOG_GB` | `3` | Hog watcher: process size in GB |
 | `hog.git_gb` | `ORCH_HOG_GIT_GB` | `2` | Hog watcher: git process size in GB |
 | `hog.git_age_s` | `ORCH_HOG_GIT_AGE_S` | `180` | Hog watcher: git process age in seconds |
 | `workers.ask_timeout_s` | `ORCH_ASK_TIMEOUT_S` | `1800` | Maximum seconds a worker question waits for an answer |

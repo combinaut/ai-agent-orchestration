@@ -793,6 +793,22 @@ class WatcherTests(IsolatedTestCase):
         raw["result"]["agents"] = []
         self.one("workers", raw, "dead/disappeared")
 
+    def test_hog_default_threshold_is_3_gib_per_process(self):
+        raw = [
+            {
+                "pid": "42",
+                "rss": 3 * 1048576 - 1,
+                "age": 1,
+                "start": "one",
+                "comm": "node",
+            }
+        ]
+        with patch.dict(os.environ):
+            os.environ.pop("ORCH_HOG_GB", None)
+            self.assertEqual(w.conditions("hog", raw), {})
+            raw[0]["rss"] = 3 * 1048576
+            self.assertEqual(list(w.conditions("hog", raw)), ["42:one:HOG"])
+
     def test_hog_thresholds_pid_reuse(self):
         raw = [{"pid": "42", "rss": 1000, "age": 1, "start": "one", "comm": "node"}]
         self.cycle("hog", raw)

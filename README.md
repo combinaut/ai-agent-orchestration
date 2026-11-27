@@ -98,6 +98,7 @@ Many sessions share one machine. `heavy-slot` caps how many test runs, browsers 
 heavy-slot take acme-tests --note "unit tests" -- npm test   # waits up to 1800 s for a free slot, then runs; --note names the job in list and feed lines
 heavy-slot count                         # slots in use
 heavy-slot list                          # names, pids, ages, notes, stale records
+heavy-slot stop acme-tests               # stops that slot's job
 ```
 
 If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`](docs/heavy-slot.md).

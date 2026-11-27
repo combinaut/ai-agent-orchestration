@@ -595,3 +595,9 @@ name.toml"
   [ "$(printf '%s\n' "$stderr" | wc -l | tr -d ' ')" -eq 1 ]
   [[ "$stderr" == "WARNING: $TMP/odd\\nname.toml sets review.finalize_commands to /finalize-code-comments;"* ]]
 }
+
+@test "the hog watcher size defaults to 3 GB" {
+  run python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import orch_settings as s; print(next(x for x in s.SETTINGS if x.env == "ORCH_HOG_GB").default)' "$BATS_TEST_DIRNAME/../lib"
+  [ "$status" -eq 0 ]
+  [ "$output" = 3 ]
+}

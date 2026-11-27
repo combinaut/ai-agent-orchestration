@@ -591,7 +591,7 @@ SETTINGS = [
         1800,
         "Feed: seconds a condition stays clear before its clear line",
     ),
-    _g("hog.gb", "ORCH_HOG_GB", "number", 6, "Hog watcher: process size in GB"),
+    _g("hog.gb", "ORCH_HOG_GB", "number", 3, "Hog watcher: process size in GB"),
     _g(
         "hog.git_gb",
         "ORCH_HOG_GIT_GB",

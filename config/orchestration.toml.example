@@ -172,7 +172,7 @@ quiet_s = 1800
 
 [hog]
 # Hog watcher: process size in GB
-gb = 6
+gb = 3
 # Hog watcher: git process size in GB
 git_gb = 2
 # Hog watcher: git process age in seconds

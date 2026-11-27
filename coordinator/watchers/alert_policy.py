@@ -38,7 +38,7 @@ BALANCE_METRICS = {
     "MEMFREE": ("free", None, 30, True),
 }
 HOG_KINDS = {
-    "HOG": ("rss", "ORCH_HOG_GB", 6),
+    "HOG": ("rss", "ORCH_HOG_GB", 3),
     "GITBIG": ("rss", "ORCH_HOG_GIT_GB", 2),
     "GITLONG": ("age", "ORCH_HOG_GIT_AGE_S", 180),
 }
