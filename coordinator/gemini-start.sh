@@ -50,7 +50,6 @@ cwd=$("$herdr_bin" pane get "$pane" | jq -er '.result.pane.cwd') || { echo "gemi
 case "$cwd" in /*) ;; *) echo "gemini-start.sh: pane $pane has no absolute directory: '$cwd'" >&2; exit 1 ;; esac
 
 # agy asks for trust unless trustedWorkspaces holds the folder's exact path.
-orch_python >/dev/null || exit 2
 "$ORCH_LOADER_PYTHON" -I - "$HOME/.gemini/antigravity-cli/settings.json" "$cwd" <<'PY'
 import fcntl, json, os, stat, sys, tempfile
 

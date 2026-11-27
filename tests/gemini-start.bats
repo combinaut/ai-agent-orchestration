@@ -289,3 +289,25 @@ SH
   [ ! -e "$HERDR_CALLS" ]
   [ ! -e "$SETTINGS" ]
 }
+
+@test "a missing settings directory is created private" {
+  umask 022
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 0 ]
+  [ "$(mode_of "${SETTINGS%/*}")" = 0o700 ]
+}
+
+@test "a host without jq is refused by name" {
+  loader=$(. "$ROOT/coordinator/watchers/coord-lib.sh" && orch_python)
+  # A PATH of only these tools, so no system jq is on it.
+  mkdir "$TMP/nojq"
+  for tool in env bash sh dirname readlink; do
+    ln -s "$(PATH="/usr/bin:/bin" command -v "$tool")" "$TMP/nojq/$tool"
+  done
+  ln -s "$TMP/bin/herdr" "$TMP/nojq/herdr"
+  PATH="$TMP/nojq" ORCH_LOADER_PYTHON="$loader" run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"required command not found on PATH: jq"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
+  [ ! -e "$SETTINGS" ]
+}
