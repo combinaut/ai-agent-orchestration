@@ -122,6 +122,7 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"$PLUGIN/plugin.json is missing or dangling"*"run install.sh"* ]] || false
   [ ! -e "$HERDR_CALLS" ]
+  [ ! -e "$HOME/.gemini/antigravity-cli/settings.json" ]
 }
 
 @test "a dangling agy rules link is refused" {
@@ -228,13 +229,13 @@ refused_unchanged() {
 @test "a failed write leaves the file and no temp file, and agy does not start" {
   seed_settings '{}'
   mkdir "$TMP/inject"
-  printf 'import os\ndef fail(*a, **k):\n    raise OSError("disk full")\nos.replace = fail\n' >"$TMP/inject/sitecustomize.py"
+  printf 'import os\ndef fail(*a, **k):\n    raise OSError("disk full")\nos.replace = fail\n' >"$TMP/inject/fault.py"
   loader=$(. "$ROOT/coordinator/watchers/coord-lib.sh" && orch_python)
   # -I ignores PYTHONPATH, so the wrapper loads the fault itself.
   cat >"$TMP/bin/failing-python" <<SH
 #!/bin/sh
 if [ "\$2" = - ]; then
-  { cat "$TMP/inject/sitecustomize.py"; cat; } >"$TMP/inject/run.py"
+  { cat "$TMP/inject/fault.py"; cat; } >"$TMP/inject/run.py"
   shift 2
   exec "$loader" -I "$TMP/inject/run.py" "\$@"
 fi
@@ -286,12 +287,5 @@ SH
   [ "$status" -eq 1 ]
   [[ "$output" == *"pane pane1 has no absolute directory"* ]] || false
   [ ! -e "$HERDR_CALLS" ]
-  [ ! -e "$SETTINGS" ]
-}
-
-@test "a refused start trusts nothing" {
-  rm "$PLUGIN/plugin.json"
-  run "$SCRIPT" w1 pane1 worker
-  [ "$status" -eq 1 ]
   [ ! -e "$SETTINGS" ]
 }
