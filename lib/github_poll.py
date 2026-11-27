@@ -154,10 +154,21 @@ class _Expired(BaseException):
     """Deadline delivery bypasses recoverable read-error handlers."""
 
 
+def _late_tick(_signum, _frame):
+    """macOS can deliver one SIGALRM after the interval timer is disarmed."""
+
+
+def _after_timer(handler):
+    return _late_tick if handler == signal.SIG_DFL else handler
+
+
 @contextmanager
 def call_deadline(seconds, *, expired_error=_Expired):
     previous_handler = signal.getsignal(signal.SIGALRM)
     previous_timer = signal.getitimer(signal.ITIMER_REAL)
+    restored_handler = (
+        previous_handler if previous_timer[0] else _after_timer(previous_handler)
+    )
     started = time.time()
     monotonic_started = time.monotonic()
     previous_remaining = previous_timer[0]
@@ -202,7 +213,7 @@ def call_deadline(seconds, *, expired_error=_Expired):
                 signal.signal(signal.SIGALRM, previous_handler)
         else:
             signal.setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, previous_handler)
+            signal.signal(signal.SIGALRM, restored_handler)
             if previous_timer[0] and not getattr(previous_handler, "_fired", False):
                 signal.setitimer(
                     signal.ITIMER_REAL,
@@ -531,7 +542,7 @@ def supervise(deadline, argv, *, capture_group=False):
                 process.wait(timeout=1)
             except subprocess.TimeoutExpired:
                 pass
-        signal.signal(signal.SIGALRM, previous_alarm)
+        signal.signal(signal.SIGALRM, _after_timer(previous_alarm))
         signal.signal(signal.SIGTERM, previous_term)
         signal.signal(signal.SIGINT, previous_int)
 

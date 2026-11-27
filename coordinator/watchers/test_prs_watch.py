@@ -318,3 +318,53 @@ assert sleeps == [1, 1], sleeps
         self.assertTrue(hook["done"])
         self.assertEqual(Outer.count, 1)
         self.assertEqual(cleanup, ["started", "finished"])
+
+    def run_late_tick_driver(self, body):
+        driver = (
+            "import sys, time\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import github_poll\n"
+            "github_poll.DEADLINE_TICK = 0.00002\n" + body
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", driver, str(ROOT / "lib")],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode, 0, f"exit {result.returncode}: {result.stderr}"
+        )
+
+    def test_tick_delivered_after_a_call_deadline_disarms_is_harmless(self):
+        self.run_late_tick_driver(
+            "for _ in range(1000):\n"
+            "    with github_poll.call_deadline(5):\n"
+            "        time.sleep(0.002)\n"
+            "    time.sleep(0.0005)\n"
+        )
+
+    def test_tick_delivered_after_the_supervisor_disarms_is_harmless(self):
+        self.run_late_tick_driver(
+            "for _ in range(300):\n"
+            "    code = github_poll.supervise(time.time() + 5, ['true'])\n"
+            "    assert code == 0, code\n"
+            "    time.sleep(0.0005)\n"
+        )
+
+    def test_default_handler_returns_with_a_timer_armed_before_the_call(self):
+        call_deadline = load_prs().github_poll.call_deadline
+        previous_handler = signal.signal(signal.SIGALRM, signal.SIG_DFL)
+        previous_timer = signal.setitimer(signal.ITIMER_REAL, 50)
+        try:
+            with call_deadline(5):
+                pass
+            restored = signal.getsignal(signal.SIGALRM)
+            armed = signal.getitimer(signal.ITIMER_REAL)[0]
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_handler)
+            if previous_timer[0]:
+                signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+        self.assertIs(restored, signal.SIG_DFL)
+        self.assertGreater(armed, 45)
