@@ -249,6 +249,31 @@ class DeadlineCheckPointTests(IsolatedTestCase):
                 seen.append((timer, [p["label"] for p in runtime._SOFT_DEADLINES]))
         self.assertEqual(seen, [((0.0, 0.0), ["outer"])])
 
+    def test_alarm_in_a_nested_kept_exit_keeps_the_enclosing_deadline(self):
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+        self.addCleanup(signal.pthread_sigmask, signal.SIG_UNBLOCK, {signal.SIGALRM})
+        exit_code = runtime.deadline.__exit__.__code__
+
+        def fire(frame, _event, _arg):
+            if frame.f_code is exit_code:
+                sys.settrace(None)
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.getsignal(signal.SIGALRM)(signal.SIGALRM, frame)
+
+        self.addCleanup(sys.settrace, None)
+        seen = []
+        with self.assertRaises(TimeoutError):
+            with runtime.deadline(5, "outer", soft=True):
+                with runtime.deadline(50, "middle", soft=True):
+                    held = signal.getsignal(signal.SIGALRM)
+                    with self.assertRaises(TimeoutError):
+                        with runtime.deadline(50, "inner", soft=True):
+                            sys.settrace(fire)
+                    live = signal.getsignal(signal.SIGALRM)
+                    labels = [p["label"] for p in runtime._SOFT_DEADLINES]
+                    seen.append((live is held, labels))
+        self.assertEqual(seen, [(True, ["outer", "middle"])])
+
     def runtime_clock(self):
         clock = [0.0]
         real = runtime.time
