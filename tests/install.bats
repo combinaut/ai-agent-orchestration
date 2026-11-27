@@ -1686,6 +1686,13 @@ TOML
   contains "$output" "removed stale   $plugin/rules/claude-always.md"
 }
 
+@test "install links the agy sandbox rule into the plugin" {
+  fresh_install
+  plugin="$HOME/.gemini/config/plugins/ai-agent-orchestration"
+  clone=$(cd "$CLONE" && pwd -P)
+  [ "$(readlink "$plugin/rules/orch-agy-sandbox.md")" = "$clone/snippets/agy-sandbox.md" ]
+}
+
 @test "a path-scoped Claude rule is not given to agy" {
   mkdir -p "$HOME/.claude/rules"
   printf -- '---\npaths: "src/**"\n---\nscoped\n' >"$HOME/.claude/rules/scoped.md"

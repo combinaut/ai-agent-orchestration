@@ -4,16 +4,21 @@
 setup() {
   ROOT=$(cd "$BATS_TEST_DIRNAME/.." && pwd -P)
   SCRIPT="$ROOT/coordinator/gemini-start.sh"
-  TMP=$(mktemp -d "${TMPDIR:-/tmp}/gemini-start-bats.XXXXXX")
+  TMP=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/gemini-start-bats.XXXXXX")" && pwd -P)
   export HOME="$TMP/home"
   export PATH="$TMP/bin:$PATH"
   export HERDR_CALLS="$TMP/herdr.calls"
   export ORCH_CONFIG="$TMP/orchestration.toml"
-  unset ORCH_GEMINI_WORKER_MODEL ORCH_GEMINI_SMART_MODEL ORCH_PROVIDERS
+  export HERDR_PANE_CWD="$TMP"
+  unset ORCH_GEMINI_WORKER_MODEL ORCH_GEMINI_SMART_MODEL ORCH_PROVIDERS ORCH_HEAVY_SLOTS_DIR GIT_CONFIG_GLOBAL XDG_CONFIG_HOME
   mkdir -p "$HOME" "$TMP/bin"
   printf '[models]\ngemini_worker = "gemini-4-neon-medium"\ngemini_smart = "gemini-4-neon-high"\n' >"$ORCH_CONFIG"
   cat >"$TMP/bin/herdr" <<'SH'
 #!/bin/sh
+if [ "$1 $2" = "pane get" ]; then
+  printf '{"result":{"pane":{"cwd":"%s"}}}\n' "$HERDR_PANE_CWD"
+  exit 0
+fi
 printf '%s\n' "$*" >>"$HERDR_CALLS"
 SH
   chmod +x "$TMP/bin/herdr"
@@ -23,6 +28,17 @@ SH
   printf '{}\n' >"$PLUGIN/plugin.json"
   printf 'rules\n' >"$HOME/.claude/CLAUDE.md"
   ln -s "$HOME/.claude/CLAUDE.md" "$PLUGIN/rules/AGENTS.md"
+  printf 'sandbox\n' >"$PLUGIN/rules/orch-agy-sandbox.md"
+}
+
+# allow_rules: the permissions.allow entries of the --settings JSON in the agent start call, one per line.
+allow_rules() {
+  python3 -c 'import json, sys; line = open(sys.argv[1]).read(); print("\n".join(json.loads(line.split(" --settings ", 1)[1])["permissions"]["allow"]))' "$HERDR_CALLS"
+}
+
+# has_rule <rule>: the start call grants exactly this rule.
+has_rule() {
+  allow_rules | grep -qxF "$1"
 }
 
 teardown() {
@@ -32,20 +48,20 @@ teardown() {
 @test "worker tier starts agy with --model and --mode auto" {
   run "$SCRIPT" w1 pane1 worker
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-medium --mode auto" ]
+  [[ "$(cat "$HERDR_CALLS")" == "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-medium --mode auto --settings {"* ]] || false
 }
 
 @test "smart tier starts agy with the smart model" {
   run "$SCRIPT" w1 pane1 smart
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-high --mode auto" ]
+  [[ "$(cat "$HERDR_CALLS")" == "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-high --mode auto --settings {"* ]] || false
 }
 
 @test "one set Gemini model serves both tiers" {
   printf '[models]\ngemini_worker = ""\ngemini_smart = "gemini-4-neon-high"\n' >"$ORCH_CONFIG"
   run "$SCRIPT" w1 pane1 worker
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-high --mode auto" ]
+  [[ "$(cat "$HERDR_CALLS")" == "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-high --mode auto --settings {"* ]] || false
 }
 
 @test "an empty tier setting with no fallback means gemini is not configured" {
@@ -102,7 +118,7 @@ teardown() {
   printf '[models]\ngemini_worker = "gemini-4-neon-medium"\n' >"$ORCH_CONFIG"
   run "$SCRIPT" w1 pane1 worker
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-medium --mode auto" ]
+  [[ "$(cat "$HERDR_CALLS")" == "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-medium --mode auto --settings {"* ]] || false
 }
 
 @test "a missing agy plugin manifest is refused" {
@@ -119,4 +135,67 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"$PLUGIN/rules/AGENTS.md is missing or dangling"* ]] || false
   [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "a missing agy sandbox rule is refused" {
+  rm "$PLUGIN/rules/orch-agy-sandbox.md"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$PLUGIN/rules/orch-agy-sandbox.md is missing or dangling"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "agy gets read rules for the orch checkout and config and write rules for reports and slots" {
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 0 ]
+  has_rule "read_file($ROOT)"
+  has_rule "read_file($ORCH_CONFIG)"
+  has_rule "write_file($HOME/.claude/worker-reports)"
+  has_rule "write_file($HOME/.claude/heavy-slots)"
+  [ -d "$HOME/.claude/worker-reports" ]
+  [ -d "$HOME/.claude/heavy-slots" ]
+  ! allow_rules | grep -qvE '^(read_file|write_file)\(/' || false
+}
+
+@test "a configured heavy-slot dir gets the write rule" {
+  export ORCH_HEAVY_SLOTS_DIR="$TMP/slots"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 0 ]
+  has_rule "write_file($TMP/slots)"
+  ! has_rule "write_file($HOME/.claude/heavy-slots)" || false
+}
+
+@test "the global git config, its includes, the excludes file and the worktree's git dir are readable" {
+  printf '[include]\n\tpath = ~/.gitconfig.local\n[core]\n\texcludesFile = ~/.gitignore_global\n' >"$HOME/.gitconfig"
+  printf '[user]\n\tname = probe\n' >"$HOME/.gitconfig.local"
+  : >"$HOME/.gitignore_global"
+  git init -q "$TMP/main"
+  git -C "$TMP/main" -c user.email=a@b -c user.name=a commit -q --allow-empty -m init
+  git -C "$TMP/main" worktree add -q "$TMP/wt" 2>/dev/null
+  export HERDR_PANE_CWD="$TMP/wt"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 0 ]
+  has_rule "read_file($HOME/.gitconfig)"
+  has_rule "read_file($HOME/.gitconfig.local)"
+  has_rule "read_file($HOME/.gitignore_global)"
+  has_rule "read_file($TMP/main/.git)"
+}
+
+@test "paths that do not exist get no rule" {
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 0 ]
+  has_rule "read_file($ORCH_CONFIG)"
+  ! allow_rules | grep -qF 'orchestration.env' || false
+  ! allow_rules | grep -qF '.git)' || false
+  ! allow_rules | grep -qF 'gitconfig' || false
+}
+
+@test "a symlinked path is granted at its link and its target" {
+  mkdir -p "$TMP/elsewhere"
+  printf 'X=1\n' >"$TMP/elsewhere/orchestration.env"
+  ln -s "$TMP/elsewhere/orchestration.env" "$HOME/.claude/orchestration.env"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 0 ]
+  has_rule "read_file($HOME/.claude/orchestration.env)"
+  has_rule "read_file($TMP/elsewhere/orchestration.env)"
 }
