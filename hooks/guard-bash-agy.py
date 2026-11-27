@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """agy PreToolUse hook: runs guard-bash.py on a run_command line or on the text
 a manage_task send_input types into a running command.
-A deny prints {"decision": "deny", "reason": ...}; a pass prints nothing, because
-agy reads "{}" as a deny and "allow" skips its Auto check. Errors fail open.
+A deny prints {"decision": "deny", "reason": ...}; a pass prints nothing: agy reads
+"{}" as a deny. Errors fail open.
 """
 
 import datetime

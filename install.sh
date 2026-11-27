@@ -481,7 +481,6 @@ write_file() {
   n_linked=$((n_linked + 1))
 }
 
-# agy runs each run_command and manage_task call through the plugin's hooks.json.
 write_agy_hooks() {
   local cmd
   cmd="ORCH_CONFIG=$(printf '%q' "$(placeholder_value ORCH_CONFIG)") python3 ~/.claude/hooks/guard-bash-agy.py"
@@ -830,7 +829,7 @@ allow_bind_self() {
   say "added" "$settings: bind-self.py and heavy-slot stop allow rules ($(jq -r 'join(", ")' <<<"$missing"))"
 }
 
-# The linked guard must deny a forbidden command with exit 2 and the attribution reason on stderr.
+# The linked guard must deny a forbidden command with exit 2 and the attribution reason on stderr; the agy adapter must print a deny decision with that reason.
 verify_guard() {
   local status=0 reason
   reason=$(printf '%s' '{"tool_name":"Bash","cwd":"/","tool_input":{"command":"git commit -m \"Co-Authored-By: Claude\""}}' |
