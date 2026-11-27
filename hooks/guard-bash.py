@@ -1733,9 +1733,15 @@ WRAPPER_OPTIONS = {
         "--chdir": 1,
         "-S": 1,
         "--split-string": 1,
-        "--default-signal": 1,
-        "--ignore-signal": 1,
-        "--block-signal": 1,
+        "-P": 1,
+        "-a": 1,
+        "--argv0": 1,
+        "--env0-from": 1,
+        "-v": 0,
+        "--debug": 0,
+        "--default-signal": "optional",
+        "--ignore-signal": "optional",
+        "--block-signal": "optional",
         "--list-signal-handling": 0,
         "--help": 0,
         "--version": 0,
@@ -1755,6 +1761,9 @@ WRAPPER_OPTIONS = {
         "--verbose": 0,
         "-q": 0,
         "--quiet": 0,
+        "-l": 0,
+        "-h": 0,
+        "-V": 0,
         "--help": 0,
         "--version": 0,
     },
@@ -1763,8 +1772,12 @@ WRAPPER_OPTIONS = {
         "--kill-after": 1,
         "-s": 1,
         "--signal": 1,
+        "-f": 0,
         "--foreground": 0,
+        "-p": 0,
         "--preserve-status": 0,
+        "-v": 0,
+        "--verbose": 0,
         "--help": 0,
         "--version": 0,
     },
@@ -1779,6 +1792,8 @@ WRAPPER_OPTIONS = {
         "--close-from": 1,
         "-D": 1,
         "--chdir": 1,
+        "-R": 1,
+        "--chroot": 1,
         "-h": 1,
         "--host": 1,
         "-p": 1,
@@ -1815,6 +1830,15 @@ WRAPPER_OPTIONS = {
         "--stdin": 0,
         "-s": 0,
         "--shell": 0,
+        "-e": 0,
+        "--edit": 0,
+        "-l": 0,
+        "--list": 0,
+        "-N": 0,
+        "--no-update": 0,
+        "-V": 0,
+        "-v": 0,
+        "--validate": 0,
     },
     "xargs": {
         "-0": 0,
@@ -1828,6 +1852,7 @@ WRAPPER_OPTIONS = {
         "-e": "optional",
         "-I": 1,
         "--replace": 1,
+        "-J": 1,
         "-i": "optional",
         "-L": 1,
         "--max-lines": 1,
@@ -1840,6 +1865,10 @@ WRAPPER_OPTIONS = {
         "--interactive": 0,
         "-r": 0,
         "--no-run-if-empty": 0,
+        "-R": 1,
+        "-S": 1,
+        "-o": 0,
+        "--open-tty": 0,
         "-s": 1,
         "--max-chars": 1,
         "-t": 0,
@@ -1862,17 +1891,18 @@ def unwrap_wrapper_options(words, wrapper):
             break
         name, equals, attached = option.partition("=")
         arity = options.get(name)
-        if arity is None and not equals:
-            for short, short_arity in options.items():
-                if (
-                    short.startswith("--")
-                    or not option.startswith(short)
-                    or len(option) == len(short)
-                ):
-                    continue
-                arity = short_arity
-                attached = option[len(short) :]
-                break
+        if arity is None and not option.startswith("--"):
+            for index in range(1, len(option)):
+                short_arity = options.get("-" + option[index])
+                if short_arity in (1, "optional"):
+                    if any(
+                        options.get("-" + letter) is None for letter in option[1:index]
+                    ):
+                        return [option, *words]
+                    name = "-" + option[index]
+                    arity = short_arity
+                    attached = option[index + 1 :]
+                    break
         if arity is None:
             continue
         if arity == 1:
@@ -2118,6 +2148,14 @@ HERDR_PAIRS = (
     ("pane", "send-text"),
 )
 CURSOR_REASON = "Cursor starts only through ~/.claude/coordinator/cursor-start.sh <name> <pane> <worker|smart>; the provider and model come from settings."
+AGY_REASON = "agy (Gemini) starts only through ~/.claude/coordinator/gemini-start.sh <name> <pane> <worker|smart>; the model comes from settings, and a raw agy start or an agy bypass flag is denied."
+AGY_INFO_ARGS = {"--version", "--help", "-h", "help", "models"}
+AGY_BYPASS_FLAGS = (
+    "--dangerously-skip-permissions",
+    "--remote-agent",
+    "--remote-control",
+)
+AGY_PROMPT = re.compile(r"\s*agy(?:\s|$)")
 PI_INFO_FLAGS = {"--list-models", "--help", "-h", "--version", "-v"}
 
 
@@ -2143,7 +2181,13 @@ def pi_kind(args):
 
 
 def guard_pi(executable, args, where=".", disabled=()):
-    """Enforce the pi and Cursor launchers and model restrictions on agent starts."""
+    """Enforce the pi, Cursor and agy launchers and model restrictions on agent starts."""
+    if executable == "agy":
+        if any(
+            re.sub(r"^-+", "--", a.split("=", 1)[0]) in AGY_BYPASS_FLAGS for a in args
+        ):
+            return AGY_REASON
+        return None if args[:1] and args[0] in AGY_INFO_ARGS else AGY_REASON
     if executable in ("cursor-agent", "agent"):
         return None if pi_info(args) else CURSOR_REASON
     if executable == "cursor":
@@ -2157,6 +2201,8 @@ def guard_pi(executable, args, where=".", disabled=()):
             kinds = pi_kind(args)
             if "cursor" in kinds:
                 return CURSOR_REASON
+            if "agy" in kinds or "gemini" in kinds:
+                return AGY_REASON
             agent_args = rest[rest.index("--") + 1 :] if "--" in rest else []
             if "codex" in kinds and (
                 codex_widened(agent_args)
@@ -2181,8 +2227,11 @@ def guard_pi(executable, args, where=".", disabled=()):
             return evaluate(text, where, disabled) or guard_pi_text(
                 text, where, disabled, 0, strict=True
             )
-        elif pair == ("agent", "prompt") and MODEL_COMMAND.match(text):
-            return PI_REASON
+        elif pair == ("agent", "prompt"):
+            if MODEL_COMMAND.match(text):
+                return PI_REASON
+            if AGY_PROMPT.match(text):
+                return AGY_REASON
     elif not pi_info(args):
         names_model = any(
             a in ("--provider", "--model") or a.startswith(("--provider=", "--model="))
@@ -2209,7 +2258,7 @@ def pi_candidates(words, wrapped):
         for candidate in found
         if candidate
         and os.path.basename(candidate[0])
-        in ("herdr", "pi", "cursor", "cursor-agent", "agent")
+        in ("herdr", "pi", "cursor", "cursor-agent", "agent", "agy")
     ]
 
 
@@ -2262,6 +2311,7 @@ def guard_pi_text(text, where, disabled, depth, direct=True, strict=False):
 GUARDED_EXECUTABLES = {
     "herdr",
     "pi",
+    "agy",
     "git",
     "gh",
     "pkill",
@@ -2275,6 +2325,19 @@ GUARDED_EXECUTABLES = {
     "find",
     "fd",
 }
+
+
+SHELL_KEYWORDS = {"then", "do", "else", "elif", "{", "}", "!"}
+PLAIN_PROGRAMS = {"grep", "echo", "printf", "ps", "pgrep"}
+
+
+def argument_word(words, index, keyword):
+    """True when a later `agy` or `pi` word is an argument of a program that does not run its arguments (`timeout 30 grep -rn agy hooks/`), not a command: no shell keyword stands before it. `keyword` is the index of the first shell keyword after the first word, or len(words)."""
+    return (
+        index < keyword
+        and os.path.basename(words[index]) in ("agy", "pi")
+        and os.path.basename(words[0]) in PLAIN_PROGRAMS
+    )
 
 
 def evaluate_words(words, where, command, disabled, pipeline):
@@ -2312,7 +2375,7 @@ def evaluate_words(words, where, command, disabled, pipeline):
             return GITHUB_WRITE_OPTION_REASON
         args = unwrap_gh(wrapped_args)
         guards = (guard_attribution,)
-    elif executable in ("herdr", "pi", "cursor", "cursor-agent", "agent"):
+    elif executable in ("herdr", "pi", "cursor", "cursor-agent", "agent", "agy"):
         return (
             None
             if "guard_pi" in disabled
@@ -2352,15 +2415,22 @@ def evaluate(command, cwd, disabled=()):
         for words, where, pipeline in commands(normalized_command, cwd):
             # Familiar wrappers may have incomplete option parsing. Inspect every later
             # guarded executable too, so a leftover option value cannot hide a command.
+            # A later agy or pi word that is an argument of grep, echo, printf, ps or
+            # pgrep is skipped.
             words, wrapped = unwrap(words, lookup_ok)
             if not words:
                 continue
             candidates = [words]
             if wrapped:
+                keyword = next(
+                    (i for i, w in enumerate(words) if i and w in SHELL_KEYWORDS),
+                    len(words),
+                )
                 candidates += [
                     words[index:]
                     for index, word in enumerate(words)
                     if os.path.basename(word) in GUARDED_EXECUTABLES
+                    and not argument_word(words, index, keyword)
                 ]
             for candidate in candidates:
                 reason = evaluate_words(
