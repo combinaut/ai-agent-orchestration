@@ -1686,6 +1686,26 @@ TOML
   contains "$output" "removed stale   $plugin/rules/claude-always.md"
 }
 
+@test "install writes the agy guard hook with the Claude hook's config and keeps it on a re-run" {
+  fresh_install
+  hooks="$HOME/.gemini/config/plugins/ai-agent-orchestration/hooks.json"
+  [ -f "$hooks" ] && [ ! -L "$hooks" ]
+  [ "$(jq -r 'keys[]' "$hooks")" = ai-agent-orchestration-guard-bash ]
+  [ "$(jq -r '.[].PreToolUse[0].matcher' "$hooks")" = 'run_command|manage_task' ]
+  cmd=$(jq -r '.[].PreToolUse[0].hooks[0].command' "$hooks")
+  claude=$(jq -r '[.hooks.PreToolUse[].hooks[].command | select(endswith("guard-bash.py"))][0]' "$HOME/.claude/settings.json")
+  [ "$cmd" = "${claude%guard-bash.py}guard-bash-agy.py" ]
+  contains "$output" "verified        $HOME/.claude/hooks/guard-bash-agy.py denies a forbidden command"
+  payload='{"toolCall":{"name":"run_command","args":{"CommandLine":"git push origin main"}},"cwd":"/"}'
+  [ "$(cd "$(dirname "$hooks")" && printf '%s' "$payload" | sh -c "$cmd" | jq -r .decision)" = deny ]
+  install_ok
+  contains "$output" "already set     $hooks"
+  printf '{}\n' >"$hooks"
+  install_ok
+  contains "$output" "backed up       $hooks -> "
+  [ "$(jq -r '.[].PreToolUse[0].hooks[0].command' "$hooks")" = "$cmd" ]
+}
+
 @test "a path-scoped Claude rule is not given to agy" {
   mkdir -p "$HOME/.claude/rules"
   printf -- '---\npaths: "src/**"\n---\nscoped\n' >"$HOME/.claude/rules/scoped.md"
