@@ -54,7 +54,7 @@ WAIT_OWNER = re.compile(
     r"^workers: WORKER WAITING .+ pane=\S+ owner=([A-Za-z0-9_-]+) \d+m session=\S+"
 )
 OWNER = re.compile(
-    r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER(?:-SOFT|-HARD)? \S+|workers: WORKER IDLE \S+|workers: WORKER (?:DONE|QUESTION(?: TO USER| EXPIRED)?|ANSWER LATE) \S+) owner=([A-Za-z0-9_-]+) "
+    r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER(?:-SOFT|-HARD)? \S+|workers: WORKER IDLE \S+|workers: WORKER (?:DONE|QUESTION) \S+) owner=([A-Za-z0-9_-]+) "
 )
 
 spec = importlib.util.spec_from_file_location("reader", w.ROOT / "read-alerts.py")

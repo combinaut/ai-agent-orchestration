@@ -95,7 +95,7 @@ unchanged. No picker opens in the worker pane.
 
 | Resource | Bound |
 |---|---|
-| Pending questions | One per pane; at most 200 question records machine-wide, including deferred panel cleanup; further asks fail clearly |
+| Pending questions | One per pane; at most 200 question records machine-wide; further asks fail clearly |
 | Ask wait | `workers.ask_timeout_s` / `ORCH_ASK_TIMEOUT_S`, default 1800 seconds; positive finite override `--timeout` |
 | Waiting ask polling | At most once per second, last sleep capped by remaining time |
 | Heartbeats | One accepted per 30 seconds; fresh for 300 seconds |

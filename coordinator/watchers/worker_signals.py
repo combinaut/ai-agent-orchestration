@@ -158,12 +158,10 @@ def remove_question(record, close_panel=True):
     identifier = record["id"]
     panel = questions_directory() / (identifier + ".md")
     if not close_panel and (panel.exists() or record.get("resume_answer")):
-        if not close_panel:
-            record["cleanup"] = True
-            write(question_path(identifier), record)
-            answer_path(identifier).unlink(missing_ok=True)
-            panel.with_suffix(".remind").unlink(missing_ok=True)
-            return False
+        record["cleanup"] = True
+        write(question_path(identifier), record)
+        answer_path(identifier).unlink(missing_ok=True)
+        panel.with_suffix(".remind").unlink(missing_ok=True)
         return False
     question_path(identifier).unlink(missing_ok=True)
     answer_path(identifier).unlink(missing_ok=True)
