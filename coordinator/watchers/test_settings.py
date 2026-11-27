@@ -247,6 +247,18 @@ class WriteSettingTest(SettingsTest):
             '[pr]\nauthor = "b"\n# author = "old"\n',
         )
 
+    def test_a_new_table_is_added_with_the_file_line_ending(self):
+        self.assertEqual(
+            self.edit('[pr]\r\nauthor = "a"\r\n', "hog.gb", 4),
+            '[pr]\r\nauthor = "a"\r\n\r\n[hog]\r\ngb = 4\r\n',
+        )
+
+    def test_a_new_table_leaves_a_missing_final_newline_missing(self):
+        self.assertEqual(
+            self.edit('[pr]\nauthor = "a"', "hog.gb", 4),
+            '[pr]\nauthor = "a"\n\n[hog]\ngb = 4',
+        )
+
     def test_a_symlinked_file_stays_a_link_and_keeps_its_mode(self):
         real = self.write("real.toml", '[pr]\nauthor = "a"\n')
         real.chmod(0o640)

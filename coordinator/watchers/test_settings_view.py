@@ -185,8 +185,12 @@ class EditTest(ViewCase):
 
     def test_a_checklist_saves_the_ticked_choices_in_schema_order(self):
         app = self.at("providers.claude")
-        self.keys(app, ENTER, " ", "s")
+        self.keys(app, ENTER, " ", DOWN, " ", " ", "s")
         self.assertEqual(self.saved("providers.claude"), ["sonnet", "opus", "fable"])
+        self.keys(app, ENTER, " ", "s")
+        self.assertEqual(
+            self.saved("providers.claude"), ["haiku", "sonnet", "opus", "fable"]
+        )
 
     def test_a_checklist_the_schema_rejects_writes_nothing(self):
         app = self.at("providers.enabled")
@@ -259,10 +263,11 @@ class OverrideAndErrorTest(ViewCase):
         self.assertNotIn("\x07", self.out.getvalue())
 
     def test_a_broken_file_shows_the_error_and_edits_nothing(self):
-        broken = "[pr]\nnope = 1\n"
+        broken = "[pr\n"
         self.path.write_text(broken)
         app = self.at("herdr.todo_pane")
-        self.assertIn("unknown key", self.frame())
+        self.assertIn("invalid TOML", app.error)
+        self.assertIn("ERROR:", self.frame())
         self.keys(app, " ", "u")
         self.assertEqual(self.path.read_text(), broken)
 

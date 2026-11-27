@@ -207,12 +207,7 @@ class App:
         self.selected, self.top, self.hits = 0, 0, {}
         self.values, self.path, self.create = {}, "", False
         self.last_refresh, self.shown_size = None, None
-        self.settings = sorted(
-            orch_settings.listed("global"),
-            key=lambda x: [y.table for y in orch_settings.listed("global")].index(
-                x.table
-            ),
-        )
+        self.settings = orch_settings.listed("global")
         self.rows = list(self.settings)
 
     # --- the file ---

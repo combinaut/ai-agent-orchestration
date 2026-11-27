@@ -1988,7 +1988,6 @@ def without(data, setting):
 def changed_text(label, text, setting, value):
     """spliced(), proven to parse, to hold value and to differ in nothing else."""
     before = parse(text, label)
-    validate(before, label, "global")
     new = spliced(label, text, setting, value)
     problem = ConfigError(
         f"{label}: {setting.key}: cannot be set in place; edit it by hand"
