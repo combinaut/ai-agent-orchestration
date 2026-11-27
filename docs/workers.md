@@ -91,11 +91,13 @@ rollout shapes disable this fallback and log once per failure episode;
 `test_codex_store_shape_wakes_idle_parent_once` in `test_codex_subagents.py` pins
 the supported shape. Subagent answers remain in their native threads.
 
-An owner may answer or escalate a question. Escalation uses the existing questions
-directory, answers lock, reminders and Q panel; the answers watcher forwards the
-user's answer to the blocked worker. If the asker has died, the bridge discards
-the answer and emits one `ANSWERS READFAIL answer discarded:` notice instead, except for an escalated question: its answer becomes a `WORKER ANSWER LATE` line for the owner. If opening the panel fails, a due reminder
-retries. If `orch-signal` fails, a worker must finish with `DONE: <report path>`
+An owner may answer a question. Only an ownerless legacy question may escalate through
+the existing questions directory, answers lock, reminders and Q panel; the answers
+watcher forwards the user's answer to the blocked worker. If the asker has died, the
+bridge discards the answer and emits one `ANSWERS READFAIL answer discarded:` notice
+instead, except for an ownerless escalated question: its answer becomes a `WORKER
+ANSWER LATE` line for the owner. If opening that panel fails, a due reminder retries.
+If `orch-signal` fails, a worker must finish with `DONE: <report path>`
 or ask with `QUESTION: <text>` so its owner can recover the result; plain
 `QUESTION:` is also the fallback when `ask` times out. `NEED SLOT:` is
 unchanged. No picker opens in the worker pane.
