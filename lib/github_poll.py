@@ -195,9 +195,12 @@ class call_deadline:
             if time.time() < expires and time.monotonic() < monotonic_expires:
                 return
             expired._fired = True
-            if frame and frame.f_code is _EXIT_CODE:
+            if frame and frame.f_code is _EXIT_CODE and frame.f_locals["self"] is self:
                 # The body is done, but __exit__ has not reached its restore.
                 restore()
+                if inherited and callable(previous_handler):
+                    # The direct call below is this alarm's one delivery.
+                    signal.setitimer(signal.ITIMER_REAL, 0)
             else:
                 signal.setitimer(signal.ITIMER_REAL, 0)
             if inherited and callable(previous_handler):

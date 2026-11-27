@@ -6,6 +6,7 @@ import functools
 import gc
 import signal
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -119,8 +120,8 @@ class DeadlineCheckPointTests(IsolatedTestCase):
         while True:
             n += 1
             clock[0] = 0.0
-            # A raising handler unsets the trace. Code reports opcodes only after a
-            # traced run and a later settrace, so each run follows a warm-up run.
+            # A raising handler unsets the trace. On 3.12, code reports opcodes only
+            # after a traced run and a later settrace, so each run follows a warm-up.
             alarm.arm(0)
             sys.settrace(alarm.call)
             body()
@@ -246,6 +247,147 @@ class DeadlineCheckPointTests(IsolatedTestCase):
                 timer = signal.getitimer(signal.ITIMER_REAL)
                 seen.append((timer, [p["label"] for p in runtime._SOFT_DEADLINES]))
         self.assertEqual(seen, [((0.0, 0.0), ["outer"])])
+
+    def runtime_clock(self):
+        clock = [0.0]
+        real = runtime.time
+        self.enterContext(
+            patch.object(
+                runtime,
+                "time",
+                SimpleNamespace(monotonic=lambda: real.monotonic() + clock[0]),
+            )
+        )
+        return clock
+
+    def deliver(self):
+        """Runs the installed handler as a fired one-shot alarm."""
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.getsignal(signal.SIGALRM)(signal.SIGALRM, None)
+
+    def count_deliveries(self, body, errors):
+        """Counts the errors body raises, then any a pending timer delivers."""
+        count = 0
+        for step in (body, lambda: time.sleep(0.05)):
+            try:
+                step()
+            except errors:
+                count += 1
+        return count
+
+    def test_alarm_inside_restore_is_delivered_once(self):
+        for outer, enclosing in (("soft", 0), ("soft", 500), ("poll", 0)):
+            with self.subTest(outer=outer, enclosing=enclosing):
+                clock = self.runtime_clock()
+                poll = self.poll_clock()
+                signal.signal(signal.SIGALRM, quiet)
+                signal.setitimer(signal.ITIMER_REAL, enclosing)
+                test = self
+
+                class FiresOnce(list):
+                    armed = True
+
+                    def __setitem__(self, key, value):
+                        super().__setitem__(key, value)
+                        if self.armed:
+                            self.armed = False
+                            clock[0] = poll[0] = 100.0
+                            test.deliver()
+
+                seen = []
+
+                def inner():
+                    with runtime.deadline(1, "inner", soft=True):
+                        pass
+
+                manager = (
+                    runtime.deadline(5, "outer", soft=True)
+                    if outer == "soft"
+                    else g.call_deadline(5, expired_error=Expired)
+                )
+                with patch.object(runtime, "_SOFT_DEADLINES", FiresOnce()):
+                    try:
+                        with manager:
+                            held = signal.getsignal(signal.SIGALRM)
+                            count = self.count_deliveries(
+                                inner, (Expired, TimeoutError)
+                            )
+                            live = signal.getsignal(signal.SIGALRM)
+                            timer = signal.getitimer(signal.ITIMER_REAL)[0]
+                            seen.append((count, live, timer > 0, held))
+                    except (Expired, TimeoutError):
+                        pass
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                [(count, live, armed, held)] = seen
+                self.assertEqual(count, 1)
+                self.assertIs(live, quiet if enclosing else held)
+                self.assertEqual(armed, bool(enclosing))
+
+    def test_alarm_in_a_kept_body_leaves_the_outer_handler_unarmed(self):
+        seen = []
+        with self.assertRaises(TimeoutError):
+            with runtime.deadline(5, "outer", soft=True):
+                held = signal.getsignal(signal.SIGALRM)
+
+                def inner():
+                    with runtime.deadline(50, "inner", soft=True):
+                        self.deliver()
+
+                count = self.count_deliveries(inner, TimeoutError)
+                live = signal.getsignal(signal.SIGALRM)
+                seen.append((count, live is held, signal.getitimer(0)))
+        self.assertEqual(seen, [(1, True, (0.0, 0.0))])
+
+    def fire_in_call_deadline_exit(self):
+        exit_code = g.call_deadline.__exit__.__code__
+
+        def fire(frame, _event, _arg):
+            if frame.f_code is exit_code:
+                sys.settrace(None)
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.getsignal(signal.SIGALRM)(signal.SIGALRM, frame)
+
+        self.addCleanup(sys.settrace, None)
+        sys.settrace(fire)
+
+    def test_alarm_in_an_inherited_exit_is_delivered_once(self):
+        clock = self.runtime_clock()
+        poll = self.poll_clock()
+        seen = []
+
+        def inner():
+            with g.call_deadline(10):
+                clock[0] = poll[0] = 100.0
+                self.fire_in_call_deadline_exit()
+
+        with self.assertRaises(TimeoutError):
+            with runtime.deadline(5, "outer", soft=True):
+                seen.append(self.count_deliveries(inner, (g._Expired, TimeoutError)))
+        self.assertEqual(seen, [1])
+
+    def test_caught_inner_exit_error_keeps_the_outer_call_deadline(self):
+        poll = self.poll_clock()
+        seen = []
+        with self.assertRaises(Expired):
+            with g.call_deadline(5, expired_error=Expired):
+                held = signal.getsignal(signal.SIGALRM)
+                try:
+                    with g.call_deadline(10):
+                        poll[0] = 100.0
+                        self.fire_in_call_deadline_exit()
+                except Expired:
+                    seen.append(signal.getsignal(signal.SIGALRM) is held)
+        self.assertEqual(seen, [True])
+
+    def test_alarm_in_an_exit_keeps_a_non_callable_timer(self):
+        poll = self.poll_clock()
+        signal.signal(signal.SIGALRM, signal.SIG_IGN)
+        signal.setitimer(signal.ITIMER_REAL, 5)
+        with self.assertRaises(g._Expired):
+            with g.call_deadline(10):
+                poll[0] = 4.0 + 1.5
+                self.fire_in_call_deadline_exit()
+        self.assertGreater(signal.getitimer(signal.ITIMER_REAL)[0], 0)
 
     def test_kept_alarm_carries_the_poll_deadline(self):
         with g.call_deadline(5):

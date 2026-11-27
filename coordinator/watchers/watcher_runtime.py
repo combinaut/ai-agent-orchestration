@@ -122,7 +122,7 @@ def arm_traceback_backstop():
 
 
 class _KeptAlarm:
-    """An enclosing alarm handler, kept by a deadline that ends no earlier."""
+    """An enclosing alarm handler, kept when its timer is due within the new deadline."""
 
     def __init__(self, owner, handler):
         self.owner = owner
@@ -167,6 +167,7 @@ class deadline:
 
         def expired(_signal, frame):
             if soft:
+                expired._spent = True
                 pending["expired"] = True
                 if (
                     frame
@@ -206,14 +207,22 @@ class deadline:
                     os._exit(70)
 
         def restore():
-            signal.setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, previous_handler)
-            if previous_timer[0]:
-                signal.setitimer(
-                    signal.ITIMER_REAL,
-                    max(0.001, previous_timer[0] - (time.monotonic() - started)),
-                    previous_timer[1],
-                )
+            spent = getattr(previous_handler, "_spent", False) or getattr(
+                previous_handler, "_fired", False
+            )
+            # A spent handler that installed its own enclosing alarm keeps it live.
+            if not spent or signal.getsignal(signal.SIGALRM) in (
+                handler,
+                previous_handler,
+            ):
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.signal(signal.SIGALRM, previous_handler)
+                if previous_timer[0] and not spent:
+                    signal.setitimer(
+                        signal.ITIMER_REAL,
+                        max(0.001, previous_timer[0] - (time.monotonic() - started)),
+                        previous_timer[1],
+                    )
             if soft:
                 _SOFT_DEADLINES[:] = [p for p in _SOFT_DEADLINES if p is not pending]
             else:
