@@ -2039,6 +2039,9 @@ PYTEST
   contains "$prompt" 'nothing was posted'
   contains "$prompt" 'send APPROVE once more'
   contains "$prompt" 'otherwise post REQUEST_CHANGES quoting its ERROR line'
+  contains "$prompt" 'When that covers every kept fix and nothing else blocks'
+  contains "$prompt" 'If you judge every named finding false or already fixed at this head and nothing else blocks'
+  contains "$prompt" 'If that second APPROVE also exits 3, post REQUEST_CHANGES quoting its ERROR line'
   contains "$prompt" 'Exit 1 is a process refusal'
   not_contains "$prompt" 'with exit 1, post REQUEST_CHANGES'
 }

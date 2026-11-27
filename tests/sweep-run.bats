@@ -1923,7 +1923,7 @@ PYTEST
   done
 }
 
-@test "a refusal names the undisputed fixes and a quoted ERROR line does not hide the retry's disputes" {
+@test "a refusal names the undisputed fixes and a pasted ERROR line does not hide the retry's disputes" {
   FAKE_PR_FINDINGS=1 run_sweep
   as_comment author
   edit_comments 'r["items"].append(dict(r["items"][0], id="F8")); r["items"].append(dict(r["items"][0], id="F9", **{"class": "nit"})); r["open_fix"] = 2; r["findings"] += 2; r["verdicts"][r["items"][0]["verdict"]] += 2'
