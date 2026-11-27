@@ -43,6 +43,7 @@ plugin="$HOME/.gemini/config/plugins/ai-agent-orchestration"
 for f in plugin.json rules/AGENTS.md rules/orch-agy-sandbox.md; do
   [ -e "$plugin/$f" ] || { echo "gemini-start.sh: $plugin/$f is missing or dangling, so agy would start without the orch skills and your rules; run install.sh" >&2; exit 1; }
 done
+[ -e "$plugin/hooks.json" ] || { echo "gemini-start.sh: $plugin/hooks.json is missing, so agy would run commands without the Bash guard; run install.sh" >&2; exit 1; }
 
 herdr_bin=${ORCH_HERDR_BIN:-herdr}
 orch_need_cmd "$herdr_bin"

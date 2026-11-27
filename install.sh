@@ -447,6 +447,7 @@ link_shared_files() {
   link_entry "$ORCH_REPO/worker-reports/machine-rules.md" "$CLAUDE_DIR/worker-reports/machine-rules.md"
   link_entry "$ORCH_REPO/hooks/orch-update-check.sh" "$CLAUDE_DIR/hooks/orch-update-check.sh"
   link_entry "$ORCH_REPO/hooks/guard-bash.py" "$CLAUDE_DIR/hooks/guard-bash.py"
+  link_entry "$ORCH_REPO/hooks/guard-bash-agy.py" "$CLAUDE_DIR/hooks/guard-bash-agy.py"
   link_agy_plugin
 }
 
@@ -460,8 +461,34 @@ agy_size_check() {
   [ "$2" -le "$AGY_RULE_CAP" ] || say "warning" "$1 is $2 bytes; agy cuts a rule file at $AGY_RULE_CAP bytes, so gemini workers miss its end"
 }
 
+# write_file <dest> <text> <note>: writes text to dest, backing up a different file.
+write_file() {
+  local backup
+  if [ -f "$1" ] && [ ! -L "$1" ] && [ "$(cat "$1")" = "$2" ]; then
+    say "already set" "$1"
+    n_ok=$((n_ok + 1))
+    return
+  fi
+  if [ -L "$1" ] || [ -e "$1" ]; then
+    backup=$(backup_name "$1")
+    mv "$1" "$backup"
+    say "backed up" "$1 -> $backup"
+    n_backup=$((n_backup + 1))
+  fi
+  mkdir -p "$(dirname "$1")"
+  printf '%s\n' "$2" >"$1"
+  say "wrote" "$1$3"
+  n_linked=$((n_linked + 1))
+}
+
+write_agy_hooks() {
+  local cmd
+  cmd="ORCH_CONFIG=$(printf '%q' "$(placeholder_value ORCH_CONFIG)") python3 ~/.claude/hooks/guard-bash-agy.py"
+  write_file "$AGY_PLUGIN/hooks.json" "$(jq -n --arg cmd "$cmd" '{"ai-agent-orchestration-guard-bash": {PreToolUse: [{matcher: "run_command|manage_task", hooks: [{type: "command", command: $cmd, timeout: 10}]}]}}')" ""
+}
+
 link_agy_plugin() {
-  local d name src dest text bytes backup total=0
+  local d name src dest text bytes total=0
   link_entry "$ORCH_REPO/snippets/agy-plugin.json" "$AGY_PLUGIN/plugin.json"
   for d in "$ORCH_REPO"/skills/*/; do
     [ -d "$d" ] || continue
@@ -494,22 +521,9 @@ link_agy_plugin() {
     agy_size_check "$src" "$bytes"
     total=$((total + bytes))
     text=$(printf -- '---\ntrigger: always_on\n---\n@[%s](%s)\n' "$name" "$src")
-    if [ -f "$dest" ] && [ ! -L "$dest" ] && [ "$(cat "$dest")" = "$text" ]; then
-      say "already set" "$dest"
-      n_ok=$((n_ok + 1))
-      continue
-    fi
-    if [ -L "$dest" ] || [ -e "$dest" ]; then
-      backup=$(backup_name "$dest")
-      mv "$dest" "$backup"
-      say "backed up" "$dest -> $backup"
-      n_backup=$((n_backup + 1))
-    fi
-    mkdir -p "$AGY_PLUGIN/rules"
-    printf '%s\n' "$text" >"$dest"
-    say "wrote" "$dest (includes $src)"
-    n_linked=$((n_linked + 1))
+    write_file "$dest" "$text" " (includes $src)"
   done
+  write_agy_hooks
   # About four bytes per token.
   [ $((total / 4)) -le "$AGY_RULES_TOKENS" ] || say "warning" "the rules for agy total $total bytes (about $((total / 4)) tokens); over agy's $AGY_RULES_TOKENS-token budget it gives workers file paths instead of the text"
 }
@@ -816,7 +830,7 @@ allow_bind_self() {
   say "added" "$settings: bind-self.py and heavy-slot stop allow rules ($(jq -r 'join(", ")' <<<"$missing"))"
 }
 
-# The linked guard must deny a forbidden command with exit 2 and the attribution reason on stderr.
+# The linked guard must deny a forbidden command with exit 2 and the attribution reason on stderr; the agy adapter must print a deny decision with that reason.
 verify_guard() {
   local status=0 reason
   reason=$(printf '%s' '{"tool_name":"Bash","cwd":"/","tool_input":{"command":"git commit -m \"Co-Authored-By: Claude\""}}' |
@@ -824,6 +838,12 @@ verify_guard() {
   case "$status:$reason" in
     "2:No AI attribution"*) say "verified" "$CLAUDE_DIR/hooks/guard-bash.py denies a forbidden command" ;;
     *) die "$CLAUDE_DIR/hooks/guard-bash.py did not deny a forbidden command (exit $status: ${reason:-no reason}); Bash is unguarded" ;;
+  esac
+  reason=$(printf '%s' '{"toolCall":{"name":"run_command","args":{"CommandLine":"git commit -m \"Co-Authored-By: Claude\""}},"cwd":"/"}' |
+    python3 "$CLAUDE_DIR/hooks/guard-bash-agy.py" | jq -r 'select(.decision == "deny") | .reason' 2>/dev/null) || true
+  case "$reason" in
+    "No AI attribution"*) say "verified" "$CLAUDE_DIR/hooks/guard-bash-agy.py denies a forbidden command" ;;
+    *) die "$CLAUDE_DIR/hooks/guard-bash-agy.py did not deny a forbidden command (${reason:-no deny}); agy workers are unguarded" ;;
   esac
 }
 

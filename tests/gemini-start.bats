@@ -32,6 +32,7 @@ SH
   PLUGIN="$HOME/.gemini/config/plugins/ai-agent-orchestration"
   mkdir -p "$PLUGIN/rules" "$HOME/.claude"
   printf '{}\n' >"$PLUGIN/plugin.json"
+  printf '{}\n' >"$PLUGIN/hooks.json"
   printf 'rules\n' >"$HOME/.claude/CLAUDE.md"
   ln -s "$HOME/.claude/CLAUDE.md" "$PLUGIN/rules/AGENTS.md"
   printf 'sandbox\n' >"$PLUGIN/rules/orch-agy-sandbox.md"
@@ -134,6 +135,14 @@ teardown() {
   [[ "$output" == *"$PLUGIN/plugin.json is missing or dangling"*"run install.sh"* ]] || false
   [ ! -e "$HERDR_CALLS" ]
   [ ! -e "$HOME/.gemini/antigravity-cli/settings.json" ]
+}
+
+@test "a missing agy guard hook is refused" {
+  rm "$PLUGIN/hooks.json"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$PLUGIN/hooks.json is missing, so agy would run commands without the Bash guard"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
 }
 
 @test "a dangling agy rules link is refused" {
