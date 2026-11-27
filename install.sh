@@ -474,7 +474,7 @@ link_agy_plugin() {
     total=$bytes
   fi
   for dest in "$AGY_PLUGIN"/rules/claude-*.md; do
-    [ -f "$dest" ] && [ ! -L "$dest" ] || continue
+    if [ ! -f "$dest" ] || [ -L "$dest" ]; then continue; fi
     name=${dest##*/rules/claude-}
     [ ! -f "$CLAUDE_DIR/rules/$name" ] || continue
     rm "$dest"
@@ -507,6 +507,7 @@ link_agy_plugin() {
     mkdir -p "$AGY_PLUGIN/rules"
     printf '%s\n' "$text" >"$dest"
     say "wrote" "$dest (includes $src)"
+    n_linked=$((n_linked + 1))
   done
   # About four bytes per token.
   [ $((total / 4)) -le "$AGY_RULES_TOKENS" ] || say "warning" "the rules for agy total $total bytes (about $((total / 4)) tokens); over agy's $AGY_RULES_TOKENS-token budget it gives workers file paths instead of the text"
