@@ -1895,18 +1895,14 @@ def reduce_answers(before, raw):
 
 
 def acknowledge_answers(raw):
-    notices = []
     for slug, text, path, _ in raw.get("answers", []):
         if not path:
             continue
-        notice = worker_signals.bridge_user_answer(slug, text)
-        if notice:
-            notices.append(notice)
         processing = Path(path)
         processing.replace(
             processing.with_name(processing.name.removesuffix(".processing") + ".seen")
         )
-    return notices
+    return []
 
 
 def reduce(mode, before, raw):

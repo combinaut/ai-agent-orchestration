@@ -120,20 +120,6 @@ pending_question() {
   id=${id%.json}
 }
 
-ownerless_pending_question() {
-  pending_question
-  "$PYTHON" -c '
-import json
-import pathlib
-import sys
-
-path = pathlib.Path(sys.argv[1])
-record = json.loads(path.read_text())
-record["owner"] = None
-path.write_text(json.dumps(record))
-' "$HOME/.claude/coordinator/worker-signals/$id.json"
-}
-
 stop_asker() {
   kill "$asker" 2>/dev/null || true
   wait "$asker" 2>/dev/null || true
@@ -285,22 +271,6 @@ assert_escalate() {
   assert_escalate "$HOME/.claude/coordinator/worker-signals"
 }
 
-@test "worker signals answer --to-user exits 73 naming the questions directory when the panel file is unwritable" {
-  ownerless_pending_question
-  chmod 555 "$TMP/questions"
-  run "$ROOT/orch-signal" answer "$id" --to-user
-  stop_asker
-  assert_escalate "$TMP/questions"
-}
-
-@test "worker signals answer --to-user exits 73 naming the questions directory when the reminder file is unwritable" {
-  ownerless_pending_question
-  deny_with_stub
-  run env ORCH_TEST_DENY=reminder "$ROOT/orch-signal" answer "$id" --to-user
-  stop_asker
-  assert_escalate "$TMP/questions"
-}
-
 @test "worker signals list exits 73 naming the questions directory when a blocking flock is denied" {
   deny_with_stub
   run env ORCH_TEST_DENY=flock "$ROOT/orch-signal" list
@@ -311,14 +281,6 @@ assert_escalate() {
   deny_with_stub
   run env ORCH_TEST_DENY=flock "$ROOT/orch-signal" ask --question 'Which version?' --timeout 5
   assert_escalate "${ORCH_USER_QUESTIONS_DIR:-$HOME/.claude/coordinator/questions}"
-}
-
-@test "worker signals answer --to-user exits 73 naming the questions directory when the reminder cleanup is denied" {
-  ownerless_pending_question
-  deny_with_stub
-  run env ORCH_TEST_DENY=unlink-remind "$ROOT/orch-signal" answer "$id" --to-user
-  stop_asker
-  assert_escalate "$TMP/questions"
 }
 
 @test "worker signals ask exits 73 naming the signals directory when the answered record cleanup is denied" {
