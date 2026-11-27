@@ -29,7 +29,7 @@ import orch_settings  # noqa: E402
 import sweep_record  # noqa: E402
 
 LIMIT = sweep_record.SLICE_LINES
-MAX_SLICES = 25
+DEFAULT_MAX_SLICES = 25
 PER_VALIDATOR = 40
 MAX_VALIDATORS = 12
 GH_TIMEOUT = 45
@@ -1059,9 +1059,10 @@ def run(args):
     if why:
         raise Failure(f"slice plan: {why}")
     print(f"PLAN {len(slices)} slices, {len(files)} files")
-    if len(slices) > MAX_SLICES:
+    if len(slices) > args.max_slices:
         raise Failure(
-            f"{len(slices)} slices; the limit is {MAX_SLICES}; split the PR",
+            f"{len(slices)} slices; the limit is {args.max_slices}; split the PR"
+            f" or set --max-slices (at most {sweep_record.MAX_SLICES})",
             3,
         )
     diffs = tempfile.mkdtemp(prefix="orch-sweep-diffs-")
@@ -1306,6 +1307,7 @@ def main(argv):
     go.add_argument("--concurrency", type=int, default=4)
     go.add_argument("--agent-timeout", type=int, default=900)
     go.add_argument("--timeout", type=int, default=3600)
+    go.add_argument("--max-slices", type=int, default=DEFAULT_MAX_SLICES)
     go.add_argument("--record")
     go.add_argument("--no-comment", action="store_true")
     go.add_argument(
@@ -1343,6 +1345,8 @@ def main(argv):
             )
         if args.concurrency > 8:
             raise Failure("--concurrency must be at most 8")
+        if not 1 <= args.max_slices <= sweep_record.MAX_SLICES:
+            raise Failure(f"--max-slices must be from 1 to {sweep_record.MAX_SLICES}")
         return run(args)
     except Failure as error:
         print(f"ERROR: {sweep_record.one_line(str(error))}", file=sys.stderr)

@@ -352,13 +352,38 @@ for line in open(sys.argv[1]):
   [ ! -e "$TMP/agent.calls" ]
 }
 
-@test "more than 25 slices stops before any agent starts" {
+@test "more than 25 slices stops before any agent starts by default" {
   for n in $(seq 1 26); do write "d$n/x.py" 5; done
   commit wide
   HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
   run_sweep --no-comment
   [ "$status" -eq 3 ]
-  [[ "$stderr" == "ERROR: "*"slices; the limit is 25"* ]]
+  [[ "$stderr" == "ERROR: 28 slices; the limit is 25; split the PR or set --max-slices (at most 50)" ]]
+  [ ! -e "$TMP/agent.calls" ]
+}
+
+@test "--max-slices 26 runs a 26-slice plan, and its record passes the gate" {
+  for n in $(seq 1 24); do write "d$n/x.py" 5; done
+  commit wide
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  printf %s "$HEAD_SHA" >"$TMP/pr_head"
+  run_sweep --max-slices 26
+  [ "$status" -eq 0 ]
+  [ "$(field 'r["slices"]')" = 26 ]
+  as_comment
+  gate
+  [ "$status" -eq 0 ]
+}
+
+@test "--max-slices outside 1 to 50 is a usage error" {
+  for n in 0 51; do
+    run_sweep --no-comment --max-slices "$n"
+    [ "$status" -eq 1 ]
+    [ "$stderr" = "ERROR: --max-slices must be from 1 to 50" ]
+  done
+  run_sweep --no-comment --max-slices 2.5
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"--max-slices"*"invalid int value"* ]]
   [ ! -e "$TMP/agent.calls" ]
 }
 
@@ -1969,13 +1994,13 @@ PYTEST
 }
 
 
-@test "the gate refuses more than 25 slices" {
+@test "the gate refuses more than 50 slices" {
   run_sweep
   as_comment
-  edit_comments 'r["plan"] = [{"name": f"s{n}", "lines": 1, "files": [{"path": f"d{n}/x.py", "old": None, "lines": 1}]} for n in range(26)]; r["slices"], r["sweep_agents"] = 26, 53; r["sweep_agent_ids"] = [f"a{n}" for n in range(53)]'
+  edit_comments 'r["plan"] = [{"name": f"s{n}", "lines": 1, "files": [{"path": f"d{n}/x.py", "old": None, "lines": 1}]} for n in range(51)]; r["slices"], r["sweep_agents"] = 51, 103; r["sweep_agent_ids"] = [f"a{n}" for n in range(103)]'
   gate
   [ "$status" -eq 1 ]
-  [[ "$stderr" == *"26 slices pass the limit of 25" ]]
+  [[ "$stderr" == *"51 slices pass the limit of 50" ]]
 }
 
 
