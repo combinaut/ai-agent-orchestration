@@ -201,7 +201,7 @@ class call_deadline:
                 # The body is done, but __exit__ has not reached its restore.
                 restore()
                 if inherited and callable(previous_handler):
-                    # The direct call below is this alarm's one delivery.
+                    # Keeps the restored timer from firing during the direct call below.
                     signal.setitimer(signal.ITIMER_REAL, 0)
             else:
                 signal.setitimer(signal.ITIMER_REAL, 0)

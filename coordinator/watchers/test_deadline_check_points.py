@@ -111,7 +111,8 @@ class DeadlineCheckPointTests(IsolatedTestCase):
             )
 
         alarm = self.enterContext(AlarmAt(modules, clock))
-        # With SIGALRM blocked, only AlarmAt runs the handler, so each run is deterministic.
+        # Blocking SIGALRM keeps the real timer from running the handler,
+        # so each run is deterministic.
         signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
         self.addCleanup(signal.pthread_sigmask, signal.SIG_UNBLOCK, {signal.SIGALRM})
         n = 0
