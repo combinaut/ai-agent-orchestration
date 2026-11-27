@@ -337,7 +337,6 @@ assert sleeps == [1, 1], sleeps
         )
 
     def test_tick_delivered_after_a_call_deadline_disarms_is_harmless(self):
-        # macOS can deliver one SIGALRM after an interval timer is disarmed.
         self.run_late_tick_driver(
             "for _ in range(1000):\n"
             "    with github_poll.call_deadline(5):\n"
