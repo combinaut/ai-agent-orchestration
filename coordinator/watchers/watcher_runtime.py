@@ -121,79 +121,115 @@ def arm_traceback_backstop():
         faulthandler.cancel_dump_traceback_later()
 
 
-@contextlib.contextmanager
-def deadline(seconds, label, *, soft=False):
+class deadline:
     """Hard exit bypasses broad read-error handlers and releases locks on death.
 
     Only used by the main thread. Nested guards retain the earlier deadline.
     SIGALRM also interrupts an in-process read/lock, with no child to time out.
     """
-    previous_handler = signal.getsignal(signal.SIGALRM)
-    previous_timer = signal.getitimer(signal.ITIMER_REAL)
-    started = time.monotonic()
-    pending = {"expired": False, "label": label}
-    if soft:
-        _SOFT_DEADLINES.append(pending)
-    else:
-        _HARD_DEADLINES.append(started + seconds)
-        arm_traceback_backstop()
 
-    def expired(_signal, _frame):
-        if soft:
-            pending["expired"] = True
-            # Keep the enclosing hard alarm live if a collector catches this.
+    def __init__(self, seconds, label, *, soft=False):
+        self.seconds = seconds
+        self.label = label
+        self.soft = soft
+
+    def __enter__(self):
+        seconds, label, soft = self.seconds, self.label, self.soft
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        previous_timer = signal.getitimer(signal.ITIMER_REAL)
+        started = time.monotonic()
+        pending = {"expired": False, "label": label}
+        self._pending = pending
+
+        def expired(_signal, frame):
+            if soft:
+                pending["expired"] = True
+                if (
+                    frame
+                    and frame.f_code is _EXIT_CODE
+                    and frame.f_locals["self"] is self
+                ):
+                    # The body is done, but __exit__ has not reached its restore.
+                    restore()
+                # Keep the enclosing hard alarm live if a collector catches this.
+                elif previous_timer[0]:
+                    signal.signal(signal.SIGALRM, previous_handler)
+                    signal.setitimer(
+                        signal.ITIMER_REAL,
+                        max(0.001, previous_timer[0] - (time.monotonic() - started)),
+                    )
+                raise TimeoutError(f"pass deadline exceeded: {label} ({seconds}s)")
+            blocking = None
+            try:
+                # Restore the shared open-file-description flag before exiting.
+                blocking = os.get_blocking(2)
+                os.set_blocking(2, False)
+                os.write(
+                    2, f"watcher deadline exceeded: {label} ({seconds}s)\n".encode()
+                )
+                if _ACTIVE_PROCESS is not None:
+                    os.write(2, f"active command: {_ACTIVE_PROCESS.args!r}\n".encode())
+                faulthandler.dump_traceback(file=2, all_threads=True)
+            except OSError:
+                pass
+            finally:
+                try:
+                    if _ACTIVE_PROCESS is not None:
+                        kill_command(_ACTIVE_PROCESS)
+                    if blocking is not None:
+                        os.set_blocking(2, blocking)
+                finally:
+                    os._exit(70)
+
+        def restore():
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_handler)
             if previous_timer[0]:
-                signal.signal(signal.SIGALRM, previous_handler)
                 signal.setitimer(
                     signal.ITIMER_REAL,
                     max(0.001, previous_timer[0] - (time.monotonic() - started)),
+                    previous_timer[1],
                 )
-            raise TimeoutError(f"pass deadline exceeded: {label} ({seconds}s)")
-        blocking = None
-        try:
-            # Restore the shared open-file-description flag before exiting.
-            blocking = os.get_blocking(2)
-            os.set_blocking(2, False)
-            os.write(2, f"watcher deadline exceeded: {label} ({seconds}s)\n".encode())
-            if _ACTIVE_PROCESS is not None:
-                os.write(2, f"active command: {_ACTIVE_PROCESS.args!r}\n".encode())
-            faulthandler.dump_traceback(file=2, all_threads=True)
-        except OSError:
-            pass
-        finally:
-            try:
-                if _ACTIVE_PROCESS is not None:
-                    kill_command(_ACTIVE_PROCESS)
-                if blocking is not None:
-                    os.set_blocking(2, blocking)
-            finally:
-                os._exit(70)
+            if soft:
+                _SOFT_DEADLINES[:] = [p for p in _SOFT_DEADLINES if p is not pending]
+            else:
+                if started + seconds in _HARD_DEADLINES:
+                    _HARD_DEADLINES.remove(started + seconds)
+                arm_traceback_backstop()
 
-    keep_previous = previous_timer[0] > 0 and previous_timer[0] <= seconds
-    signal.signal(signal.SIGALRM, previous_handler if keep_previous else expired)
-    signal.setitimer(
-        signal.ITIMER_REAL, previous_timer[0] if keep_previous else seconds
-    )
-    try:
-        yield
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous_handler)
-        if previous_timer[0]:
-            signal.setitimer(
-                signal.ITIMER_REAL,
-                max(0.001, previous_timer[0] - (time.monotonic() - started)),
-                previous_timer[1],
+        self._restore = restore
+        keep_previous = previous_timer[0] > 0 and previous_timer[0] <= seconds
+        try:
+            if soft:
+                _SOFT_DEADLINES.append(pending)
+            else:
+                _HARD_DEADLINES.append(started + seconds)
+                arm_traceback_backstop()
+            signal.signal(
+                signal.SIGALRM, previous_handler if keep_previous else expired
             )
-        if soft:
-            _SOFT_DEADLINES.remove(pending)
-        else:
-            _HARD_DEADLINES.remove(started + seconds)
-            arm_traceback_backstop()
+            signal.setitimer(
+                signal.ITIMER_REAL, previous_timer[0] if keep_previous else seconds
+            )
+        except BaseException:
+            restore()
+            raise
+
+    def __exit__(self, *_exc):
+        try:
+            self._restore()
+        except BaseException:
+            self._restore()
+            raise
         # Source-level OSError handlers can swallow the first signal. Keep an
         # exhausted pass from being committed as a success after they return.
-        if pending["expired"]:
-            raise TimeoutError(f"pass deadline exceeded: {label} ({seconds}s)")
+        if self._pending["expired"]:
+            raise TimeoutError(
+                f"pass deadline exceeded: {self.label} ({self.seconds}s)"
+            )
+
+
+_EXIT_CODE = deadline.__exit__.__code__
 
 
 def loop_clock():

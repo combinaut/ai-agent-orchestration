@@ -11,7 +11,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
@@ -162,81 +161,107 @@ def _after_timer(handler):
     return _late_tick if handler == signal.SIG_DFL else handler
 
 
-@contextmanager
-def call_deadline(seconds, *, expired_error=_Expired):
-    previous_handler = signal.getsignal(signal.SIGALRM)
-    previous_timer = signal.getitimer(signal.ITIMER_REAL)
-    restored_handler = (
-        previous_handler if previous_timer[0] else _after_timer(previous_handler)
-    )
-    started = time.time()
-    monotonic_started = time.monotonic()
-    previous_remaining = previous_timer[0]
-    if endpoints := getattr(previous_handler, "_poll_deadline", None):
-        # A poller's periodic alarm is a clock-check tick, not its deadline.
-        previous_remaining = max(
-            0.001, min(endpoints[0] - started, endpoints[1] - monotonic_started)
+class call_deadline:
+    """Restores the alarm state on exit, even when the deadline fires in enter or exit."""
+
+    def __init__(self, seconds, *, expired_error=_Expired):
+        self.seconds = seconds
+        self.expired_error = expired_error
+
+    def __enter__(self):
+        seconds = self.seconds
+        expired_error = self.expired_error
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        previous_timer = signal.getitimer(signal.ITIMER_REAL)
+        restored_handler = (
+            previous_handler if previous_timer[0] else _after_timer(previous_handler)
         )
-    inherited = 0 < previous_remaining <= seconds
-    inherited_fired = False
-    duration = previous_remaining if inherited else seconds
-    expires = started + duration
-    monotonic_expires = monotonic_started + duration
+        started = time.time()
+        monotonic_started = time.monotonic()
+        previous_remaining = previous_timer[0]
+        if endpoints := getattr(previous_handler, "_poll_deadline", None):
+            # A poller's periodic alarm is a clock-check tick, not its deadline.
+            previous_remaining = max(
+                0.001, min(endpoints[0] - started, endpoints[1] - monotonic_started)
+            )
+        inherited = 0 < previous_remaining <= seconds
+        inherited_fired = False
+        duration = previous_remaining if inherited else seconds
+        expires = started + duration
+        monotonic_expires = monotonic_started + duration
 
-    def expired(signum, frame):
-        nonlocal inherited_fired
-        if time.time() < expires and time.monotonic() < monotonic_expires:
-            return
-        expired._fired = True
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        if inherited and callable(previous_handler):
-            inherited_fired = True
-            try:
-                previous_handler(signum, frame)
-            except TimeoutError as error:
-                raise _Expired from error
-            inherited_fired = False
-        raise expired_error
-
-    expired._poll_deadline = (expires, monotonic_expires)
-    signal.signal(signal.SIGALRM, expired)
-    signal.setitimer(
-        signal.ITIMER_REAL,
-        max(0.001, min(DEADLINE_TICK, expires - started)),
-        DEADLINE_TICK,
-    )
-
-    def restore():
-        if inherited_fired:
-            if signal.getsignal(signal.SIGALRM) is expired:
-                signal.setitimer(signal.ITIMER_REAL, 0)
-                signal.signal(signal.SIGALRM, previous_handler)
-        else:
+        def expired(signum, frame):
+            nonlocal inherited_fired
+            if time.time() < expires and time.monotonic() < monotonic_expires:
+                return
+            expired._fired = True
+            if frame and frame.f_code is _EXIT_CODE:
+                # The body is done, but __exit__ has not reached its restore.
+                restore()
+                raise expired_error
             signal.setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, restored_handler)
-            if previous_timer[0] and not getattr(previous_handler, "_fired", False):
-                signal.setitimer(
-                    signal.ITIMER_REAL,
-                    max(
-                        0.001,
-                        previous_timer[0]
-                        - max(
-                            time.time() - started, time.monotonic() - monotonic_started
-                        ),
-                    ),
-                    previous_timer[1],
-                )
+            if inherited and callable(previous_handler):
+                inherited_fired = True
+                try:
+                    previous_handler(signum, frame)
+                except TimeoutError as error:
+                    raise _Expired from error
+                inherited_fired = False
+            raise expired_error
 
-    try:
-        yield
-        if time.time() >= expires or time.monotonic() >= monotonic_expires:
-            expired(signal.SIGALRM, None)
-    finally:
+        def restore():
+            if inherited_fired:
+                if signal.getsignal(signal.SIGALRM) is expired:
+                    signal.setitimer(signal.ITIMER_REAL, 0)
+                    signal.signal(signal.SIGALRM, previous_handler)
+            else:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.signal(signal.SIGALRM, restored_handler)
+                if previous_timer[0] and not getattr(previous_handler, "_fired", False):
+                    signal.setitimer(
+                        signal.ITIMER_REAL,
+                        max(
+                            0.001,
+                            previous_timer[0]
+                            - max(
+                                time.time() - started,
+                                time.monotonic() - monotonic_started,
+                            ),
+                        ),
+                        previous_timer[1],
+                    )
+
+        def check():
+            if time.time() >= expires or time.monotonic() >= monotonic_expires:
+                expired(signal.SIGALRM, None)
+
+        self._restore = restore
+        self._check = check
+        expired._poll_deadline = (expires, monotonic_expires)
         try:
-            restore()
+            signal.signal(signal.SIGALRM, expired)
+            signal.setitimer(
+                signal.ITIMER_REAL,
+                max(0.001, min(DEADLINE_TICK, expires - started)),
+                DEADLINE_TICK,
+            )
         except BaseException:
             restore()
             raise
+
+    def __exit__(self, exc_type, _exc, _traceback):
+        try:
+            if exc_type is None:
+                self._check()
+        finally:
+            try:
+                self._restore()
+            except BaseException:
+                self._restore()
+                raise
+
+
+_EXIT_CODE = call_deadline.__exit__.__code__
 
 
 def run(argv, invoke, timeout=45, retry_base=60, retry_jitter=(1, 5)):
