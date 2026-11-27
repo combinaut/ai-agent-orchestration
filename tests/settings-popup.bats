@@ -64,7 +64,7 @@ count() { grep -c "$1" "$HCONF" || true; }
   popups_install ORCH_HERDR_SETTINGS_POPUP=1
   cmp "$HCONF" "$TMP/after-first"
   not_contains "$(cat "$HERDR_CALLS")" 'server reload-config'
-  not_contains "$(cat "$HERDR_CALLS")" 'plugin link '"$CLONE/env/herdr/settings-plugin"
+  not_contains "$(cat "$HERDR_CALLS")" 'plugin link '"$(cd "$CLONE" && pwd -P)/env/herdr/settings-plugin"
 }
 
 @test "an edit inside the settings block is replaced" {
@@ -76,7 +76,7 @@ count() { grep -c "$1" "$HCONF" || true; }
   [ "$(count 'prefix+shift+s')" -eq 1 ]
 }
 
-@test "an unpaired settings marker stops the install before anything changes" {
+@test "an unpaired settings marker stops the install before either popup changes" {
   fresh_install
   printf '[ui]\n%s (managed by install.sh; edits inside are replaced)\n[theme]\n' "$START" >"$HCONF"
   cp "$HCONF" "$TMP/before"
@@ -86,4 +86,12 @@ count() { grep -c "$1" "$HCONF" || true; }
   cmp "$HCONF" "$TMP/before"
   [ ! -f "$HERDR_SETTINGS_PLUGIN" ]
   [ ! -f "$HERDR_TODO_PLUGIN" ]
+}
+
+@test "a failed settings plugin link stops the install without its key block" {
+  fresh_install
+  run env HERDR_LINK_FAIL=settings-plugin /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -ne 0 ]
+  not_contains "$output" 'Herdr plugin combinaut.settings ->'
+  not_contains "$(cat "$HCONF")" "$START"
 }

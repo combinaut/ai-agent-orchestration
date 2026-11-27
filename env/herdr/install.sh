@@ -268,7 +268,7 @@ popup_key_markers_ok() {
   ' "$1"
 }
 
-# popup_config_check: ends the install before anything changes when a popup's key block markers in Herdr's config.toml are unpaired.
+# popup_config_check: ends the install, before either popup's plugin or Herdr's config.toml changes, when a popup's key block markers are unpaired.
 popup_config_check() {
   local target name
   target=$(resolve_link_path "$(herdr_config_file)") || die "cannot resolve $(herdr_config_file)"
@@ -362,7 +362,7 @@ popup_config_sync() {
 }
 
 # install_popup: the selected popup's plugin and key block are installed unless its setting is false, which removes both.
-# Returns 0 when the config file changed.
+# Sets POPUP_CHANGED=1 when the config file changed. Runs outside any condition, so errexit stays on.
 install_popup() {
   local enabled plugin source
   enabled=$(config_value "$POPUP_SETTING")
@@ -382,17 +382,18 @@ install_popup() {
     "$HERDR_EXE" plugin unlink "$POPUP_ID" >/dev/null
     say "unlinked" "Herdr plugin $POPUP_ID"
   fi
-  popup_config_sync "$enabled"
+  if popup_config_sync "$enabled"; then POPUP_CHANGED=1; fi
 }
 
 install_popups() {
-  local name changed=0
+  local name
+  POPUP_CHANGED=0
   popup_config_check
   for name in todo settings; do
     popup_select "$name"
-    if install_popup; then changed=1; fi
+    install_popup
   done
-  [ "$changed" = 0 ] || "$HERDR_EXE" server reload-config >/dev/null 2>&1 || say "note" "Herdr did not reload its config; run: $HERDR_EXE server reload-config"
+  [ "$POPUP_CHANGED" = 0 ] || "$HERDR_EXE" server reload-config >/dev/null 2>&1 || say "note" "Herdr did not reload its config; run: $HERDR_EXE server reload-config"
 }
 
 herdr_config_file() { printf '%s/herdr/config.toml' "${XDG_CONFIG_HOME:-$HOME/.config}"; }

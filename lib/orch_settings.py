@@ -521,7 +521,7 @@ SETTINGS = [
         "ORCH_HERDR_TODO_PANE",
         "bool",
         True,
-        "The Coordinator keeps a to-do pane open beside its own; `false` makes `todo-pane.sh` open none and close an open one. The to-do popup is separate",
+        "The Coordinator opens a to-do pane beside its own at start and after a recycle; `false` makes `todo-pane.sh` open none and close every pane labelled To-do. The to-do popup is separate",
     ),
     _g(
         "herdr.settings_popup",
@@ -1076,10 +1076,13 @@ def config_path(environ):
     return chosen or str(Path(GLOBAL_FILE).expanduser())
 
 
+CONTROL = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
+
+
 def print_lines(values):
     """One NAME=value line per setting; a control character in a value would split or hide a line."""
     for name, value in values.items():
-        if re.search(r"[\x00-\x08\x0a-\x1f\x7f]", value):
+        if CONTROL.search(value):
             raise ConfigError(
                 f"{name}: the value contains a control character; one setting must stay on one line"
             )
@@ -1859,7 +1862,6 @@ def migrate(env_path, toml_path, snippet_dir):
 MAX_FILE_BYTES = 1 << 20
 WRITE_ATTEMPTS = 3
 EXAMPLE_FILE = Path(__file__).resolve().parents[1] / "config/orchestration.toml.example"
-CONTROL = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
 
 
 def comment_columns(text):
@@ -1874,6 +1876,9 @@ def comment_columns(text):
                 if text[index + 1 : index + 2] != "\n":
                     index += 1
             elif text.startswith(quote, index):
+                # Extra quotes before a closing """ or ''' belong to the string.
+                while len(quote) == 3 and text.startswith(quote, index + 1):
+                    index += 1
                 index += len(quote) - 1
                 quote = None
         elif char in "\"'":
@@ -1957,6 +1962,8 @@ def spliced(label, text, setting, value):
     final_newline = lines[-1] == ""
     if final_newline:
         lines.pop()
+    else:
+        lines[-1] += eol
 
     def added(*new):
         return [line + eol for part in new for line in part.split("\n")]
@@ -1971,11 +1978,12 @@ def spliced(label, text, setting, value):
             f"[{setting.table}]",
             f"{setting.name} = {rendered}",
         )
-    return "\n".join(lines) + ("\n" if final_newline or not text else "")
+    result = "\n".join(lines)
+    return result + "\n" if final_newline else result.removesuffix(eol)
 
 
 def without(data, setting):
-    """Parsed TOML minus one setting and any table that leaves empty."""
+    """Parsed TOML minus one setting and every empty table."""
     result = {
         table: dict(entries) if isinstance(entries, dict) else entries
         for table, entries in data.items()
@@ -2058,7 +2066,7 @@ def write_value(path, setting, value, check=None, create=False):
 def value_problem(setting, value):
     """Why value is out of the setting's range or holds a control character, else None."""
     if setting.kind in ("int", "number"):
-        if not math.isfinite(value):
+        if isinstance(value, float) and not math.isfinite(value):
             return "must be a finite number"
         if setting.above is not None and not value > setting.above:
             return f"must be more than {setting.above}"

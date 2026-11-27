@@ -70,7 +70,7 @@ class BoundedOut:
         pass
 
 
-def serve(make_app, popup, stop, clock=time.monotonic, scratch=None):
+def serve(make_app, popup, stop, scratch=None):
     """Runs make_app(out) on this terminal until it closes; scratch is a directory removed on the way out.
 
     The app has tick(), feed(text), lone_escape(), `buf` and `closing`.
@@ -97,10 +97,10 @@ def serve(make_app, popup, stop, clock=time.monotonic, scratch=None):
             next_pane_check = 0
             pane = os.environ.get("HERDR_PANE_ID") if popup else None
             while not app.closing and os.getppid() == parent:
-                if pane and clock() >= next_pane_check:
+                if pane and time.monotonic() >= next_pane_check:
                     if not todo_popup.pane_exists(pane):
                         break
-                    next_pane_check = clock() + 3
+                    next_pane_check = time.monotonic() + 3
                 app.tick()
                 ready, _, _ = select.select(
                     [fd], [], [], 0.3 if app.buf == "\x1b" else 1

@@ -43,7 +43,7 @@ class ViewCase(IsolatedTestCase):
 
     def app(self):
         self.out = io.StringIO()
-        app = self.view.App(self.env, self.out, lambda: self.size, popup=True)
+        app = self.view.App(self.env, self.out, lambda: self.size)
         app.tick()
         return app
 
@@ -85,6 +85,20 @@ class CoverageTest(ViewCase):
             sorted(self.view.APPLIES), sorted(x.key for x in s.listed("global"))
         )
 
+    def test_apply_times_name_every_kind_of_reader(self):
+        both = self.view.BOTH
+        self.assertEqual(self.view.APPLIES["legacy.reads_max"], both)
+        for key, words in (
+            ("recycle.tokens", ("watchers", "sessions")),
+            ("recycle.pct", ("script run", "watchers", "sessions")),
+            ("heavy_slots.max", ("script run", "watchers", "sessions")),
+            ("herdr.bin", ("script run", "services", "install.sh")),
+            ("watchers.python3", ("script run", "services", "install.sh")),
+        ):
+            with self.subTest(key=key):
+                for word in words:
+                    self.assertIn(word, self.view.APPLIES[key])
+
     def test_every_global_setting_has_an_editor(self):
         kinds = {x.key: self.view.editor_kind(x) for x in s.listed("global")}
         self.assertEqual(
@@ -109,6 +123,14 @@ class CoverageTest(ViewCase):
 
 
 class EditTest(ViewCase):
+    def test_q_and_escape_close_the_editor_in_a_plain_terminal(self):
+        for key in ("q", ESC):
+            with self.subTest(key=key):
+                app = self.view.App(self.env, io.StringIO(), lambda: self.size)
+                app.tick()
+                self.keys(app, key)
+                self.assertTrue(app.closing)
+
     def test_space_toggles_a_boolean_and_keeps_the_rest_of_the_file(self):
         app = self.at("herdr.todo_pane")
         self.keys(app, " ")

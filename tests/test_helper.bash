@@ -91,7 +91,10 @@ case "$1 ${2:-}" in
     [ "$3" != combinaut.todo ] || rm -f "$HERDR_TODO_PLUGIN"
     [ "$3" != combinaut.settings ] || rm -f "$HERDR_SETTINGS_PLUGIN"
     ;;
-  'plugin link') case "$3" in */todo-plugin) printf '%s' "$3" >"$HERDR_TODO_PLUGIN" ;; */settings-plugin) printf '%s' "$3" >"$HERDR_SETTINGS_PLUGIN" ;; *) printf '%s' "$3" >"$HERDR_PLUGIN" ;; esac ;;
+  'plugin link')
+    case "$3" in *"/${HERDR_LINK_FAIL:-none}") echo "link failed: $3" >&2; exit 1 ;; esac
+    case "$3" in */todo-plugin) printf '%s' "$3" >"$HERDR_TODO_PLUGIN" ;; */settings-plugin) printf '%s' "$3" >"$HERDR_SETTINGS_PLUGIN" ;; *) printf '%s' "$3" >"$HERDR_PLUGIN" ;; esac
+    ;;
   'plugin action')
     case "$*" in
       *state-start*)

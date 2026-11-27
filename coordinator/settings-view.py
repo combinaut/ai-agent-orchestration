@@ -4,6 +4,7 @@
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -22,6 +23,9 @@ WATCHER = (
 )
 BOTH = "next script run; watchers after they restart"
 INSTALL = "after you run install.sh"
+SCRIPTS_AND_SERVICES = "next script run; services after you run install.sh"
+WATCHER_SESSION = "watchers after they restart; sessions at their next recycle"
+ALL_READERS = "next script run; watchers after restart; sessions at next recycle"
 COORDINATOR_PANE = "at the next Coordinator start or recycle (todo-pane.sh)"
 
 
@@ -76,8 +80,6 @@ APPLIES = {
         "audit.page_prs",
         "audit.page_nodes",
         "legacy.scans_max",
-        "legacy.reads_max",
-        "recycle.tokens",
         "host.pressure_min_pct",
         "host.swap_max_mb",
         "host.procs_max",
@@ -95,12 +97,11 @@ APPLIES = {
     ),
     **_applies(
         BOTH,
-        "heavy_slots.max",
+        "legacy.reads_max",
         "heavy_slots.dir",
         "recycle.worker_soft_tokens",
         "recycle.worker_hard_tokens",
         "recycle.worker_ask_timeout_s",
-        "recycle.pct",
         "watchers.pr_scope",
         "watchers.worker_model",
         "watchers.primary_repo",
@@ -117,13 +118,14 @@ APPLIES = {
         "install.env",
         "install.radar_path",
         "watchers.service",
-        "watchers.python3",
         "watchers.path",
-        "herdr.bin",
         "herdr.socket",
         "herdr.todo_popup",
         "herdr.settings_popup",
     ),
+    **_applies(SCRIPTS_AND_SERVICES, "watchers.python3", "herdr.bin"),
+    **_applies(ALL_READERS, "heavy_slots.max", "recycle.pct"),
+    "recycle.tokens": WATCHER_SESSION,
     "herdr.todo_pane": COORDINATOR_PANE,
 }
 
@@ -194,13 +196,11 @@ class Editor:
 
 
 class App:
-    """The screen state; every input and clock tick goes through here so it can run without a terminal."""
+    """Screen state, driven by feed(), lone_escape() and tick(); needs no terminal."""
 
-    def __init__(
-        self, environ, out, size, clock=popup_terminal.time.monotonic, popup=False
-    ):
-        self.environ, self.out, self.size, self.clock = environ, out, size, clock
-        self.popup, self.closing = popup, False
+    def __init__(self, environ, out, size):
+        self.environ, self.out, self.size = environ, out, size
+        self.closing = False
         self.buf, self.status, self.error = "", "", ""
         self.filter, self.filtering = "", False
         self.field, self.editor = None, None
@@ -223,7 +223,7 @@ class App:
                 orch_settings.check_resolves(self.path, self.path)
         except (orch_settings.ConfigError, OSError) as error:
             self.error = f"ERROR: {error}"
-        self.last_refresh = self.clock()
+        self.last_refresh = time.monotonic()
 
     def value(self, setting):
         return self.values.get(setting, setting.default)
@@ -405,7 +405,7 @@ class App:
         elif token == "/":
             self.filtering = True
         elif token == "q":
-            self.closing = self.popup
+            self.closing = True
         else:
             action = {
                 "\r": "enter",
@@ -427,7 +427,7 @@ class App:
             self.filtering, self.filter = False, ""
             self.apply_filter()
         else:
-            self.closing = self.popup
+            self.closing = True
 
     def click(self, column, line):
         if self.field or self.editor or line not in self.hits:
@@ -461,7 +461,8 @@ class App:
     def tick(self):
         size = self.size()
         stale = (
-            self.last_refresh is None or self.clock() - self.last_refresh > REFRESH_S
+            self.last_refresh is None
+            or time.monotonic() - self.last_refresh > REFRESH_S
         )
         if stale:
             self.load()
@@ -596,7 +597,7 @@ def main():
         return todo_popup.open_popup()
     popup = "--popup" in sys.argv[1:]
     popup_terminal.serve(
-        lambda out: App(os.environ, out, os.get_terminal_size, popup=popup),
+        lambda out: App(os.environ, out, os.get_terminal_size),
         popup,
         stop,
     )

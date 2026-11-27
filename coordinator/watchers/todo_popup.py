@@ -1,4 +1,4 @@
-"""Session-scoped ownership and replacement of one popup view; a process serves one popup, the to-do view unless configure() names another."""
+"""Session-scoped ownership and replacement of one popup per process: the to-do view unless configure() names another."""
 
 import fcntl
 import hashlib

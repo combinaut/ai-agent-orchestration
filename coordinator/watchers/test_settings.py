@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from pathlib import Path
 from unittest.mock import patch
 
@@ -210,6 +211,23 @@ class WriteSettingTest(SettingsTest):
             '[pr]\nauthor = "c#d"  # me\n',
         )
 
+    def test_a_comment_after_a_string_ending_in_extra_quotes_stays(self):
+        for quotes in ('"' * 4, '"' * 5, "'" * 4, "'" * 5):
+            with self.subTest(quotes=quotes):
+                opening = quotes[0] * 3
+                self.assertEqual(
+                    self.edit(
+                        f"[pr]\nauthor = {opening}a{quotes}  # me\n", "pr.author", "b"
+                    ),
+                    '[pr]\nauthor = "b"  # me\n',
+                )
+
+    def test_a_key_added_to_a_crlf_file_without_a_final_newline(self):
+        self.assertEqual(
+            self.edit('[pr]\r\nauthor = "a"', "hog.gb", 4),
+            '[pr]\r\nauthor = "a"\r\n\r\n[hog]\r\ngb = 4',
+        )
+
     def test_crlf_line_endings_stay(self):
         self.assertEqual(
             self.edit('[pr]\r\nauthor = "a"\r\n# x\r\n', "pr.author", "b"),
@@ -335,6 +353,9 @@ class WriteSettingTest(SettingsTest):
         ):
             with self.subTest(key=key, value=value):
                 self.refuses(key, value, "must be")
+
+    def test_a_huge_whole_number_is_refused_by_its_range(self):
+        self.refuses("audit.page_prs", 10**400, "at most 100")
 
     def test_a_control_character_writes_nothing(self):
         for key, value in (("pr.author", "a\nb"), ("pr_tabs.repos", ["a\x1bb"])):
@@ -1563,6 +1584,27 @@ class DriftTest(SettingsTest):
             + "\n",
             doc,
         )
+
+    def test_links_to_the_settings_doc_reach_a_heading(self):
+        def anchor(heading):
+            kept = "".join(
+                c
+                for c in heading.lower()
+                if c in " -_" or unicodedata.category(c)[0] in "LMN"
+            )
+            return kept.replace(" ", "-")
+
+        doc = (REPO / "docs/settings.md").read_text()
+        anchors = {anchor(h) for h in re.findall(r"^#+ (.*)$", doc, re.M)}
+        links = [
+            (path.name, link)
+            for path in (REPO / "README.md", *(REPO / "docs").glob("*.md"))
+            for link in re.findall(r"settings\.md#([^)\s]+)", path.read_text())
+        ]
+        self.assertTrue(links)
+        for name, link in links:
+            with self.subTest(name=name, link=link):
+                self.assertIn(link, anchors)
 
     def test_every_setting_has_one_scope_a_unique_name_and_a_valid_default(self):
         self.assertEqual(len(s.BY_KEY), len(s.SETTINGS))

@@ -876,7 +876,6 @@ def main():
         lambda out: App(hidden, demo, out, os.get_terminal_size, popup=popup),
         popup,
         stop,
-        clock=mono,
         scratch=scratch,
     )
 

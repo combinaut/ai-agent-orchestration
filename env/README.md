@@ -47,7 +47,7 @@ An env without the file, or `install.env = "none"`, has no open work: the watche
 
 - Unless `herdr.todo_popup` is `false`, links `env/herdr/todo-plugin` as `combinaut.todo` (a popup pane titled `Your to-do` running `~/.claude/coordinator/user-todo-view.py --popup`, plus the `open` action) and keeps a `# >>> ai-agent-orchestration to-do key` block in Herdr's `config.toml` (written through a symlinked file) that binds `prefix+t` to `combinaut.todo.open`, then reloads Herdr's config. Off unlinks the plugin and removes the block. A current block stays where it is in the file. Runs after the Radar daemon starts; Radar's blocks are not touched.
 
-- Unless `herdr.settings_popup` is `false`, does the same for `env/herdr/settings-plugin` as `combinaut.settings` (a popup pane titled `Settings` running `~/.claude/coordinator/settings-view.py --popup`) with its own `# >>> ai-agent-orchestration settings key` block that binds `prefix+shift+s`. The two popups switch independently; an unpaired marker of either stops the install before anything changes.
+- Unless `herdr.settings_popup` is `false`, does the same for `env/herdr/settings-plugin` as `combinaut.settings` (a popup pane titled `Settings` running `~/.claude/coordinator/settings-view.py --popup`) with its own `# >>> ai-agent-orchestration settings key` block that binds `prefix+shift+s`. The two popups switch independently; an unpaired marker of either stops the install before either popup's plugin or Herdr's `config.toml` changes.
 
 - `open_work.py`: one `herdr workspace list` and one `herdr pane list`; a workspace without a Herdr worktree takes the checkout of its first pane's directory.
 

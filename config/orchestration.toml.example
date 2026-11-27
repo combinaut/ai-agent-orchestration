@@ -137,7 +137,7 @@ bin = ""
 socket = ""
 # install.sh links a Herdr plugin that opens the to-do view in a popup titled "Your to-do" on prefix+t, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env
 todo_popup = true
-# The Coordinator keeps a to-do pane open beside its own; `false` makes `todo-pane.sh` open none and close an open one. The to-do popup is separate
+# The Coordinator opens a to-do pane beside its own at start and after a recycle; `false` makes `todo-pane.sh` open none and close every pane labelled To-do. The to-do popup is separate
 todo_pane = true
 # install.sh links a Herdr plugin that opens a settings editor for this file in a popup on prefix+shift+s, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env
 settings_popup = true

@@ -14,7 +14,7 @@ A repo key in the global file (except the two `review.*` keys above), a global k
 
 `orch-settings` prints every resolved global setting as one `ORCH_NAME=value` line: the built-in default, then the global file (`ORCH_CONFIG` or `~/.claude/orchestration.toml`), then an exported variable. With no argument, a missing default file prints the defaults; a missing `ORCH_CONFIG` file, an explicit file that does not exist, an argument that starts with `-` and a value with a control character are errors (exit 2). Sessions run it at startup instead of reading the commented TOML. `orch-agents` is its companion for Herdr: one line per agent (name, pane, kind, status, workspace, owner, role, cwd), for a session that would otherwise read the `herdr agent list` JSON; it exits 2 with herdr's own message when herdr fails or answers in an unexpected shape. The installer links both into `~/.local/bin`.
 
-## 🎛️ Edit in a popup
+## 🎛 Edit in a popup
 
 With the herdr env, `prefix+shift+s` opens a popup titled "Settings" that edits the global file. `herdr.settings_popup = false` plus a run of `install.sh` removes the key and the plugin; `python3 ~/.claude/coordinator/settings-view.py` runs the same editor in any terminal.
 
@@ -121,7 +121,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `herdr.bin` | `ORCH_HERDR_BIN` | empty | Absolute path of the Herdr executable |
 | `herdr.socket` | `ORCH_HERDR_SOCKET` | empty | Absolute path of the Herdr socket |
 | `herdr.todo_popup` | `ORCH_HERDR_TODO_POPUP` | `true` | install.sh links a Herdr plugin that opens the to-do view in a popup titled "Your to-do" on prefix+t, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env |
-| `herdr.todo_pane` | `ORCH_HERDR_TODO_PANE` | `true` | The Coordinator keeps a to-do pane open beside its own; `false` makes `todo-pane.sh` open none and close an open one. The to-do popup is separate |
+| `herdr.todo_pane` | `ORCH_HERDR_TODO_PANE` | `true` | The Coordinator opens a to-do pane beside its own at start and after a recycle; `false` makes `todo-pane.sh` open none and close every pane labelled To-do. The to-do popup is separate |
 | `herdr.settings_popup` | `ORCH_HERDR_SETTINGS_POPUP` | `true` | install.sh links a Herdr plugin that opens a settings editor for this file in a popup on prefix+shift+s, with a marked `[[keys.command]]` block in Herdr's `config.toml`; `false` removes both. Needs the herdr env |
 | `user_todo.status_dir` | `ORCH_USER_TODO_STATUS_DIR` | empty | To-do status directory; empty means ~/.claude/coordinator/status |
 | `user_todo.output` | `ORCH_USER_TODO_OUTPUT` | empty | To-do output file; empty means ~/.claude/coordinator/user-todo.md |
