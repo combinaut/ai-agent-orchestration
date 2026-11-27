@@ -2,6 +2,7 @@
 """Runs /finalize-sweep as a script: feature slices, headless agents, validators, the record and the PR comment."""
 
 import atexit
+import base64
 import concurrent.futures
 import hashlib
 import json
@@ -18,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+import zlib
 from pathlib import Path
 
 LIB = Path(__file__).resolve().parent
@@ -34,6 +36,8 @@ GH_TIMEOUT = 45
 GH_MAX_BYTES = 32 * 1024 * 1024
 STOP_GRACE = 5
 HISTORY_LIMIT = 60000
+HISTORY_SWEEPS = 50
+HISTORY_BYTES = 8 * 1024 * 1024
 OUTCOME_FIELDS = {"who": 40, "file": 200, "category": 60, "summary": 300, "reason": 500}
 COMMENT_LIMIT = 65536
 MARKER = "<!-- orch-sweep v1 -->"
@@ -815,10 +819,10 @@ def history(outcomes):
 
 
 def context(pr, comments, threads, reviews):
-    """The PR text, earlier sweep outcomes, and the latest 50 other comments, thread comments and review summaries."""
+    """The PR text, outcomes of the latest sweep comments within HISTORY_SWEEPS and HISTORY_BYTES, and the latest 50 other comments, thread comments and review summaries."""
     parts = [f"Title: {pr['title']}", f"Body:\n{pr['body'] or ''}"]
-    others, outcomes = [], []
-    for c in comments:
+    others, outcomes, size, full = [], [], 0, False
+    for c in reversed(comments):
         body = c.get("body") or ""
         trusted = c.get("author_association") in {
             "OWNER",
@@ -828,8 +832,13 @@ def context(pr, comments, threads, reviews):
         found = sweep_outcomes(body) if trusted and MARKER in body else None
         if found is None:
             others.append(c)
-        else:
-            outcomes.append(((c.get("user") or {}).get("login", "?"), found))
+        elif not full:
+            size += len(json.dumps(found, separators=(",", ":")))
+            full = len(outcomes) == HISTORY_SWEEPS or size > HISTORY_BYTES
+            if not full:
+                outcomes.append(((c.get("user") or {}).get("login", "?"), found))
+    others.reverse()
+    outcomes.reverse()
     if outcomes:
         parts.append(
             "Earlier sweep outcomes and their verdicts, by comment author:\n"
@@ -879,7 +888,21 @@ def cell(text):
     )
 
 
-def comment_body(record, tables=("Kept", "Dropped"), indent=1):
+def record_block(record, indent, compressed):
+    """The record in an HTML comment: JSON, or compact JSON as base64 of its zlib stream."""
+    text = json.dumps(record, indent=indent, separators=None if indent else (",", ":"))
+    if compressed:
+        if len(text) > sweep_record.RECORD_LIMIT:
+            raise Failure(
+                f"the sweep record needs {len(text)} bytes; a compressed record may hold {sweep_record.RECORD_LIMIT}; the record is kept locally",
+                5,
+            )
+        packed = base64.b64encode(zlib.compress(text.encode(), 9)).decode()
+        return ["<!-- orch-sweep-record-z", packed, "-->"]
+    return ["<!-- orch-sweep-record", text.replace("--", "\\u002d\\u002d"), "-->"]
+
+
+def comment_body(record, tables=("Kept", "Dropped"), indent=1, compressed=False):
     lines = [
         MARKER,
         f"### Finalize sweep at `{record['head']}`",
@@ -924,11 +947,7 @@ def comment_body(record, tables=("Kept", "Dropped"), indent=1):
         f"Raw findings {record['findings']}, kept {len(record['items'])}, open fix {record['open_fix']}."
         + (f" Verdicts: {counts}." if counts else ""),
         "",
-        "<!-- orch-sweep-record",
-        json.dumps(
-            record, indent=indent, separators=None if indent else (",", ":")
-        ).replace("--", "\\u002d\\u002d"),
-        "-->",
+        *record_block(record, indent, compressed),
         "",
         TRAILERS[record["runtime"]],
     ]
@@ -936,14 +955,15 @@ def comment_body(record, tables=("Kept", "Dropped"), indent=1):
 
 
 def fitting_body(record):
-    """The fullest comment within COMMENT_LIMIT: indented record and both tables, then compact, then fewer tables."""
-    for tables, indent in (
-        (("Kept", "Dropped"), 1),
-        (("Kept", "Dropped"), None),
-        (("Kept",), None),
-        ((), None),
+    """The fullest comment within COMMENT_LIMIT: indented record and both tables, then compact, then compressed, then fewer tables."""
+    for tables, indent, compressed in (
+        (("Kept", "Dropped"), 1, False),
+        (("Kept", "Dropped"), None, False),
+        (("Kept", "Dropped"), None, True),
+        (("Kept",), None, True),
+        ((), None, True),
     ):
-        body = comment_body(record, tables, indent)
+        body = comment_body(record, tables, indent, compressed)
         if len(body) <= COMMENT_LIMIT:
             return body
     raise Failure(

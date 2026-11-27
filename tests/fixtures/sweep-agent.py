@@ -4,6 +4,7 @@
 import json
 import os
 import re
+import secrets
 import signal
 import subprocess
 import sys
@@ -102,7 +103,8 @@ else:
                 "line": i + 1,
                 "category": role,
                 "summary": f"{role} {os.getpid()} {i}"
-                + "x" * int(os.environ.get("FAKE_PAD", "0")),
+                + "x" * int(os.environ.get("FAKE_PAD", "0"))
+                + secrets.token_hex(int(os.environ.get("FAKE_NOISE", "0"))),
                 "evidence": f"{files[0]}:{i + 1}",
             }
             for i in range(count)

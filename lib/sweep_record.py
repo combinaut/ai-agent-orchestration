@@ -2,6 +2,7 @@
 """Checks the record /finalize-sweep writes at the end of its validate step."""
 
 import argparse
+import base64
 import glob
 import hashlib
 import json
@@ -11,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -34,6 +36,7 @@ VERDICTS = (
 KEEP = ("CONFIRMED_NEW", "CONFIRMED_REGRESSED", "DISPUTED_DROP")
 FINDING_KEYS = ("file", "line", "category", "summary")
 SLICE_LINES = 400
+RECORD_LIMIT = 4 * 1024 * 1024
 SCRIPT_FIELDS = (
     "version",
     "run_nonce",
@@ -714,16 +717,32 @@ def gate_since(base, head):
     return None
 
 
+def inflate(packed):
+    """The text of a base64 zlib stream; None unless it is complete and within RECORD_LIMIT bytes."""
+    stream = zlib.decompressobj()
+    data = stream.decompress(base64.b64decode(packed, validate=True), RECORD_LIMIT + 1)
+    if len(data) > RECORD_LIMIT or not stream.eof or stream.unused_data:
+        return None
+    return data.decode()
+
+
 def comment_record(body):
     """The orch-sweep record in a sweep comment, else None."""
     if MARKER not in body:
         return None
     block = re.search(r"<!-- orch-sweep-record\n(.*?)\n-->", body, re.S)
+    packed = None
     if not block:
-        block = re.search(r"```json\n(.*?)\n```", body, re.S)
+        packed = re.search(r"<!-- orch-sweep-record-z\n(.*?)\n-->", body, re.S)
+        if not packed:
+            block = re.search(r"```json\n(.*?)\n```", body, re.S)
     try:
-        record = json.loads(block.group(1)) if block else None
-    except ValueError:
+        if packed:
+            text = inflate(packed.group(1))
+        else:
+            text = block.group(1) if block else None
+        record = None if text is None else json.loads(text)
+    except (ValueError, RecursionError, zlib.error):
         return None
     if not isinstance(record, dict) or record.get("tool") != "orch-sweep":
         return None
@@ -869,7 +888,7 @@ def gate(url, head, review_body=None, record_info=None):
     pages = gh_json(
         "api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"
     )
-    order = []
+    latest = None
     for comment in (c for page in pages for c in page):
         if (comment.get("user") or {}).get("login") not in trusted:
             continue
@@ -880,10 +899,10 @@ def gate(url, head, review_body=None, record_info=None):
             and record.get("head") == head
             and record.get("kind") == "full"
         ):
-            order.append((record, comment.get("id")))
-    if not order:
+            latest = (record, comment.get("id"))
+    if not latest:
         return f"no full orch-sweep comment by the reviewer or PR author for the exact head {head}"
-    record, cid = order[-1]
+    record, cid = latest
     why = record_problem(record, head)
     if why:
         return why
