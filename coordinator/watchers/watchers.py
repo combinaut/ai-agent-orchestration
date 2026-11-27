@@ -277,7 +277,7 @@ def conditions(mode, raw):
             rss, age = float(proc["rss"]), int(proc["age"])
             kind = (
                 "HOG"
-                if rss >= float(os.environ.get("ORCH_HOG_GB", 6)) * 1048576
+                if rss >= float(os.environ.get("ORCH_HOG_GB", 3)) * 1048576
                 else None
             )
             if Path(proc["comm"]).name == "git":

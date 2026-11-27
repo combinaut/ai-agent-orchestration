@@ -97,6 +97,33 @@ class PolicyTest(IsolatedTestCase):
         self.assertEqual(inbox.feed_lines([line]), [])
         self.assertFalse(feed_actions.is_action(line, feed_actions.action_patterns()))
 
+    def test_emitted_hog_and_load_lines_pass_the_action_filter(self):
+        process = "age=181s comm=[Google Chrome He] cmd=[/usr/bin/x] parents:"
+        lines = self.run_at(
+            0,
+            {
+                "mode": "hog",
+                "events": [
+                    f"HOG pid=1 rss=7.0GB {process}",
+                    f"GITBIG pid=2 rss=3.0GB {process}",
+                    f"GITLONG pid=3 rss=1.0GB {process}",
+                ],
+            },
+            {"mode": "balance", "events": ["BALANCE LOAD5(150.00) top: a(1%,1MB)"]},
+        )
+        self.assertEqual(len(lines), 4)
+        patterns = feed_actions.action_patterns()
+        for line in lines:
+            with self.subTest(line=line):
+                stamped = "2026-11-27T12:00:00+0100 " + line
+                self.assertTrue(feed_actions.is_action(stamped, patterns))
+
+    def test_hog_limit_defaults_to_3_gib(self):
+        with patch.dict(os.environ):
+            del os.environ["ORCH_HOG_GB"]
+            (item,) = policy.hog_facts("HOG pid=1 rss=3.5GB age=5s comm=[node]")
+        self.assertEqual(item["limit"], 3)
+
     def test_first_alert_writes_one_start_line(self):
         self.assertEqual(
             self.run_at(0, files(160000)), ["host: HOST FILES 160000 (start)"]
@@ -1042,8 +1069,15 @@ class ActionPatternTest(IsolatedTestCase):
         "2026-10-13T22:02:00+0200 workers: WORKER wA:p9 blocked (clear)": False,
         "2026-10-13T22:02:00+0200 workers: WORKER READFAIL p(unknown) (start)": False,
         "2026-10-13T22:02:00+0200 hog: hog HEARTBEAT STALE (start)": True,
-        "2026-10-13T22:02:00+0200 hog: HOG 340/fseventsd 6.0GB (start)": False,
-        "2026-10-13T22:02:00+0200 balance: BALANCE LOAD5 293.26 (start)": False,
+        "2026-10-13T22:02:00+0200 hog: HOG 340/fseventsd 6.0GB (start)": True,
+        "2026-10-13T22:02:00+0200 hog: HOG 340/fseventsd 6.0GB (clear)": False,
+        "2026-10-13T22:02:00+0200 hog: GITBIG 2/git 3.0GB (start)": True,
+        "2026-10-13T22:02:00+0200 hog: GITLONG 3/git 181s (start)": True,
+        "2026-10-13T22:02:00+0200 balance: BALANCE LOAD5 293.26 (start)": True,
+        "2026-10-13T22:02:00+0200 balance: BALANCE LOAD5 293.26 (clear)": False,
+        "2026-10-13T22:02:00+0200 balance: BALANCE SLOTS 5 (start)": False,
+        "2026-10-13T22:02:00+0200 audit: APPROVED o/r#1 hog: HOG 1/x 6.0GB (start)": False,
+        "2026-10-13T22:02:00+0200 audit: APPROVED o/r#1 balance: BALANCE LOAD5 9 (start)": False,
         "2026-10-13T22:02:00+0200 watchers: Watcher digest, 1 folded: WORKER a closed (digest)": False,
     }
 
@@ -3365,8 +3399,12 @@ class QuietFeedTest(IsolatedTestCase):
         ):
             with self.subTest(line=line):
                 self.assert_action(line)
-        # A hog start stays in the feed as today; no native copy and no Monitor line (not in feed-actions.regex).
-        self.assert_action("hog: HOG 1/x 6.0GB (start)", native=False)
+        for line in (
+            "hog: HOG 1/x 6.0GB (start)",
+            "balance: BALANCE LOAD5 150.00 (start)",
+        ):
+            with self.subTest(line=line):
+                self.assert_action(line)
 
     def test_a_mixed_batch_splits_and_keeps_the_order(self):
         recycle = "context: RECYCLE w1:p1 architect-a 302k (start)"
