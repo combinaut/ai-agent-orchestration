@@ -120,6 +120,20 @@ pending_question() {
   id=${id%.json}
 }
 
+ownerless_pending_question() {
+  pending_question
+  "$PYTHON" -c '
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+record = json.loads(path.read_text())
+record["owner"] = None
+path.write_text(json.dumps(record))
+' "$HOME/.claude/coordinator/worker-signals/$id.json"
+}
+
 stop_asker() {
   kill "$asker" 2>/dev/null || true
   wait "$asker" 2>/dev/null || true
@@ -272,17 +286,17 @@ assert_escalate() {
 }
 
 @test "worker signals answer --to-user exits 73 naming the questions directory when the panel file is unwritable" {
-  pending_question
+  ownerless_pending_question
   chmod 555 "$TMP/questions"
-  run env HERDR_PANE_ID=architect-pane HERDR_WORKSPACE_ID=architect "$ROOT/orch-signal" answer "$id" --to-user
+  run "$ROOT/orch-signal" answer "$id" --to-user
   stop_asker
   assert_escalate "$TMP/questions"
 }
 
 @test "worker signals answer --to-user exits 73 naming the questions directory when the reminder file is unwritable" {
-  pending_question
+  ownerless_pending_question
   deny_with_stub
-  run env ORCH_TEST_DENY=reminder HERDR_PANE_ID=architect-pane HERDR_WORKSPACE_ID=architect "$ROOT/orch-signal" answer "$id" --to-user
+  run env ORCH_TEST_DENY=reminder "$ROOT/orch-signal" answer "$id" --to-user
   stop_asker
   assert_escalate "$TMP/questions"
 }
@@ -300,9 +314,9 @@ assert_escalate() {
 }
 
 @test "worker signals answer --to-user exits 73 naming the questions directory when the reminder cleanup is denied" {
-  pending_question
+  ownerless_pending_question
   deny_with_stub
-  run env ORCH_TEST_DENY=unlink-remind HERDR_PANE_ID=architect-pane HERDR_WORKSPACE_ID=architect "$ROOT/orch-signal" answer "$id" --to-user
+  run env ORCH_TEST_DENY=unlink-remind "$ROOT/orch-signal" answer "$id" --to-user
   stop_asker
   assert_escalate "$TMP/questions"
 }
