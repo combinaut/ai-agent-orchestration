@@ -195,7 +195,9 @@ class call_deadline:
             if time.time() < expires and time.monotonic() < monotonic_expires:
                 return
             expired._fired = True
-            if frame and frame.f_code is _EXIT_CODE and frame.f_locals["self"] is self:
+            exiting = bool(frame) and frame.f_code is _EXIT_CODE
+            exiting = exiting and frame.f_locals["self"] is self
+            if exiting:
                 # The body is done, but __exit__ has not reached its restore.
                 restore()
                 if inherited and callable(previous_handler):
@@ -210,6 +212,9 @@ class call_deadline:
                 except TimeoutError as error:
                     raise _Expired from error
                 inherited_fired = False
+                if exiting:
+                    # The handler returned, so its alarm stays armed.
+                    restore()
             raise expired_error
 
         def restore():

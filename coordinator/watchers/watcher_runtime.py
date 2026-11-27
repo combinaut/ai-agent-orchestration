@@ -141,7 +141,7 @@ class _KeptAlarm:
         self.handler(signum, frame)
 
     def __getattr__(self, name):
-        # call_deadline reads its state off the installed handler.
+        # Nested deadlines read state off the installed handler.
         return getattr(self.handler, name)
 
 

@@ -379,6 +379,46 @@ class DeadlineCheckPointTests(IsolatedTestCase):
                     seen.append(signal.getsignal(signal.SIGALRM) is held)
         self.assertEqual(seen, [True])
 
+    def test_caught_inner_exit_error_keeps_the_outer_timer_live(self):
+        wall, real = [0.0], g.time
+        self.enterContext(
+            patch.object(
+                g,
+                "time",
+                SimpleNamespace(
+                    time=lambda: real.time() + wall[0], monotonic=real.monotonic
+                ),
+            )
+        )
+        seen = []
+        with g.call_deadline(5, expired_error=Expired):
+            held = signal.getsignal(signal.SIGALRM)
+            wall[0] = -100.0
+            try:
+                with g.call_deadline(10, expired_error=Expired):
+                    # Due by the inner wall clock, not by either outer clock.
+                    wall[0] = -50.0
+                    self.fire_in_call_deadline_exit()
+            except Expired:
+                live = signal.getitimer(signal.ITIMER_REAL)[0] > 0
+                seen.append((signal.getsignal(signal.SIGALRM) is held, live))
+            wall[0] = 0.0
+        self.assertEqual(seen, [(True, True)])
+
+    def test_inherited_alarm_in_the_body_keeps_the_inner_handler(self):
+        poll = self.poll_clock()
+        signal.setitimer(signal.ITIMER_REAL, 5)
+        seen = []
+        with g.call_deadline(10, expired_error=Expired):
+            held = signal.getsignal(signal.SIGALRM)
+            try:
+                poll[0] = 100.0
+                held(signal.SIGALRM, None)
+            except Expired:
+                seen.append(signal.getsignal(signal.SIGALRM) is held)
+            poll[0] = 0.0
+        self.assertEqual(seen, [True])
+
     def test_alarm_in_an_exit_keeps_a_non_callable_timer(self):
         poll = self.poll_clock()
         signal.signal(signal.SIGALRM, signal.SIG_IGN)
