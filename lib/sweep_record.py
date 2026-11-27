@@ -931,14 +931,14 @@ def gate(url, head, review_body=None, record_info=None):
             max(own, key=lambda r: r["submitted_at"]).get("body") if own else ""
         )
     disputes = review_disputes(review_body)
-    count = sum(
-        1
+    undisputed = [
+        f"{cid}/{item['id']}"
         for item in record["items"]
         if item["class"] == "fix" and (cid, item["id"]) not in disputes
-    )
-    if count:
+    ]
+    if undisputed:
         return OpenFix(
-            f"the full sweep of {head} has {count} open fix findings; disputes parsed: {len(disputes)}"
+            f"the full sweep of {head} has {len(undisputed)} open fix findings; disputes parsed: {len(disputes)}; undisputed: {', '.join(undisputed)}"
         )
     return None
 

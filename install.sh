@@ -447,6 +447,70 @@ link_shared_files() {
   link_entry "$ORCH_REPO/worker-reports/machine-rules.md" "$CLAUDE_DIR/worker-reports/machine-rules.md"
   link_entry "$ORCH_REPO/hooks/orch-update-check.sh" "$CLAUDE_DIR/hooks/orch-update-check.sh"
   link_entry "$ORCH_REPO/hooks/guard-bash.py" "$CLAUDE_DIR/hooks/guard-bash.py"
+  link_agy_plugin
+}
+
+# agy reads global skills and rules only from plugins under ~/.gemini/config; its limits are 24,000 bytes per rule file and 20,000 tokens of always-on rules.
+AGY_PLUGIN="$HOME/.gemini/config/plugins/ai-agent-orchestration"
+AGY_RULE_CAP=24000
+AGY_RULES_TOKENS=20000
+
+# agy_size_check <file> <bytes>: warns when agy would cut the rule file.
+agy_size_check() {
+  [ "$2" -le "$AGY_RULE_CAP" ] || say "warning" "$1 is $2 bytes; agy cuts a rule file at $AGY_RULE_CAP bytes, so gemini workers miss its end"
+}
+
+link_agy_plugin() {
+  local d name src dest text bytes backup total=0
+  link_entry "$ORCH_REPO/snippets/agy-plugin.json" "$AGY_PLUGIN/plugin.json"
+  for d in "$ORCH_REPO"/skills/*/; do
+    [ -d "$d" ] || continue
+    link_entry "$ORCH_REPO/skills/$(basename "$d")" "$AGY_PLUGIN/skills/$(basename "$d")"
+  done
+  link_entry "$CLAUDE_DIR/CLAUDE.md" "$AGY_PLUGIN/rules/AGENTS.md"
+  if [ -f "$CLAUDE_DIR/CLAUDE.md" ]; then
+    bytes=$(wc -c <"$CLAUDE_DIR/CLAUDE.md" | tr -d ' ')
+    agy_size_check "$CLAUDE_DIR/CLAUDE.md" "$bytes"
+    total=$bytes
+  fi
+  for dest in "$AGY_PLUGIN"/rules/claude-*.md; do
+    if [ ! -f "$dest" ] || [ -L "$dest" ]; then continue; fi
+    name=${dest##*/rules/claude-}
+    [ ! -f "$CLAUDE_DIR/rules/$name" ] || continue
+    rm "$dest"
+    say "removed stale" "$dest"
+  done
+  for src in "$CLAUDE_DIR"/rules/*.md; do
+    [ -f "$src" ] || continue
+    name=${src##*/}
+    dest="$AGY_PLUGIN/rules/claude-$name"
+    if [ "$(head -n 1 "$src")" = --- ] && sed -n '2,/^---$/p' "$src" | grep -q '^paths:'; then
+      skip "$src for agy (paths: scopes it in Claude; agy would load it always)"
+      [ ! -f "$dest" ] || rm "$dest"
+      continue
+    fi
+    bytes=$(wc -c <"$src" | tr -d ' ')
+    agy_size_check "$src" "$bytes"
+    total=$((total + bytes))
+    text=$(printf -- '---\ntrigger: always_on\n---\n@[%s](%s)\n' "$name" "$src")
+    if [ -f "$dest" ] && [ ! -L "$dest" ] && [ "$(cat "$dest")" = "$text" ]; then
+      say "already set" "$dest"
+      n_ok=$((n_ok + 1))
+      continue
+    fi
+    if [ -L "$dest" ] || [ -e "$dest" ]; then
+      backup=$(backup_name "$dest")
+      mv "$dest" "$backup"
+      say "backed up" "$dest -> $backup"
+      n_backup=$((n_backup + 1))
+    fi
+    mkdir -p "$AGY_PLUGIN/rules"
+    printf '%s\n' "$text" >"$dest"
+    say "wrote" "$dest (includes $src)"
+    n_linked=$((n_linked + 1))
+  done
+  # About four bytes per token.
+  [ $((total / 4)) -le "$AGY_RULES_TOKENS" ] || say "warning" "the rules for agy total $total bytes (about $((total / 4)) tokens); over agy's $AGY_RULES_TOKENS-token budget it gives workers file paths instead of the text"
 }
 
 # Backups an earlier installer left beside the skills move under $BACKUP_DIR.
@@ -546,6 +610,13 @@ ask_config_keys() {
       case "$value" in
         "" | "<"*">") ;;
         *) families=$families,cursor; break ;;
+      esac
+    done
+    for key in ORCH_GEMINI_WORKER_MODEL ORCH_GEMINI_SMART_MODEL; do
+      value=$(unset ORCH_GEMINI_WORKER_MODEL ORCH_GEMINI_SMART_MODEL && config_value "$key")
+      case "$value" in
+        "" | "<"*">") ;;
+        *) families=$families,gemini; break ;;
       esac
     done
     write_config_key ORCH_PROVIDERS "$families"
@@ -714,18 +785,18 @@ merge_settings() {
   [ -n "$current" ] || say "added" "$settings: statusLine ($STATUSLINE_CMD)"
 }
 
-# Lets sessions run bind-self.py themselves in auto mode. Appends the missing rules to permissions.allow and keeps every entry you have.
+# Lets sessions run bind-self.py and heavy-slot stop themselves in auto mode. Appends the missing rules to permissions.allow and keeps every entry you have.
 allow_bind_self() {
   local settings="$CLAUDE_DIR/settings.json" script="coordinator/watchers/bind-self.py" bindings="coordinator/watchers/bindings" rules missing tmp backup target mode
   [ "$settings_saved" != -1 ] || return 0
-  rules=$(jq -nc --arg tilde "Bash(python3 ~/.claude/$script --output ~/.claude/$bindings/*)" --arg abs "Bash(python3 $CLAUDE_DIR/$script --output $CLAUDE_DIR/$bindings/*)" '[$tilde, $abs]')
+  rules=$(jq -nc --arg tilde "Bash(python3 ~/.claude/$script --output ~/.claude/$bindings/*)" --arg abs "Bash(python3 $CLAUDE_DIR/$script --output $CLAUDE_DIR/$bindings/*)" '[$tilde, $abs, "Bash(heavy-slot stop *)"]')
   if ! jq -e 'type == "object" and ((.permissions? // {}) | type == "object") and ((.permissions.allow? // []) | type == "array")' "$settings" >/dev/null 2>&1; then
-    skip "$settings has no supported permissions.allow list; add the bind-self.py allow rules by hand"
+    skip "$settings has no supported permissions.allow list; add the bind-self.py and heavy-slot stop allow rules by hand"
     return
   fi
   missing=$(jq -c --argjson rules "$rules" '(.permissions.allow // []) as $have | $rules | map(select(. as $r | $have | index($r) | not))' "$settings")
   if [ "$missing" = "[]" ]; then
-    say "already set" "$settings: bind-self.py allow rules"
+    say "already set" "$settings: bind-self.py and heavy-slot stop allow rules"
     return
   fi
   if [ "$settings_saved" != 1 ]; then
@@ -739,9 +810,9 @@ allow_bind_self() {
   tmp=$(mktemp "$target.tmp.XXXXXX") || die "cannot write beside $target; settings.json is unchanged"
   if ! jq --argjson add "$missing" '.permissions.allow = ((.permissions.allow // []) + $add)' "$settings" >"$tmp" || ! jq -e type "$tmp" >/dev/null 2>&1 || ! chmod "$mode" "$tmp" || ! mv "$tmp" "$target"; then
     rm -f "$tmp"
-    die "could not write the bind-self.py allow rules; $settings is unchanged (backup: ${backup:-none})"
+    die "could not write the bind-self.py and heavy-slot stop allow rules; $settings is unchanged (backup: ${backup:-none})"
   fi
-  say "added" "$settings: bind-self.py allow rules ($(jq -r 'join(", ")' <<<"$missing"))"
+  say "added" "$settings: bind-self.py and heavy-slot stop allow rules ($(jq -r 'join(", ")' <<<"$missing"))"
 }
 
 # The linked guard must deny a forbidden command with exit 2 and the attribution reason on stderr.

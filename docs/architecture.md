@@ -14,6 +14,7 @@ flowchart TD
     A1 -.-> R["reviewer (short-lived)"]
     A2 --> W3["worker (cursor / Grok)"]
     A2 --> W4["worker (pi / DeepSeek)"]
+    A2 --> W5["worker (gemini / agy)"]
 ```
 
 | Role | Count | Owns | Never does |
@@ -80,6 +81,7 @@ flowchart LR
 | Worker, hard | Codex at `ORCH_CODEX_SMART_MODEL`, reasoning effort `ORCH_CODEX_SMART_REASONING_EFFORT` (default `medium`) |
 | Worker on a local or DeepSeek model | pi at `ORCH_PI_WORKER_MODEL` (routine), `ORCH_PI_SMART_MODEL` (hard) or one entry of `ORCH_PI_MODELS`; only when set. DeepSeek only in repos that opted in |
 | Worker on Grok / Cursor models | cursor at `ORCH_CURSOR_WORKER_MODEL` (routine) or `ORCH_CURSOR_SMART_MODEL` (hard); only when set. One model serves both tiers |
+| Worker on Gemini models | gemini at `ORCH_GEMINI_WORKER_MODEL` (routine) or `ORCH_GEMINI_SMART_MODEL` (hard) through the `agy` CLI; only when set. One model serves both tiers |
 | Worker where Codex cannot do the step | Claude: the lightest allowed tier that does the task well (Haiku mechanical, Sonnet implementation and review, Opus hard, Fable only for the hardest); only tiers `providers.claude` allows |
 | Reviewer | The family that did not write the code |
 
@@ -89,9 +91,10 @@ A Claude session also gets `--effort` from `ORCH_COORDINATOR_EFFORT`, `ORCH_ARCH
 - The architect picks Claude or Codex per task for quality; Codex is the default for routine work. Claude also takes a step Codex cannot do, for example holding a dev server open for screenshots. `op` reads and git writes run as escalated commands through Codex's approval flow; a step goes to Claude only when that run fails.
 - pi is a third family, available only when its model settings are filled in. DeepSeek (named in the provider or the model id) runs only in a repo whose `.orchestration.local.toml` sets `pi.deepseek = true`. pi has no native channel, so follow-ups go through `herdr agent prompt`.
 - cursor is a fourth family (Cursor CLI, typically Grok), available only when `models.cursor_worker` or `models.cursor_smart` is set. Start with `cursor-start.sh`. No native cross-session channel: follow-ups go through `herdr agent prompt`.
+- gemini is a fifth family (the `agy` CLI), available only when `models.gemini_worker` or `models.gemini_smart` is set. Start with `gemini-start.sh`. No native cross-session channel: follow-ups go through `herdr agent prompt`.
 - A provider that refuses work for quota is replaced by another enabled family for new work; with only one family on, new work goes to another tier of that family. The architect says so once.
 - A live session never changes model. A tier change happens through a recycle onto the new model.
-- The model settings of each enabled family (`providers.enabled`: both claude models, at least one codex model, at least one cursor model when cursor is on) must be filled in `~/.claude/orchestration.toml`; the skills stop while one is missing. One codex or cursor model serves both tiers of that family. A family left out of the list needs none.
+- The model settings of each enabled family (`providers.enabled`: both claude models, at least one codex model, at least one cursor model when cursor is on, at least one gemini model when gemini is on) must be filled in `~/.claude/orchestration.toml`; the skills stop while one is missing. One codex, cursor or gemini model serves both tiers of that family. A family left out of the list needs none.
 
 ## 🔁 Context recycle
 
@@ -169,11 +172,12 @@ Many sessions share one machine, and running out of open file handles has crashe
 - Every heavy command runs through [`heavy-slot`](../heavy-slot): `heavy-slot take <architect>-<job> [--note <what the job is>] -- <command> [args...]`. It admits the job atomically, so two jobs cannot both take the last slot.
 - A slot is a file `~/.claude/heavy-slots/<owner>-<job>` holding the pid of the child. The helper writes it and removes it on completion or a handled signal. A slot is a file, never a directory.
 - `heavy-slot count` and `heavy-slot list` show live slots, with names, pids, ages, notes and stale records.
+- [`heavy-slot stop <name>`](heavy-slot.md#stopping-a-job) stops one slot job; it refuses a pid whose start time does not match.
 - When the cap is full, `take` waits up to 1800 seconds and then prints `NEED SLOT`. The worker ends its turn with a plain `NEED SLOT: …` line and stops; `SLOT: go` from the architect means run now. A worker never opens an interactive question box.
 - A worker takes its slot itself. It does not wait for the architect.
 - Stale slot files raise `STALESLOT`, directories raise `SLOTDIR`, from the audit. Too many slots or busy worktrees raise `BALANCE`.
-- On `BALANCE`, the Coordinator asks architects to stagger heavy work and stops excess jobs only by their owned slot pids.
-- On `HOST`, the memory guard applies: the Coordinator stops heavy jobs by their owned slot pids and tells the architects holding slots.
+- On `BALANCE`, the Coordinator asks architects to stagger heavy work and stops excess jobs only with `heavy-slot stop <name>`.
+- On `HOST`, the memory guard applies: the Coordinator stops heavy jobs with `heavy-slot stop <name>` and tells the architects holding slots.
 - It never removes a live slot file.
 
 The template every worker brief carries is [`worker-reports/machine-rules.md`](../worker-reports/machine-rules.md).

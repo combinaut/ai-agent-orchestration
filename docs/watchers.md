@@ -29,7 +29,7 @@ ORCH_HOST_FILES_MAX=1 ~/.claude/coordinator/watchers/coord-host-watch.sh --state
 
 When the host is under pressure, the Coordinator follows the memory guard:
 
-- On HOST danger it should stop heavy jobs by their slot pids and tell architects that hold slots.
+- On HOST danger it should stop heavy jobs with `heavy-slot stop <name>` and tell architects that hold slots.
 - On HOST READFAIL it restores readable metrics and keeps heavy jobs paused.
 - On host HEARTBEAT STALE it restores the producer's service and checks current metrics.
 - HOST RECOVERED clears the pressure. The Coordinator checks the guard before it allows heavy jobs again.

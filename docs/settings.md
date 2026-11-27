@@ -27,7 +27,7 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 
 ## 🧩 Worker families
 
-`[providers] enabled` turns worker families on and off. `claude` must be in the list: the Coordinator and the architects run on it. Left empty, it means `claude` and `codex`, plus `pi` or `cursor` when a model of that family (including `models.pi_models` for pi) is set. `orch-settings` prints the resolved list as `ORCH_PROVIDERS`.
+`[providers] enabled` turns worker families on and off. `claude` must be in the list: the Coordinator and the architects run on it. Left empty, it means `claude` and `codex`, plus `pi`, `cursor` or `gemini` when a model of that family (including `models.pi_models` for pi) is set. `orch-settings` prints the resolved list as `ORCH_PROVIDERS`.
 
 | Family | Model settings | Needed when on |
 |---|---|---|
@@ -35,8 +35,9 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `codex` | `models.codex_worker`, `models.codex_smart` | at least one; it then serves both tiers, and `orch-settings` prints it for both |
 | `pi` | `models.pi_worker`, `models.pi_smart`, `models.pi_models` | none of them; an empty tier is not used |
 | `cursor` | `models.cursor_worker`, `models.cursor_smart` | at least one; it then serves both tiers, and `orch-settings` prints it for both. Off until a model is set (unlike codex) |
+| `gemini` | `models.gemini_worker`, `models.gemini_smart` | at least one; it then serves both tiers, and `orch-settings` prints it for both. Off until a model is set (unlike codex) |
 
-A family left out is never started: the installer does not ask for its models, architects do not pick it (a review falls back to a fresh Sonnet pane of the author's family (Opus for an Opus author), a stronger allowed tier only for credentials, security, shared config, money, installer or watchers, or a HIGH finding; with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code), `/review-prs` dispatches no Codex review, and `pi-start.sh` / `cursor-start.sh` refuse. Its model settings may stay empty. On a terminal run with `providers.enabled` empty, answering `-` to both Codex model questions writes `enabled = ["claude"]` (plus `"pi"` / `"cursor"` when a model of that family is set). A new family is one more entry in `PROVIDERS` in `lib/orch_settings.py`, with its model settings.
+A family left out is never started: the installer does not ask for its models, architects do not pick it (a review falls back to a fresh Sonnet pane of the author's family (Opus for an Opus author), a stronger allowed tier only for credentials, security, shared config, money, installer or watchers, or a HIGH finding; with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code), `/review-prs` dispatches no Codex review, and `pi-start.sh` / `cursor-start.sh` / `gemini-start.sh` refuse. Its model settings may stay empty. On a terminal run with `providers.enabled` empty, answering `-` to both Codex model questions writes `enabled = ["claude"]` (plus `"pi"` / `"cursor"` / `"gemini"` when a model of that family is set). A new family is one more entry in `PROVIDERS` in `lib/orch_settings.py`, with its model settings.
 
 `[providers] claude` lists the Claude worker tiers the architects may start: `haiku`, `sonnet`, `opus`, `fable` (the default is all four). Only these names, at least one; anything else stops with an `ERROR:`. The architects pick Claude tiers only from the list, and `orch-settings` prints it as `ORCH_CLAUDE_TIERS`. The Coordinator and architect models are their own settings.
 
@@ -58,7 +59,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `heavy_slots.dir` | `ORCH_HEAVY_SLOTS_DIR` | empty | Slot directory; empty means ~/.claude/heavy-slots |
 | `heavy_slots.kill_grace` | `ORCH_HEAVY_SLOTS_KILL_GRACE` | `10` | Seconds a stopped job gets before it is killed |
 | `heavy_slots.long_run` | `ORCH_HEAVY_SLOTS_LONG_RUN` | `1800` | Seconds a heavy job runs before one RUNLONG line reaches the feed; 0 turns it off |
-| `providers.enabled` | `ORCH_PROVIDERS` | empty | Worker families this machine uses (claude, codex, pi, cursor); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi or cursor when a model of that family is set. A family left out is never started or asked for, and its model settings may stay empty |
+| `providers.enabled` | `ORCH_PROVIDERS` | empty | Worker families this machine uses (claude, codex, pi, cursor, gemini); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi, cursor or gemini when a model of that family is set. A family left out is never started or asked for, and its model settings may stay empty |
 | `providers.claude` | `ORCH_CLAUDE_TIERS` | `["haiku", "sonnet", "opus", "fable"]` | Claude worker tiers the architects may pick (haiku, sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings |
 | `models.coordinator` | `ORCH_COORDINATOR_MODEL` | `"claude-opus-5-5"` | Model of the Coordinator |
 | `models.architect` | `ORCH_ARCHITECT_MODEL` | `"claude-opus-5-5"` | Model of the architects |
@@ -74,6 +75,8 @@ A family left out is never started: the installer does not ask for its models, a
 | `models.pi_models` | `ORCH_PI_MODELS` | empty | More pi models as provider/model-id that the architect may pick per task, besides pi_worker and pi_smart; any of the three set turns pi on |
 | `models.cursor_worker` | `ORCH_CURSOR_WORKER_MODEL` | empty | Cursor CLI model for routine work (for example grok-4.7-medium); empty or a placeholder means cursor_smart serves it too. With cursor on, set at least one of the two |
 | `models.cursor_smart` | `ORCH_CURSOR_SMART_MODEL` | empty | Cursor CLI model for hard work (for example grok-4.7-high); empty or a placeholder means cursor_worker serves it too. With cursor on, set at least one of the two |
+| `models.gemini_worker` | `ORCH_GEMINI_WORKER_MODEL` | empty | Gemini model for routine work through the agy CLI (for example gemini-4-neon-medium); empty or a placeholder means gemini_smart serves it too. With gemini on, set at least one of the two |
+| `models.gemini_smart` | `ORCH_GEMINI_SMART_MODEL` | empty | Gemini model for hard work through the agy CLI (for example gemini-4-neon-high); empty or a placeholder means gemini_worker serves it too. With gemini on, set at least one of the two |
 | `remote_control.architects` | `ORCH_REMOTE_CONTROL_ARCHITECTS` | `true` | Give architect sessions Remote Control on start and recycle |
 | `recycle.tokens` | `ORCH_RECYCLE_TOKENS` | `300000` | Tokens used at which RECYCLE fires |
 | `recycle.worker_soft_tokens` | `ORCH_WORKER_SOFT_TOKENS` | `300000` | Worker tokens at which the architect asks for a clean point |
@@ -106,7 +109,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `alerts.escalate_ratio` | `ORCH_ALERT_ESCALATE_RATIO` | `1.5` | Feed: ratio between severity steps; greater than 1 |
 | `alerts.digest_s` | `ORCH_ALERT_DIGEST_S` | `1800` | Feed: seconds between digest lines |
 | `alerts.quiet_s` | `ORCH_ALERT_QUIET_S` | `1800` | Feed: seconds a condition stays clear before its clear line |
-| `hog.gb` | `ORCH_HOG_GB` | `6` | Hog watcher: process size in GB |
+| `hog.gb` | `ORCH_HOG_GB` | `3` | Hog watcher: process size in GB |
 | `hog.git_gb` | `ORCH_HOG_GIT_GB` | `2` | Hog watcher: git process size in GB |
 | `hog.git_age_s` | `ORCH_HOG_GIT_AGE_S` | `180` | Hog watcher: git process age in seconds |
 | `workers.ask_timeout_s` | `ORCH_ASK_TIMEOUT_S` | `1800` | Maximum seconds a worker question waits for an answer |
@@ -143,6 +146,10 @@ A family left out is never started: the installer does not ask for its models, a
 ### 🖱️ cursor workers (Grok)
 
 `models.cursor_worker` and `models.cursor_smart` are Cursor CLI model ids, for example `grok-4.7-medium` and `grok-4.7-high`. Check ids with `cursor-agent --list-models`. Both default to empty; empty means the cursor family is off. With at least one set (and `providers.enabled` empty, or `"cursor"` in the list), architects start workers with `~/.claude/coordinator/cursor-start.sh <name> <pane> <worker|smart>`, which passes `--model` and, unless `--no-trust` is requested for a foreign PR review, `--trust`. One filled model serves both tiers, like Codex.
+
+### ♊ gemini workers (agy)
+
+`models.gemini_worker` and `models.gemini_smart` are agy model ids, for example `gemini-4-neon-medium` and `gemini-4-neon-high`. Check ids with `agy models`. Both default to empty; empty means the gemini family is off. Per agy's docs, agy sends the code a worker reads and the prompts it gets to Google, and there is no per-repo opt-in like `[pi] deepseek`: once a gemini model is set, every repo may use Gemini, so set one only if you accept that. With at least one set (and `providers.enabled` empty, or `"gemini"` in the list), architects start workers with `~/.claude/coordinator/gemini-start.sh <name> <pane> <worker|smart>`, which runs `herdr agent start --kind agy` with `--model` and `--mode auto`, takes no extra arguments, and refuses while the agy plugin `install.sh` builds is missing (see `docs/workers.md`). One filled model serves both tiers, like Codex. A gemini worker runs in agy's Auto mode: workspace edits and safe commands run without asking, and no `allow` rule is shipped (so Auto's check sees every command that leaves the sandbox, `orch-signal` included; never add `command(orch-signal)`), with `deny` rules for the destructive git/gh commands, under `permissions` in `~/.gemini/antigravity-cli/settings.json` (see `docs/workers.md`).
 
 DeepSeek sends the code to a remote API, so it is off for every repo. A repo opts in with `[pi] deepseek = true` in its personal `.orchestration.local.toml` (the main checkout's file also applies to its linked worktrees). The key in a committed `.orchestration.toml` is ignored with a warning, because a committed file would opt in every clone. The same key in a git-tracked `.orchestration.local.toml` is ignored too, and so is it when git cannot say whether the file is tracked (a broken index or a timeout), with a warning. DeepSeek counts as named when `deepseek` appears, in any case, in the provider or in the model id (`openrouter/deepseek/…`); every other provider, LM Studio included, needs no opt-in. `coordinator/pi-start.sh` enforces this when it starts a pi worker: it refuses an empty provider, ignores an exported `ORCH_PI_DEEPSEEK` and `GIT_*` variables, and its refusal tells the session to ask the user rather than edit the file. The Bash guard denies the ways around it; `docs/bash-guard.md` lists what stays open.
 

@@ -129,6 +129,32 @@ EOF
   [ "$(config_get ORCH_PROVIDERS)" = claude,cursor ]
 }
 
+@test "both Codex answers empty with a gemini model set write claude and gemini" {
+  fresh_install
+  config_set ORCH_GEMINI_WORKER_MODEL gemini-fixture
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude,gemini ]
+}
+
+@test "both Codex answers empty with only gemini placeholders leave gemini off" {
+  fresh_install
+  config_set ORCH_GEMINI_WORKER_MODEL '<gemini-worker-model>'
+  config_set ORCH_GEMINI_SMART_MODEL '<gemini-smart-model>'
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude ]
+}
+
+@test "both Codex answers empty with a gemini placeholder and usable smart model enable gemini" {
+  fresh_install
+  config_set ORCH_GEMINI_WORKER_MODEL '<gemini-worker-model>'
+  config_set ORCH_GEMINI_SMART_MODEL gemini-fixture
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude,gemini ]
+}
+
 @test "one Codex answer empty and the other set leaves providers.enabled empty and no Codex key to fill" {
   fresh_install
   on_tty $'-\ngpt-x\n-\n-\n-'

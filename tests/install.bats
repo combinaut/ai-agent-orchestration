@@ -23,7 +23,7 @@ load test_helper
   fresh_install
   settings="$HOME/.claude/settings.json"
   cp "$settings" "$TMP/settings-before.json"
-  find "$HOME" -path "$CLONE" -prune -o -path "$HOME/.claude/.orch-links" -prune -o -type f -exec cksum {} \; | LC_ALL=C sort >"$TMP/home-before.cksum"
+  find "$HOME" -path "$CLONE" -prune -o -path "$HOME/.claude/.orch-links" -prune -o -path "$HOME/.gemini/config/plugins/ai-agent-orchestration/rules" -prune -o -type f -exec cksum {} \; | LC_ALL=C sort >"$TMP/home-before.cksum"
   : >"$LAUNCHCTL_CALLS"
   : >"$SYSTEMCTL_CALLS"
   : >"$HERDR_CALLS"
@@ -39,8 +39,10 @@ load test_helper
   [ -L "$HOME/.claude/rules/links-only.md" ]
   [ "$HOME/.claude/rules/links-only.md" -ef "$CLONE/rules/links-only.md" ]
   [ ! -e "$HOME/.claude/rules/links-only-old.md" ]
+  [ -f "$HOME/.gemini/config/plugins/ai-agent-orchestration/rules/claude-links-only.md" ]
+  [ ! -e "$HOME/.gemini/config/plugins/ai-agent-orchestration/rules/claude-links-only-old.md" ]
   cmp "$TMP/settings-before.json" "$settings"
-  find "$HOME" -path "$CLONE" -prune -o -path "$HOME/.claude/.orch-links" -prune -o -type f -exec cksum {} \; | LC_ALL=C sort >"$TMP/home-after.cksum"
+  find "$HOME" -path "$CLONE" -prune -o -path "$HOME/.claude/.orch-links" -prune -o -path "$HOME/.gemini/config/plugins/ai-agent-orchestration/rules" -prune -o -type f -exec cksum {} \; | LC_ALL=C sort >"$TMP/home-after.cksum"
   cmp "$TMP/home-before.cksum" "$TMP/home-after.cksum"
   [ ! -s "$LAUNCHCTL_CALLS" ]
   [ ! -s "$SYSTEMCTL_CALLS" ]
@@ -319,11 +321,12 @@ raise SystemExit(result.returncode)
   jq -e '.statusLine.command == "mine" and .hooks.Stop[0].hooks[0].command == "stop" and ([.hooks.SessionStart[]?.hooks[]?.command] | index("bash ~/.claude/hooks/orch-update-check.sh"))' "$HOME/.claude/settings.json" >/dev/null
 }
 
-# bind_rules <claude dir>: the two bind-self.py allow rules for that install, one per line.
+# bind_rules <claude dir>: the allow rules for that install, one per line.
 bind_rules() {
   printf '%s\n' \
     'Bash(python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/*)' \
-    "Bash(python3 $1/coordinator/watchers/bind-self.py --output $1/coordinator/watchers/bindings/*)"
+    "Bash(python3 $1/coordinator/watchers/bind-self.py --output $1/coordinator/watchers/bindings/*)" \
+    'Bash(heavy-slot stop *)'
 }
 
 @test "bind-self allow rules are added to a missing settings file" {
@@ -337,7 +340,7 @@ bind_rules() {
   fresh_install
   printf '{}\n' >"$HOME/.claude/settings.json"
   install_ok
-  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 2 ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
 }
 
 @test "bind-self allow rules keep existing allow entries in order" {
@@ -346,7 +349,7 @@ bind_rules() {
   install_ok
   [ "$(jq -c '.permissions.allow[:2]' "$HOME/.claude/settings.json")" = '["Bash(ls *)","Read(~/x)"]' ]
   [ "$(jq -c '.permissions.deny' "$HOME/.claude/settings.json")" = '["Bash(rm *)"]' ]
-  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 4 ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 5 ]
 }
 
 @test "a second run adds no bind-self allow rule" {
@@ -355,26 +358,27 @@ bind_rules() {
   before=$(cat "$HOME/.claude/settings.json")
   install_ok
   [ "$(cat "$HOME/.claude/settings.json")" = "$before" ]
-  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 2 ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
 }
 
 @test "hand-added bind-self allow rules are recognized" {
   fresh_install
   jq -n --arg abs "$HOME/.claude" '{permissions: {allow: [
     "Bash(python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/*)",
-    "Bash(python3 \($abs)/coordinator/watchers/bind-self.py --output \($abs)/coordinator/watchers/bindings/*)"]}}' >"$HOME/.claude/settings.json"
+    "Bash(python3 \($abs)/coordinator/watchers/bind-self.py --output \($abs)/coordinator/watchers/bindings/*)",
+    "Bash(heavy-slot stop *)"]}}' >"$HOME/.claude/settings.json"
   before=$(jq -S . "$HOME/.claude/settings.json")
   install_ok
   [ "$(jq -S '.permissions' "$HOME/.claude/settings.json")" = "$(jq -S '.permissions' <<<"$before")" ]
-  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 2 ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
 }
 
 @test "only the missing bind-self allow rule is added" {
   fresh_install
   jq -n '{permissions: {allow: ["Bash(python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/*)"]}}' >"$HOME/.claude/settings.json"
   install_ok
-  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 2 ]
-  [ "$(jq -r '.permissions.allow[1]' "$HOME/.claude/settings.json")" = "$(bind_rules "$HOME/.claude" | tail -n 1)" ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
+  [ "$(jq -r '.permissions.allow[1]' "$HOME/.claude/settings.json")" = "$(bind_rules "$HOME/.claude" | sed -n 2p)" ]
 }
 
 @test "bind-self absolute allow rule follows the installed HOME" {
@@ -382,7 +386,7 @@ bind_rules() {
   mkdir -p "$other"
   use_home "$other"
   fresh_install
-  [ "$(jq -r '.permissions.allow[1]' "$other/.claude/settings.json")" = "$(bind_rules "$other/.claude" | tail -n 1)" ]
+  [ "$(jq -r '.permissions.allow[1]' "$other/.claude/settings.json")" = "$(bind_rules "$other/.claude" | sed -n 2p)" ]
   [ "$(jq -r '.permissions.allow[]' "$other/.claude/settings.json" | grep -cF "$TMP/home/")" -eq 0 ]
 }
 
@@ -443,7 +447,7 @@ EOF
   install_ok
   mode=$(python3 -c 'import os, sys; print(format(os.stat(sys.argv[1]).st_mode & 0o777, "o"))' "$HOME/.claude/settings.json")
   [ "$mode" = 640 ]
-  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 4 ]
 }
 
 @test "bind-self allow rules are written through a symlinked settings.json" {
@@ -453,7 +457,7 @@ EOF
   ln -s "$TMP/real-settings.json" "$HOME/.claude/settings.json"
   install_ok
   [ -L "$HOME/.claude/settings.json" ]
-  [ "$(jq '.permissions.allow | length' "$TMP/real-settings.json")" -eq 3 ]
+  [ "$(jq '.permissions.allow | length' "$TMP/real-settings.json")" -eq 4 ]
 }
 
 @test "settings with a non-list permissions.allow are left alone" {
@@ -1658,4 +1662,49 @@ TOML
 @test "the finalize and pr-defend skills carry no repo-specific names" {
   run grep -rniE 'spar''kle|combinaut|sleistner|stagehand|rubocop|mise run|\.ai/' "$ROOT/skills/finalize-sweep" "$ROOT/skills/finalize-change-footprint" "$ROOT/skills/finalize-code-comments" "$ROOT/skills/pr-defend"
   [ "$status" -eq 1 ]
+}
+
+@test "install builds the agy plugin from the clone skills and the Claude rules" {
+  mkdir -p "$HOME/.claude/rules"
+  printf 'always rule\n' >"$HOME/.claude/rules/always.md"
+  fresh_install
+  plugin="$HOME/.gemini/config/plugins/ai-agent-orchestration"
+  clone=$(cd "$CLONE" && pwd -P)
+  [ "$(readlink "$plugin/plugin.json")" = "$clone/snippets/agy-plugin.json" ]
+  for skill in "$clone"/skills/*/; do
+    name=$(basename "$skill")
+    [ "$(readlink "$plugin/skills/$name")" = "$clone/skills/$name" ]
+  done
+  [ "$(readlink "$plugin/rules/AGENTS.md")" = "$HOME/.claude/CLAUDE.md" ]
+  grep -qF 'orchestration:start' "$plugin/rules/AGENTS.md"
+  [ "$(cat "$plugin/rules/claude-always.md")" = "$(printf -- '---\ntrigger: always_on\n---\n@[always.md](%s)' "$HOME/.claude/rules/always.md")" ]
+  install_ok
+  contains "$output" "already set     $plugin/rules/claude-always.md"
+  rm "$HOME/.claude/rules/always.md"
+  install_ok
+  [ ! -e "$plugin/rules/claude-always.md" ]
+  contains "$output" "removed stale   $plugin/rules/claude-always.md"
+}
+
+@test "a path-scoped Claude rule is not given to agy" {
+  mkdir -p "$HOME/.claude/rules"
+  printf -- '---\npaths: "src/**"\n---\nscoped\n' >"$HOME/.claude/rules/scoped.md"
+  printf -- '---\ndescription: plain\n---\nunscoped\n' >"$HOME/.claude/rules/plain.md"
+  fresh_install
+  plugin="$HOME/.gemini/config/plugins/ai-agent-orchestration"
+  [ ! -e "$plugin/rules/claude-scoped.md" ]
+  [ -f "$plugin/rules/claude-plain.md" ]
+  contains "$output" "skipped         $HOME/.claude/rules/scoped.md for agy"
+}
+
+@test "install warns when agy would cut or demote the rules" {
+  mkdir -p "$HOME/.claude/rules"
+  head -c 24001 /dev/zero | tr '\0' x >"$HOME/.claude/rules/big.md"
+  fresh_install
+  contains "$output" "$HOME/.claude/rules/big.md is 24001 bytes; agy cuts a rule file at 24000 bytes"
+  not_contains "$output" "token budget"
+  for n in 1 2 3; do head -c 20000 /dev/zero | tr '\0' x >"$HOME/.claude/rules/r$n.md"; done
+  install_ok
+  contains "$output" "over agy's 20000-token budget"
+  not_contains "$output" "r1.md is"
 }

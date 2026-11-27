@@ -1967,6 +1967,22 @@ PYTEST
   done
 }
 
+@test "a refusal names the undisputed fixes and a pasted ERROR line does not hide the retry's disputes" {
+  FAKE_PR_FINDINGS=1 run_sweep
+  as_comment author
+  edit_comments 'r["items"].append(dict(r["items"][0], id="F8")); r["items"].append(dict(r["items"][0], id="F9", **{"class": "nit"})); r["open_fix"] = 2; r["findings"] += 2; r["verdicts"][r["items"][0]["verdict"]] += 2'
+  review APPROVE '{"body":"The earlier finding is corrected. No new findings.\n\n*(Generated using Codex)*"}'
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"disputes parsed: 0; undisputed: 1/F1, 1/F8" ]]
+  review APPROVE '{"body":"Sweep dispute 1/F8: the PR body now states the condition."}'
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"disputes parsed: 1; undisputed: 1/F1" ]]
+  [ ! -e "$TMP/review.json" ]
+  review APPROVE '{"body":"ERROR: APPROVE refused: the full sweep has 2 open fix findings; disputes parsed: 0\n\nSweep dispute 1/F1: The cited sentence is unchanged from the merge base.\nSweep dispute 1/F8: The PR body now states the condition.\n\n*(Generated using Codex)*"}'
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/review.json" ]
+}
+
 @test "the gate reports the exact reused comment id" {
   FAKE_PR_FINDINGS=1 run_sweep
   as_comment author

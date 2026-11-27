@@ -62,11 +62,11 @@ The gate reads only a PR comment that holds an `orch-sweep run` record. A `/fina
 
 The gate emits `RECORD_COMMENT <id>` for its selected validated comment, including when open fixes prevent approval. `RECORD_REUSABLE` distinguishes that refusal from missing or stale evidence. Both lines are flushed before the `ERROR:` diagnostic, so combined output keeps the reason last.
 
-Disputes are visible review-body lines: `Sweep dispute <sweep-comment-id>/<finding-id>: <specific code reason>`. List markers and indentation are accepted; fenced code, blockquotes and HTML comments are skipped. Reasons without a letter or digit, different sweep comments and reviews of other heads do not count. `post-review` evaluates its supplied body; later gate checks read the reviewer's latest submitted review at that head.
+Disputes are visible review-body lines: `Sweep dispute <sweep-comment-id>/<finding-id>: <specific code reason>`. List markers and indentation are accepted; fenced code, blockquotes and HTML comments are skipped. Reasons without a letter or digit, different sweep comments and reviews of other heads do not count. `post-review` evaluates only the body it is sending with APPROVE; dispute lines in a REQUEST_CHANGES, COMMENT or earlier review do not count toward it. Later gate checks read the reviewer's latest submitted review at that head.
 
 `review.finalize_commands = []` from the base settings (or dispatch's resolved value) skips record checks, while review posting still pins and checks the requested head. Dispatch checks for reusable evidence before starting agents, does not rerun a sweep merely because its findings need assessment. The independent review supplies that assessment.
 
-`orch-sweep post-review` reads `{body, comments}` on stdin, gates APPROVE and pins `commit_id` to `--head`. An undisputed-fix refusal exits 3; process/evidence refusals exit 1 and mean NOT POSTED, not REQUEST_CHANGES. Dispatch passes its resolved finalize setting in the post command. Tool failures, including uncertain review-POST outcomes, exit 2; do not post a replacement verdict or replay an uncertain request.
+`orch-sweep post-review` reads `{body, comments}` on stdin, gates APPROVE and pins `commit_id` to `--head`. An undisputed-fix refusal exits 3, posts nothing and ends its ERROR line with `undisputed: <sweep-comment-id>/<finding-id>, ...`; process/evidence refusals exit 1 and mean NOT POSTED, not REQUEST_CHANGES. Dispatch passes its resolved finalize setting in the post command. Tool failures, including uncertain review-POST outcomes, exit 2; do not post a replacement verdict or replay an uncertain request.
 
 ## Capacity
 
