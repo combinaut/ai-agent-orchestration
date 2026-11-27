@@ -197,6 +197,70 @@ class DeadlineCheckPointTests(IsolatedTestCase):
         # The outer deadline stays pending through every alarm in the inner exit.
         self.assertEqual({tuple(labels) for labels in pending}, {("outer",)})
 
+    def test_hard_deadline_inside_a_soft_deadline_restores_at_every_check_point(self):
+        # A failing run leaves the exiting traceback backstop armed.
+        self.addCleanup(runtime.faulthandler.cancel_dump_traceback_later)
+        self.addCleanup(runtime._HARD_DEADLINES.clear)
+
+        raised = set()
+
+        def body():
+            with runtime.deadline(5, "outer", soft=True):
+                try:
+                    # The earlier outer alarm stays installed, so no alarm hard-exits.
+                    with runtime.deadline(50, "inner"):
+                        pass
+                except BaseException as error:
+                    # The outer exit replaces this error with its own TimeoutError.
+                    raised.add(type(error))
+                    raise
+
+        places = self.sweep(
+            (runtime, contextlib),
+            body,
+            [0.0],
+            expected=(runtime._HARD_DEADLINES, runtime._SOFT_DEADLINES),
+        )
+        self.assertIn("arm_traceback_backstop", places)
+        self.assertEqual(raised, {TimeoutError})
+
+    def test_kept_alarm_in_exit_restores_without_rearming(self):
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+        self.addCleanup(signal.pthread_sigmask, signal.SIG_UNBLOCK, {signal.SIGALRM})
+        exit_code = runtime.deadline.__exit__.__code__
+
+        def fire(frame, _event, _arg):
+            if frame.f_code is exit_code:
+                sys.settrace(None)
+                # A fired one-shot alarm leaves no timer.
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.getsignal(signal.SIGALRM)(signal.SIGALRM, frame)
+
+        self.addCleanup(sys.settrace, None)
+        seen = []
+        with self.assertRaises(TimeoutError):
+            with runtime.deadline(5, "outer", soft=True):
+                with self.assertRaises(TimeoutError):
+                    with runtime.deadline(50, "inner", soft=True):
+                        sys.settrace(fire)
+                timer = signal.getitimer(signal.ITIMER_REAL)
+                seen.append((timer, [p["label"] for p in runtime._SOFT_DEADLINES]))
+        self.assertEqual(seen, [((0.0, 0.0), ["outer"])])
+
+    def test_kept_alarm_carries_the_poll_deadline(self):
+        with g.call_deadline(5):
+            with runtime.deadline(50, "kept", soft=True):
+                with g.call_deadline(10):
+                    expires = signal.getsignal(signal.SIGALRM)._poll_deadline[0]
+                    # The inherited limit is the outer 5s, not its clock-check tick.
+                    self.assertGreater(expires - g.time.time(), 4)
+
+    def test_kept_non_callable_alarm_stays_installed(self):
+        signal.signal(signal.SIGALRM, signal.SIG_IGN)
+        signal.setitimer(signal.ITIMER_REAL, 5)
+        with runtime.deadline(50, "kept", soft=True):
+            self.assertEqual(signal.getsignal(signal.SIGALRM), signal.SIG_IGN)
+
     def test_call_deadline_inside_a_soft_deadline_marks_it_expired(self):
         clock = self.poll_clock()
         escaped = []

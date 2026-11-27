@@ -121,6 +121,30 @@ def arm_traceback_backstop():
         faulthandler.cancel_dump_traceback_later()
 
 
+class _KeptAlarm:
+    """An enclosing alarm handler, kept by a deadline that ends no earlier."""
+
+    def __init__(self, owner, handler):
+        self.owner = owner
+        self.handler = handler
+
+    def __call__(self, signum, frame):
+        if (
+            frame
+            and frame.f_code is _EXIT_CODE
+            and frame.f_locals["self"] is self.owner
+        ):
+            # The restore leaves the timer as the alarm found it.
+            timer = signal.getitimer(signal.ITIMER_REAL)
+            self.owner._restore()
+            signal.setitimer(signal.ITIMER_REAL, *timer)
+        self.handler(signum, frame)
+
+    def __getattr__(self, name):
+        # call_deadline reads its state off the installed handler.
+        return getattr(self.handler, name)
+
+
 class deadline:
     """Hard exit bypasses broad read-error handlers and releases locks on death.
 
@@ -199,15 +223,18 @@ class deadline:
 
         self._restore = restore
         keep_previous = previous_timer[0] > 0 and previous_timer[0] <= seconds
+        handler = expired
+        if keep_previous:
+            handler = previous_handler
+            if callable(previous_handler):
+                handler = _KeptAlarm(self, previous_handler)
         try:
             if soft:
                 _SOFT_DEADLINES.append(pending)
             else:
                 _HARD_DEADLINES.append(started + seconds)
                 arm_traceback_backstop()
-            signal.signal(
-                signal.SIGALRM, previous_handler if keep_previous else expired
-            )
+            signal.signal(signal.SIGALRM, handler)
             signal.setitimer(
                 signal.ITIMER_REAL, previous_timer[0] if keep_previous else seconds
             )
