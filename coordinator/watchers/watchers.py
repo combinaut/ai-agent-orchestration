@@ -1902,7 +1902,6 @@ def acknowledge_answers(raw):
         processing.replace(
             processing.with_name(processing.name.removesuffix(".processing") + ".seen")
         )
-    return []
 
 
 def reduce(mode, before, raw):
@@ -2227,9 +2226,7 @@ def cycle_pass(base, mode, collector, failures, budget):
         if mode == "todo" and reduced:
             commit_todo_closures(raw)
         if mode == "answers" and reduced:
-            notices = acknowledge_answers(raw)
-            if notices:
-                line = publish_events(base, mode, state, notices)
+            acknowledge_answers(raw)
         if mode == "hog":
             log_events = log_hog_hits(base, state, hog_hits)
             if log_events:

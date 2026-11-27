@@ -22,7 +22,6 @@ HEARTBEAT_MIN_SECONDS = 30
 HEARTBEAT_FRESH_SECONDS = 300
 QUESTION_RETAIN_SECONDS = 3600
 QUESTIONS_MAX = 200
-CLEANUP_MAX = 1
 DONE_EVENTS_MAX = 200
 DONE_EVENTS_KEEP_SECONDS = 3600
 ID = re.compile(r"signal-[a-f0-9]{32}\Z")
@@ -158,7 +157,7 @@ def remove_question(record, close_panel=True):
     """Remove a worker question record and its answer files."""
     identifier = record["id"]
     panel = questions_directory() / (identifier + ".md")
-    if panel.exists() or (not close_panel and record.get("resume_answer")):
+    if not close_panel and (panel.exists() or record.get("resume_answer")):
         if not close_panel:
             record["cleanup"] = True
             write(question_path(identifier), record)
@@ -319,7 +318,6 @@ def collect(rows, owners, now, snapshot_at=None, resume=None):
                 item[0].name,
             )
         )
-        cleanup_used = 0
         for path, record in saved:
             if not record:
                 continue
@@ -351,14 +349,6 @@ def collect(rows, owners, now, snapshot_at=None, resume=None):
                     or closed
                     or (now > record["deadline"] + QUESTION_RETAIN_SECONDS)
                 ):
-                    panel = questions_directory() / (record["id"] + ".md")
-                    if panel.exists():
-                        if cleanup_used >= CLEANUP_MAX:
-                            remove_question(record, close_panel=False)
-                            continue
-                        cleanup_used += 1
-                        record.update(cleanup=True, cleanup_tried=now)
-                        write(path, record)
                     remove_question(record)
                 else:
                     if not answered and now < record["deadline"]:

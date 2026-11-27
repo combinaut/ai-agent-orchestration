@@ -107,7 +107,7 @@ unchanged. No picker opens in the worker pane.
 | Native outbox | Existing 200 entries; merge overflow by target, drop oldest beyond cap; retry every 60 seconds, expire after 3600 seconds |
 
 Files live under `~/.claude/coordinator/worker-signals/`, never in the repo.
-Escalated question files live in `~/.claude/coordinator/questions/`. Pruning uses a validated pane snapshot through the env adapter, preserves records when
+Pruning uses a validated pane snapshot through the env adapter, preserves records when
 the snapshot is unreadable, and does not prune records newer than the snapshot cutoff.
 Pruning uses the existing answers lock, so answer publication cannot race cancellation. A
 successful `ask` prints only its answer to stdout; timeout exits nonzero with one

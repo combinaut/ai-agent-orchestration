@@ -509,6 +509,15 @@ class SignalTests(IsolatedTestCase):
         s.collect(rows, {"worker": "owner"}, q["deadline"] + 3601)
         self.assertFalse(s.question_path(q["id"]).exists())
 
+    def test_expired_question_removes_a_leftover_panel_file(self):
+        q = self.record(timeout=1)
+        panel = s.questions_directory() / (q["id"] + ".md")
+        panel.write_text("Old panel")
+        rows = [dict(pane_id="pane:1", workspace_id="worker")]
+        s.collect(rows, {"worker": "owner"}, q["deadline"] + 3601)
+        self.assertFalse(s.question_path(q["id"]).exists())
+        self.assertFalse(panel.exists())
+
     def test_full_signal_payload_survives_policy(self):
         import alert_policy
 
