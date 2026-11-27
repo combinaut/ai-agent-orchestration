@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print the agy --settings JSON of read_file/write_file rules for a worker in herdr pane --pane.
+"""Print the agy --settings JSON of read_file/write_file rules for a worker whose folder is --cwd.
 
 Read: the orch checkout, each --read, the global git config files that set an entry, the excludes, ignore and attributes files, the pane's git common dir.
 """
@@ -44,21 +44,6 @@ def git_config_files(cwd):
     return files
 
 
-def pane_cwd(herdr, pane):
-    """The cwd herdr reports for `pane`, or "" when herdr fails."""
-    try:
-        result = subprocess.run(
-            [herdr, "pane", "get", pane],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        return json.loads(result.stdout)["result"]["pane"]["cwd"]
-    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
-        return ""
-
-
 def git_common_dir(cwd):
     """The git common dir of `cwd` (for a worktree: the main checkout's .git), or None."""
     if not cwd:
@@ -96,14 +81,13 @@ def settings(cwd, reads, writes):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--herdr", default="herdr")
-    parser.add_argument("--pane", required=True)
+    parser.add_argument("--cwd", required=True)
     parser.add_argument("--read", action="append", default=[])
     parser.add_argument("--write", action="append", default=[])
     args = parser.parse_args()
     print(
         json.dumps(
-            settings(pane_cwd(args.herdr, args.pane), args.read, args.write),
+            settings(args.cwd, args.read, args.write),
             separators=(",", ":"),
         )
     )

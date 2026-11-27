@@ -159,7 +159,7 @@ An `allow` rule switches off Auto's check for every command it matches, and matc
 
 ### Terminal sandbox paths
 
-agy's terminal sandbox blocks the user's home folder except a few caches, keeps `.git` read-only even in the workspace, and has no network or Unix sockets. `gemini-start.sh` passes `--settings` with `read_file(...)` and `write_file(...)` rules, which agy adds to the sandbox's read-only and read-write path lists for that session only; it never writes agy's settings files, and your own `deny` rules still apply. `coordinator/agy-sandbox-settings.py` builds them; paths that do not exist are left out, and a symlinked path is granted at the link and its target.
+agy's terminal sandbox blocks the user's home folder except a few caches, keeps `.git` read-only even in the workspace, and has no network or Unix sockets. `gemini-start.sh` passes `--settings` with `read_file(...)` and `write_file(...)` rules, which agy adds to the sandbox's read-only and read-write path lists for that session only; they are never written to agy's settings files, and your own `deny` rules still apply. `coordinator/agy-sandbox-settings.py` builds them; paths that do not exist are left out, and a symlinked path is granted at the link and its target.
 
 | Rule | Path | For |
 |---|---|---|
@@ -174,4 +174,6 @@ Any sandboxed command of any gemini worker can read those files and change any r
 
 agy reads global skills and rules only from `~/.gemini/config/`, not from `~/.claude` or `~/.agents/skills`. `install.sh` builds the plugin `~/.gemini/config/plugins/ai-agent-orchestration/` with the orch skills, your `~/.claude/CLAUDE.md` as `rules/AGENTS.md`, and each `~/.claude/rules/<name>.md` without `paths:` as an always-on include (see the [file table](installer.md#-files-linked-into-claude)), so a gemini worker gets the orch skills and your global rules in every repo. `install.sh` also links `snippets/agy-sandbox.md` as `rules/orch-agy-sandbox.md`. `gemini-start.sh` refuses to start while `plugin.json`, `rules/AGENTS.md` or `rules/orch-agy-sandbox.md` is missing or dangling; run `install.sh`.
 
-agy shows its workspace trust dialog for each new folder, so the user trusts the worktree root or a parent folder before the first gemini worker there. agy loads the plugin's skills and rules (it follows the links and expands the includes). `orch-signal` runs outside the sandbox, and Auto's check asks once for `orch-signal heartbeat --new-job` and once for `orch-signal done` per worker ("writes a signal file outside the workspace"); the user presses "Yes, run command", never an "always" option.
+Before the start, `gemini-start.sh` adds the resolved path of the pane's folder to `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json` (agy matches the exact path), so agy shows no trust prompt. It changes no other value, and refuses to start when that file is not a JSON object or `trustedWorkspaces` is not a list.
+
+agy loads the plugin's skills and rules (it follows the links and expands the includes). `orch-signal` runs outside the sandbox, and Auto's check asks once for `orch-signal heartbeat --new-job` and once for `orch-signal done` per worker ("writes a signal file outside the workspace"); the user presses "Yes, run command", never an "always" option.
