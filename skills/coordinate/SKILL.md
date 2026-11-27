@@ -65,7 +65,7 @@ Before starting your Coordinator session, read [references/startup.md](reference
 
 Use `gh` and `gh api` for GitHub actions and queries, within the Coordinator authority limits below.
 
-For every GitHub write or Actions call, use `python3 <orch-root>/lib/github_write.py --timeout <seconds> <gh arguments>` with a timeout below the caller's deadline. It shares cooldown state across sessions, serializes retries, and only retries confirmed secondary-limit/abuse responses; do not replay permission or uncertain-outcome failures. Use `github_poll.py` or the existing PR watcher for repeated reads and CI waits.
+For every GitHub write or Actions call, use `github-write --timeout <seconds> <gh arguments>` with a timeout below the caller's deadline. It shares cooldown state across sessions, serializes retries, and only retries confirmed secondary-limit/abuse responses; do not replay permission or uncertain-outcome failures. Use `github_poll.py` or the existing PR watcher for repeated reads and CI waits.
 
 **Relay commands down.** When the user says something for "all architects", send it to every architect (use `name [ref]` when names repeat), then tell the user who got it and who did not. Say it once, precisely, with the reason. Never water it down or add rules the user did not give.
 

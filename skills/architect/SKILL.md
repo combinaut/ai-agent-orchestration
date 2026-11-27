@@ -151,7 +151,7 @@ Put these rules in every worker brief, together with the contents of `~/.claude/
 
 Use `gh` and `gh api` for GitHub actions and queries.
 
-**Shared write admission.** Every GitHub write or Actions call (POST, PATCH, PUT, DELETE, `gh workflow run`, review/comment/thread actions, reviewer edits) uses `python3 <orch-root>/lib/github_write.py --timeout <seconds> <gh arguments>`, with its timeout below the caller's own deadline. It serializes retrying writes across sessions and retries only confirmed secondary-limit/abuse 403s or 429s; permission errors and uncertain outcomes fail without replaying the write. Repeated reads and CI waits use `github_poll.py` or the PR watcher at its normal cadence, never a raw tight loop.
+**Shared write admission.** Every GitHub write or Actions call (POST, PATCH, PUT, DELETE, `gh workflow run`, review/comment/thread actions, reviewer edits) uses `github-write --timeout <seconds> <gh arguments>`, with its timeout below the caller's own deadline. It serializes retrying writes across sessions and retries only confirmed secondary-limit/abuse 403s or 429s; permission errors and uncertain outcomes fail without replaying the write. Repeated reads and CI waits use `github_poll.py` or the PR watcher at its normal cadence, never a raw tight loop.
 
 **GitHub actions never wait on a confirmation.** Every brief that lists a GitHub action (comment, edit, undraft, request review, open PR, merge) states: "The brief is the authorization: do each listed GitHub action without asking for confirmation, then report what you did." The architect keeps a Herdr-only status watch on its own workers (no `gh`), so a worker that stops anyway is answered within minutes.
 

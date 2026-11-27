@@ -2290,6 +2290,15 @@ pkill -f vite
         f"python3 {ROOT}/lib/github_write.py pr create --title Fix --body Details",
     )
     case(
+        "installed github-write PR attribution",
+        'github-write --timeout 240 pr create --body "Generated with Codex"',
+        True,
+    )
+    case(
+        "wrapped search for github-write",
+        "timeout 60 rg -n github-write --glob '*.md' docs",
+    )
+    case(
         "ruff mentions wrapper source",
         f"python3 -m ruff check {ROOT}/lib/github_write.py --fix",
     )

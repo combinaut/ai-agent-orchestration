@@ -20,7 +20,7 @@ from pathlib import Path
 
 PUSH_REASON = "Never push to main/master; open a PR (see .ai/git-workflow.md)."
 ATTR_REASON = "No AI attribution in commits, PR titles or PR bodies (global + .ai/git-workflow.md); remove the trailer and retry."
-GITHUB_WRITE_OPTION_REASON = "github_write.py accepts only --timeout before gh arguments; remove the unknown wrapper option and retry."
+GITHUB_WRITE_OPTION_REASON = "The GitHub write helper accepts only --timeout before gh arguments; remove the unknown wrapper option and retry."
 FILE_TOO_LARGE_REASON = "Message/body file is too large to check safely; use a smaller file or remove the file input."
 FILE_NONREGULAR_REASON = (
     "Message/body file is not a regular file; use a regular file input."
@@ -31,8 +31,7 @@ BIG_REPO_REASON = (
 BIG_REPO_BATCH_REASON = "No whole-tree cat-file batch read in a configured big repo. Use rg scoped to the directories you need."
 SEARCH_ROOT_REASON = (
     "Do not search a whole-machine root. Search a named project directory, or use the "
-    "known helper paths: orch-signal is on PATH and GitHub writes use "
-    "python3 <orch repo>/lib/github_write.py."
+    "known helpers: orch-signal and github-write are on PATH."
 )
 PI_REASON = "pi starts only through ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart|provider/model-id from ORCH_PI_MODELS>; DeepSeek is off unless the repo opted in, and a live pi never switches model."
 CODEX_REASON = "A raw codex start may not carry --dangerously-bypass-hook-trust, --dangerously-bypass-approvals-and-sandbox, --yolo, --full-auto, --approve-for-me, -a/--ask-for-approval, -s/--sandbox, --add-dir, -p/--profile, --disable hooks, -c/--config keys starting sandbox, approval, permissions, default_permissions, profiles or hooks, or a $ or backtick in its agent arguments; start a bypassed Codex worker with ~/.claude/coordinator/codex-start.sh <name> <pane> <worker|smart>."
@@ -1963,10 +1962,10 @@ PYTHON_VALUE_FLAGS = {"W", "X"}
 
 
 def github_write_gh_args(words):
-    """The gh arguments wrapped by a real github_write.py script invocation."""
+    """The gh arguments wrapped by github-write or a github_write.py script run."""
     if not words:
         return None
-    if os.path.basename(words[0]) == "github_write.py":
+    if os.path.basename(words[0]) in ("github-write", "github_write.py"):
         return words[1:]
     if not re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", os.path.basename(words[0])):
         return None
