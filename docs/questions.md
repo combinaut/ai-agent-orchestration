@@ -6,9 +6,9 @@ Every user question opens below the asking architect’s own pane without taking
 
 ## Open and close
 
-Create the question's Markdown file under `~/.claude/coordinator/questions/<slug>.md`, then run `ask-user-question <slug> <file>`. The pane is labelled `Q: <slug>`. The architect opens it directly and registers `QUESTION <slug> <file>` with the Coordinator for answer relay; the Coordinator records the slug’s asker rather than inferring it from the question pane’s location. Keep the matching wait in the architect’s status file so it also appears in the generated to-do list.
+Create the question's Markdown file under `~/.claude/coordinator/questions/<slug>.md`, then run `ask-user-question <slug> <file>`. The pane is labelled `Q: <slug>`. The architect opens it directly and registers `QUESTION <slug> <file>` with the Coordinator for answer relay; the Coordinator records the slug’s asker rather than inferring it from the question pane’s location. Keep the matching wait in the architect’s status file so it also appears in the generated to-do list. An architect-owned worker question never opens this panel: its architect asks the user here and relays the answer with `orch-signal answer <id> "<text>"`.
 
-The question is rendered by the Rust Markdown viewer `mdcat`, found on `PATH` or at `/opt/homebrew/bin/mdcat`. Successful renders are cached by question text and terminal width. If the viewer is unavailable or fails, the panel shows plain text with one stderr warning and uses plain text for the rest of that panel’s lifetime. The answer controls stay interactive. C0/C1 controls other than newline and tab are stripped from question text and option labels before display; worker escalations strip them before writing the question file.
+The question is rendered by the Rust Markdown viewer `mdcat`, found on `PATH` or at `/opt/homebrew/bin/mdcat`. Successful renders are cached by question text and terminal width. If the viewer is unavailable or fails, the panel shows plain text with one stderr warning and uses plain text for the rest of that panel’s lifetime. The answer controls stay interactive. C0/C1 controls other than newline and tab are stripped from question text and option labels before display.
 
 | Command | Effect |
 | --- | --- |

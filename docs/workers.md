@@ -40,25 +40,14 @@ orch-signal done --outcome succeeded --report /path/report.md --summary "Checks 
 # In the owning architect workspace:
 orch-signal list
 orch-signal answer signal-<id> "v2"
-orch-signal answer signal-<id> --to-user
 ```
 
-`answer --to-user` opens the Q panel. The workers watcher then sends the
-Coordinator one `WORKER QUESTION TO USER <pane> owner=<ws> id=<id> file=<question file>`
-line at its next poll (the command does not send it), unless the question is already
-answered or closed, and the Coordinator treats it
-as the architect's `QUESTION <slug> <file>` registration. The command exits non-zero
-(one stderr line) when the panel did not open. The escalated question stays open after
-the worker's ask times out, until the user answers or 24 hours after
-`answer --to-user`. A user answer after the ask ended reaches the owning architect as
-`WORKER ANSWER LATE <pane> owner=<ws> id=<id> answer=<text>`; the architect relays it
-once through the worker runtime's native message channel (the Messages rule in
-`skills/architect/SKILL.md`). At 24 hours the owner gets
-`WORKER QUESTION EXPIRED <pane> owner=<ws> id=<id>`. A closed worker pane, an owner
-change or a cancelled ask (SIGINT, SIGTERM or SIGHUP) closes the question with no new
-line, unless a LATE or EXPIRED line was already sent. Lines already sent stand. An escalated
-ask whose worker was killed with SIGKILL stays open until a LATE or EXPIRED line. The architect still adds a
-`## Waits on the user` item.
+An architect-owned worker question never opens the Q panel. The owning architect asks
+the user from its own pane, then returns the answer with `orch-signal answer <id>
+"<text>"`. `orch-signal answer <id> --to-user` is rejected for such a question before
+it writes a question file or notifies the Coordinator, so it cannot create a worker
+question panel by accident. Ownerless sessions retain the legacy `--to-user` panel
+flow.
 
 A **current job** begins with `heartbeat --new-job` and ends with `done`; every
 follow-up brief in a reused pane must begin a new job. Identical done calls are
@@ -118,7 +107,7 @@ unchanged. No picker opens in the worker pane.
 | Waiting ask polling | At most once per second, last sleep capped by remaining time |
 | Heartbeats | One accepted per 30 seconds; fresh for 300 seconds |
 | Pane records | One per live pane; removed after a successful snapshot confirms pane closed or owner changed |
-| Question/answer files | Worker consumption returns immediately; Q closure is deferred to the workers poll. Removed when consumed (Codex receipts remain until wake-up, observed working, or deadline), replaced, closed, or at deadline + 3600 seconds (an escalated question is kept up to 24 hours after `answer --to-user`, then for the notice window); a failed Q close retains a retry record; live askers wait for cleanup, while dead askers can be replaced |
+| Question/answer files | Worker consumption returns immediately; Q closure is deferred to the workers poll. Removed when consumed (Codex receipts remain until wake-up, observed working, or deadline), replaced, closed, or at deadline + 3600 seconds (an ownerless legacy escalation is kept up to 24 hours after `answer --to-user`, then for the notice window); a failed Q close retains a retry record; live askers wait for cleanup, while dead askers can be replaced |
 | Completion handoff | Latest 200 completions per pane for 3600 seconds; oldest dropped beyond cap; remaining events are emitted once before pruning a closed or re-tagged pane |
 | Q-panel cleanup | At most one close attempt per workers poll, 2-second execution timeout with bounded process-group teardown; failed attempts rotate behind other pending panels |
 | Signal dedupe state | IDs from retained live completions and unexpired pending questions and escalated questions kept open |

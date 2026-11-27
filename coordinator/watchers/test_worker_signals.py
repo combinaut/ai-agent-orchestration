@@ -122,6 +122,19 @@ class SignalTests(IsolatedTestCase):
         self.assertFalse(s.question_path(q["id"]).exists())
         self.assertFalse(s.answer_path(q["id"]).exists())
 
+    def test_owner_cannot_escalate_a_worker_question_to_the_user_panel(self):
+        q = self.record(timeout=60)
+        with (
+            patch.dict(
+                os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
+            ),
+            self.assertRaisesRegex(ValueError, "architect must ask the user directly"),
+        ):
+            s.answer(q["id"], None, to_user=True)
+        self.opener.assert_not_called()
+        self.assertFalse((s.questions_directory() / (q["id"] + ".md")).exists())
+        self.assertNotIn("to_user", s.read(s.question_path(q["id"])))
+
     def answered_codex_question(self):
         self.work["panes"][0].update(agent="codex", status="idle")
         q = s.new_question(s.identity(), "Which?", "a,b", 60)
@@ -293,12 +306,11 @@ class SignalTests(IsolatedTestCase):
             with self.assertRaisesRegex(ValueError, "already answered"):
                 s.answer(q["id"], "b")
 
-    def test_escalation_and_answers_watcher_bridge(self):
+    def test_ownerless_question_can_still_escalate_to_the_user_panel(self):
         q = self.record(timeout=60)
+        q = dict(q, owner=None)
+        s.write(s.question_path(q["id"]), q)
         with (
-            patch.dict(
-                os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
-            ),
             patch.object(s, "open_user_question", return_value=0),
         ):
             s.answer(q["id"], None, to_user=True)
@@ -334,10 +346,9 @@ class SignalTests(IsolatedTestCase):
             "Y" + controls + "es,No",
             60,
         )
-        with patch.dict(
-            os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
-        ):
-            s.answer(q["id"], None, to_user=True)
+        q = dict(q, owner=None)
+        s.write(s.question_path(q["id"]), q)
+        s.answer(q["id"], None, to_user=True)
         text = (s.questions_directory() / (q["id"] + ".md")).read_text()
         self.assertEqual(
             text,
@@ -346,10 +357,9 @@ class SignalTests(IsolatedTestCase):
 
     def test_worker_question_keeps_sparse_display_ids_and_numeric_answers(self):
         q = s.new_question(s.identity(), "Pick?", "A,,C", 60)
-        with patch.dict(
-            os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
-        ):
-            s.answer(q["id"], None, to_user=True)
+        q = dict(q, owner=None)
+        s.write(s.question_path(q["id"]), q)
+        s.answer(q["id"], None, to_user=True)
         question = s.questions_directory() / (q["id"] + ".md")
         self.assertIn("1\\. A  \n3\\. C", question.read_text())
         spec = importlib.util.spec_from_file_location(
@@ -1119,10 +1129,14 @@ class SignalTests(IsolatedTestCase):
         self.assertTrue(any("WORKER WAITING" in line for line in events))
 
     def escalate(self, q):
-        with patch.dict(
-            os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
-        ):
-            s.answer(q["id"], None, to_user=True)
+        # Existing ownerless escalations retain their watcher lifecycle after ownership
+        # is restored from the current worker snapshot.
+        legacy = dict(s.read(s.question_path(q["id"])), owner=None)
+        s.write(s.question_path(q["id"]), legacy)
+        s.answer(q["id"], None, to_user=True)
+        restored = s.read(s.question_path(q["id"]))
+        restored["owner"] = q["owner"]
+        s.write(s.question_path(q["id"]), restored)
 
     def live(self, now):
         return s.collect(
@@ -1214,26 +1228,6 @@ class SignalTests(IsolatedTestCase):
         self.assertFalse(panel.exists())
         _, records = self.live(after + 5)
         self.assertEqual(self.route(state, records)[1], [])
-
-    def test_failed_panel_open_exits_non_zero_and_keeps_the_retry(self):
-        q = self.record(timeout=60)
-        panel = s.questions_directory() / (q["id"] + ".md")
-        for code, expected in ((1, 1), (73, 0), (0, 0)):
-            self.opener.return_value = code
-            stderr = io.StringIO()
-            with (
-                patch.dict(
-                    os.environ, HERDR_WORKSPACE_ID="owner", HERDR_PANE_ID="architect"
-                ),
-                patch.object(
-                    s.sys, "argv", ["orch-signal", "answer", q["id"], "--to-user"]
-                ),
-                patch.object(s.sys, "stderr", stderr),
-            ):
-                self.assertEqual(s.main(), expected)
-            if code == 1:
-                self.assertEqual(len(stderr.getvalue().splitlines()), 1)
-                self.assertTrue(panel.with_suffix(".remind").exists())
 
     def test_plain_question_still_closes_at_its_deadline(self):
         q = self.record(timeout=60)

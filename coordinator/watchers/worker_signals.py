@@ -300,13 +300,18 @@ def answer(identifier, text, to_user=False):
         record = read(question_path(identifier))
         if not record or record.get("cleanup") or record["deadline"] <= time.time():
             raise ValueError("question is missing or expired")
-        if caller["workspace"] != record["owner"]:
-            raise ValueError("only the owner architect workspace may answer")
+        if record.get("owner"):
+            if caller["workspace"] != record["owner"]:
+                raise ValueError("only the owner architect workspace may answer")
+        elif caller["workspace"] != record["workspace"]:
+            raise ValueError("only the asking workspace may answer")
         if not asker_alive(record):
             raise ValueError("asker is gone")
         if answer_path(identifier).exists():
             raise ValueError("question already answered")
         if to_user:
+            if record.get("owner"):
+                raise ValueError("owner architect must ask the user directly")
             target = questions_directory() / (identifier + ".md")
             choices = "\n".join(
                 f"{number}\\. " + choice.strip() + "  "
