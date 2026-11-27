@@ -1191,7 +1191,7 @@ HANG='echo $$ >"$TEST_ROOT/hung"; exec sleep 60'
   fake_slot agent-nosignal
   read -r start _ < <(python3 -I "$ROOT/lib/process_identity.py" "$FAKE_PID")
   printf '%s %s\n' "$FAKE_PID" "$start" >"$ORCH_HEAVY_SLOTS_DIR/.ids/agent-nosignal"
-  # shellcheck disable=SC2329 # heavy-slot calls the exported function.
+  # shellcheck disable=SC2317,SC2329 # heavy-slot calls the exported function.
   kill() { [ "$1" != -TERM ] || return 1; builtin kill "$@"; }
   export -f kill
   run "$HELPER" stop agent-nosignal
@@ -1202,7 +1202,7 @@ HANG='echo $$ >"$TEST_ROOT/hung"; exec sleep 60'
 @test "stop reports a job that ends before TERM as stopped" {
   # shellcheck disable=SC2016 # The job's bash expands these.
   start_job agent-early 'echo ready >"$1"; exec sleep 30'
-  # shellcheck disable=SC2329 # heavy-slot calls the exported function.
+  # shellcheck disable=SC2317,SC2329 # heavy-slot calls the exported function.
   kill() {
     [ "$1" = -TERM ] || { builtin kill "$@"; return; }
     builtin kill -KILL "$2"
