@@ -23,6 +23,8 @@ A slot is a file in `~/.claude/heavy-slots/` that holds the job's pid. `take` re
 
 `heavy-slot stop <name>` sends TERM to the pid in that slot's file, and KILL if it still runs after `ORCH_HEAVY_SLOTS_KILL_GRACE` seconds (default 10). The job's `take` then ends the rest of the job's process group and removes the slot file. `stop` prints each step. A job that `stop` ends writes a `FAIL` event.
 
+`stop` checks the start time just before each signal. The check and the signal are two steps (macOS has no pidfd), so a pid that is reused between them gets the signal.
+
 `stop` signals nothing and exits non-zero when:
 
 - no slot has that name (exit 64);

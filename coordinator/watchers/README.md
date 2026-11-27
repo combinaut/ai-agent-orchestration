@@ -207,7 +207,7 @@ Thresholds compare raw RSS in kB; only display values are rounded to one decimal
 Linux scans skip and count exited, inaccessible or malformed PIDs in the adapter’s
 `skipped_processes` counter without discarding valid processes.
 The Coordinator inspects the command and parent chain, routes the evidence to the
-owning architect, and stops only an owned job PID when the memory guard requires it.
+owning architect, and stops only an owned job, a slot job with `heavy-slot stop <name>`, when the memory guard requires it.
 On hog HEARTBEAT STALE or repeated read failures, inspect and restore the producer.
 The watcher kills nothing.
 

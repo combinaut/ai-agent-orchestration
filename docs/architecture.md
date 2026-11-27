@@ -173,8 +173,8 @@ Many sessions share one machine, and running out of open file handles has crashe
 - When the cap is full, `take` waits up to 1800 seconds and then prints `NEED SLOT`. The worker ends its turn with a plain `NEED SLOT: …` line and stops; `SLOT: go` from the architect means run now. A worker never opens an interactive question box.
 - A worker takes its slot itself. It does not wait for the architect.
 - Stale slot files raise `STALESLOT`, directories raise `SLOTDIR`, from the audit. Too many slots or busy worktrees raise `BALANCE`.
-- On `BALANCE`, the Coordinator asks architects to stagger heavy work and stops excess jobs only by their owned slot pids.
-- On `HOST`, the memory guard applies: the Coordinator stops heavy jobs by their owned slot pids and tells the architects holding slots.
+- On `BALANCE`, the Coordinator asks architects to stagger heavy work and stops excess jobs only with `heavy-slot stop <name>`.
+- On `HOST`, the memory guard applies: the Coordinator stops heavy jobs with `heavy-slot stop <name>` and tells the architects holding slots.
 - It never removes a live slot file.
 
 The template every worker brief carries is [`worker-reports/machine-rules.md`](../worker-reports/machine-rules.md).
