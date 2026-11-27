@@ -18,6 +18,11 @@ printf '%s\n' "$*" >>"$HERDR_CALLS"
 SH
   chmod +x "$TMP/bin/herdr"
   ln -s "$(command -v python3)" "$TMP/bin/python3"
+  PLUGIN="$HOME/.gemini/config/plugins/ai-agent-orchestration"
+  mkdir -p "$PLUGIN/rules" "$HOME/.claude"
+  printf '{}\n' >"$PLUGIN/plugin.json"
+  printf 'rules\n' >"$HOME/.claude/CLAUDE.md"
+  ln -s "$HOME/.claude/CLAUDE.md" "$PLUGIN/rules/AGENTS.md"
 }
 
 teardown() {
@@ -98,4 +103,20 @@ teardown() {
   run "$SCRIPT" w1 pane1 worker
   [ "$status" -eq 0 ]
   [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-medium --mode auto" ]
+}
+
+@test "a missing agy plugin manifest is refused" {
+  rm "$PLUGIN/plugin.json"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$PLUGIN/plugin.json is missing or dangling"*"run install.sh"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "a dangling agy rules link is refused" {
+  rm "$HOME/.claude/CLAUDE.md"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$PLUGIN/rules/AGENTS.md is missing or dangling"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
 }

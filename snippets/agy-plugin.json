@@ -1,0 +1,5 @@
+{
+  "name": "ai-agent-orchestration",
+  "description": "The orchestration skills and the user's global Claude rules (~/.claude/CLAUDE.md, ~/.claude/rules), installed by ai-agent-orchestration install.sh.",
+  "repository": "https://github.com/combinaut/ai-agent-orchestration"
+}

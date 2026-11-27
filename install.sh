@@ -447,6 +447,69 @@ link_shared_files() {
   link_entry "$ORCH_REPO/worker-reports/machine-rules.md" "$CLAUDE_DIR/worker-reports/machine-rules.md"
   link_entry "$ORCH_REPO/hooks/orch-update-check.sh" "$CLAUDE_DIR/hooks/orch-update-check.sh"
   link_entry "$ORCH_REPO/hooks/guard-bash.py" "$CLAUDE_DIR/hooks/guard-bash.py"
+  link_agy_plugin
+}
+
+# agy reads global skills and rules only from plugins under ~/.gemini/config; its limits are 24,000 bytes per rule file and 20,000 tokens of always-on rules.
+AGY_PLUGIN="$HOME/.gemini/config/plugins/ai-agent-orchestration"
+AGY_RULE_CAP=24000
+AGY_RULES_TOKENS=20000
+
+# agy_size_check <file> <bytes>: warns when agy would cut the rule file.
+agy_size_check() {
+  [ "$2" -le "$AGY_RULE_CAP" ] || say "warning" "$1 is $2 bytes; agy cuts a rule file at $AGY_RULE_CAP bytes, so gemini workers miss its end"
+}
+
+link_agy_plugin() {
+  local d name src dest text bytes backup total=0
+  link_entry "$ORCH_REPO/snippets/agy-plugin.json" "$AGY_PLUGIN/plugin.json"
+  for d in "$ORCH_REPO"/skills/*/; do
+    [ -d "$d" ] || continue
+    link_entry "$ORCH_REPO/skills/$(basename "$d")" "$AGY_PLUGIN/skills/$(basename "$d")"
+  done
+  link_entry "$CLAUDE_DIR/CLAUDE.md" "$AGY_PLUGIN/rules/AGENTS.md"
+  if [ -f "$CLAUDE_DIR/CLAUDE.md" ]; then
+    bytes=$(wc -c <"$CLAUDE_DIR/CLAUDE.md" | tr -d ' ')
+    agy_size_check "$CLAUDE_DIR/CLAUDE.md" "$bytes"
+    total=$bytes
+  fi
+  for dest in "$AGY_PLUGIN"/rules/claude-*.md; do
+    [ -f "$dest" ] && [ ! -L "$dest" ] || continue
+    name=${dest##*/rules/claude-}
+    [ ! -f "$CLAUDE_DIR/rules/$name" ] || continue
+    rm "$dest"
+    say "removed stale" "$dest"
+  done
+  for src in "$CLAUDE_DIR"/rules/*.md; do
+    [ -f "$src" ] || continue
+    name=${src##*/}
+    dest="$AGY_PLUGIN/rules/claude-$name"
+    if [ "$(head -n 1 "$src")" = --- ] && sed -n '2,/^---$/p' "$src" | grep -q '^paths:'; then
+      skip "$src for agy (paths: scopes it in Claude; agy would load it always)"
+      [ ! -f "$dest" ] || rm "$dest"
+      continue
+    fi
+    bytes=$(wc -c <"$src" | tr -d ' ')
+    agy_size_check "$src" "$bytes"
+    total=$((total + bytes))
+    text=$(printf -- '---\ntrigger: always_on\n---\n@[%s](%s)\n' "$name" "$src")
+    if [ -f "$dest" ] && [ ! -L "$dest" ] && [ "$(cat "$dest")" = "$text" ]; then
+      say "already set" "$dest"
+      n_ok=$((n_ok + 1))
+      continue
+    fi
+    if [ -L "$dest" ] || [ -e "$dest" ]; then
+      backup=$(backup_name "$dest")
+      mv "$dest" "$backup"
+      say "backed up" "$dest -> $backup"
+      n_backup=$((n_backup + 1))
+    fi
+    mkdir -p "$AGY_PLUGIN/rules"
+    printf '%s\n' "$text" >"$dest"
+    say "wrote" "$dest (includes $src)"
+  done
+  # About four bytes per token.
+  [ $((total / 4)) -le "$AGY_RULES_TOKENS" ] || say "warning" "the rules for agy total $total bytes (about $((total / 4)) tokens); over agy's $AGY_RULES_TOKENS-token budget it gives workers file paths instead of the text"
 }
 
 # Backups an earlier installer left beside the skills move under $BACKUP_DIR.

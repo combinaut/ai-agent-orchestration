@@ -37,6 +37,11 @@ if ! orch_provider_enabled gemini; then
 fi
 case "$model" in "" | "<"*">") echo "$not_configured" >&2; exit 1 ;; esac
 
+plugin="$HOME/.gemini/config/plugins/ai-agent-orchestration"
+for f in plugin.json rules/AGENTS.md; do
+  [ -e "$plugin/$f" ] || { echo "gemini-start.sh: $plugin/$f is missing or dangling, so agy would start without the orch skills and your rules; run install.sh" >&2; exit 1; }
+done
+
 herdr_bin=${ORCH_HERDR_BIN:-herdr}
 orch_need_cmd "$herdr_bin"
 
