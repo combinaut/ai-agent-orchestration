@@ -4,6 +4,8 @@
 
 For Codex 0.166.0 and later, the hook receives a command's resolved workdir only through the top-level `cwd`; `tool_input` contains the command.
 
+For agy (Gemini) workers, `hooks/guard-bash-agy.py` runs the same guard from the agy plugin's `hooks.json` on every `run_command` line and on the text that `manage_task` `send_input` types into a running command. It passes the top-level `cwd` (else the first `workspacePaths` entry), prints `{"decision": "deny", "reason": …}` on a deny and nothing on a pass: agy reads `{}` as a deny, and `allow` skips agy's own Auto check. Its own errors fail open with a `guard-bash-agy fail-open` log line; agy blocks the command when the hook exits non-zero, prints text that is not JSON, or runs past the 10-second timeout. `send_input` text is checked as a shell command even when the running program is not a shell, so an answer that reads like a denied command is denied.
+
 It denies:
 
 - `git push` to `main` or `master` in code repositories (including `--all`, `--mirror`, `:` and glob refspecs). Push a branch and open a PR; GitHub wiki remotes are allowed.
