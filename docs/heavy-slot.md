@@ -23,13 +23,15 @@ A slot is a file in `~/.claude/heavy-slots/` that holds the job's pid. `take` re
 
 `heavy-slot stop <name>` sends TERM to the pid in that slot's file, and KILL if it still runs after `ORCH_HEAVY_SLOTS_KILL_GRACE` seconds (default 10). The job's `take` then ends the rest of the job's process group and removes the slot file. `stop` prints each step. A job that `stop` ends writes a `FAIL` event.
 
-`stop` checks the start time just before each signal. The check and the signal are two steps (macOS has no pidfd), so a pid that is reused between them gets the signal.
+`stop` takes no slot lock. It checks the pid and its start time just before TERM and again before KILL. A check and its signal are two steps (macOS has no pidfd), so a pid that is reused between them gets the signal. A job that ends before a signal counts as stopped.
+
+`take` reads the start time after it releases the slot lock, and gives that step 10 seconds. When it records none, it says so on stderr and `stop` refuses the slot. `stop` exits 1 when the job's pid has ended but the slot file still holds it (its `take` is gone).
 
 `stop` signals nothing and exits non-zero when:
 
 - no slot has that name (exit 64);
 - the pid is not running (exit 65);
-- the pid does not match the start time `take` recorded in `<slot dir>/.ids/<name>`, or there is no record (exit 65). This covers a reused pid and a slot taken by a `heavy-slot` without `stop`. The command is not compared, because a job can `exec` or rename itself. `lib/process_identity.py` reads the start time without `ps`.
+- the pid does not match the start time `take` recorded in `<slot dir>/.ids/<name>`, there is no record, or the start time cannot be read in 10 seconds (exit 65). This covers a reused pid and a slot taken by a `heavy-slot` without `stop`. The command is not compared, because a job can `exec` or rename itself. `lib/process_identity.py` reads the start time without `ps`.
 
 `install.sh` adds the allow rule `Bash(heavy-slot stop *)`, so auto mode lets any session stop any slot job, including another session's.
 

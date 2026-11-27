@@ -7,6 +7,7 @@ SELF=$0
 [ ! -L "$SELF" ] || SELF=$(readlink "$SELF")
 # shellcheck source=coordinator/watchers/coord-lib.sh
 . "$(cd "$(dirname "$SELF")" && pwd -P)/coordinator/watchers/coord-lib.sh"
+IDENTITY_SCRIPT="$(cd "$(dirname "$SELF")" && pwd -P)/lib/process_identity.py"
 CONFIG=$(orch_config_path)
 CONFIG_PARENT=$(dirname "$CONFIG")
 ORCH_HEAVY_SLOTS_MAX_WAS_SET=${ORCH_HEAVY_SLOTS_MAX+x}
@@ -69,6 +70,9 @@ JOB_NAME=
 NOTE=-
 JOB_START=
 KILL_CODE=-
+IDENTITY_LIMIT=10
+IDENTITY=
+PROBE_PID=
 KILL_EVENT=0
 EVENTS_MAX_BYTES=65536
 CHILD_PID=
@@ -299,6 +303,7 @@ release_lock() {
 cleanup() {
   local status=$? slot_pid='' pid_group='' deadline
   stop_watch
+  stop_probe
   [ "$LOCK_HELD" -eq 1 ] && release_lock
   [ -n "$SLOT_FILE" ] || return 0
   deadline=$(( $(date +%s) + 1 ))
@@ -350,16 +355,36 @@ valid_name() {
   case $1 in *-*-*) ;; *-*) return 0 ;; *) return 1 ;; esac
 }
 
-# Prints `<start> <name>`.
-process_identity() {
-  orch_python >/dev/null 2>&1 || return 1
-  "$ORCH_LOADER_PYTHON" -I "$(dirname "$(orch_settings_module)")/process_identity.py" "$1" 2>/dev/null
+stop_probe() {
+  [ -n "$PROBE_PID" ] || return 0
+  kill -KILL "$PROBE_PID" 2>/dev/null || true
+  wait "$PROBE_PID" 2>/dev/null
+  rm -f "$SLOT_DIR/.identity.$$"
+  PROBE_PID=''
+}
+
+# Sets IDENTITY to `<start> <name>`, empty after IDENTITY_LIMIT seconds. Never call it with the slot lock held.
+# It runs while the job runs: no command substitution and no second job-control group, so bash prints nothing of its own.
+read_identity() {
+  local out="$SLOT_DIR/.identity.$$" ticks=0
+  IDENTITY=
+  [ -n "${ORCH_LOADER_PYTHON:-}" ] || return 0
+  "$ORCH_LOADER_PYTHON" -I "$IDENTITY_SCRIPT" "$1" </dev/null >"$out" 2>/dev/null &
+  PROBE_PID=$!
+  while is_pid_live "$PROBE_PID" && [ "$ticks" -lt "$((IDENTITY_LIMIT * 10))" ]; do sleep 0.1; ticks=$((ticks + 1)); done
+  is_pid_live "$PROBE_PID" || read -r IDENTITY 2>/dev/null <"$out" || true
+  stop_probe
 }
 
 record_identity() {
   local start='' rest=''
-  read -r start rest < <(process_identity "$2")
-  mkdir -p "$IDS_DIR" 2>/dev/null && printf '%s %s\n' "$2" "$start" >"$IDS_DIR/$1" 2>/dev/null
+  read_identity "$2"
+  read -r start rest <<<"$IDENTITY"
+  if [ -n "$start" ]; then
+    mkdir -p "$IDS_DIR" 2>/dev/null && printf '%s %s\n' "$2" "$start" >"$IDS_DIR/$1" 2>/dev/null && return 0
+  fi
+  is_pid_live "$2" || return 0
+  printf 'heavy-slot: no start time recorded for pid %s; heavy-slot stop will refuse slot %s\n' "$2" "$1" >&2
 }
 
 # Succeeds when the slot's pid is the process take started; sets STOP_PID, else STOP_REASON.
@@ -372,7 +397,9 @@ verify_slot_process() {
   read -r recorded_pid recorded_start 2>/dev/null <"$IDS_DIR/$name" || true
   [ -n "$recorded_start" ] || { STOP_REASON="no start time is recorded for pid $pid"; return 1; }
   [ "$recorded_pid" = "$pid" ] || { STOP_REASON="the start time record is for pid $recorded_pid, the slot holds pid $pid"; return 1; }
-  read -r start STOP_COMMAND < <(process_identity "$pid")
+  read_identity "$pid"
+  read -r start STOP_COMMAND <<<"$IDENTITY"
+  [ -n "$start" ] || { STOP_REASON="cannot read the start time of pid $pid"; return 1; }
   [ "$start" = "$recorded_start" ] || { STOP_REASON="pid $pid has another start time (pid reused)"; return 1; }
   STOP_PID=$pid
 }
@@ -384,33 +411,27 @@ stop_refuse() {
   exit 65
 }
 
-stop_lock() {
-  take_lock "$(( $(date +%s) + LOCK_MAX_AGE ))" && return 0
-  stop_say "the slot lock stayed busy" >&2
-  exit 75
-}
-
+# Takes no lock: each check reads the slot file once, just before its signal.
 stop_slot() {
   local name=$1 pid deadline held='' rest=''
   JOB_NAME=$name
   [ -f "$SLOT_DIR/$name" ] || die "no slot named $name"
-  trap '[ "$LOCK_HELD" -eq 0 ] || release_lock' EXIT
-  stop_lock
+  orch_python >/dev/null 2>&1 || true
+  trap stop_probe EXIT
   verify_slot_process "$name" || stop_refuse "$STOP_REASON"
   pid=$STOP_PID
-  kill -TERM "$pid" 2>/dev/null || stop_refuse "cannot signal pid $pid"
-  release_lock
-  stop_say "sent TERM to pid $pid (${STOP_COMMAND:-name unknown})"
+  if kill -TERM "$pid" 2>/dev/null; then
+    stop_say "sent TERM to pid $pid (${STOP_COMMAND:-name unknown})"
+  else
+    is_pid_live "$pid" && stop_refuse "cannot signal pid $pid"
+    stop_say "pid $pid ended before TERM"
+  fi
   deadline=$(( $(date +%s) + KILL_GRACE ))
   while is_pid_live "$pid" && [ "$(date +%s)" -lt "$deadline" ]; do sleep 1; done
   if is_pid_live "$pid"; then
-    stop_lock
     if verify_slot_process "$name" && [ "$STOP_PID" = "$pid" ]; then
-      kill -KILL "$pid" 2>/dev/null || true
-      release_lock
-      stop_say "sent KILL to pid $pid after ${KILL_GRACE}s"
-    else
-      release_lock
+      kill -KILL "$pid" 2>/dev/null && stop_say "sent KILL to pid $pid after ${KILL_GRACE}s"
+    elif is_pid_live "$pid"; then
       stop_say "no KILL: the slot no longer matches pid $pid" >&2
       exit 65
     fi
@@ -432,6 +453,7 @@ take_slot() {
   local name=$1 max=$2 existing_pid='' existing_group='' count status deadline now remaining pause waited=0
   shift 2
   probe_slot_dir
+  orch_python >/dev/null 2>&1 || true
   JOB_NAME=$name
   SLOT_FILE="$SLOT_DIR/$name"
   deadline=$(( $(date +%s) + max ))
@@ -462,18 +484,19 @@ take_slot() {
       CHILD_PID=$!
       set +m
       exec 3<&-
-      if ! printf '%s\n' "$CHILD_PID" >"$SLOT_FILE"; then
+      # A rename, so a reader without the lock never sees part of a pid.
+      if ! { printf '%s\n' "$CHILD_PID" >"$SLOT_DIR/.slot.$$" && mv -f "$SLOT_DIR/.slot.$$" "$SLOT_FILE"; }; then
         terminate_group "$CHILD_PID"
         wait "$CHILD_PID" 2>/dev/null || true
-        rm -f "$SLOT_FILE"
+        rm -f "$SLOT_FILE" "$SLOT_DIR/.slot.$$"
         release_lock
         die "cannot write $SLOT_FILE"
       fi
-      record_identity "$name" "$CHILD_PID"
       release_lock
       if [ "$LONG_RUN" -gt 0 ]; then
         start_watch "$CHILD_PID"
       fi
+      record_identity "$name" "$CHILD_PID"
       wait "$CHILD_PID"
       status=$?
       stop_watch

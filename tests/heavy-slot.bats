@@ -1063,7 +1063,7 @@ fake_slot() {
   export IDS_FILE="$ORCH_HEAVY_SLOTS_DIR/.ids/agent-changed"
   # shellcheck disable=SC2016 # The job's bash expands these.
   start_job agent-changed 'trap "echo \"\$\$ changed\" >\"\$IDS_FILE\"" TERM; echo ready >"$1"; while :; do sleep 0.1; done'
-  run env ORCH_HEAVY_SLOTS_KILL_GRACE=1 "$HELPER" stop agent-changed
+  run env ORCH_HEAVY_SLOTS_KILL_GRACE=3 "$HELPER" stop agent-changed
   [ "$status" -eq 65 ]
   [[ "$output" == *"no KILL: the slot no longer matches pid $JOB_PID"* ]]
   kill -0 "$JOB_PID"
@@ -1113,4 +1113,146 @@ fake_slot() {
   run "$HELPER" stop ../outside-slot
   [ "$status" -eq 64 ]
   [[ "$output" == *"name must be <architect>-<job>"* ]]
+}
+
+# identity_shim: a Python that runs $HOOK on identity read number $HOOK_AT (default 1), then the real one.
+identity_shim() {
+  REAL_PYTHON=$(command -v python3)
+  export REAL_PYTHON
+  cat >"$TMP/identity-python" <<'SH'
+#!/bin/bash
+case "$*" in
+  *process_identity.py*)
+    n=$(($(cat "$TEST_ROOT/identity-reads" 2>/dev/null || echo 0) + 1))
+    echo "$n" >"$TEST_ROOT/identity-reads"
+    [ "$n" -ne "${HOOK_AT:-1}" ] || eval "$HOOK" ;;
+esac
+exec "$REAL_PYTHON" "$@"
+SH
+  chmod +x "$TMP/identity-python"
+}
+
+# shellcheck disable=SC2016 # The shim's bash expands this.
+HANG='echo $$ >"$TEST_ROOT/hung"; exec sleep 60'
+
+@test "a hung identity step holds no slot lock and ends with its take" {
+  identity_shim
+  ORCH_PYTHON3="$TMP/identity-python" HOOK="$HANG" "$HELPER" take agent-hung -- sleep 30 >"$TMP/take.log" 2>&1 3>&- &
+  local hung_take=$!
+  wait_for_file "$TMP/hung"
+  [ ! -e "$ORCH_HEAVY_SLOTS_DIR/.lock" ]
+  run "$HELPER" take agent-other --wait-max 3 -- true
+  [ "$status" -eq 0 ]
+  kill "$hung_take"
+  code=0
+  wait "$hung_take" || code=$?
+  [ "$code" -eq 143 ]
+  if kill -0 "$(cat "$TMP/hung")" 2>/dev/null; then return 1; fi
+}
+
+@test "take gives up on a hung identity step and says the slot cannot be stopped" {
+  identity_shim
+  run env ORCH_PYTHON3="$TMP/identity-python" HOOK="$HANG" "$HELPER" take agent-slow -- bash -c 'sleep 13; exit 7'
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"no start time recorded for pid "*"stop will refuse slot agent-slow"* ]]
+  if kill -0 "$(cat "$TMP/hung")" 2>/dev/null; then return 1; fi
+}
+
+@test "take says nothing about a job that ends before its start time is read" {
+  identity_shim
+  run env ORCH_PYTHON3="$TMP/identity-python" HOOK='sleep 1; exit 1' "$HELPER" take agent-short -- true
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"no start time recorded"* ]]
+}
+
+@test "take renames the slot file into place" {
+  mkdir "$TMP/bin"
+  # shellcheck disable=SC2016 # The helper must receive these expressions literally.
+  printf '%s\n' '#!/bin/sh' 'echo "$3 <- $(cat "$2" 2>/dev/null)" >>"$TEST_ROOT/renames"' 'exec /bin/mv "$@"' >"$TMP/bin/mv"
+  chmod +x "$TMP/bin/mv"
+  # shellcheck disable=SC2016 # The job's bash expands these.
+  run env PATH="$TMP/bin:$PATH" "$HELPER" take agent-atomic -- bash -c 'echo $$ >"$TEST_ROOT/job-pid"'
+  [ "$status" -eq 0 ]
+  grep -qxF "$ORCH_HEAVY_SLOTS_DIR/agent-atomic <- $(cat "$TMP/job-pid")" "$TMP/renames"
+}
+
+@test "stop refuses when the start time cannot be read" {
+  # shellcheck disable=SC2016 # The job's bash expands these.
+  start_job agent-unreadable 'echo ready >"$1"; exec sleep 30'
+  identity_shim
+  run env ORCH_PYTHON3="$TMP/identity-python" HOOK='exit 1' "$HELPER" stop agent-unreadable
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"refused: cannot read the start time of pid $JOB_PID; nothing signalled"* ]]
+  kill -0 "$JOB_PID"
+  kill "$TAKE_PID"
+}
+
+@test "stop refuses a pid it cannot signal" {
+  fake_slot agent-nosignal
+  read -r start _ < <(python3 -I "$ROOT/lib/process_identity.py" "$FAKE_PID")
+  printf '%s %s\n' "$FAKE_PID" "$start" >"$ORCH_HEAVY_SLOTS_DIR/.ids/agent-nosignal"
+  # shellcheck disable=SC2329 # heavy-slot calls the exported function.
+  kill() { [ "$1" != -TERM ] || return 1; builtin kill "$@"; }
+  export -f kill
+  run "$HELPER" stop agent-nosignal
+  unset -f kill
+  refused_and_alive "cannot signal pid $FAKE_PID"
+}
+
+@test "stop reports a job that ends before TERM as stopped" {
+  # shellcheck disable=SC2016 # The job's bash expands these.
+  start_job agent-early 'echo ready >"$1"; exec sleep 30'
+  # shellcheck disable=SC2329 # heavy-slot calls the exported function.
+  kill() {
+    [ "$1" = -TERM ] || { builtin kill "$@"; return; }
+    builtin kill -KILL "$2"
+    while builtin kill -0 "$2" 2>/dev/null; do sleep 0.05; done
+    return 1
+  }
+  export -f kill
+  run "$HELPER" stop agent-early
+  unset -f kill
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pid $JOB_PID ended before TERM"* ]]
+  [[ "$output" == *"pid $JOB_PID stopped; slot removed"* ]]
+}
+
+@test "stop reports a job that ends before the KILL check as stopped" {
+  # shellcheck disable=SC2016 # The job's bash expands these.
+  start_job agent-late 'trap "" TERM; echo ready >"$1"; exec sleep 30'
+  identity_shim
+  export JOB_PID
+  # shellcheck disable=SC2016 # The shim's bash expands this.
+  run env ORCH_PYTHON3="$TMP/identity-python" ORCH_HEAVY_SLOTS_KILL_GRACE=1 HOOK_AT=2 \
+    HOOK='kill -KILL "$JOB_PID"; while [ -e "$ORCH_HEAVY_SLOTS_DIR/agent-late" ]; do sleep 0.05; done' "$HELPER" stop agent-late
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TMP/identity-reads")" -eq 2 ]
+  [[ "$output" == *"pid $JOB_PID stopped; slot removed"* ]]
+  [[ "$output" != *"sent KILL"* ]]
+  [[ "$output" != *"no KILL"* ]]
+}
+
+@test "stop sends no KILL when the slot moves to another recorded pid" {
+  fake_slot agent-moved
+  rm "$ORCH_HEAVY_SLOTS_DIR/agent-moved"
+  read -r OTHER_START _ < <(python3 -I "$ROOT/lib/process_identity.py" "$FAKE_PID")
+  export FAKE_PID OTHER_START
+  # shellcheck disable=SC2016 # The job's bash expands these.
+  start_job agent-moved 'trap "echo \$FAKE_PID >\$ORCH_HEAVY_SLOTS_DIR/agent-moved; echo \$FAKE_PID \$OTHER_START >\$ORCH_HEAVY_SLOTS_DIR/.ids/agent-moved" TERM; echo ready >"$1"; while :; do sleep 0.1; done'
+  run env ORCH_HEAVY_SLOTS_KILL_GRACE=3 "$HELPER" stop agent-moved
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"no KILL: the slot no longer matches pid $JOB_PID"* ]]
+  kill -0 "$JOB_PID"
+  kill -0 "$FAKE_PID"
+  kill "$TAKE_PID"
+}
+
+@test "stop exits 1 when the slot file still holds the ended pid" {
+  # shellcheck disable=SC2016 # The job's bash expands these.
+  start_job agent-orphan 'echo ready >"$1"; exec sleep 30'
+  kill -KILL "$TAKE_PID"
+  wait "$TAKE_PID" || true
+  run env ORCH_HEAVY_SLOTS_KILL_GRACE=2 "$HELPER" stop agent-orphan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"slot file still holds pid $JOB_PID"* ]]
 }
