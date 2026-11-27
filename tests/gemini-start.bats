@@ -181,21 +181,36 @@ teardown() {
   has_rule "read_file($TMP/main/.git)"
 }
 
+@test "an includeIf for the pane's repo and git's default ignore and attributes files are readable" {
+  git init -q "$TMP/main"
+  printf '[includeIf "gitdir:%s/main/"]\n\tpath = ~/.gitconfig.work\n' "$TMP" >"$HOME/.gitconfig"
+  printf '[user]\n\tname = work\n' >"$HOME/.gitconfig.work"
+  mkdir -p "$HOME/.config/git"
+  : >"$HOME/.config/git/ignore"
+  : >"$HOME/.config/git/attributes"
+  export HERDR_PANE_CWD="$TMP/main"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 0 ]
+  has_rule "read_file($HOME/.gitconfig.work)"
+  has_rule "read_file($HOME/.config/git/ignore)"
+  has_rule "read_file($HOME/.config/git/attributes)"
+}
+
 @test "paths that do not exist get no rule" {
   run "$SCRIPT" w1 pane1 worker
   [ "$status" -eq 0 ]
   has_rule "read_file($ORCH_CONFIG)"
-  ! allow_rules | grep -qF 'orchestration.env' || false
+  ! allow_rules | grep -qF '.config/git' || false
   ! allow_rules | grep -qF '.git)' || false
   ! allow_rules | grep -qF 'gitconfig' || false
 }
 
 @test "a symlinked path is granted at its link and its target" {
   mkdir -p "$TMP/elsewhere"
-  printf 'X=1\n' >"$TMP/elsewhere/orchestration.env"
-  ln -s "$TMP/elsewhere/orchestration.env" "$HOME/.claude/orchestration.env"
+  mv "$ORCH_CONFIG" "$TMP/elsewhere/orchestration.toml"
+  ln -s "$TMP/elsewhere/orchestration.toml" "$ORCH_CONFIG"
   run "$SCRIPT" w1 pane1 worker
   [ "$status" -eq 0 ]
-  has_rule "read_file($HOME/.claude/orchestration.env)"
-  has_rule "read_file($TMP/elsewhere/orchestration.env)"
+  has_rule "read_file($ORCH_CONFIG)"
+  has_rule "read_file($TMP/elsewhere/orchestration.toml)"
 }

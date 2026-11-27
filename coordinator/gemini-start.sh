@@ -51,7 +51,7 @@ slots=${ORCH_HEAVY_SLOTS_DIR:-"$HOME/.claude/heavy-slots"}
 mkdir -p "$reports" "$slots"
 python=$(orch_python) || exit 2
 sandbox=$("$python" -I "$root/agy-sandbox-settings.py" --herdr "$herdr_bin" --pane "$pane" \
-  --read "$(orch_config_path)" --read "$HOME/.claude/orchestration.env" \
+  --read "$(orch_config_path)" \
   --write "$reports" --write "$slots") || { echo "gemini-start.sh: could not build the agy sandbox settings" >&2; exit 1; }
 
 exec "$herdr_bin" agent start "$name" --kind agy --pane "$pane" -- --model "$model" --mode auto --settings "$sandbox"

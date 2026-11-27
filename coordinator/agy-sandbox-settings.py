@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Print the agy --settings JSON of read_file/write_file rules for a worker in herdr pane --pane.
 
-Read: the orch checkout, each --read, the global git config and excludes files, the pane's git common dir.
+Read: the orch checkout, each --read, the global git config, ignore and attributes files, the pane's git common dir.
 """
 
 import argparse
@@ -22,17 +22,23 @@ def git(*args):
     return result.stdout if result.returncode == 0 else ""
 
 
-def git_config_files():
-    """The files `git config --global` reads, includes followed."""
+def git_config_files(cwd):
+    """The files `git config --global` reads in `cwd` (includes followed) and git's ignore and attributes files."""
+    where = ["-C", cwd] if cwd and os.path.isdir(cwd) else []
     files = []
     for entry in git(
-        "config", "--global", "-z", "--show-origin", "--list", "--includes"
+        *where, "config", "--global", "-z", "--show-origin", "--list", "--includes"
     ).split("\0")[::2]:
         if entry.startswith("file:"):
             files.append(entry[len("file:") :])
-    excludes = git("config", "--global", "--path", "core.excludesFile").strip()
+    excludes = git(*where, "config", "--global", "--path", "core.excludesFile").strip()
     if excludes:
         files.append(excludes)
+    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    files += [
+        os.path.join(xdg, "git", "ignore"),
+        os.path.join(xdg, "git", "attributes"),
+    ]
     return files
 
 
@@ -76,7 +82,7 @@ def settings(cwd, reads, writes):
     """The settings object: permissions.allow holding read_file/write_file rules only."""
     rules = []
     orch_repo = Path(os.path.realpath(__file__)).parent.parent
-    for path in [str(orch_repo), *reads, *git_config_files()]:
+    for path in [str(orch_repo), *reads, *git_config_files(cwd)]:
         grant(rules, "read_file", path)
     common = git_common_dir(cwd)
     if common:
