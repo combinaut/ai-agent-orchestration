@@ -256,7 +256,7 @@ def context_facts(line):
 
 def worker_facts(line):
     signal = re.match(
-        r"WORKER (DONE|QUESTION|QUESTION TO USER|QUESTION EXPIRED|ANSWER LATE)"
+        r"WORKER (DONE|QUESTION)"
         r" \S+ owner=\S+ id=(\S+)",
         line,
     )
