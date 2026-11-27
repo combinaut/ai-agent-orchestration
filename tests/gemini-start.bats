@@ -196,6 +196,15 @@ teardown() {
   has_rule "read_file($HOME/.config/git/attributes)"
 }
 
+@test "an excludes file set in an included git config is readable" {
+  printf '[include]\n\tpath = ~/.gitconfig.inc\n' >"$HOME/.gitconfig"
+  printf '[core]\n\texcludesFile = ~/.ignore.inc\n' >"$HOME/.gitconfig.inc"
+  : >"$HOME/.ignore.inc"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 0 ]
+  has_rule "read_file($HOME/.ignore.inc)"
+}
+
 @test "paths that do not exist get no rule" {
   run "$SCRIPT" w1 pane1 worker
   [ "$status" -eq 0 ]

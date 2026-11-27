@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Print the agy --settings JSON of read_file/write_file rules for a worker in herdr pane --pane.
 
-Read: the orch checkout, each --read, the global git config, ignore and attributes files, the pane's git common dir.
+Read: the orch checkout, each --read, the global git config files that set an entry, the excludes, ignore and attributes files, the pane's git common dir.
 """
 
 import argparse
@@ -23,7 +23,7 @@ def git(*args):
 
 
 def git_config_files(cwd):
-    """The files `git config --global` reads in `cwd` (includes followed) and git's ignore and attributes files."""
+    """The files that set a `git config --global` entry in `cwd` (includes followed), the excludes file, git's ignore and attributes files."""
     where = ["-C", cwd] if cwd and os.path.isdir(cwd) else []
     files = []
     for entry in git(
@@ -31,7 +31,9 @@ def git_config_files(cwd):
     ).split("\0")[::2]:
         if entry.startswith("file:"):
             files.append(entry[len("file:") :])
-    excludes = git(*where, "config", "--global", "--path", "core.excludesFile").strip()
+    excludes = git(
+        *where, "config", "--global", "--includes", "--path", "core.excludesFile"
+    ).strip()
     if excludes:
         files.append(excludes)
     xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
