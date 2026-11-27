@@ -151,8 +151,8 @@ class deadline:
                 ):
                     # The body is done, but __exit__ has not reached its restore.
                     restore()
-                # Keep the enclosing hard alarm live if a collector catches this.
                 elif previous_timer[0]:
+                    # Keep the enclosing hard alarm live if a collector catches this.
                     signal.signal(signal.SIGALRM, previous_handler)
                     signal.setitimer(
                         signal.ITIMER_REAL,

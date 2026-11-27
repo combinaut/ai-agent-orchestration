@@ -198,8 +198,8 @@ class call_deadline:
             if frame and frame.f_code is _EXIT_CODE:
                 # The body is done, but __exit__ has not reached its restore.
                 restore()
-                raise expired_error
-            signal.setitimer(signal.ITIMER_REAL, 0)
+            else:
+                signal.setitimer(signal.ITIMER_REAL, 0)
             if inherited and callable(previous_handler):
                 inherited_fired = True
                 try:

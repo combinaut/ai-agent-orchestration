@@ -40,7 +40,8 @@ class AlarmAt:
     """Runs the installed SIGALRM handler at the n-th signal check point of the modules."""
 
     def __init__(self, modules, clock):
-        self.files = {module.__file__ for module in modules}
+        self.namespaces = [vars(module) for module in modules]
+        self.called = set()
         self.clock = clock
         self.arm(0)
 
@@ -58,7 +59,8 @@ class AlarmAt:
         sys.settrace(None)
 
     def call(self, frame, _event, _arg):
-        if frame.f_code.co_filename not in self.files:
+        self.called.add(frame.f_code.co_filename)
+        if not any(frame.f_globals is namespace for namespace in self.namespaces):
             return None
         frame.f_trace_opcodes = True
         entered = [True]
@@ -108,7 +110,7 @@ class DeadlineCheckPointTests(IsolatedTestCase):
             )
 
         alarm = self.enterContext(AlarmAt(modules, clock))
-        # Only the traced calls run the handler, so each run is deterministic.
+        # With SIGALRM blocked, only AlarmAt runs the handler, so each run is deterministic.
         signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
         self.addCleanup(signal.pthread_sigmask, signal.SIG_UNBLOCK, {signal.SIGALRM})
         n = 0
@@ -117,11 +119,12 @@ class DeadlineCheckPointTests(IsolatedTestCase):
         while True:
             n += 1
             clock[0] = 0.0
-            # A raising handler unsets the trace, and code first traced mid-call
-            # reports no opcodes, so each run starts with a traced warm-up run.
+            # A raising handler unsets the trace. Code reports opcodes only after a
+            # traced run and a later settrace, so each run follows a warm-up run.
             alarm.arm(0)
             sys.settrace(alarm.call)
             body()
+            sys.settrace(alarm.call)
             alarm.arm(n)
             try:
                 body()
@@ -144,6 +147,7 @@ class DeadlineCheckPointTests(IsolatedTestCase):
             self.assertEqual(after_gc, clean, f"{where}: state after gc")
             self.assertEqual(leftovers, [[] for _ in expected], where)
             if not alarm.fired:
+                self.assertGreater(n, 1, f"no check point traced in {alarm.called}")
                 return places
             places.add(alarm.where.split(" ")[0])
 
@@ -157,7 +161,6 @@ class DeadlineCheckPointTests(IsolatedTestCase):
                 SimpleNamespace(
                     time=lambda: real.time() + clock[0],
                     monotonic=lambda: real.monotonic() + clock[0],
-                    sleep=real.sleep,
                 ),
             )
         )
@@ -193,3 +196,21 @@ class DeadlineCheckPointTests(IsolatedTestCase):
         self.assertLessEqual({"deadline.__enter__", "deadline.__exit__"}, places)
         # The outer deadline stays pending through every alarm in the inner exit.
         self.assertEqual({tuple(labels) for labels in pending}, {("outer",)})
+
+    def test_call_deadline_inside_a_soft_deadline_marks_it_expired(self):
+        clock = self.poll_clock()
+        escaped = []
+
+        def body():
+            try:
+                with runtime.deadline(5, "outer", soft=True):
+                    with g.call_deadline(10):
+                        pass
+            except g._Expired:
+                escaped.append(True)
+
+        self.sweep(
+            (g, runtime, contextlib), body, clock, expected=(runtime._SOFT_DEADLINES,)
+        )
+        # The inherited soft deadline expires whenever the call deadline fires.
+        self.assertEqual(escaped, [])
