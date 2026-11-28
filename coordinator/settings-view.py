@@ -131,7 +131,6 @@ APPLIES = {
     "herdr.todo_pane": COORDINATOR_PANE,
 }
 
-TITLE = "Settings Orchestrator"
 # Every section of the schema is on exactly one tab.
 TABS = (
     ("Models", ("providers", "models", "pi")),
@@ -140,7 +139,10 @@ TABS = (
     ("Watchers", ("watchers", "alerts", "hog", "host")),
     ("Herdr", ("herdr", "user_todo", "user_questions", "remote_control")),
     ("Install", ("install",)),
+    ("Info", ()),
 )
+INFO_TAB = len(TABS) - 1
+ACTIVE_TAB = "\033[1;48;5;141;38;5;16m"
 TABLE_ORDER = [table for _, tables in TABS for table in tables]
 FIELD_MAX = 4096
 LIST_MAX = 200
@@ -596,19 +598,21 @@ class App:
         return clean(text) + ("" if setting in self.values else "  default")
 
     def tab_bar(self, width):
-        """The tab names and the line under the active one."""
+        """The tab names, the active one filled, and the rule under them."""
         chosen = self.current()
         active = tab_of(chosen) if self.searching() and chosen else self.tab
         first = 0
         while True:
-            names, start = "", 0
+            names, used, end = "", 0, 0
             for index, (name, _) in enumerate(TABS[first:], first):
+                label = f" {name.lower()} "
+                used += 1 + len(label)
                 if index == active:
-                    start = len(names) + 1
-                names += f"  {name} "
-            end = start + len(TABS[active][0]) + 2
+                    end = used
+                    label = f"{ACTIVE_TAB}{label}{RESET}"
+                names += f" {label}"
             if end <= width or first == active:
-                return [names, " " * start + "━" * (end - start)]
+                return [names, "─" * width]
             first += 1
 
     def editing_row(self, label, width):
@@ -643,6 +647,8 @@ class App:
         """The scrolling lines, the line to keep visible and {line: row index}."""
         if self.editor:
             return self.editor_body(width)
+        if self.tab == INFO_TAB and not self.searching():
+            return wrap(f"Settings file: {clean(self.path)}", width), 0, {}
         lines, rows, focus = [], {}, 0
         group = None
         for index, setting in enumerate(self.rows):
@@ -693,9 +699,7 @@ class App:
     def render(self):
         size = self.size()
         width, height = size.columns or 80, size.lines or 24
-        head = [f"{TITLE}  {clean(self.path)}"]
-        if self.error:
-            head += wrap(clean(self.error), width)[:4]
+        head = wrap(clean(self.error), width)[:4] if self.error else []
         head += self.tab_bar(width)
         if self.searching():
             head.append(

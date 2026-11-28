@@ -18,7 +18,7 @@ A repo key in the global file (except the two `review.*` keys above), a global k
 
 With the herdr env, `prefix+shift+s` opens a popup titled "Settings Orchestrator" that edits the global file. `herdr.settings_popup = false` plus a run of `install.sh` removes the key and the plugin; `python3 ~/.claude/coordinator/settings-view.py` runs the same editor in any terminal.
 
-It lists every setting the global file accepts, by its full key on one of six tabs, with the setting's description and when a change takes effect. A value the file does not set reads `default`. Repo-only settings are not listed. ← and → switch tabs.
+It lists every setting the global file accepts, by its full key on one of six setting tabs, with the setting's description and when a change takes effect. A value the file does not set reads `default`. Repo-only settings are not listed. ← and → switch tabs. The last tab, `info`, shows the path of the settings file.
 
 | Tab | Sections |
 |---|---|
