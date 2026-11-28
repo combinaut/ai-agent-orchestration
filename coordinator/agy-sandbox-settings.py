@@ -46,8 +46,7 @@ def include_target(where, source, entry):
             return None
         if not condition_holds(where, key[len("includeif.") : -len(".path")], folder):
             return None
-    target = os.path.join(folder, os.path.expanduser(value))
-    return target if os.path.isfile(target) else None
+    return os.path.join(folder, os.path.expanduser(value))
 
 
 def git_config_files(cwd):

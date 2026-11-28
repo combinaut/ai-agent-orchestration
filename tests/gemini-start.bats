@@ -320,12 +320,21 @@ writable() {
   ! has_rule "read_file($HOME/other.inc)" || false
 }
 
-@test "an include that names a folder gets no rule" {
-  mkdir -p "$HOME/folder"
-  printf '[include]\n\tpath = ~/folder\n' >"$HOME/.gitconfig"
+@test "an empty GIT_CONFIG_GLOBAL file is readable" {
+  : >"$HOME/global.conf"
+  export GIT_CONFIG_GLOBAL="$HOME/global.conf"
   run "$SCRIPT" w1 pane1 worker "$REPORTS"
   [ "$status" -eq 0 ]
-  ! has_rule "read_file($HOME/folder)" || false
+  has_rule "read_file($HOME/global.conf)"
+}
+
+@test "an empty XDG git config is readable beside ~/.gitconfig" {
+  printf '[user]\n\tname = home\n' >"$HOME/.gitconfig"
+  mkdir -p "$HOME/.config/git"
+  : >"$HOME/.config/git/config"
+  run "$SCRIPT" w1 pane1 worker "$REPORTS"
+  [ "$status" -eq 0 ]
+  has_rule "read_file($HOME/.config/git/config)"
 }
 
 @test "paths that do not exist get no rule" {
