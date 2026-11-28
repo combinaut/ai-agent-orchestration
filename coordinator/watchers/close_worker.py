@@ -15,6 +15,7 @@ sys.path.insert(
     0, str(ROOT)
 )  # the script runs with -I, which leaves its own directory off the path
 
+from agy_conversation import resolve as agy_conversation  # noqa: E402
 from watchers import architect_like  # noqa: E402
 
 SECTION = "## Closed workers"
@@ -96,16 +97,20 @@ def facts(pane, caller_pane, caller_workspace):
         or agent.get("cwd")
         or "unknown"
     )
+    agent_kind = (
+        (agent.get("agent_session") or {}).get("agent") or agent.get("agent") or ""
+    )
+    session = (agent.get("agent_session") or {}).get("value") or "unknown"
+    if agent_kind == "agy":
+        session = agy_conversation(worktree) or "unknown"
     return {
         "caller": caller["name"],
         "pane": pane,
         "name": agent.get("name") or "unnamed",
         "worktree": worktree,
         "branch": branch_of(worktree),
-        "session": (agent.get("agent_session") or {}).get("value") or "unknown",
-        "agent": (agent.get("agent_session") or {}).get("agent")
-        or agent.get("agent")
-        or "",
+        "session": session,
+        "agent": agent_kind,
     }
 
 
