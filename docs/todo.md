@@ -24,13 +24,13 @@ width = "80%"
 height = "80%"
 ```
 
-The Coordinator opens this view itself at start, in a pane labelled `To-do` beside its own (`~/.claude/coordinator/todo-pane.sh`). A recycled Coordinator moves a pane with that label into its tab and opens no second one. It runs without `--popup`, so nothing closes it.
+The Coordinator opens this view itself at start, in a pane labelled `To-do` beside its own (`~/.claude/coordinator/todo-pane.sh`). A recycled Coordinator moves a pane with that label into its tab and opens no second one. It runs without `--popup`, so `Esc` and `q` do not close it. If you only want the popup, set `todo_pane = false` under `[herdr]` (or untick it in the [settings popup](settings.md#-edit-in-a-popup)). The script then opens no pane, closes every pane labelled `To-do` and exits 0 (1 when a close fails); this applies at the next Coordinator start or recycle. The `prefix+t` popup does not change. The to-do count in the pane metadata and tab bar comes from a running to-do view, so with the pane off it is not kept up to date.
 
 ![The to-do view in the popup, with demo items](todo-view.png)
 
 `install.sh` (herdr env) also makes `prefix+t` open the buttons view as a popup titled "Your to-do". It links the Herdr plugin in `env/herdr/todo-plugin` and adds a marked `[[keys.command]]` block to Herdr's `config.toml`. To turn the popup off, set `todo_popup = false` under `[herdr]` in `~/.claude/orchestration.toml` and run `install.sh`; that removes both. See [docs/settings.md](settings.md).
 
-Question panes (`ask-user-question`) open below the asking architect’s pane using `HERDR_PANE_ID`; a missing or vanished caller falls back to the last question pane, then `To-do`.
+Question panes (`ask-user-question`) open below the asking architect’s pane using `HERDR_PANE_ID`; a missing or vanished caller falls back to the last question pane, then `To-do` (label or `todo` token), then the pane tagged `role=coordinator`.
 
 ## Answer an item
 

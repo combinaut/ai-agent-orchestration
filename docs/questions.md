@@ -1,14 +1,14 @@
 # User questions
 
-Every user question opens below the asking architect’s own pane without taking focus. The opener validates `HERDR_PANE_ID` against the live pane list and splits that pane in its workspace. With no caller pane, or one that has disappeared, it falls back to the last `Q: ` pane, then the `To-do` label or `todo` token.
+Every user question opens below the asking architect’s own pane without taking focus. The opener validates `HERDR_PANE_ID` against the live pane list and splits that pane in its workspace. With no caller pane, or one that has disappeared, it falls back to the last `Q: ` pane, then the `To-do` label or `todo` token, then the pane tagged `role=coordinator`.
 
 ![The Q panel with the reminder picker open](q-panel.png)
 
 ## Open and close
 
-Create the question's Markdown file under `~/.claude/coordinator/questions/<slug>.md`, then run `ask-user-question <slug> <file>`. The pane is labelled `Q: <slug>`. The architect opens it directly and registers `QUESTION <slug> <file>` with the Coordinator for answer relay; the Coordinator records the slug’s asker rather than inferring it from the question pane’s location. Keep the matching wait in the architect’s status file so it also appears in the generated to-do list.
+Create the question's Markdown file under `~/.claude/coordinator/questions/<slug>.md`, then run `ask-user-question <slug> <file>`. The pane is labelled `Q: <slug>`. The architect opens it directly and registers `QUESTION <slug> <file>` with the Coordinator for answer relay; the Coordinator records the slug’s asker rather than inferring it from the question pane’s location. Keep the matching wait in the architect’s status file so it also appears in the generated to-do list. An architect-owned worker question never opens this panel: its architect asks the user here and relays the answer with `orch-signal answer <id> "<text>"`.
 
-The question is rendered by the Rust Markdown viewer `mdcat`, found on `PATH` or at `/opt/homebrew/bin/mdcat`. Successful renders are cached by question text and terminal width. If the viewer is unavailable or fails, the panel shows plain text with one stderr warning and uses plain text for the rest of that panel’s lifetime. The answer controls stay interactive. C0/C1 controls other than newline and tab are stripped from question text and option labels before display; worker escalations strip them before writing the question file.
+The question is rendered by the Rust Markdown viewer `mdcat`, found on `PATH` or at `/opt/homebrew/bin/mdcat`. Successful renders are cached by question text and terminal width. If the viewer is unavailable or fails, the panel shows plain text with one stderr warning and uses plain text for the rest of that panel’s lifetime. The answer controls stay interactive. C0/C1 controls other than newline and tab are stripped from question text and option labels before display.
 
 | Command | Effect |
 | --- | --- |
@@ -25,7 +25,7 @@ The question is rendered by the Rust Markdown viewer `mdcat`, found on `PATH` or
 | `d` | Dismiss: writes `answers: DISMISSED <slug>` to the feed, then closes the pane and removes the question. |
 | `r` | Remind: opens the same picker as the to-do view's Reminder (`1` 15m, `2` 1h, `3` 2h, `4` 4h, `5` tomorrow 9:00, `t` a typed `30m` or `3h`). Esc cancels it. |
 
-The panel writes `<slug>.answer`. `coord-user-answers-watch.sh` runs the answers watcher, which claims the file, normalises whitespace and publishes `answers: ANSWER <slug>: <text>` to the shared feed Monitor. The Coordinator relays `<slug>: <text>` to the registered asker verbatim. Worker choices use literal escaped markers and hard breaks to preserve their source ids, including gaps, while keeping the legacy bare-number answer format. Worker `signal-*` questions additionally bridge into the worker signal answer file so the original waiting `orch-signal ask` receives the answer by its stored identity.
+The panel writes `<slug>.answer`. `coord-user-answers-watch.sh` runs the answers watcher, which claims the file, normalises whitespace and publishes `answers: ANSWER <slug>: <text>` to the shared feed Monitor. The Coordinator relays `<slug>: <text>` to the registered asker verbatim.
 
 ## File format
 

@@ -1895,18 +1895,13 @@ def reduce_answers(before, raw):
 
 
 def acknowledge_answers(raw):
-    notices = []
     for slug, text, path, _ in raw.get("answers", []):
         if not path:
             continue
-        notice = worker_signals.bridge_user_answer(slug, text)
-        if notice:
-            notices.append(notice)
         processing = Path(path)
         processing.replace(
             processing.with_name(processing.name.removesuffix(".processing") + ".seen")
         )
-    return notices
 
 
 def reduce(mode, before, raw):
@@ -2231,9 +2226,7 @@ def cycle_pass(base, mode, collector, failures, budget):
         if mode == "todo" and reduced:
             commit_todo_closures(raw)
         if mode == "answers" and reduced:
-            notices = acknowledge_answers(raw)
-            if notices:
-                line = publish_events(base, mode, state, notices)
+            acknowledge_answers(raw)
         if mode == "hog":
             log_events = log_hog_hits(base, state, hog_hits)
             if log_events:

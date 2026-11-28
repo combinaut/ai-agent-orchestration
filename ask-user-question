@@ -103,11 +103,10 @@ print(caller if any(isinstance(row, dict) and row.get("pane_id") == caller for r
     if [ -z "$anchor" ]; then
       anchor=$(pane_rows | "${ORCH_PYTHON3:-python3}" -c '
 import json, sys
-for row in json.load(sys.stdin).get("result", {}).get("panes", []):
-    tokens = row.get("tokens") or {}
-    if row.get("pane_id") and "todo" in tokens:
-        print(row["pane_id"])
-        break
+rows = json.load(sys.stdin).get("result", {}).get("panes", [])
+todo = [row.get("pane_id") for row in rows if "todo" in (row.get("tokens") or {})]
+coordinator = [row.get("pane_id") for row in rows if (row.get("tokens") or {}).get("role") == "coordinator"]
+print(next(filter(None, todo + coordinator[::-1]), ""))
 ' )
     fi
     [ -n "$anchor" ] || { echo "to-do pane not found" >&2; exit 69; }

@@ -1,4 +1,4 @@
-"""Question text for terminal display and user escalation."""
+"""Question text for terminal display."""
 
 import re
 from pathlib import Path

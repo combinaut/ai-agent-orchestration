@@ -142,6 +142,62 @@ splits() { calls | grep -c '^pane split ' || true; }
   not_contains "$(calls)" 'pane run'
 }
 
+pane_off() { printf '[herdr]\ntodo_pane = false\n' >"$ORCH_CONFIG"; }
+closes() { calls | grep -c '^pane close ' || true; }
+
+@test "todo_pane off opens nothing" {
+  pane_off
+  run "$PANE"
+  [ "$status" -eq 0 ]
+  contains "$output" 'to-do pane is off'
+  [ "$(splits)" -eq 0 ]
+  not_contains "$(calls)" 'pane run'
+}
+
+@test "todo_pane off closes every open to-do pane in any tab and marks it closed on purpose" {
+  pane_off
+  printf '{"pane_id":"coord-pane","tab_id":"coord-tab"},{"pane_id":"here","label":"To-do","tab_id":"coord-tab"},{"pane_id":"there","label":"To-do","tab_id":"old-tab"}' >"$TMP/panes.json"
+  run "$PANE"
+  [ "$status" -eq 0 ]
+  contains "$(calls)" 'pane close here'
+  contains "$(calls)" 'pane close there'
+  [ -f "$ORCH_CLOSED_DIR/here" ]
+  [ -f "$ORCH_CLOSED_DIR/there" ]
+  not_contains "$(calls)" 'pane move'
+}
+
+@test "todo_pane off works without HERDR_PANE_ID" {
+  pane_off
+  printf '{"pane_id":"old-todo","label":"To-do","tab_id":"old-tab"}' >"$TMP/panes.json"
+  run env -u HERDR_PANE_ID "$PANE"
+  [ "$status" -eq 0 ]
+  contains "$(calls)" 'pane close old-todo'
+}
+
+@test "todo_pane off leaves panes with other labels alone" {
+  pane_off
+  printf '{"pane_id":"a","label":"To-do list"},{"pane_id":"b","label":"Q: To-do"},{"pane_id":"c","title":"To-do"}' >"$TMP/panes.json"
+  run "$PANE"
+  [ "$status" -eq 0 ]
+  [ "$(closes)" -eq 0 ]
+}
+
+@test "todo_pane off reports a failed close and still tries the other panes" {
+  pane_off
+  printf '{"pane_id":"first","label":"To-do"},{"pane_id":"second","label":"To-do"}' >"$TMP/panes.json"
+  run env HERDR_FAIL=close "$PANE"
+  [ "$status" -eq 1 ]
+  contains "$output" 'failed to close to-do pane: first'
+  contains "$output" 'failed to close to-do pane: second'
+}
+
+@test "an exported ORCH_HERDR_TODO_PANE wins over the file" {
+  pane_off
+  run env ORCH_HERDR_TODO_PANE=1 "$PANE"
+  [ "$status" -eq 0 ]
+  [ "$(splits)" -eq 1 ]
+}
+
 # shellcheck disable=SC2088 # The tilde is matched literally.
 @test "the Coordinator startup steps run the to-do pane script" {
   grep -qF '~/.claude/coordinator/todo-pane.sh' "$ROOT/skills/coordinate/references/startup.md"

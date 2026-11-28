@@ -1,4 +1,4 @@
-"""Session-scoped ownership and replacement of the to-do popup."""
+"""Session-scoped ownership and replacement of one popup per process: the to-do view unless configure() names another."""
 
 import fcntl
 import hashlib
@@ -15,6 +15,16 @@ import uuid
 from pathlib import Path
 
 VIEW = Path(__file__).resolve().parent.parent / "user-todo-view.py"
+PLUGIN = "combinaut.todo"
+TOKEN_ENV = "ORCH_TODO_POPUP_TOKEN"
+STEM = "todo-popup"
+NAME = "to-do popup"
+
+
+def configure(view, plugin, token_env, stem, name):
+    global VIEW, PLUGIN, TOKEN_ENV, STEM, NAME
+    VIEW, PLUGIN, TOKEN_ENV = Path(view).resolve(), plugin, token_env
+    STEM, NAME = stem, name
 
 
 def rpc(method, params):
@@ -22,9 +32,7 @@ def rpc(method, params):
         client.settimeout(1)
         client.connect(os.environ["HERDR_SOCKET_PATH"])
         client.sendall(
-            json.dumps(
-                {"id": "todo-popup", "method": method, "params": params}
-            ).encode()
+            json.dumps({"id": STEM, "method": method, "params": params}).encode()
             + b"\n"
         )
         with client.makefile("rb") as stream:
@@ -37,7 +45,7 @@ def pidfile():
         os.environ.get("HERDR_PLUGIN_STATE_DIR", Path.home() / ".claude/coordinator")
     )
     directory.mkdir(parents=True, exist_ok=True)
-    return directory / f"todo-popup-{session}.json"
+    return directory / f"{STEM}-{session}.json"
 
 
 def process_identity(pid):
@@ -105,7 +113,7 @@ def replace(path):
             if not owns(record):
                 return
             time.sleep(0.05)
-    raise RuntimeError("the earlier to-do popup did not exit")
+    raise RuntimeError(f"the earlier {NAME} did not exit")
 
 
 def register():
@@ -118,7 +126,7 @@ def register():
         "pid": os.getpid(),
         "identity": identity,
         "socket": os.environ["HERDR_SOCKET_PATH"],
-        "token": os.environ.get("ORCH_TODO_POPUP_TOKEN"),
+        "token": os.environ.get(TOKEN_ENV),
         "registered_at": registered_at,
     }
     fd, name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".")
@@ -162,11 +170,11 @@ def open_popup():
             "pane",
             "open",
             "--plugin",
-            "combinaut.todo",
+            PLUGIN,
             "--entrypoint",
             "view",
             "--env",
-            f"ORCH_TODO_POPUP_TOKEN={token}",
+            f"{TOKEN_ENV}={token}",
         ]
         opened_at = time.time()
         deadline = time.monotonic() + 3
@@ -209,5 +217,5 @@ def open_popup():
             ):
                 return 0
             time.sleep(0.05)
-        print("to-do popup did not register its process", file=sys.stderr)
+        print(f"{NAME} did not register its process", file=sys.stderr)
         return 1

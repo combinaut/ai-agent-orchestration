@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Opens the to-do pane beside the calling pane and follows a recycled Coordinator tab.
+# With herdr.todo_pane = false it opens nothing and closes every to-do pane.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -9,6 +10,24 @@ orch_load_config
 label="To-do"
 herdr=${HERDR_BIN_PATH:-${ORCH_HERDR_BIN:-herdr}}
 python=${ORCH_PYTHON3:-python3}
+
+if [ "${ORCH_HERDR_TODO_PANE:-1}" = 0 ]; then
+  panes=$("$herdr" pane list | "$python" -c '
+import json, sys
+for row in json.load(sys.stdin).get("result", {}).get("panes", []):
+    if isinstance(row, dict) and row.get("pane_id") and row.get("label") == sys.argv[1]:
+        print(row["pane_id"])
+' "$label")
+  status=0
+  for pane in $panes; do
+    if ! "$root/watchers/close-pane.sh" "$pane"; then
+      echo "failed to close to-do pane: $pane" >&2
+      status=1
+    fi
+  done
+  echo "to-do pane is off (herdr.todo_pane = false)"
+  exit "$status"
+fi
 
 decision=$("$herdr" pane list | "$python" -c '
 import json, os, sys

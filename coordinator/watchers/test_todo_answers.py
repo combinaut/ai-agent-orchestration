@@ -612,11 +612,15 @@ class TodoAnswerTests(IsolatedTestCase):
         with (
             contextlib.redirect_stdout(io.StringIO()),
             patch.object(view, "App", return_value=app),
-            patch.object(view.termios, "tcgetattr", return_value=[]),
-            patch.object(view.termios, "tcsetattr"),
-            patch.object(view.tty, "setcbreak"),
-            patch.object(view.select, "select", return_value=([0], [], [])),
-            patch.object(view.os, "read", side_effect=lambda *_: next(keys)),
+            patch.object(view.popup_terminal.termios, "tcgetattr", return_value=[]),
+            patch.object(view.popup_terminal.termios, "tcsetattr"),
+            patch.object(view.popup_terminal.tty, "setcbreak"),
+            patch.object(
+                view.popup_terminal.select, "select", return_value=([0], [], [])
+            ),
+            patch.object(
+                view.popup_terminal.os, "read", side_effect=lambda *_: next(keys)
+            ),
         ):
             view.main()
         self.assertEqual(a.records()[0]["answer"], "x" * 61 + "界 café")
