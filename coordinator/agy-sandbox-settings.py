@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Print the agy --settings JSON of read_file/write_file rules for a worker whose folder is --cwd.
 
-Read: the orch checkout, each --read, the global git config files that set an entry, the excludes, ignore and attributes files, the pane's git common dir.
+Read: the orch checkout, each --read, the XDG git config, the global git config files that set an entry, the excludes, ignore and attributes files, the pane's git common dir.
 """
 
 import argparse
@@ -23,20 +23,23 @@ def git(*args):
 
 
 def git_config_files(cwd):
-    """The files that set a `git config --global` entry in `cwd` (includes followed), the excludes file, git's ignore and attributes files."""
+    """The global and XDG git config files and their includes in `cwd`, their excludes files, git's ignore and attributes files."""
     where = ["-C", cwd] if os.path.isdir(cwd) else []
-    files = []
-    for entry in git(
-        *where, "config", "--global", "-z", "--show-origin", "--list", "--includes"
-    ).split("\0")[::2]:
-        if entry.startswith("file:"):
-            files.append(entry[len("file:") :])
-    excludes = git(
-        *where, "config", "--global", "--includes", "--path", "core.excludesFile"
-    ).strip()
-    if excludes:
-        files.append(excludes)
     xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    xdg_config = os.path.join(xdg, "git", "config")
+    files = [xdg_config]
+    # --global leaves out the XDG config while ~/.gitconfig exists.
+    for source in (["--global"], ["--file", xdg_config]):
+        for entry in git(
+            *where, "config", *source, "-z", "--show-origin", "--list", "--includes"
+        ).split("\0")[::2]:
+            if entry.startswith("file:"):
+                files.append(entry[len("file:") :])
+        excludes = git(
+            *where, "config", *source, "--includes", "--path", "core.excludesFile"
+        ).strip()
+        if excludes:
+            files.append(excludes)
     files += [
         os.path.join(xdg, "git", "ignore"),
         os.path.join(xdg, "git", "attributes"),
