@@ -260,6 +260,19 @@ class InfoTabTest(ViewCase):
         self.keys(app, LEFT, "/", *"zzzz")
         self.assertIn("no setting matches", self.frame())
 
+    def test_closing_an_empty_filter_returns_to_the_info_tab(self):
+        for closing in (ESC, ENTER):
+            with self.subTest(closing=closing):
+                app = self.app()
+                self.keys(app, LEFT, "/", closing)
+                self.assertEqual(self.active(), "info")
+
+    def test_a_match_picked_from_the_info_tab_opens_its_own_tab(self):
+        app = self.app()
+        self.keys(app, LEFT, "/", *"herdr.todo_pane", ENTER, ESC)
+        self.assertEqual(self.active(), "herdr")
+        self.assertEqual(app.rows[app.selected].key, "herdr.todo_pane")
+
 
 class TitleTest(ViewCase):
     def test_the_view_leaves_the_title_to_the_popup_border(self):

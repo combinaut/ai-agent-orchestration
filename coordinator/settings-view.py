@@ -369,6 +369,13 @@ class App:
             self.rows = [x for x in self.settings if tab_of(x) == self.tab]
         self.selected = self.rows.index(chosen) if chosen in self.rows else 0
 
+    def close_filter(self):
+        """Ends the search; the info tab stays when no filter text picked a match."""
+        if self.tab == INFO_TAB and not self.filter:
+            self.rows = []
+        self.filtering, self.filter = False, ""
+        self.apply_filter()
+
     def change(self, action):
         """Enter, space or u on the selected setting."""
         setting = self.current()
@@ -493,7 +500,10 @@ class App:
             self.editor_key(token)
         elif self.filtering:
             if token in ("\r", "\n"):
-                self.filtering = False
+                if self.filter:
+                    self.filtering = False
+                else:
+                    self.close_filter()
             elif token in ("\x7f", "\b"):
                 self.filter = self.filter[:-1]
             elif len(token) == 1 and token.isprintable():
@@ -531,8 +541,7 @@ class App:
         elif self.editor:
             self.editor, self.status = None, "list changes discarded"
         elif self.filtering or self.filter:
-            self.filtering, self.filter = False, ""
-            self.apply_filter()
+            self.close_filter()
         else:
             self.closing = True
 
