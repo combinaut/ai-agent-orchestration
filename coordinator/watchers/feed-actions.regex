@@ -2,7 +2,6 @@
 ^[^ ]+ host: HOST .* \(danger\)$
 ^[^ ]+ pulls: (APPROVED[A-Z-]*|RED|CHANGES|THREADS|COPILOT|COMMENTED|MERGED) .* \(start\)$
 ^[^ ]+ workers: WORKER [^ ]+ (blocked|error|dead/disappeared) \(start\)$
-^[^ ]+ workers: WORKER QUESTION TO USER .* \(start\)$
 ^[^ ]+ [a-z]+: STATE RESET .* \(start\)$
 ^[^ ]+ [a-z]+: [a-z]+ HEARTBEAT STALE \(start\)$
 ^[^ ]+ todo: TODO [0-9]+ new: .* \(start\)$
