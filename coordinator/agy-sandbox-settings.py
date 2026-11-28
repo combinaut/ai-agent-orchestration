@@ -24,7 +24,7 @@ def git(*args):
 
 def git_config_files(cwd):
     """The files that set a `git config --global` entry in `cwd` (includes followed), the excludes file, git's ignore and attributes files."""
-    where = ["-C", cwd] if cwd and os.path.isdir(cwd) else []
+    where = ["-C", cwd] if os.path.isdir(cwd) else []
     files = []
     for entry in git(
         *where, "config", "--global", "-z", "--show-origin", "--list", "--includes"
@@ -46,8 +46,6 @@ def git_config_files(cwd):
 
 def git_common_dir(cwd):
     """The git common dir of `cwd` (for a worktree: the main checkout's .git), or None."""
-    if not cwd:
-        return None
     path = git(
         "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"
     ).strip()

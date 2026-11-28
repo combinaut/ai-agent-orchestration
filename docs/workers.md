@@ -163,7 +163,7 @@ agy's terminal sandbox blocks the user's home folder except a few caches, keeps 
 
 | Rule | Path | For |
 |---|---|---|
-| `read_file` | the orch checkout | running `orch-signal`, `heavy-slot`, `github-write` |
+| `read_file` | the orch checkout | running `heavy-slot` and other orch scripts in the sandbox |
 | `read_file` | `orchestration.toml` | orch settings |
 | `read_file` | each file that sets a `git config --global` entry in the pane's folder (includes and `includeIf` followed), `core.excludesFile` (also when set in an include), git's `ignore` and `attributes` in `$XDG_CONFIG_HOME/git` | `git status`, `diff`, `log` |
 | `read_file` | the git common dir of the worker's pane (a worktree's main `.git`) | the same, in a worktree |
@@ -176,4 +176,4 @@ agy reads global skills and rules only from `~/.gemini/config/`, not from `~/.cl
 
 Before the start, `gemini-start.sh` adds the resolved path of the pane's folder to `trustedWorkspaces` in `~/.gemini/antigravity-cli/settings.json` (agy matches the exact path), so agy shows no trust prompt. It changes no other value, and refuses to start when that file is not a JSON object or `trustedWorkspaces` is not a list.
 
-agy loads the plugin's skills and rules (it follows the links and expands the includes). `orch-signal` runs outside the sandbox, and Auto's check asks once for `orch-signal heartbeat --new-job` and once for `orch-signal done` per worker ("writes a signal file outside the workspace"); the user presses "Yes, run command", never an "always" option.
+agy loads a plugin rule through its link (a live worker followed `rules/orch-agy-sandbox.md`); loading the skills and expanding the includes is untested. `orch-signal` runs outside the sandbox, and Auto's check asks once for `orch-signal heartbeat --new-job` and once for `orch-signal done` per worker ("writes a signal file outside the workspace"); the user presses "Yes, run command", never an "always" option.

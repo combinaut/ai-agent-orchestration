@@ -175,7 +175,7 @@ stop_watch() {
   WATCH_PID=''
 }
 
-# signal_live <kill target...>: the target exists; EPERM (a sandbox or another user) means it exists.
+# signal_live <kill target...>: kill -0 succeeds or fails with EPERM (a sandbox or another user).
 signal_live() {
   local err
   err=$(LC_ALL=C kill -0 "$@" 2>&1) && return 0

@@ -1676,6 +1676,7 @@ TOML
     [ "$(readlink "$plugin/skills/$name")" = "$clone/skills/$name" ]
   done
   [ "$(readlink "$plugin/rules/AGENTS.md")" = "$HOME/.claude/CLAUDE.md" ]
+  [ "$(readlink "$plugin/rules/orch-agy-sandbox.md")" = "$clone/snippets/agy-sandbox.md" ]
   grep -qF 'orchestration:start' "$plugin/rules/AGENTS.md"
   [ "$(cat "$plugin/rules/claude-always.md")" = "$(printf -- '---\ntrigger: always_on\n---\n@[always.md](%s)' "$HOME/.claude/rules/always.md")" ]
   install_ok
@@ -1684,13 +1685,6 @@ TOML
   install_ok
   [ ! -e "$plugin/rules/claude-always.md" ]
   contains "$output" "removed stale   $plugin/rules/claude-always.md"
-}
-
-@test "install links the agy sandbox rule into the plugin" {
-  fresh_install
-  plugin="$HOME/.gemini/config/plugins/ai-agent-orchestration"
-  clone=$(cd "$CLONE" && pwd -P)
-  [ "$(readlink "$plugin/rules/orch-agy-sandbox.md")" = "$clone/snippets/agy-sandbox.md" ]
 }
 
 @test "install writes the agy guard hook with the Claude hook's config and keeps it on a re-run" {
