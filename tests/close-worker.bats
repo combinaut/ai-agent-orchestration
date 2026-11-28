@@ -21,7 +21,7 @@ case "$1 $2" in
 esac
 STUB
   chmod +x "$BIN/herdr"
-  python_bin=$(command -v python3)
+  python_bin=$(PATH=/usr/bin:/bin command -v python3)
   export HOME="$TMP/home" FX HERDR_CALLS="$TMP/herdr.calls" HERDR_BIN_PATH="$BIN/herdr" ORCH_CONFIG="$TMP/none.toml" \
     ORCH_CLOSED_DIR="$TMP/closed" ORCH_PYTHON3="$python_bin" HERDR_PANE_ID=wA:p1 HERDR_WORKSPACE_ID=wA
   unset ORCH_USER_TODO_STATUS_DIR
@@ -39,6 +39,22 @@ teardown() {
 agent() {
   printf '{"result":{"agent":{"pane_id":"%s","name":"%s","workspace_id":"%s","cwd":"%s","terminal_title_stripped":"%s","tokens":{"role":"%s"},"agent_session":{"agent":"%s","value":"%s"}}}}\n' \
     "$1" "$2" "$3" "$6" "${8:-}" "$4" "${7:-claude}" "$5" >"$FX/agent-${1//:/_}.json"
+}
+
+agy_conversation() {
+  local identifier=$1 folder=$2
+  mkdir -p "$HOME/.gemini/antigravity-cli/conversations"
+  "$python_bin" - "$HOME/.gemini/antigravity-cli/conversations/$identifier.db" "$folder" <<'PY'
+import sqlite3
+import sys
+
+with sqlite3.connect(sys.argv[1]) as connection:
+    connection.execute("CREATE TABLE trajectory_metadata_blob (id TEXT PRIMARY KEY, data BLOB)")
+    connection.execute(
+        "INSERT INTO trajectory_metadata_blob VALUES ('main', ?)",
+        (f"file://{sys.argv[2]}".encode(),),
+    )
+PY
 }
 
 # workspace <id> <owner> <checkout>
@@ -200,4 +216,12 @@ close_worker() {
   close_worker wW:p1 --task t
   [ "$status" -eq 0 ]
   grep -q 'resume: codex resume 2222-bbbb$' "$STATUS"
+}
+
+@test "an agy worker resumes the conversation associated with its worktree" {
+  agent wW:p1 fix-it wW "" unknown "$TMP/wt" agy
+  agy_conversation 11111111-1111-1111-1111-111111111111 "$TMP/wt"
+  close_worker wW:p1 --task t
+  [ "$status" -eq 0 ]
+  grep -q 'resume: agy --conversation 11111111-1111-1111-1111-111111111111$' "$STATUS"
 }
