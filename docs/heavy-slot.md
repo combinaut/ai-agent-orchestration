@@ -17,6 +17,7 @@ A slot is a file in `~/.claude/heavy-slots/` that holds the job's pid. `take` re
 - `take` exits 73 when the slot directory is not writable (for example in a sandbox). Run it again with write access to that directory.
 - Never create slot files by hand. Stop a job with `heavy-slot stop`, never with `pkill`.
 - The audit reports `STALESLOT` for a file whose pid is gone.
+- A pid that `heavy-slot` may not signal (from inside a sandbox, or another user's) counts as live.
 - The balance watcher uses the same cap.
 
 ## Stopping a job

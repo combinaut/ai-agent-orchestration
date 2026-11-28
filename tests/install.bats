@@ -1676,6 +1676,7 @@ TOML
     [ "$(readlink "$plugin/skills/$name")" = "$clone/skills/$name" ]
   done
   [ "$(readlink "$plugin/rules/AGENTS.md")" = "$HOME/.claude/CLAUDE.md" ]
+  [ "$(readlink "$plugin/rules/orch-agy-sandbox.md")" = "$clone/snippets/agy-sandbox.md" ]
   grep -qF 'orchestration:start' "$plugin/rules/AGENTS.md"
   [ "$(cat "$plugin/rules/claude-always.md")" = "$(printf -- '---\ntrigger: always_on\n---\n@[always.md](%s)' "$HOME/.claude/rules/always.md")" ]
   install_ok

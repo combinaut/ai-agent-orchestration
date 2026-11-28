@@ -386,6 +386,15 @@ install_failing_mv() {
   [[ "$output" == *stale ]]
 }
 
+@test "a pid this process may not signal counts as live" {
+  printf '1\n' >"$ORCH_HEAVY_SLOTS_DIR/agent-other"
+  run "$HELPER" count
+  [ "$status" -eq 0 ]
+  [ "$output" = 1 ]
+  run "$HELPER" list
+  [[ "$output" == *"agent-other pid=1 "*live ]] || false
+}
+
 @test "slot is removed after a normal exit and a failure" {
   run "$HELPER" take agent-normal -- bash -c 'exit 0'
   [ "$status" -eq 0 ]

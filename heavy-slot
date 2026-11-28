@@ -175,14 +175,22 @@ stop_watch() {
   WATCH_PID=''
 }
 
+# signal_live <kill target...>: kill -0 succeeds or fails with EPERM (a sandbox or another user).
+signal_live() {
+  local err
+  err=$(LC_ALL=C kill -0 "$@" 2>&1) && return 0
+  case $err in *"not permitted"*) return 0 ;; esac
+  return 1
+}
+
 is_pid_live() {
   case ${1:-} in ''|*[!0-9]*|0|0[0-9]*) return 1 ;; esac
-  kill -0 "$1" 2>/dev/null
+  signal_live "$1"
 }
 
 is_group_live() {
   case ${1:-} in ''|*[!0-9]*|0|0[0-9]*) return 1 ;; esac
-  kill -0 -- "-$1" 2>/dev/null
+  signal_live -- "-$1"
 }
 
 file_mtime() {

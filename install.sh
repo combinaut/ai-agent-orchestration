@@ -495,6 +495,7 @@ link_agy_plugin() {
     link_entry "$ORCH_REPO/skills/$(basename "$d")" "$AGY_PLUGIN/skills/$(basename "$d")"
   done
   link_entry "$CLAUDE_DIR/CLAUDE.md" "$AGY_PLUGIN/rules/AGENTS.md"
+  link_entry "$ORCH_REPO/snippets/agy-sandbox.md" "$AGY_PLUGIN/rules/orch-agy-sandbox.md"
   if [ -f "$CLAUDE_DIR/CLAUDE.md" ]; then
     bytes=$(wc -c <"$CLAUDE_DIR/CLAUDE.md" | tr -d ' ')
     agy_size_check "$CLAUDE_DIR/CLAUDE.md" "$bytes"

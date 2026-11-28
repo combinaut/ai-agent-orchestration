@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Starts a Gemini (agy) worker in an existing herdr pane:
-#   gemini-start.sh <agent-name> <pane-id> <worker|smart>
+#   gemini-start.sh <agent-name> <pane-id> <worker|smart> <report-dir>
+# <report-dir> is a direct subfolder of ~/.claude/worker-reports, the one folder there the worker may write unless the heavy-slot dir overlaps worker-reports.
 # It adds the pane's folder to trustedWorkspaces in agy's settings, so agy shows no trust prompt.
 # The model comes from models.gemini_worker or models.gemini_smart (agy model ids, e.g. gemini-4-neon-medium).
-# The worker runs in agy's Auto mode; no allow rule is shipped, so Auto's check sees every command
-# that leaves the sandbox, including every orch-signal call. Never add command(orch-signal): the
+# The worker runs in agy's Auto mode. --settings adds read_file/write_file sandbox paths only
+# (agy-sandbox-settings.py); no command rule is shipped, so Auto's check sees every command that
+# leaves the sandbox, including every orch-signal call. Never add command(orch-signal): the
 # program it runs comes from the caller's environment (ORCH_LOADER_PYTHON, ORCH_PYTHON3, PATH).
 case ${ZSH_EVAL_CONTEXT:-} in *:file*) echo "run it, do not source it" >&2; return 1 ;; esac
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
@@ -13,11 +15,20 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")" && pwd)"
 . "$root/watchers/coord-lib.sh"
 
-[ $# -ge 3 ] || { echo "usage: gemini-start.sh <agent-name> <pane-id> <worker|smart>" >&2; exit 2; }
-name=$1 pane=$2 tier=$3
-shift 3
+[ $# -ge 4 ] || { echo "usage: gemini-start.sh <agent-name> <pane-id> <worker|smart> <report-dir>" >&2; exit 2; }
+name=$1 pane=$2 tier=$3 report_dir=$4 report_arg=$4
+shift 4
 [ $# -eq 0 ] || { echo "gemini-start.sh: takes no extra arguments" >&2; exit 2; }
 case "$tier" in worker | smart) ;; *) echo "gemini-start.sh: tier must be worker or smart, not '$tier'" >&2; exit 2 ;; esac
+
+reports="$HOME/.claude/worker-reports"
+report_dir=${report_dir%/}
+sub=${report_dir#"$reports"/}
+case "$sub" in "$report_dir" | "" | . | .. | */*) sub= ;; esac
+if [ -z "$sub" ] || [ -L "$report_dir" ] || { [ -e "$report_dir" ] && [ ! -d "$report_dir" ]; }; then
+  echo "gemini-start.sh: report-dir must be a direct subfolder of $reports and not a link or file: '$report_arg'" >&2
+  exit 2
+fi
 
 orch_load_config
 setting=ORCH_GEMINI_WORKER_MODEL
@@ -39,7 +50,7 @@ fi
 case "$model" in "" | "<"*">") echo "$not_configured" >&2; exit 1 ;; esac
 
 plugin="$HOME/.gemini/config/plugins/ai-agent-orchestration"
-for f in plugin.json rules/AGENTS.md; do
+for f in plugin.json rules/AGENTS.md rules/orch-agy-sandbox.md; do
   [ -e "$plugin/$f" ] || { echo "gemini-start.sh: $plugin/$f is missing or dangling, so agy would start without the orch skills and your rules; run install.sh" >&2; exit 1; }
 done
 [ -e "$plugin/hooks.json" ] || { echo "gemini-start.sh: $plugin/hooks.json is missing, so agy would run commands without the Bash guard; run install.sh" >&2; exit 1; }
@@ -105,4 +116,10 @@ except OSError as error:
     sys.exit(f"gemini-start.sh: cannot write {shown}: {error}")
 PY
 
-exec "$herdr_bin" agent start "$name" --kind agy --pane "$pane" -- --model "$model" --mode auto
+slots=${ORCH_HEAVY_SLOTS_DIR:-"$HOME/.claude/heavy-slots"}
+mkdir -p "$report_dir" "$slots"
+sandbox=$("$ORCH_LOADER_PYTHON" -I "$root/agy-sandbox-settings.py" --cwd "$cwd" \
+  --read "$(orch_config_path)" --read "$reports" \
+  --write "$report_dir" --write "$slots") || { echo "gemini-start.sh: could not build the agy sandbox settings" >&2; exit 1; }
+
+exec "$herdr_bin" agent start "$name" --kind agy --pane "$pane" -- --model "$model" --mode auto --settings "$sandbox"

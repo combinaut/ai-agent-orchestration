@@ -2148,7 +2148,7 @@ HERDR_PAIRS = (
     ("pane", "send-text"),
 )
 CURSOR_REASON = "Cursor starts only through ~/.claude/coordinator/cursor-start.sh <name> <pane> <worker|smart>; the provider and model come from settings."
-AGY_REASON = "agy (Gemini) starts only through ~/.claude/coordinator/gemini-start.sh <name> <pane> <worker|smart>; the model comes from settings, and a raw agy start or an agy bypass flag is denied."
+AGY_REASON = "agy (Gemini) starts only through ~/.claude/coordinator/gemini-start.sh <name> <pane> <worker|smart> <report-dir>; the model comes from settings, and a raw agy start or an agy bypass flag is denied."
 AGY_INFO_ARGS = {"--version", "--help", "-h", "help", "models"}
 AGY_BYPASS_FLAGS = (
     "--dangerously-skip-permissions",
