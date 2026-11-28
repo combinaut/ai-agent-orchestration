@@ -326,14 +326,14 @@ class App:
     # --- apply ---
 
     def send_apply(self):
-        """One feed line naming the unapplied settings; only a live Feed Monitor reads it."""
+        """One feed line naming the unapplied settings; only a running Feed Monitor reads it."""
         if not self.unapplied:
             self.status = "nothing to apply"
             return
         now = time.time()
         try:
             monitor = self.feed_path.with_name(feed_attach.MONITOR_NAME)
-            if feed_attach.read_record(monitor, now) is None:
+            if not feed_attach.follower_runs(monitor, now):
                 self.status = "not sent: no Coordinator Feed Monitor is running"
                 return
             feed_attach.append_line(self.feed_path, apply_line(self.unapplied, now))

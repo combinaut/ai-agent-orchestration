@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -71,6 +72,13 @@ class ViewCase(IsolatedTestCase):
     def frame(self):
         return SGR.sub("", self.out.getvalue().split("\033[2J")[-1])
 
+    def active(self):
+        """The tab name above the underline."""
+        lines = self.frame().split("\r\n")
+        under = next(n for n, line in enumerate(lines) if "━" in line)
+        first, last = lines[under].index("━"), lines[under].rindex("━")
+        return lines[under - 1][first : last + 1].strip()
+
     def saved(self, key):
         return s.read_file(self.path, "global").get(s.BY_KEY[key])
 
@@ -133,14 +141,7 @@ class TabTest(ViewCase):
     def tab_names(self):
         return [name for name, _ in TABS]
 
-    def active(self):
-        """The tab names above the underline."""
-        lines = self.frame().split("\r\n")
-        under = next(n for n, line in enumerate(lines) if "━" in line)
-        first, last = lines[under].index("━"), lines[under].rindex("━")
-        return lines[under - 1][first : last + 1].strip()
-
-    def test_there_are_six_tabs_in_the_agreed_order(self):
+    def test_there_are_six_tabs_in_order(self):
         self.assertEqual(list(self.view.TABS), TABS)
 
     def test_every_section_of_the_schema_is_on_exactly_one_tab(self):
@@ -218,7 +219,7 @@ class TabTest(ViewCase):
 
 
 class TitleTest(ViewCase):
-    def test_the_header_line_has_the_new_title(self):
+    def test_the_header_line_has_the_title(self):
         self.size = Size(200, 30)
         self.app()
         self.assertEqual(
@@ -226,7 +227,7 @@ class TitleTest(ViewCase):
             f"Settings Orchestrator  {self.path}",
         )
 
-    def test_the_herdr_manifest_has_the_new_title(self):
+    def test_the_herdr_manifest_has_the_title(self):
         manifest = tomllib.loads(
             (
                 WATCHERS.parents[1] / "env/herdr/settings-plugin/herdr-plugin.toml"
@@ -359,10 +360,7 @@ class FilterTest(ViewCase):
     def test_the_underline_follows_the_selected_match(self):
         app = self.app()
         self.keys(app, "/", *"herdr.todo_pane", ENTER)
-        lines = self.frame().split("\r\n")
-        under = next(n for n, line in enumerate(lines) if "━" in line)
-        first, last = lines[under].index("━"), lines[under].rindex("━")
-        self.assertEqual(lines[under - 1][first : last + 1].strip(), "Herdr")
+        self.assertEqual(self.active(), "Herdr")
 
     def test_escape_returns_to_the_tab_of_the_selected_match(self):
         app = self.app()
@@ -589,6 +587,27 @@ class ApplyTest(ViewCase):
         self.assertIn("no Coordinator Feed Monitor", app.status)
         self.assertEqual(self.sent(), [])
         self.assertEqual(app.unapplied, ["herdr.todo_pane", "pr.author"])
+
+    def test_a_heartbeat_without_a_running_follower_sends_nothing(self):
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        app = self.two_changes()
+        beat = self.feed.with_name(feed_attach.MONITOR_NAME)
+        for record in (f"1 0 0 0 {gone.pid}", "1 0 0", "1 0 0 0 0", "1 0 0 0 x"):
+            with self.subTest(record=record):
+                beat.write_text(record + "\n")
+                self.keys(app, "a")
+                self.assertIn("no Coordinator Feed Monitor", app.status)
+                self.assertEqual(self.sent(), [])
+                self.assertEqual(len(app.unapplied), 2)
+
+    def test_a_stale_heartbeat_sends_nothing(self):
+        app = self.two_changes()
+        beat = self.feed.with_name(feed_attach.MONITOR_NAME)
+        old = beat.stat().st_mtime - feed_attach.MONITOR_FRESH_SECONDS - 1
+        os.utime(beat, (old, old))
+        self.keys(app, "a")
+        self.assertEqual((self.sent(), len(app.unapplied)), ([], 2))
 
     def test_a_with_nothing_changed_sends_nothing(self):
         self.keys(self.app(), "a")
