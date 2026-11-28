@@ -4,7 +4,7 @@
 
 ```bash
 orch-sweep run --pr <url> --head <sha> --base-ref <remote>/<base branch> \
-  [--runtime codex|claude] [--model <model>] [--concurrency 4] \
+  [--runtime codex|claude] [--model <model>] [--concurrency 4] [--max-slices 25] \
   [--agent-timeout 900] [--timeout 3600] [--record <path>] [--no-comment] [--no-transcripts]
 orch-sweep plan --base <rev> [--head <rev>]   # the slice plan as JSON
 orch-sweep tree                               # the five tree values and the untracked map's hash, as JSON
@@ -38,7 +38,7 @@ The model comes from the settings: `models.codex_worker`, else `models.codex_sma
 1. A test file (under `test/`, `tests/`, `spec/` or `__tests__/`, or named `test_*`, `*_spec.*`, `*_test.*`, `*.test.*`, `*.spec.*` or `*.bats`) joins the changed source file with the same stem (test markers stripped, `-` read as `_`), the one sharing the most directory names first. A deleted file joins the added or changed file with its stem. A renamed file keeps its old path for the agents.
 2. The feature of a source file and the files joined to it is its directory, cut to two levels (`lib`, `skills/review-prs`).
 3. Within a feature, these units pack into slices of at most 400 changed lines, largest first. A unit over 400 lines splits into its files; a file over 400 lines gets its own slice. Features never share a slice. Binary files go together in one slice named `binary`.
-4. The plan is checked before any agent starts: every changed path in exactly one slice, only single-file slices over 400 lines, binary files only in the binary slice. Over 25 slices the run stops with exit 3.
+4. The plan is checked before any agent starts: every changed path in exactly one slice, only single-file slices over 400 lines, binary files only in the binary slice. Over `--max-slices` slices (default 25, an integer from 1 to 50; any other value is a usage error) the run stops with exit 3.
 
 ## Tree state
 
@@ -58,7 +58,7 @@ The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<numb
 
 ## The gate
 
-The gate reads only a PR comment that holds an `orch-sweep run` record. A `/finalize-sweep` record file or a plain table comment is not evidence for it. When sweep checks are on, `orch-sweep post-review --event APPROVE` needs a passing gate, so an approval needs such a record. `orch-sweep-record gate --pr <url> --head <sha>` checks the exact live PR head and the newest full record published by the PR author or the current reviewer. Either record counts as published evidence on its author's word, including a record from a PR author who is not a collaborator. The gate does not verify transcripts or check the run nonce against an actual run, and it makes no collaborator-permission check. It validates the record's schema (including nonce format), Git ancestry, the merge base using GitHub's live `base.sha` and undisputed fix findings. Missing base objects or GitHub/Git failures exit 2; fetch the base and retry later. The reviewer's independent judgement is the guard against untruthful records; the reviewer also reads the current PR title and body independently. No local cache equality is required. More than 25 slices are refused; split the PR.
+The gate reads only a PR comment that holds an `orch-sweep run` record. A `/finalize-sweep` record file or a plain table comment is not evidence for it. When sweep checks are on, `orch-sweep post-review --event APPROVE` needs a passing gate, so an approval needs such a record. `orch-sweep-record gate --pr <url> --head <sha>` checks the exact live PR head and the newest full record published by the PR author or the current reviewer. Either record counts as published evidence on its author's word, including a record from a PR author who is not a collaborator. The gate does not verify transcripts or check the run nonce against an actual run, and it makes no collaborator-permission check. It validates the record's schema (including nonce format), Git ancestry, the merge base using GitHub's live `base.sha` and undisputed fix findings. Missing base objects or GitHub/Git failures exit 2; fetch the base and retry later. The reviewer's independent judgement is the guard against untruthful records; the reviewer also reads the current PR title and body independently. No local cache equality is required. A record with more than 50 slices is refused; split the PR.
 
 The gate emits `RECORD_COMMENT <id>` for its selected validated comment, including when open fixes prevent approval. `RECORD_REUSABLE` distinguishes that refusal from missing or stale evidence. Both lines are flushed before the `ERROR:` diagnostic, so combined output keeps the reason last.
 
@@ -72,7 +72,7 @@ Disputes are visible review-body lines: `Sweep dispute <sweep-comment-id>/<findi
 
 | Bound | Value |
 |---|---|
-| Agents per sweep | `2 x slices + 1` sweep agents, then `ceil(findings / 40)` validators, at most 12; with the 25-slice cap, at most 63 agent jobs, and with retries at most 88 agent processes |
+| Agents per sweep | `2 x slices + 1` sweep agents, then `ceil(findings / 40)` validators, at most 12; at the default limit of 25 slices, at most 63 agent jobs and with retries 88 agent processes; at the ceiling of 50 slices, at most 113 and 163 |
 | Agents at once | `--concurrency`, default 4, a bounded pool of at most 8 |
 | Per agent | `--agent-timeout`, default 900 s, cut to what is left of the sweep; when the agent exits or times out, its process group gets SIGTERM, then SIGKILL after at most 5 s for whatever is left |
 | Per sweep | `--timeout`, default 3600 s; no agent starts after it |
@@ -84,4 +84,4 @@ Run it as one heavy job: `heavy-slot take <name>-sweep --note "orch sweep" -- or
 
 ## Exit codes
 
-`0` record written (and the comment posted, unless `--no-comment`); `1` usage, checkout or GitHub error; `2` the tree changed; `3` over 25 slices; `4` an agent failed after its retry; `5` the record does not fit in one comment; `128 + n` stopped by signal `n`.
+`0` record written (and the comment posted, unless `--no-comment`); `1` usage, checkout or GitHub error; `2` the tree changed; `3` over `--max-slices` slices; `4` an agent failed after its retry; `5` the record does not fit in one comment; `128 + n` stopped by signal `n`.

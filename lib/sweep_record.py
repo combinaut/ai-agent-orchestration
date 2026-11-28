@@ -36,6 +36,7 @@ VERDICTS = (
 KEEP = ("CONFIRMED_NEW", "CONFIRMED_REGRESSED", "DISPUTED_DROP")
 FINDING_KEYS = ("file", "line", "category", "summary")
 SLICE_LINES = 400
+MAX_SLICES = 50
 RECORD_LIMIT = 4 * 1024 * 1024
 SCRIPT_FIELDS = (
     "version",
@@ -781,8 +782,8 @@ def record_problem(record, head):
         return (
             f"the {record.get('kind')} sweep record of {head}: {why.split(': ', 1)[1]}"
         )
-    if record["slices"] > 25:
-        return f"{record['slices']} slices pass the limit of 25"
+    if record["slices"] > MAX_SLICES:
+        return f"{record['slices']} slices pass the limit of {MAX_SLICES}"
     return None
 
 
