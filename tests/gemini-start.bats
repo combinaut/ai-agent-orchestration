@@ -292,6 +292,42 @@ writable() {
   has_rule "read_file($HOME/.ignore.xdg)"
 }
 
+@test "an empty ~/.gitconfig and empty or comment-only include targets are readable" {
+  mkdir -p "$HOME/.config/git"
+  : >"$HOME/.gitconfig"
+  printf '[include]\n\tpath = ../../main.inc\n' >"$HOME/.config/git/config"
+  printf '[include]\n\tpath = empty.inc\n\tpath = ~/comment.inc\n' >"$HOME/main.inc"
+  : >"$HOME/empty.inc"
+  printf '# nothing set\n' >"$HOME/comment.inc"
+  run "$SCRIPT" w1 pane1 worker "$REPORTS"
+  [ "$status" -eq 0 ]
+  has_rule "read_file($HOME/.gitconfig)"
+  has_rule "read_file($HOME/empty.inc)"
+  has_rule "read_file($HOME/comment.inc)"
+}
+
+@test "an empty includeIf target is readable only when its condition holds in the pane's folder" {
+  git init -q "$HOME/main"
+  printf '[includeIf "gitdir:%s/main/"]\n\tpath = ~/work.inc\n[includeIf "gitdir:./main/"]\n\tpath = ~/relative.inc\n[includeIf "gitdir:%s/other/"]\n\tpath = ~/other.inc\n' "$HOME" "$HOME" >"$HOME/.gitconfig"
+  : >"$HOME/work.inc"
+  : >"$HOME/relative.inc"
+  : >"$HOME/other.inc"
+  export PANE_CWD="$HOME/main"
+  run "$SCRIPT" w1 pane1 worker "$REPORTS"
+  [ "$status" -eq 0 ]
+  has_rule "read_file($HOME/work.inc)"
+  has_rule "read_file($HOME/relative.inc)"
+  ! has_rule "read_file($HOME/other.inc)" || false
+}
+
+@test "an include that names a folder gets no rule" {
+  mkdir -p "$HOME/folder"
+  printf '[include]\n\tpath = ~/folder\n' >"$HOME/.gitconfig"
+  run "$SCRIPT" w1 pane1 worker "$REPORTS"
+  [ "$status" -eq 0 ]
+  ! has_rule "read_file($HOME/folder)" || false
+}
+
 @test "paths that do not exist get no rule" {
   run "$SCRIPT" w1 pane1 worker "$REPORTS"
   [ "$status" -eq 0 ]

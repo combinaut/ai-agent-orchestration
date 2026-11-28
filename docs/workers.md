@@ -147,7 +147,7 @@ agy's terminal sandbox blocks the user's home folder except a few caches, keeps 
 |---|---|---|
 | `read_file` | the orch checkout | running `heavy-slot` and other orch scripts in the sandbox |
 | `read_file` | `orchestration.toml` | orch settings |
-| `read_file` | `$XDG_CONFIG_HOME/git/config`, each file that sets an entry through it or `git config --global` in the pane's folder (includes and `includeIf` followed), their `core.excludesFile` (also when set in an include), git's `ignore` and `attributes` in `$XDG_CONFIG_HOME/git` | `git status`, `diff`, `log` |
+| `read_file` | `~/.gitconfig`, `$XDG_CONFIG_HOME/git/config`, `$GIT_CONFIG_GLOBAL` and every file they include, empty ones too (an `includeIf` file only when its condition holds in the pane's folder), their `core.excludesFile` (also when set in an include), git's `ignore` and `attributes` in `$XDG_CONFIG_HOME/git` | `git status`, `diff`, `log` |
 | `read_file` | the git common dir of the worker's pane (a worktree's main `.git`) | the same, in a worktree |
 | `read_file` | `~/.claude/worker-reports` | briefs, earlier reports and `machine-rules.md` |
 | `write_file` | `<report-dir>`, the worker's subfolder of `~/.claude/worker-reports` | the report, written without a prompt |
