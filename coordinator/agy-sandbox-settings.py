@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Print the agy --settings JSON of read_file/write_file rules for a worker whose folder is --cwd.
 
-Read: the orch checkout, each --read, the global and XDG git config files and every file they include, the excludes, ignore and attributes files, the pane's git common dir.
+Read: the orch checkout, each --read, the paths git_config_files lists, the pane's git common dir.
 """
 
 import argparse
@@ -50,7 +50,7 @@ def include_target(where, source, entry):
 
 
 def git_config_files(cwd):
-    """The global and XDG git config files and their includes in `cwd`, their excludes files, git's ignore and attributes files."""
+    """Git config, ignore and attributes paths; includes and excludes come from --global (GIT_CONFIG_GLOBAL if set, not ~/.gitconfig) and XDG."""
     where = ["-C", cwd] if os.path.isdir(cwd) else []
     xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     xdg_config = os.path.join(xdg, "git", "config")

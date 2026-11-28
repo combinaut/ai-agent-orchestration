@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts a Gemini (agy) worker in an existing herdr pane:
 #   gemini-start.sh <agent-name> <pane-id> <worker|smart> <report-dir>
-# <report-dir> is a direct subfolder of ~/.claude/worker-reports, the one folder there the worker may write.
+# <report-dir> is a direct subfolder of ~/.claude/worker-reports, the one folder there the worker may write unless the heavy-slot dir overlaps worker-reports.
 # It adds the pane's folder to trustedWorkspaces in agy's settings, so agy shows no trust prompt.
 # The model comes from models.gemini_worker or models.gemini_smart (agy model ids, e.g. gemini-4-neon-medium).
 # The worker runs in agy's Auto mode. --settings adds read_file/write_file sandbox paths only
