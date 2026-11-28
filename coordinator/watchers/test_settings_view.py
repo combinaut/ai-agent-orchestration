@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import tomllib
 import unittest
 from collections import namedtuple
@@ -36,6 +37,24 @@ def load_view():
     return module
 
 
+class NoUpdates:
+    """Stands in for the updater so no test of the other tabs runs git."""
+
+    lines, offer = ["no update check"], False
+
+    def __init__(self):
+        self.checked, self.updated = [], []
+
+    def check(self, repo):
+        self.checked.append(repo)
+
+    def update(self, repo):
+        self.updated.append(repo)
+
+    def poll(self):
+        pass
+
+
 class ViewCase(IsolatedTestCase):
     TEXT = '# mine\n[pr]\nauthor = "me"  # who\n'
 
@@ -50,9 +69,18 @@ class ViewCase(IsolatedTestCase):
         self.feed = Path(tmp.name) / "coordinator-feed.log"
         feed_attach.write_record(self.feed.with_name(feed_attach.MONITOR_NAME), 1, 0, 0)
 
+    def updater(self):
+        return NoUpdates()
+
     def app(self):
         self.out = io.StringIO()
-        app = self.view.App(self.env, self.out, lambda: self.size, feed=self.feed)
+        app = self.view.App(
+            self.env,
+            self.out,
+            lambda: self.size,
+            feed=self.feed,
+            updates=self.updater(),
+        )
         app.tick()
         return app
 
@@ -133,8 +161,8 @@ TABS = [
     ("GitHub", ("pr", "pr_tabs", "audit", "legacy")),
     ("Watchers", ("watchers", "alerts", "hog", "host")),
     ("Herdr", ("herdr", "user_todo", "user_questions", "remote_control")),
-    ("Install", ("install",)),
-    ("Info", ()),
+    ("Update", ()),
+    ("Info", ("install",)),
 ]
 
 
@@ -255,23 +283,308 @@ class InfoTabTest(ViewCase):
         self.keys(app, LEFT)
         self.assertIn(str(self.path), self.frame().replace("\r\n", ""))
 
+    def test_the_install_settings_sit_under_advanced_on_the_info_tab(self):
+        app = self.app()
+        self.keys(app, LEFT)
+        frame = self.frame()
+        order = [
+            frame.index(text)
+            for text in (
+                "Settings file:",
+                "\r\nadvanced\r\n",
+                "install.repo_path",
+                "install.env",
+                "install.radar_path",
+            )
+        ]
+        self.assertEqual(order, sorted(order))
+
+    def test_an_install_setting_is_still_edited_on_the_info_tab(self):
+        app = self.app()
+        self.keys(app, LEFT, DOWN, ENTER, "x", ENTER)
+        self.assertEqual(self.saved("install.env"), "x")
+
+    def test_a_short_info_tab_scrolls_back_up_to_the_path(self):
+        self.size = Size(60, 16)
+        app = self.app()
+        self.keys(app, LEFT, DOWN, DOWN)
+        self.assertNotIn("Settings file:", self.frame())
+        self.keys(app, UP, UP)
+        self.assertIn("Settings file:", self.frame())
+        self.assertIn("> install.repo_path ", self.frame())
+
     def test_a_filter_with_no_match_on_the_info_tab_says_so(self):
         app = self.app()
         self.keys(app, LEFT, "/", *"zzzz")
         self.assertIn("no setting matches", self.frame())
 
-    def test_closing_an_empty_filter_returns_to_the_info_tab(self):
+    def test_closing_an_empty_filter_returns_to_the_update_tab(self):
         for closing in (ESC, ENTER):
             with self.subTest(closing=closing):
                 app = self.app()
-                self.keys(app, LEFT, "/", closing)
-                self.assertEqual(self.active(), "info")
+                self.keys(app, LEFT, LEFT, "/", closing)
+                self.assertEqual(self.active(), "update")
 
-    def test_a_match_picked_from_the_info_tab_opens_its_own_tab(self):
+    def test_a_match_picked_from_the_update_tab_opens_its_own_tab(self):
         app = self.app()
-        self.keys(app, LEFT, "/", *"herdr.todo_pane", ENTER, ESC)
+        self.keys(app, LEFT, LEFT, "/", *"herdr.todo_pane", ENTER, ESC)
         self.assertEqual(self.active(), "herdr")
         self.assertEqual(app.rows[app.selected].key, "herdr.todo_pane")
+
+
+class UpdateKeyTest(ViewCase):
+    def app(self):
+        self.fake = NoUpdates()
+        self.updater = lambda: self.fake
+        return super().app()
+
+    def test_u_updates_only_on_the_update_tab(self):
+        app = self.at("pr.author")
+        self.keys(app, "u")
+        self.assertEqual(self.fake.updated, [])
+        self.keys(self.app(), LEFT, LEFT, "u")
+        self.assertEqual(len(self.fake.updated), 1)
+
+    def test_u_on_a_match_found_from_the_update_tab_means_default(self):
+        app = self.app()
+        self.keys(app, LEFT, LEFT, "/", *"pr.author", ENTER, "u")
+        self.assertEqual(self.fake.updated, [])
+        self.assertEqual(self.saved("pr.author"), "")
+
+    def test_each_opening_of_the_tab_checks_once(self):
+        app = self.app()
+        self.assertEqual(self.fake.checked, [])
+        self.keys(app, LEFT, LEFT)
+        app.render()
+        self.assertEqual(len(self.fake.checked), 1)
+        self.keys(app, LEFT, RIGHT)
+        self.assertEqual(len(self.fake.checked), 2)
+
+    def test_the_checked_folder_follows_the_setting_and_the_environment(self):
+        default = str(Path("~/.claude/ai-agent-orchestration").expanduser())
+        for text, env, wanted in (
+            ("", {}, default),
+            ('[install]\nrepo_path = "/tmp/set"\n', {}, "/tmp/set"),
+            (
+                '[install]\nrepo_path = "/tmp/set"\n',
+                {"ORCH_REPO_PATH": "/tmp/env"},
+                "/tmp/env",
+            ),
+        ):
+            with self.subTest(wanted=wanted):
+                self.path.write_text(text)
+                self.env = {"ORCH_CONFIG": str(self.path), **env}
+                self.keys(self.app(), LEFT, LEFT)
+                self.assertEqual(self.fake.checked, [wanted])
+
+
+INSTALL_STUB = """#!/bin/sh
+printf 'ran\\n' >>"$STUB_LOG"
+if [ -n "${STUB_FAIL:-}" ]; then
+  echo "ERROR: the stub install broke" >&2
+  exit 1
+fi
+"""
+
+
+class UpdateTest(ViewCase):
+    """The update tab against a temporary origin and clone with a stub install.sh."""
+
+    def setUp(self):
+        super().setUp()
+        root = self.path.parent
+        self.origin, self.clone = root / "origin", root / "clone"
+        self.stub_log = root / "stub.log"
+        patcher = patch.dict(
+            os.environ,
+            {
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@example.invalid",
+                "STUB_LOG": str(self.stub_log),
+            },
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.origin.mkdir()
+        self.git(self.origin, "init", "-q", "-b", "main")
+        stub = self.origin / "install.sh"
+        stub.write_text(INSTALL_STUB)
+        stub.chmod(0o755)
+        self.git(self.origin, "add", "install.sh")
+        self.commit("first")
+        self.git(root, "clone", "-q", str(self.origin), str(self.clone))
+        self.path.write_text(f'[install]\nrepo_path = "{self.clone}"\n')
+
+    def updater(self):
+        import update_check
+
+        self.updates = update_check.Updater()
+        return self.updates
+
+    def git(self, folder, *args):
+        return subprocess.run(
+            ["git", "-C", str(folder), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def commit(self, *subjects):
+        for subject in subjects:
+            self.git(self.origin, "commit", "-q", "--allow-empty", "-m", subject)
+
+    def settle(self, app):
+        if self.updates.thread:
+            self.updates.thread.join(60)
+        if self.updates.process:
+            self.updates.process.wait(60)
+        app.tick()
+        app.last_refresh = None
+        app.tick()
+        return self.frame()
+
+    def open_tab(self):
+        self.size = Size(100, 40)
+        app = self.app()
+        self.keys(app, LEFT, LEFT)
+        return app, self.settle(app)
+
+    def head(self):
+        return self.git(self.clone, "rev-parse", "HEAD")
+
+    def test_a_current_clone_says_so_and_offers_nothing(self):
+        app, frame = self.open_tab()
+        self.assertIn("Orchestrator is up to date.", frame)
+        self.assertNotIn("u Update now", frame)
+        self.keys(app, "u")
+        self.assertIsNone(self.updates.process)
+
+    def test_new_commits_are_counted_and_listed_newest_first(self):
+        self.commit("older change", "newer change")
+        _, frame = self.open_tab()
+        self.assertIn("Update available: 2 new changes.", frame)
+        self.assertLess(frame.index("- newer change"), frame.index("- older change"))
+        self.assertIn("u Update now", frame)
+        self.assertNotIn("more", frame)
+        self.assertNotIn(str(self.path.parent), frame)
+
+    def test_one_new_commit_is_one_change(self):
+        self.commit("only")
+        self.assertIn("Update available: 1 new change.\r\n", self.open_tab()[1])
+
+    def test_a_long_list_is_cut_after_eight(self):
+        self.commit(*(f"change {n:02}" for n in range(11)))
+        _, frame = self.open_tab()
+        self.assertIn("Update available: 11 new changes.", frame)
+        self.assertEqual(frame.count("- change "), 8)
+        self.assertIn("- change 03", frame)
+        self.assertIn("and 3 more", frame)
+
+    def test_checking_is_shown_while_the_fetch_runs(self):
+        import update_check
+
+        release = threading.Event()
+        self.addCleanup(release.set)
+
+        def slow(repo):
+            release.wait(60)
+            return ["done"], False
+
+        with patch.object(update_check, "check", slow):
+            app = self.app()
+            self.keys(app, LEFT, LEFT)
+            self.assertIn("Checking for updates...", self.frame())
+            first = self.updates.thread
+            self.keys(app, LEFT, RIGHT)
+            self.assertIs(self.updates.thread, first)
+            release.set()
+            self.assertIn("done", self.settle(app))
+
+    def test_a_fetch_error_is_one_plain_line(self):
+        self.git(self.clone, "remote", "set-url", "origin", str(self.clone) + "-gone")
+        _, frame = self.open_tab()
+        (line,) = [x for x in frame.split("\r\n") if "Could not check" in x]
+        self.assertIn("does not appear to be a git repository", line)
+        self.assertNotIn("fatal:", frame)
+        self.assertNotIn("u Update now", frame)
+
+    def test_a_slow_git_is_reported(self):
+        import update_check
+
+        with patch.object(update_check, "FETCH_S", 0):
+            self.assertIn(
+                "Could not check for updates: git took too long", self.open_tab()[1]
+            )
+
+    def refused(self, words):
+        before = self.head()
+        app, frame = self.open_tab()
+        self.assertIn(words, frame)
+        self.assertNotIn("u Update now", frame)
+        self.keys(app, "u")
+        self.assertIsNone(self.updates.process)
+        self.assertEqual(self.head(), before)
+        self.assertFalse(self.stub_log.exists())
+
+    def test_local_edits_are_named_and_no_update_is_offered(self):
+        self.commit("new")
+        (self.clone / "mine.txt").write_text("mine")
+        self.refused("This copy has local changes, so it cannot be updated here.")
+
+    def test_another_branch_is_named_and_no_update_is_offered(self):
+        self.commit("new")
+        self.git(self.clone, "switch", "-q", "-c", "side", "--track", "origin/main")
+        self.refused("This copy is on branch side, not main")
+
+    def test_local_commits_are_named_and_no_update_is_offered(self):
+        self.commit("new")
+        self.git(self.clone, "commit", "-q", "--allow-empty", "-m", "mine")
+        self.refused("This copy has its own commits")
+
+    def test_u_pulls_then_installs_and_says_updated(self):
+        self.commit("new")
+        app, _ = self.open_tab()
+        self.keys(app, "u")
+        frame = self.settle(app)
+        self.assertIn("Updated. Close and reopen this popup", frame)
+        self.assertEqual(self.head(), self.git(self.origin, "rev-parse", "HEAD"))
+        self.assertEqual(self.stub_log.read_text(), "ran\n")
+        self.assertFalse(self.updates.log.exists())
+        self.keys(app, LEFT, RIGHT)
+        self.assertIn("Updated.", self.settle(app))
+
+    def test_a_failed_install_shows_its_error_in_one_line(self):
+        self.commit("new")
+        app, _ = self.open_tab()
+        with patch.dict(os.environ, {"STUB_FAIL": "1"}):
+            self.keys(app, "u")
+            frame = self.settle(app)
+        self.assertIn("Update failed: the stub install broke\r\n", frame)
+        self.assertNotIn("Updated.", frame)
+
+    def test_a_branch_changed_after_the_check_is_not_pulled(self):
+        self.commit("new")
+        app, _ = self.open_tab()
+        self.git(self.clone, "switch", "-q", "-c", "side", "--track", "origin/main")
+        before = self.head()
+        self.keys(app, "u")
+        self.assertIn("Update failed: This copy is on branch side", self.settle(app))
+        self.assertEqual(self.head(), before)
+        self.assertFalse(self.stub_log.exists())
+
+    def test_the_update_runs_in_its_own_session(self):
+        self.commit("new")
+        app, _ = self.open_tab()
+        self.keys(app, "u")
+        pid = self.updates.process.pid
+        try:
+            self.assertNotEqual(os.getsid(pid), os.getsid(0))
+        finally:
+            self.settle(app)
 
 
 class TitleTest(ViewCase):

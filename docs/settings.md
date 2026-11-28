@@ -18,7 +18,7 @@ A repo key in the global file (except the two `review.*` keys above), a global k
 
 With the herdr env, `prefix+shift+s` opens a popup titled "Settings Orchestrator" that edits the global file. `herdr.settings_popup = false` plus a run of `install.sh` removes the key and the plugin; `python3 ~/.claude/coordinator/settings-view.py` runs the same editor in any terminal.
 
-It lists every setting the global file accepts, by its full key on one of six setting tabs, with the setting's description and when a change takes effect. A value the file does not set reads `default`. Repo-only settings are not listed. ← and → switch tabs. The last tab, `info`, shows the path of the settings file.
+It lists every setting the global file accepts, by its full key on one of six tabs, with the setting's description and when a change takes effect. A value the file does not set reads `default`. Repo-only settings are not listed. ← and → switch tabs. The `update` tab holds no settings (see [Update from the popup](#-update-from-the-popup)). The last tab, `info`, shows the path of the settings file above the `install` settings, under `advanced`.
 
 | Tab | Sections |
 |---|---|
@@ -27,7 +27,7 @@ It lists every setting the global file accepts, by its full key on one of six se
 | GitHub | `pr`, `pr_tabs`, `audit`, `legacy` |
 | Watchers | `watchers`, `alerts`, `hog`, `host` |
 | Herdr | `herdr`, `user_todo`, `user_questions`, `remote_control` |
-| Install | `install` |
+| Info | `install` |
 
 For a setting that is not a list, Enter edits the value inside its row: Enter saves, Esc cancels. A list opens its own list editor, where `s` saves. An on/off setting or a fixed set of values shows `‹ value ›`, and ← and → change it.
 
@@ -45,10 +45,23 @@ For a setting that is not a list, Enter edits the value inside its row: Enter sa
 - Only the changed value is rewritten. Comments, other lines, line endings, the file mode and a symlink stay. Comments inside a multi-line list you change move above its key. A key written in a form that cannot be changed in place (such as an inline table) is refused; edit it by hand.
 - A file that does not load is shown with its error and is not edited. A missing default file is created from the example on the first change; a missing `ORCH_CONFIG` file is an error.
 - A setting overridden by an `ORCH_*` variable shows that value and cannot be changed. The editor sees only its own environment (in the popup, the one Herdr runs it in): a variable exported in another shell or service is not shown.
-- The popup never runs `install.sh` and restarts nothing.
+- Saving a setting never runs `install.sh` and restarts nothing.
 - **Apply.** The footer counts the settings you saved a new value for and have not sent (`2 changes not applied`); one you set back stays counted. `a` appends one line, `SETTINGS APPLY <key>, <key> ...`, to the Coordinator's feed, shows `Sent to the Coordinator` and clears the count. The Coordinator then acts on each key's `Applies:` text ([the rule](../skills/coordinate/SKILL.md)). Unless the Feed Monitor's heartbeat is at most 180 seconds old and the process it names runs, or when the feed cannot be written, the popup shows the error and keeps the count. Closing the popup forgets the count.
 
 Limits: file 1 MiB, text field 4096 characters, list 200 entries, filter 64 characters, 3 write attempts when another program changes the file. One settings popup per Herdr session.
+
+## ⬆️ Update from the popup
+
+Each time the `update` tab opens, it runs `git fetch` in the background in the clone `install.repo_path` names and compares the checked-out commit with its upstream. It shows `Checking for updates...`, then one of:
+
+- `Orchestrator is up to date.`
+- `Update available: N new changes.`, the subjects of up to 8 new commits, newest first, and `and N more`.
+- Why it cannot update: a branch other than `main`, local changes, or commits that are not upstream.
+- `Could not check for updates:` and the reason.
+
+When an update is available, `u` runs `git pull --ff-only` in the clone and then its `./install.sh`, and shows `Updated` or the error in one line. It never forces, resets or stashes. On every other tab, and on filter matches, `u` writes the default. The update runs in its own session with no terminal, so `install.sh` asks no questions.
+
+Limits: one check and one update at a time; `git fetch` 60 seconds, `git pull` 120 seconds, other git commands 15 seconds. `install.sh` has no time limit, because stopping it partway leaves the links half made. If it fails after the pull, the next popup reports the clone as up to date: run `./install.sh` in the clone.
 
 ## 📁 Repo files
 

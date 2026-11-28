@@ -14,6 +14,7 @@ import feed_attach  # noqa: E402
 import orch_settings  # noqa: E402
 import popup_terminal  # noqa: E402
 import todo_popup  # noqa: E402
+import update_check  # noqa: E402
 from popup_terminal import ESCAPES, fit, split_input  # noqa: E402
 from reminder_picker import RESET, cells, wrap  # noqa: E402
 
@@ -138,10 +139,10 @@ TABS = (
     ("GitHub", ("pr", "pr_tabs", "audit", "legacy")),
     ("Watchers", ("watchers", "alerts", "hog", "host")),
     ("Herdr", ("herdr", "user_todo", "user_questions", "remote_control")),
-    ("Install", ("install",)),
-    ("Info", ()),
+    ("Update", ()),
+    ("Info", ("install",)),
 )
-INFO_TAB = len(TABS) - 1
+UPDATE_TAB, INFO_TAB = len(TABS) - 2, len(TABS) - 1
 ACTIVE_TAB = "\033[1;48;5;141;38;5;16m"
 TABLE_ORDER = [table for _, tables in TABS for table in tables]
 FIELD_MAX = 4096
@@ -155,6 +156,8 @@ ENV_NOTE = "Only this editor's environment is visible; a variable exported elsew
 MAIN_HINT = (
     "←→ tab · ↑↓ select · Enter edit · u default · a Apply · / filter · Esc/q close"
 )
+UPDATE_HINT = "←→ tab · a Apply · / filter · Esc/q close"
+OFFER_HINT = "u Update now · " + UPDATE_HINT
 SENT = "Sent to the Coordinator"
 LIST_HINT = "Enter edit · a add · x delete · J/K move · s save · Esc discard"
 CHECK_HINT = "↑↓ select · space tick · s save · Esc discard"
@@ -250,8 +253,10 @@ class Editor:
 class App:
     """Screen state, driven by feed(), lone_escape() and tick(); needs no terminal."""
 
-    def __init__(self, environ, out, size, feed=feed_attach.FEED):
+    def __init__(self, environ, out, size, feed=feed_attach.FEED, updates=None):
         self.environ, self.out, self.size = environ, out, size
+        self.updates = updates or update_check.Updater()
+        self.on_update, self.shown_update = False, None
         self.feed_path, self.unapplied = Path(feed), []
         self.closing = False
         self.buf, self.status, self.error = "", "", ""
@@ -344,6 +349,27 @@ class App:
             return
         self.unapplied, self.status = [], SENT
 
+    # --- update ---
+
+    def update_open(self):
+        return self.tab == UPDATE_TAB and not self.searching()
+
+    def clone(self):
+        """The folder install.sh keeps up to date: the environment, the file, the default."""
+        setting = orch_settings.BY_KEY["install.repo_path"]
+        path = self.environ.get(setting.env, self.value(setting))
+        return os.path.expanduser(path or "~/.claude/ai-agent-orchestration")
+
+    def update_state(self):
+        return list(self.updates.lines), self.updates.offer
+
+    def watch_update(self):
+        """Checks once each time the update tab comes into view."""
+        opened = self.update_open()
+        if opened and not self.on_update:
+            self.updates.check(self.clone())
+        self.on_update = opened
+
     # --- input ---
 
     def current(self):
@@ -370,8 +396,8 @@ class App:
         self.selected = self.rows.index(chosen) if chosen in self.rows else 0
 
     def close_filter(self):
-        """Ends the search; the info tab stays when no filter text picked a match."""
-        if self.tab == INFO_TAB and not self.filter:
+        """Ends the search; the update tab stays when no filter text picked a match."""
+        if self.tab == UPDATE_TAB and not self.filter:
             self.rows = []
         self.filtering, self.filter = False, ""
         self.apply_filter()
@@ -525,6 +551,8 @@ class App:
             self.closing = True
         elif token == "a":
             self.send_apply()
+        elif token == "u" and self.update_open():
+            self.updates.update(self.clone())
         else:
             action = {
                 "\r": "enter",
@@ -581,7 +609,8 @@ class App:
         )
         if stale:
             self.load()
-        if stale or size != self.shown_size:
+        self.updates.poll()
+        if stale or size != self.shown_size or self.update_state() != self.shown_update:
             self.shown_size = size
             self.render()
 
@@ -656,9 +685,13 @@ class App:
         """The scrolling lines, the line to keep visible and {line: row index}."""
         if self.editor:
             return self.editor_body(width)
-        if self.tab == INFO_TAB and not self.searching():
-            return wrap(f"Settings file: {clean(self.path)}", width), 0, {}
+        if self.update_open():
+            text = [row for x in self.updates.lines for row in wrap(clean(x), width)]
+            return text, 0, {}
         lines, rows, focus = [], {}, 0
+        if self.tab == INFO_TAB and not self.searching():
+            lines = wrap(f"Settings file: {clean(self.path)}", width)
+            lines += ["", "advanced"]
         group = None
         for index, setting in enumerate(self.rows):
             if self.searching() and tab_of(setting) != group:
@@ -690,11 +723,14 @@ class App:
         if setting:
             help_rows += wrap(clean(setting.doc), width)[:3]
             help_rows += wrap(f"Applies: {APPLIES[setting.key]}", width)[:2]
-        help_rows += wrap(ENV_NOTE, width)[:2]
+        if not self.update_open():
+            help_rows += wrap(ENV_NOTE, width)[:2]
         if self.field:
             hint = FIELD_HINT if self.field.entry is None else ENTRY_HINT
         elif self.editor:
             hint = CHECK_HINT if self.editor.checks else LIST_HINT
+        elif self.update_open():
+            hint = OFFER_HINT if self.updates.offer else UPDATE_HINT
         else:
             hint = MAIN_HINT
         hints = [f"\033[2m{row}{RESET}" for row in wrap(hint, width)[:2]]
@@ -706,6 +742,9 @@ class App:
         return (lines + help_rows[:spare] + hints)[:limit]
 
     def render(self):
+        self.watch_update()
+        self.updates.poll()
+        self.shown_update = self.update_state()
         size = self.size()
         width, height = size.columns or 80, size.lines or 24
         head = wrap(clean(self.error), width)[:4] if self.error else []
@@ -719,6 +758,8 @@ class App:
         footer = self.footer(width, max(0, room - 3))
         room = max(1, room - len(footer))
         above = 1 if room > 1 else 0
+        if self.tab == INFO_TAB and focus < room:
+            self.top = 0
         if focus < self.top + above:
             self.top = max(0, focus - above)
         elif focus >= self.top + room:
