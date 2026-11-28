@@ -25,6 +25,7 @@ BOTH = "next script run; watchers after they restart"
 INSTALL = "after you run install.sh"
 SCRIPTS_AND_SERVICES = "next script run; services after you run install.sh"
 WATCHER_SESSION = "watchers after they restart; sessions at their next recycle"
+SCRIPTS_AND_SESSIONS = "next script run; a running session at its next recycle"
 ALL_READERS = "next script run; watchers after restart; sessions at next recycle"
 COORDINATOR_PANE = "at the next Coordinator start or recycle (todo-pane.sh)"
 
@@ -68,7 +69,6 @@ APPLIES = {
         "models.gemini_smart",
         "remote_control.architects",
         "recycle.park_idle",
-        "review.finalize_commands",
         "review.finalize_comment",
     ),
     **_applies(
@@ -126,6 +126,7 @@ APPLIES = {
     **_applies(SCRIPTS_AND_SERVICES, "watchers.python3", "herdr.bin"),
     **_applies(ALL_READERS, "heavy_slots.max", "recycle.pct"),
     "recycle.tokens": WATCHER_SESSION,
+    "review.finalize_commands": SCRIPTS_AND_SESSIONS,
     "herdr.todo_pane": COORDINATOR_PANE,
 }
 
@@ -134,7 +135,7 @@ LIST_MAX = 200
 FILTER_MAX = 64
 VALUE_COLUMN = 36
 REFRESH_S = 3
-ENV_NOTE = "Only Herdr's environment is visible here; a variable exported elsewhere is not shown."
+ENV_NOTE = "Only this editor's environment is visible; a variable exported elsewhere is not shown."
 MAIN_HINT = (
     "↑↓ select · Enter/space change · ←→ choose · u default · / filter · Esc/q close"
 )
@@ -524,7 +525,8 @@ class App:
             lines.append("no setting matches")
         return lines, focus, rows
 
-    def footer(self, width):
+    def footer(self, width, limit):
+        """At most limit rows; help rows go first, then the hint."""
         lines = ["─" * width]
         if self.field:
             room = max(1, width - 8)
@@ -532,18 +534,21 @@ class App:
         error = (self.field and self.field.error) or (self.editor and self.editor.error)
         if error:
             lines += wrap(clean(error), width)[:3]
+        help_rows = []
         setting = self.editor.setting if self.editor else self.current()
         if setting:
-            lines += wrap(clean(f"{setting.key}: {setting.doc}"), width)[:3]
-            lines += wrap(f"Applies: {APPLIES[setting.key]}", width)[:2]
-        lines += wrap(ENV_NOTE, width)[:2]
+            help_rows += wrap(clean(f"{setting.key}: {setting.doc}"), width)[:3]
+            help_rows += wrap(f"Applies: {APPLIES[setting.key]}", width)[:2]
+        help_rows += wrap(ENV_NOTE, width)[:2]
         if self.field:
             hint = FIELD_HINT
         elif self.editor:
             hint = CHECK_HINT if self.editor.checks else LIST_HINT
         else:
             hint = MAIN_HINT
-        return lines + [f"\033[2m{row}{RESET}" for row in wrap(hint, width)[:2]]
+        hints = [f"\033[2m{row}{RESET}" for row in wrap(hint, width)[:2]]
+        spare = max(0, limit - len(lines) - len(hints))
+        return (lines + help_rows[:spare] + hints)[:limit]
 
     def render(self):
         size = self.size()
@@ -556,9 +561,8 @@ class App:
                 f"/ filter: {clean(self.filter)}{'▏' if self.filtering else ''}"
             )
         body, focus, rows = self.body()
-        footer = self.footer(width)
         room = max(1, height - 1 - len(head))
-        footer = footer[-max(0, room - 3) :] if room > 3 else []
+        footer = self.footer(width, max(0, room - 3))
         room = max(1, room - len(footer))
         if focus < self.top + 1:
             self.top = max(0, focus - 1)

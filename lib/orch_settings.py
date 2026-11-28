@@ -149,6 +149,7 @@ SETTINGS = [
         "int",
         50,
         "Pack files in a clone of the open work before a PACKS line",
+        minimum=1,
     ),
     _g(
         "audit.worktrees_max",
@@ -156,6 +157,7 @@ SETTINGS = [
         "int",
         40,
         "Worktrees in a clone of the open work before a WORKTREES line",
+        minimum=1,
     ),
     _g(
         "audit.page_prs",
@@ -181,6 +183,7 @@ SETTINGS = [
         "int",
         10,
         "PRs scanned for legacy code per audit pass; the rest wait for the next pass",
+        minimum=1,
     ),
     _g(
         "legacy.reads_max",
@@ -188,6 +191,7 @@ SETTINGS = [
         "int",
         20,
         "File reads per PR scan for files GitHub returns without a patch",
+        minimum=1,
     ),
     _g(
         "legacy.map_repo",
@@ -641,6 +645,7 @@ SETTINGS = [
         "int",
         1800,
         "Maximum seconds a worker question waits for an answer",
+        minimum=1,
     ),
     _g(
         "workers.wait_s",
@@ -1864,6 +1869,9 @@ WRITE_ATTEMPTS = 3
 EXAMPLE_FILE = Path(__file__).resolve().parents[1] / "config/orchestration.toml.example"
 
 
+TABLE_HEADER = re.compile(r'^\s*\[\s*(["\']?)([A-Za-z0-9_-]+)\1\s*\]\s*(#.*)?$')
+
+
 def comment_columns(text):
     """(line, column) of every TOML comment in text."""
     found, quote, index, line, start = [], None, 0, 0, 0
@@ -1912,7 +1920,6 @@ def spliced(label, text, setting, value):
     def name(part):
         return rf'(?:"{part}"|\'{part}\'|{part})'
 
-    header = re.compile(r'^\s*\[\s*(["\']?)([A-Za-z0-9_-]+)\1\s*\]\s*(#.*)?$')
     plain = re.compile(rf"^\s*{name(setting.name)}\s*=[ \t]*")
     dotted = re.compile(
         rf"^\s*{name(setting.table)}\s*\.\s*{name(setting.name)}\s*=[ \t]*"
@@ -1926,7 +1933,7 @@ def spliced(label, text, setting, value):
             index += 1
             continue
         if stripped.startswith("["):
-            match = header.match(current)
+            match = TABLE_HEADER.match(current)
             table = match[2] if match else ""
             start = index if table == setting.table else start
             index += 1
@@ -2241,7 +2248,6 @@ def drop_keys(path):
         f"{path}: cannot drop {' '.join(present)} in place; edit it by hand"
     )
     lines, kept, removed, table, skip = text.splitlines(), [], [], None, 0
-    header = re.compile(r'^\s*\[\s*(["\']?)([A-Za-z0-9_-]+)\1\s*\]\s*(#.*)?$')
     key = re.compile(
         r'^\s*(?:(["\']?)([A-Za-z0-9_-]+)\1\s*\.\s*)?(["\']?)([A-Za-z0-9_-]+)\3\s*=(.*)$'
     )
@@ -2249,7 +2255,7 @@ def drop_keys(path):
         if skip > 0:
             skip += bracket_depth(line)
             continue
-        if match := header.match(line):
+        if match := TABLE_HEADER.match(line):
             table = match[2]
         elif (
             match := key.match(line)

@@ -250,6 +250,7 @@ class WriteSettingTest(SettingsTest):
         entries = [f"/directory/number/{n:03}" for n in range(8)]
         text = self.edit("[watchers]\r\npath = []\r\n", "watchers.path", entries)
         self.assertNotIn("\n", text.replace("\r\n", ""))
+        self.assertIn('path = [\r\n  "/directory/number/000",\r\n', text)
         self.assertEqual(s.parse(text, "t")["watchers"]["path"], entries)
 
     def test_key_looking_lines_inside_a_multi_line_value_are_not_edited(self):
@@ -350,6 +351,11 @@ class WriteSettingTest(SettingsTest):
             ("host.pressure_min_pct", 101),
             ("recycle.pct", 101),
             ("heavy_slots.max", 0),
+            ("audit.packs_max", 0),
+            ("audit.worktrees_max", 0),
+            ("legacy.scans_max", 0),
+            ("legacy.reads_max", 0),
+            ("workers.ask_timeout_s", 0),
         ):
             with self.subTest(key=key, value=value):
                 self.refuses(key, value, "must be")

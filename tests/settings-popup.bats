@@ -95,3 +95,12 @@ count() { grep -c "$1" "$HCONF" || true; }
   not_contains "$output" 'Herdr plugin combinaut.settings ->'
   not_contains "$(cat "$HCONF")" "$START"
 }
+
+@test "Herdr reloads the first popup key when the second popup step fails" {
+  fresh_install
+  : >"$HERDR_CALLS"
+  run env HERDR_LINK_FAIL=settings-plugin /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -ne 0 ]
+  [ "$(count "$TODO_START")" -eq 1 ]
+  contains "$(cat "$HERDR_CALLS")" 'server reload-config'
+}

@@ -80,7 +80,7 @@ Workers get a soft recycle ask and a hard limit capped at 60% of their known mod
 
 ### 📝 The to-do pane
 
-The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list as a popup (on by default; `todo_popup = false` turns the popup off). `todo_pane = false` turns the pane off. Every item can be answered there: select one, press `a`, then type (items with numbered choices also take a number key). Answers not delivered yet show as rows you can cancel. Details, keys and settings: [docs/todo.md](docs/todo.md).
+The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list as a popup (on by default; `todo_popup = false` turns the popup off). Every item can be answered there: select one, press `a`, then type (items with numbered choices also take a number key). Answers not delivered yet show as rows you can cancel. `todo_pane = false` turns the pane off. Details, keys and settings: [docs/todo.md](docs/todo.md).
 
 ### 🎛️ Settings popup
 

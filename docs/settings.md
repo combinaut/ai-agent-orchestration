@@ -30,10 +30,10 @@ It lists every setting the global file accepts, grouped by table, with the setti
 
 `u` writes the default. `/` filters by key. Esc leaves a field, then a list, then the filter, then closes the popup; `q` closes it from the main list. Clicking a row selects it; clicking its value changes it.
 
-- A value is checked before it is written: its type, its allowed values, and that the whole file still loads. The popup also checks number ranges (finite and not negative; `audit.page_prs` and `audit.page_nodes` 1-100; `alerts.escalate_ratio` above 1; `workers.wait_repeat_s` at least 60; `host.pressure_min_pct` and `recycle.pct` at most 100; `heavy_slots.max` at least 1) and refuses control characters.
+- A value is checked before it is written: its type, its allowed values, and that the whole file still loads. The popup also checks number ranges (finite and not negative; `audit.page_prs` and `audit.page_nodes` 1-100; `alerts.escalate_ratio` above 1; `workers.wait_repeat_s` at least 60; `host.pressure_min_pct` and `recycle.pct` at most 100; `heavy_slots.max`, `audit.packs_max`, `audit.worktrees_max`, `legacy.scans_max`, `legacy.reads_max` and `workers.ask_timeout_s` at least 1) and refuses control characters.
 - Only the changed value is rewritten. Comments, other lines, line endings, the file mode and a symlink stay. Comments inside a multi-line list you change move above its key. A key written in a form that cannot be changed in place (such as an inline table) is refused; edit it by hand.
 - A file that does not load is shown with its error and is not edited. A missing default file is created from the example on the first change; a missing `ORCH_CONFIG` file is an error.
-- A setting overridden by an `ORCH_*` variable shows that value and cannot be changed. The popup sees only the environment Herdr runs it in: a variable exported in another shell or service is not shown.
+- A setting overridden by an `ORCH_*` variable shows that value and cannot be changed. The editor sees only its own environment (in the popup, the one Herdr runs it in): a variable exported in another shell or service is not shown.
 - The popup never runs `install.sh` and restarts nothing.
 
 Limits: file 1 MiB, text field 4096 characters, list 200 entries, filter 64 characters, 3 write attempts when another program changes the file. One settings popup per Herdr session.

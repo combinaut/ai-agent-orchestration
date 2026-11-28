@@ -94,6 +94,7 @@ class CoverageTest(ViewCase):
             ("heavy_slots.max", ("script run", "watchers", "sessions")),
             ("herdr.bin", ("script run", "services", "install.sh")),
             ("watchers.python3", ("script run", "services", "install.sh")),
+            ("review.finalize_commands", ("script run", "session")),
         ):
             with self.subTest(key=key):
                 for word in words:
@@ -123,11 +124,17 @@ class CoverageTest(ViewCase):
 
 
 class EditTest(ViewCase):
-    def test_q_and_escape_close_the_editor_in_a_plain_terminal(self):
+    def test_a_short_terminal_keeps_the_field_and_its_error_on_screen(self):
+        self.size = Size(80, 11)
+        app = self.at("audit.page_prs")
+        self.keys(app, ENTER, CLEAR, *"101", ENTER)
+        self.assertIn("edit: 101", self.frame())
+        self.assertIn("at most 100", self.frame())
+
+    def test_q_and_escape_close_the_editor(self):
         for key in ("q", ESC):
             with self.subTest(key=key):
-                app = self.view.App(self.env, io.StringIO(), lambda: self.size)
-                app.tick()
+                app = self.app()
                 self.keys(app, key)
                 self.assertTrue(app.closing)
 
@@ -186,11 +193,6 @@ class EditTest(ViewCase):
         self.assertFalse(app.closing)
         self.assertEqual(self.path.read_text(), self.TEXT)
         self.keys(app, ESC)
-        self.assertTrue(app.closing)
-
-    def test_q_closes_the_popup(self):
-        app = self.app()
-        self.keys(app, "q")
         self.assertTrue(app.closing)
 
     def test_the_text_field_is_bounded(self):
