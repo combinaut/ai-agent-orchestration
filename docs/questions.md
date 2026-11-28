@@ -1,6 +1,6 @@
 # User questions
 
-Every user question opens below the asking architect’s own pane without taking focus. The opener validates `HERDR_PANE_ID` against the live pane list and splits that pane in its workspace. With no caller pane, or one that has disappeared, it falls back to the last `Q: ` pane, then the `To-do` label or `todo` token.
+Every user question opens below the asking architect’s own pane without taking focus. The opener validates `HERDR_PANE_ID` against the live pane list and splits that pane in its workspace. With no caller pane, or one that has disappeared, it falls back to the last `Q: ` pane, then the `To-do` label or `todo` token, then the pane tagged `role=coordinator`.
 
 ![The Q panel with the reminder picker open](q-panel.png)
 

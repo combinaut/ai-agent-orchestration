@@ -57,6 +57,15 @@ EOF
   grep -qx 'pane rename question-pane Q: release' "$TMP/question-herdr.calls"
 }
 
+@test "ask-user-question falls back to the Coordinator pane when no to-do pane exists" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  panes='{"result":{"panes":[{"pane_id":"worker"},{"pane_id":"coordinator","tokens":{"role":"coordinator"}}]}}'
+  run env HERDR_PANE_ID=vanished HERDR_PANES="$panes" "$ROOT/ask-user-question" release "$question"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane split coordinator --direction down --no-focus' "$TMP/question-herdr.calls"
+}
+
 @test "ask-user-question finds the to-do pane by its exact To-do label" {
   question="$HOME/.claude/coordinator/questions/release.md"
   printf 'Which release?\n' >"$question"

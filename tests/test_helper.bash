@@ -82,12 +82,19 @@ case "$1 ${2:-}" in
   '--version ') case "$0" in */.local/bin/*) echo "herdr ${HERDR_INSTALLED_VERSION:-0.9.1}" ;; *) echo "herdr ${HERDR_VERSION:-0.9.1}" ;; esac ;;
   'plugin list')
     [ ! -f "$HERDR_TODO_PLUGIN" ] || printf -- '- combinaut.todo (To-do popup) enabled [local:%s]\n' "$(cat "$HERDR_TODO_PLUGIN")"
+    [ ! -f "$HERDR_SETTINGS_PLUGIN" ] || printf -- '- combinaut.settings (Settings popup) enabled [local:%s]\n' "$(cat "$HERDR_SETTINGS_PLUGIN")"
     [ ! -f "$HERDR_PLUGIN" ] || printf -- '- hhdebb.herdr-radar (Radar) enabled [local:%s%s]\n' "$(cat "$HERDR_PLUGIN")" "${HERDR_PLUGIN_DIAGNOSTIC:-}"
     exit 0
     ;;
   'plugin uninstall') rm -f "$HERDR_PLUGIN" ;;
-  'plugin unlink') [ "$3" != combinaut.todo ] || rm -f "$HERDR_TODO_PLUGIN" ;;
-  'plugin link') case "$3" in */todo-plugin) printf '%s' "$3" >"$HERDR_TODO_PLUGIN" ;; *) printf '%s' "$3" >"$HERDR_PLUGIN" ;; esac ;;
+  'plugin unlink')
+    [ "$3" != combinaut.todo ] || rm -f "$HERDR_TODO_PLUGIN"
+    [ "$3" != combinaut.settings ] || rm -f "$HERDR_SETTINGS_PLUGIN"
+    ;;
+  'plugin link')
+    case "$3" in *"/${HERDR_LINK_FAIL:-none}") echo "link failed: $3" >&2; exit 1 ;; esac
+    case "$3" in */todo-plugin) printf '%s' "$3" >"$HERDR_TODO_PLUGIN" ;; */settings-plugin) printf '%s' "$3" >"$HERDR_SETTINGS_PLUGIN" ;; *) printf '%s' "$3" >"$HERDR_PLUGIN" ;; esac
+    ;;
   'plugin action')
     case "$*" in
       *state-start*)
@@ -175,7 +182,7 @@ printf 'mkdir -p "$HOME/.local/bin"\ncp "$BIN/%s.off" "$HOME/.local/bin/%s"\n' "
 EOF
   cat >"$BIN/mktemp" <<'EOF'
 #!/usr/bin/env bash
-case "$*" in *orch-todo-key*) [ -z "${MKTEMP_FAIL_TODO:-}" ] || exit 1 ;; esac
+case "$*" in *orch-popup-key*) [ -z "${MKTEMP_FAIL_TODO:-}" ] || exit 1 ;; esac
 exec "$REAL_MKTEMP" "$@"
 EOF
   REAL_MKTEMP=$(command -v mktemp)
@@ -234,7 +241,7 @@ EOF
   export TMP BIN ORIGIN RADAR_ORIGIN
   export MISE_CWDS="$TMP/mise.cwds" MISE_CALLS="$TMP/mise.calls" CURL_CALLS="$TMP/curl.calls"
   export INSTALL_SOURCE="$SRC" ORCH_REPO_URL="file://$ORIGIN"
-  export HERDR_CALLS="$TMP/herdr.calls" HERDR_PLUGIN="$TMP/herdr.plugin" HERDR_TODO_PLUGIN="$TMP/herdr.todo-plugin"
+  export HERDR_CALLS="$TMP/herdr.calls" HERDR_PLUGIN="$TMP/herdr.plugin" HERDR_TODO_PLUGIN="$TMP/herdr.todo-plugin" HERDR_SETTINGS_PLUGIN="$TMP/herdr.settings-plugin"
   # shellcheck disable=SC2016 # Expansions belong to the downloaded script.
   export ONE_LINER='s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) && bash -c "${s:?empty download}" _ "$@"'
 }

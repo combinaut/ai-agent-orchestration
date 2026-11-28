@@ -1248,16 +1248,16 @@ v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v)
 sys.argv = ["x", "--demo", *os.environ.get("VIEW_ARGS", "").split()]
 if os.environ.get("VIEW_FAIL"):
     def boom(*a): raise OSError("boom")
-    v.tty.setcbreak = boom
+    v.popup_terminal.tty.setcbreak = boom
 if os.environ.get("VIEW_PANE_GONE"):
     v.todo_popup.pane_exists = lambda *_: False
 if os.environ.get("VIEW_CHECK_CLEANUP"):
-    write = v.BoundedOut.write
+    write = v.popup_terminal.BoundedOut.write
     def checked(out, text):
-        if text == v.LEAVE:
+        if text == v.popup_terminal.LEAVE:
             assert v.todo_popup.read_record(v.todo_popup.pidfile()), "ownership cleared before terminal cleanup"
         write(out, text)
-    v.BoundedOut.write = checked
+    v.popup_terminal.BoundedOut.write = checked
 code = 0
 try:
     v.main()
@@ -1515,7 +1515,7 @@ class PtyTest(IsolatedTestCase):
                 os.write(write_end, b"x" * 65536)
         except BlockingIOError:
             pass
-        out = view.BoundedOut(write_end, timeout=0.3)
+        out = view.popup_terminal.BoundedOut(write_end, timeout=0.3)
         started = time.monotonic()
         with self.assertRaises(TimeoutError):
             out.write("frame")
@@ -1531,15 +1531,15 @@ class PtyTest(IsolatedTestCase):
                 os.write(write_end, b"x" * 65536)
         except BlockingIOError:
             pass
-        full = view.BoundedOut(write_end, timeout=0.2)
+        full = view.popup_terminal.BoundedOut(write_end, timeout=0.2)
         self.addCleanup(os.close, read_end)
         self.addCleanup(os.close, write_end)
         with (
-            patch.object(view, "BoundedOut", return_value=full),
+            patch.object(view.popup_terminal, "BoundedOut", return_value=full),
             patch.object(view, "App", side_effect=AssertionError("drew a frame")),
-            patch.object(view.termios, "tcgetattr", return_value=[]),
-            patch.object(view.termios, "tcsetattr") as restore,
-            patch.object(view.tty, "setcbreak"),
+            patch.object(view.popup_terminal.termios, "tcgetattr", return_value=[]),
+            patch.object(view.popup_terminal.termios, "tcsetattr") as restore,
+            patch.object(view.popup_terminal.tty, "setcbreak"),
         ):
             view.main()
         restore.assert_called_once()
