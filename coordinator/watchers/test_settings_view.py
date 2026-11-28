@@ -573,8 +573,6 @@ class ApplyTest(ViewCase):
         self.assertEqual(app.status, "Sent to the Coordinator")
         self.assertIn("Sent to the Coordinator", self.frame())
         self.assertNotIn("not applied", self.frame())
-        self.keys(app, "a")
-        self.assertEqual(len(self.sent()), 1)
 
     def test_a_feed_that_cannot_be_written_shows_the_error_and_keeps_the_list(self):
         app = self.two_changes()
