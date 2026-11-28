@@ -16,25 +16,37 @@ A repo key in the global file (except the two `review.*` keys above), a global k
 
 ## 🎛 Edit in a popup
 
-With the herdr env, `prefix+shift+s` opens a popup titled "Settings" that edits the global file. `herdr.settings_popup = false` plus a run of `install.sh` removes the key and the plugin; `python3 ~/.claude/coordinator/settings-view.py` runs the same editor in any terminal.
+With the herdr env, `prefix+shift+s` opens a popup titled "Settings Orchestrator" that edits the global file. `herdr.settings_popup = false` plus a run of `install.sh` removes the key and the plugin; `python3 ~/.claude/coordinator/settings-view.py` runs the same editor in any terminal.
 
-It lists every setting the global file accepts, grouped by table, with the setting's description and when a change takes effect. A value the file does not set reads `default`. Repo-only settings are not listed.
+It lists every setting the global file accepts, by its full key on one of six tabs, with the setting's description and when a change takes effect. A value the file does not set reads `default`. Repo-only settings are not listed. ← and → switch tabs.
+
+| Tab | Sections |
+|---|---|
+| Models | `providers`, `models` |
+| Workers | `workers`, `recycle`, `heavy_slots`, `review` |
+| GitHub | `pr`, `pr_tabs`, `audit`, `legacy` |
+| Watchers | `watchers`, `alerts`, `hog`, `host` |
+| Herdr | `herdr`, `user_todo`, `user_questions`, `remote_control` |
+| Install | `install` |
+
+For a setting that is not a list, Enter edits the value inside its row: Enter saves, Esc cancels. A list opens its own list editor, where `s` saves. An on/off setting or a fixed set of values shows `‹ value ›`, and ← and → change it.
 
 | Setting type | How to change it |
 |---|---|
-| on/off | Space or Enter |
-| a fixed set of values (effort levels) | ← and → |
+| on/off | Enter, ← or →, Enter. Space switches and saves at once |
+| a fixed set of values (effort levels) | Enter, ← or →, Enter. Space saves the next value |
 | a list of fixed values (providers) | Enter, Space to tick, `s` to save |
 | text and numbers | Enter, type, Enter. Ctrl-U clears the field |
 | other lists | Enter, then `a` add, Enter edit, `x` delete, `J`/`K` move, `s` save |
 
-`u` writes the default. `/` filters by key. Esc leaves a field, then a list, then the filter, then closes the popup; `q` closes it from the main list. Clicking a row selects it; clicking its value changes it.
+`u` writes the default. `/` filters by key across all tabs and groups the matches by tab name; clearing the filter shows the tab of the selected match. Esc leaves a field, then a list, then the filter, then closes the popup; `q` closes it from the main list. Clicking a row selects it; clicking its value does what Enter does.
 
 - A value is checked before it is written: its type, its allowed values, and that the whole file still loads. The popup also checks number ranges (finite and not negative; `audit.page_prs` and `audit.page_nodes` 1-100; `alerts.escalate_ratio` above 1; `workers.wait_repeat_s` at least 60; `host.pressure_min_pct` and `recycle.pct` at most 100; `heavy_slots.max`, `audit.packs_max`, `audit.worktrees_max`, `legacy.scans_max`, `legacy.reads_max` and `workers.ask_timeout_s` at least 1) and refuses control characters.
 - Only the changed value is rewritten. Comments, other lines, line endings, the file mode and a symlink stay. Comments inside a multi-line list you change move above its key. A key written in a form that cannot be changed in place (such as an inline table) is refused; edit it by hand.
 - A file that does not load is shown with its error and is not edited. A missing default file is created from the example on the first change; a missing `ORCH_CONFIG` file is an error.
 - A setting overridden by an `ORCH_*` variable shows that value and cannot be changed. The editor sees only its own environment (in the popup, the one Herdr runs it in): a variable exported in another shell or service is not shown.
 - The popup never runs `install.sh` and restarts nothing.
+- **Apply.** The footer counts the settings you saved a new value for and have not sent (`2 changes not applied`); one you set back stays counted. `a` appends one line, `SETTINGS APPLY <key>, <key> ...`, to the Coordinator's feed, shows `Sent to the Coordinator` and clears the count. The Coordinator then acts on each key's `Applies:` text ([the rule](../skills/coordinate/SKILL.md)). Unless the Feed Monitor's heartbeat is at most 180 seconds old and the process it names runs, or when the feed cannot be written, the popup shows the error and keeps the count. Closing the popup forgets the count.
 
 Limits: file 1 MiB, text field 4096 characters, list 200 entries, filter 64 characters, 3 write attempts when another program changes the file. One settings popup per Herdr session.
 

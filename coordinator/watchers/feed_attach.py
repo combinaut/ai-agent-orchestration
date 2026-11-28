@@ -75,6 +75,20 @@ def read_record(beat, now):
         return ()
 
 
+def follower_runs(beat, now):
+    """True when the heartbeat is fresh and the follower process it names runs."""
+    try:
+        if read_record(beat, now) is None:
+            return False
+        pid = int(beat.read_text().split()[4])
+        if pid <= 0:
+            return False
+        os.kill(pid, 0)
+    except (OSError, ValueError, IndexError, OverflowError):
+        return False
+    return True
+
+
 def will_read(record, inode, offset):
     """A Monitor reading the current feed file `inode` from before `offset`, or an older file it will rotate out of."""
     return record == () or (

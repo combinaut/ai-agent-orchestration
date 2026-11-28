@@ -1,14 +1,19 @@
 import importlib.util
 import io
 import os
+import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from collections import namedtuple
 from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
+import feed_actions
+import feed_attach
 
 WATCHERS = Path(__file__).resolve().parent
 sys.path.insert(0, str(WATCHERS.parents[1] / "lib"))
@@ -40,14 +45,17 @@ class ViewCase(IsolatedTestCase):
         self.path.write_text(self.TEXT)
         self.env = {"ORCH_CONFIG": str(self.path)}
         self.size = Size(100, 30)
+        self.feed = Path(tmp.name) / "coordinator-feed.log"
+        feed_attach.write_record(self.feed.with_name(feed_attach.MONITOR_NAME), 1, 0, 0)
 
     def app(self):
         self.out = io.StringIO()
-        app = self.view.App(self.env, self.out, lambda: self.size)
+        app = self.view.App(self.env, self.out, lambda: self.size, feed=self.feed)
         app.tick()
         return app
 
     def select(self, app, key):
+        app.show_tab(self.view.tab_of(s.BY_KEY[key]))
         app.selected = [row.key for row in app.rows].index(key)
         app.render()
 
@@ -64,22 +72,18 @@ class ViewCase(IsolatedTestCase):
     def frame(self):
         return SGR.sub("", self.out.getvalue().split("\033[2J")[-1])
 
+    def active(self):
+        """The tab name above the underline."""
+        lines = self.frame().split("\r\n")
+        under = next(n for n, line in enumerate(lines) if "━" in line)
+        first, last = lines[under].index("━"), lines[under].rindex("━")
+        return lines[under - 1][first : last + 1].strip()
+
     def saved(self, key):
         return s.read_file(self.path, "global").get(s.BY_KEY[key])
 
 
 class CoverageTest(ViewCase):
-    def test_every_global_setting_has_a_row_grouped_by_table(self):
-        app = self.app()
-        self.assertEqual(
-            sorted(row.key for row in app.rows),
-            sorted(x.key for x in s.listed("global")),
-        )
-        tables = [row.table for row in app.rows]
-        self.assertEqual(
-            tables, sorted(tables, key=tables.index), "a table is split in two"
-        )
-
     def test_every_global_setting_says_when_it_takes_effect(self):
         self.assertEqual(
             sorted(self.view.APPLIES), sorted(x.key for x in s.listed("global"))
@@ -123,12 +127,268 @@ class CoverageTest(ViewCase):
         )
 
 
+TABS = [
+    ("Models", ("providers", "models", "pi")),
+    ("Workers", ("workers", "recycle", "heavy_slots", "review", "guard", "focus")),
+    ("GitHub", ("pr", "pr_tabs", "audit", "legacy")),
+    ("Watchers", ("watchers", "alerts", "hog", "host")),
+    ("Herdr", ("herdr", "user_todo", "user_questions", "remote_control")),
+    ("Install", ("install",)),
+]
+
+
+class TabTest(ViewCase):
+    def tab_names(self):
+        return [name for name, _ in TABS]
+
+    def test_there_are_six_tabs_in_order(self):
+        self.assertEqual(list(self.view.TABS), TABS)
+
+    def test_every_section_of_the_schema_is_on_exactly_one_tab(self):
+        listed = [table for _, tables in self.view.TABS for table in tables]
+        self.assertEqual(sorted(listed), sorted({x.table for x in s.SETTINGS}))
+
+    def test_each_tab_lists_its_sections_in_order_and_nothing_is_lost(self):
+        app = self.app()
+        seen = []
+        for _, tables in TABS:
+            with self.subTest(tables=tables):
+                keys = [row.key for row in app.rows]
+                expected = [
+                    x.key
+                    for table in tables
+                    for x in s.listed("global")
+                    if x.table == table
+                ]
+                self.assertEqual(keys, expected)
+                seen += keys
+                self.keys(app, RIGHT)
+        self.assertEqual(sorted(seen), sorted(x.key for x in s.listed("global")))
+
+    def test_rows_show_full_keys_without_section_headers(self):
+        self.at("models.architect")
+        self.assertRegex(self.frame(), r"> models\.architect +\S")
+        self.assertIn("\n  providers.enabled ", self.frame())
+        self.assertNotIn("[providers]", self.frame())
+
+    def test_the_longest_key_keeps_a_gap_before_its_value(self):
+        longest = max((x.key for x in s.listed("global")), key=len)
+        self.at(longest)
+        self.assertRegex(self.frame(), rf"> {longest}  +\S")
+
+    def test_arrows_switch_tabs_both_ways_and_wrap(self):
+        app = self.app()
+        names = []
+        for key in (None, RIGHT, LEFT, LEFT, RIGHT):
+            if key:
+                self.keys(app, key)
+            else:
+                app.render()
+            names.append(self.active())
+        self.assertEqual(names, ["Models", "Workers", "Models", "Install", "Models"])
+
+    def test_a_new_tab_starts_on_its_first_row(self):
+        app = self.app()
+        self.keys(app, DOWN, DOWN, RIGHT)
+        self.assertEqual(app.selected, 0)
+
+    def test_arrows_on_the_list_never_write(self):
+        for key in ("models.worker_effort", "herdr.todo_pane"):
+            with self.subTest(key=key):
+                self.keys(self.at(key), RIGHT)
+                self.keys(self.at(key), LEFT)
+                self.assertEqual(self.path.read_text(), self.TEXT)
+
+    def test_the_tab_bar_names_all_tabs(self):
+        self.app()
+        self.assertRegex(self.frame(), " +".join(self.tab_names()))
+
+    def test_a_narrow_terminal_still_shows_the_active_tab(self):
+        self.size = Size(30, 30)
+        app = self.app()
+        self.keys(app, LEFT)
+        self.assertEqual(self.active(), "Install")
+
+    def test_the_help_line_names_the_tab_keys(self):
+        self.size = Size(100, 30)
+        self.app()
+        self.assertIn(
+            "←→ tab · ↑↓ select · Enter edit · u default · a Apply · / filter · Esc/q close",
+            self.frame(),
+        )
+
+
+class TitleTest(ViewCase):
+    def test_the_header_line_has_the_title(self):
+        self.size = Size(200, 30)
+        self.app()
+        self.assertEqual(
+            self.frame().split("\r\n")[0].removeprefix("\033[H"),
+            f"Settings Orchestrator  {self.path}",
+        )
+
+    def test_the_herdr_manifest_has_the_title(self):
+        manifest = tomllib.loads(
+            (
+                WATCHERS.parents[1] / "env/herdr/settings-plugin/herdr-plugin.toml"
+            ).read_text()
+        )
+        self.assertEqual(manifest["panes"][0]["title"], "Settings Orchestrator")
+        self.assertEqual(
+            manifest["actions"][0]["title"], "Settings Orchestrator: open the popup"
+        )
+        self.assertIn("'Settings Orchestrator'", manifest["description"])
+
+
+class InlineEditTest(ViewCase):
+    def row(self, key):
+        return next(
+            line for line in self.frame().split("\r\n") if line.startswith(f"> {key} ")
+        )
+
+    def test_a_text_value_is_edited_inside_its_row(self):
+        app = self.at("pr.author")
+        self.keys(app, ENTER, "x")
+        self.assertRegex(self.row("pr.author"), r" \[mex▏ *\]$")
+        self.assertNotIn("edit:", self.frame())
+        self.assertIn("Enter save · Esc cancel", self.frame())
+
+    def test_a_long_value_keeps_its_end_and_the_cursor_in_a_narrow_row(self):
+        for width in (80, 40):
+            with self.subTest(width=width):
+                self.size = Size(width, 30)
+                app = self.at("pr.author")
+                self.keys(app, ENTER, CLEAR, *("a" * 90), *"END")
+                line = next(x for x in self.frame().split("\r\n") if x.startswith("> "))
+                self.assertTrue(line.endswith("END▏]"), line)
+                self.assertLessEqual(len(line), width)
+
+    def test_wide_characters_do_not_push_the_cursor_off_the_row(self):
+        self.size = Size(60, 30)
+        app = self.at("pr.author")
+        self.keys(app, ENTER, CLEAR, *("界" * 40))
+        line = next(x for x in self.frame().split("\r\n") if x.startswith("> "))
+        self.assertTrue(line.endswith("界▏]"), line)
+
+    def test_a_boolean_is_chosen_with_arrows_and_saved_by_enter(self):
+        app = self.at("herdr.todo_pane")
+        self.keys(app, ENTER)
+        self.assertIn("‹ on ›", self.row("herdr.todo_pane"))
+        self.keys(app, RIGHT)
+        self.assertIn("‹ off ›", self.row("herdr.todo_pane"))
+        self.assertEqual(self.path.read_text(), self.TEXT, "written before Enter")
+        self.keys(app, ENTER)
+        self.assertIs(self.saved("herdr.todo_pane"), False)
+        self.assertIsNone(app.field)
+
+    def test_arrows_walk_fixed_choices_both_ways(self):
+        app = self.at("models.worker_effort")
+        self.keys(app, ENTER, RIGHT, ENTER)
+        self.assertEqual(self.saved("models.worker_effort"), "low")
+        self.keys(app, ENTER, LEFT, LEFT, ENTER)
+        self.assertEqual(self.saved("models.worker_effort"), "max")
+
+    def test_space_saves_the_next_choice_at_once(self):
+        app = self.at("models.worker_effort")
+        self.keys(app, " ")
+        self.assertEqual(self.saved("models.worker_effort"), "low")
+        self.assertIsNone(app.field)
+
+    def test_escape_cancels_a_choice(self):
+        app = self.at("models.worker_effort")
+        self.keys(app, ENTER, RIGHT, ESC)
+        self.assertEqual((app.field, app.closing), (None, False))
+        self.assertNotIn("‹", self.frame())
+        self.assertEqual(self.path.read_text(), self.TEXT)
+
+    def test_typing_does_nothing_to_a_choice(self):
+        app = self.at("models.worker_effort")
+        self.keys(app, ENTER, RIGHT, "x", BACKSPACE, CLEAR, ENTER)
+        self.assertEqual(self.saved("models.worker_effort"), "low")
+
+    def test_a_choice_changed_in_the_file_while_open_is_not_overwritten(self):
+        app = self.at("models.worker_effort")
+        self.keys(app, ENTER, RIGHT)
+        self.path.write_text('[models]\nworker_effort = "high"\n')
+        self.keys(app, ENTER)
+        self.assertIn("changed in the file", self.frame())
+        self.assertEqual(self.saved("models.worker_effort"), "high")
+
+    def test_a_list_entry_is_edited_inside_its_row(self):
+        app = self.at("pr_tabs.repos")
+        self.keys(app, ENTER, "a", *"one")
+        self.assertIn("\n > [one▏]", self.frame())
+        self.assertNotIn("(no entries)", self.frame())
+        self.keys(app, ENTER, "a", *"two", ENTER, UP, ENTER, "!")
+        self.assertIn("\n > [one!▏]", self.frame())
+        self.assertIn("\n   two", self.frame())
+
+    def test_the_edited_row_stays_visible_on_a_very_short_terminal(self):
+        for height in range(5, 12):
+            with self.subTest(height=height):
+                self.size = Size(80, height)
+                app = self.at("audit.page_prs")
+                for key in (ENTER, CLEAR, *"777"):
+                    self.keys(app, key)
+                    self.assertIn("▏]", self.frame())
+                    self.assertLessEqual(len(self.frame().split("\r\n")), height)
+
+
+class FilterTest(ViewCase):
+    def test_the_filter_searches_every_tab_and_groups_by_tab_name(self):
+        app = self.app()
+        self.keys(app, "/", *"max", ENTER)
+        self.assertEqual(
+            [row.key for row in app.rows],
+            [
+                row.key
+                for _, tables in TABS
+                for table in tables
+                for row in s.listed("global")
+                if row.table == table and "max" in row.key
+            ],
+        )
+        lines = [line.rstrip() for line in self.frame().split("\r\n")]
+        groups = [line for line in lines if line in dict(TABS)]
+        self.assertEqual(groups, ["Workers", "GitHub", "Watchers"])
+
+    def test_slash_alone_lists_every_tab(self):
+        app = self.app()
+        self.keys(app, "/")
+        self.assertEqual(len(app.rows), len(s.listed("global")))
+
+    def test_the_underline_follows_the_selected_match(self):
+        app = self.app()
+        self.keys(app, "/", *"herdr.todo_pane", ENTER)
+        self.assertEqual(self.active(), "Herdr")
+
+    def test_escape_returns_to_the_tab_of_the_selected_match(self):
+        app = self.app()
+        self.keys(app, "/", *"herdr.todo_pane", ENTER, ESC)
+        self.assertEqual(app.rows[app.selected].key, "herdr.todo_pane")
+        self.assertEqual(app.rows[0].table, "herdr")
+
+    def test_escape_with_no_match_returns_to_the_tab_it_started_on(self):
+        app = self.app()
+        self.keys(app, RIGHT, RIGHT, "/", *"zzz", ENTER)
+        self.assertIn("no setting matches", self.frame())
+        self.keys(app, ESC)
+        self.assertEqual(app.rows[0].table, "pr")
+
+    def test_arrows_do_not_leave_the_search_results(self):
+        app = self.app()
+        self.keys(app, "/", *"max", ENTER)
+        before = list(app.rows)
+        self.keys(app, DOWN, RIGHT)
+        self.assertEqual((app.rows, app.selected), (before, 1))
+
+
 class EditTest(ViewCase):
     def test_a_short_terminal_keeps_the_field_and_its_error_on_screen(self):
         self.size = Size(80, 11)
         app = self.at("audit.page_prs")
         self.keys(app, ENTER, CLEAR, *"101", ENTER)
-        self.assertIn("edit: 101", self.frame())
+        self.assertIn("[101▏]", self.frame())
         self.assertIn("at most 100", self.frame())
 
     def test_q_and_escape_close_the_editor(self):
@@ -145,13 +405,6 @@ class EditTest(ViewCase):
         self.assertTrue(self.path.read_text().startswith(self.TEXT))
         self.keys(app, " ")
         self.assertIs(self.saved("herdr.todo_pane"), True)
-
-    def test_arrows_cycle_fixed_choices_both_ways(self):
-        app = self.at("models.worker_effort")
-        self.keys(app, RIGHT)
-        self.assertEqual(self.saved("models.worker_effort"), "low")
-        self.keys(app, LEFT, LEFT)
-        self.assertEqual(self.saved("models.worker_effort"), "max")
 
     def test_a_text_field_starts_with_the_value_and_saves_on_enter(self):
         app = self.at("pr.author")
@@ -271,6 +524,123 @@ class EditTest(ViewCase):
         self.assertEqual(self.saved("pr.author"), "other")
 
 
+class ApplyTest(ViewCase):
+    def change(self, app, key, *keys):
+        self.select(app, key)
+        self.keys(app, *keys)
+
+    def two_changes(self):
+        app = self.app()
+        self.change(app, "herdr.todo_pane", " ")
+        self.change(app, "pr.author", ENTER, "x", ENTER)
+        return app
+
+    def sent(self):
+        return self.feed.read_text().splitlines() if self.feed.exists() else []
+
+    def test_the_footer_counts_each_saved_setting_once(self):
+        app = self.app()
+        app.render()
+        self.assertNotIn("not applied", self.frame())
+        self.change(app, "herdr.todo_pane", " ")
+        self.assertIn("\r\n1 change not applied\r\n", self.frame())
+        self.change(app, "pr.author", ENTER, "x", ENTER)
+        self.change(app, "herdr.todo_pane", " ")
+        self.assertIn("\r\n2 changes not applied\r\n", self.frame())
+
+    def test_a_save_that_changes_no_value_is_not_pending(self):
+        app = self.app()
+        self.change(app, "pr.author", ENTER, ENTER)
+        self.change(app, "herdr.todo_pane", "u")
+        self.assertEqual(app.unapplied, [])
+
+    def test_a_refused_value_is_not_pending(self):
+        app = self.app()
+        self.change(app, "audit.page_prs", ENTER, CLEAR, *"101", ENTER)
+        self.assertEqual(app.unapplied, [])
+
+    def test_a_sends_one_line_naming_the_keys_and_clears_the_list(self):
+        app = self.two_changes()
+        self.keys(app, "a")
+        (line,) = self.sent()
+        self.assertRegex(line, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d{4} ")
+        self.assertEqual(
+            line.split(" ", 1)[1],
+            "settings: SETTINGS APPLY herdr.todo_pane, pr.author (start)",
+        )
+        self.assertEqual(app.status, "Sent to the Coordinator")
+        self.assertIn("Sent to the Coordinator", self.frame())
+        self.assertNotIn("not applied", self.frame())
+
+    def test_a_feed_that_cannot_be_written_shows_the_error_and_keeps_the_list(self):
+        app = self.two_changes()
+        self.feed.mkdir()
+        self.keys(app, "a")
+        self.assertIn("not sent:", self.frame())
+        self.assertIn("directory", app.status)
+        self.assertIn("2 changes not applied", self.frame())
+
+    def test_without_a_feed_monitor_nothing_is_sent_and_the_list_stays(self):
+        app = self.two_changes()
+        self.feed.with_name(feed_attach.MONITOR_NAME).unlink()
+        self.keys(app, "a")
+        self.assertIn("no Coordinator Feed Monitor", app.status)
+        self.assertEqual(self.sent(), [])
+        self.assertEqual(app.unapplied, ["herdr.todo_pane", "pr.author"])
+
+    def test_a_heartbeat_without_a_running_follower_sends_nothing(self):
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        app = self.two_changes()
+        beat = self.feed.with_name(feed_attach.MONITOR_NAME)
+        for record in (f"1 0 0 0 {gone.pid}", "1 0 0", "1 0 0 0 0", "1 0 0 0 x"):
+            with self.subTest(record=record):
+                beat.write_text(record + "\n")
+                self.keys(app, "a")
+                self.assertIn("no Coordinator Feed Monitor", app.status)
+                self.assertEqual(self.sent(), [])
+                self.assertEqual(len(app.unapplied), 2)
+
+    def test_a_stale_heartbeat_sends_nothing(self):
+        app = self.two_changes()
+        beat = self.feed.with_name(feed_attach.MONITOR_NAME)
+        old = beat.stat().st_mtime - feed_attach.MONITOR_FRESH_SECONDS - 1
+        os.utime(beat, (old, old))
+        self.keys(app, "a")
+        self.assertEqual((self.sent(), len(app.unapplied)), ([], 2))
+
+    def test_a_with_nothing_changed_sends_nothing(self):
+        self.keys(self.app(), "a")
+        self.assertEqual(self.sent(), [])
+
+    def test_a_typed_into_a_field_or_the_filter_sends_nothing(self):
+        app = self.two_changes()
+        self.keys(app, ENTER, "a", ESC, "/", "a", ENTER)
+        self.assertEqual(self.sent(), [])
+        self.assertEqual(app.filter, "a")
+
+    def test_a_short_terminal_keeps_the_count_of_unapplied_changes(self):
+        app = self.two_changes()
+        self.size = Size(100, 9)
+        app.render()
+        self.assertIn("2 changes not applied", self.frame())
+        self.assertLessEqual(len(self.frame().split("\r\n")), 9)
+
+    def test_the_feed_monitor_prints_the_sent_line_as_an_action(self):
+        app = self.two_changes()
+        self.keys(app, "a")
+        (line,) = self.sent()
+        patterns = feed_actions.action_patterns()
+        self.assertTrue(feed_actions.is_action(line, patterns))
+        self.assertFalse(feed_actions.is_action(line, feed_actions.fyi_patterns()))
+        self.assertEqual(feed_actions.native(line), line)
+        for other in (
+            line.replace("pr.author", "pr.author; rm -rf x"),
+            line.replace("settings:", "todo:"),
+        ):
+            self.assertFalse(feed_actions.is_action(other, patterns), other)
+
+
 class OverrideAndErrorTest(ViewCase):
     def test_an_environment_override_is_shown_and_nothing_is_written(self):
         self.env["ORCH_PARK_IDLE"] = "1"
@@ -319,13 +689,19 @@ class ScreenTest(ViewCase):
         self.assertIn("Host watcher: highest load average", self.frame())
         self.assertIn(self.view.WATCHER, self.frame())
 
+    def test_the_description_does_not_repeat_the_key(self):
+        self.size = Size(200, 30)
+        self.at("host.load_max")
+        doc = s.BY_KEY["host.load_max"].doc
+        self.assertIn(doc, self.frame().split("\r\n"))
+
     def test_the_list_scrolls_to_keep_the_selection_visible(self):
         self.size = Size(100, 14)
         app = self.app()
         for _ in range(len(app.rows) + 5):
             self.keys(app, DOWN)
         self.assertEqual(app.selected, len(app.rows) - 1)
-        self.assertRegex(self.frame(), r"> finalize_comment ")
+        self.assertRegex(self.frame(), r"> models\.gemini_smart ")
         self.assertLessEqual(len(self.frame().split("\r\n")), 14)
 
     def test_slash_filters_rows_and_escape_clears_the_filter_before_closing(self):
@@ -336,7 +712,7 @@ class ScreenTest(ViewCase):
         )
         self.keys(app, ESC)
         self.assertFalse(app.closing)
-        self.assertEqual(len(app.rows), len(s.listed("global")))
+        self.assertGreater(len(app.rows), 2)
 
     def test_the_filter_is_bounded(self):
         app = self.app()
@@ -351,14 +727,15 @@ class ScreenTest(ViewCase):
         )
         app.feed(f"\x1b[<0;{column};{line}M")
 
-    def test_a_click_selects_a_row_and_a_click_on_its_value_changes_it(self):
+    def test_a_click_selects_a_row_and_a_click_on_its_value_opens_it(self):
         self.size = Size(100, 200)
         app = self.at("herdr.bin")
-        self.click(app, "todo_pane", 5)
+        self.click(app, "herdr.todo_pane", self.view.VALUE_COLUMN - 1)
         self.assertEqual(app.rows[app.selected].key, "herdr.todo_pane")
+        self.assertIsNone(app.field)
+        self.click(app, "herdr.todo_pane", self.view.VALUE_COLUMN)
+        self.assertIsNotNone(app.field)
         self.assertEqual(self.path.read_text(), self.TEXT)
-        self.click(app, "todo_pane", self.view.VALUE_COLUMN + 1)
-        self.assertIs(self.saved("herdr.todo_pane"), False)
 
 
 if __name__ == "__main__":

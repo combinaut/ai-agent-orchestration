@@ -10,11 +10,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "watchers"))
 sys.path.insert(0, str(ROOT.parent / "lib"))
+import feed_attach  # noqa: E402
 import orch_settings  # noqa: E402
 import popup_terminal  # noqa: E402
 import todo_popup  # noqa: E402
 from popup_terminal import ESCAPES, fit, split_input  # noqa: E402
-from reminder_picker import RESET, wrap  # noqa: E402
+from reminder_picker import RESET, cells, wrap  # noqa: E402
 
 RUN = "at the next script run"
 SESSION = "new agent starts use it; a running session at its next recycle"
@@ -130,18 +131,33 @@ APPLIES = {
     "herdr.todo_pane": COORDINATOR_PANE,
 }
 
+TITLE = "Settings Orchestrator"
+# Every section of the schema is on exactly one tab.
+TABS = (
+    ("Models", ("providers", "models", "pi")),
+    ("Workers", ("workers", "recycle", "heavy_slots", "review", "guard", "focus")),
+    ("GitHub", ("pr", "pr_tabs", "audit", "legacy")),
+    ("Watchers", ("watchers", "alerts", "hog", "host")),
+    ("Herdr", ("herdr", "user_todo", "user_questions", "remote_control")),
+    ("Install", ("install",)),
+)
+TABLE_ORDER = [table for _, tables in TABS for table in tables]
 FIELD_MAX = 4096
 LIST_MAX = 200
 FILTER_MAX = 64
-VALUE_COLUMN = 36
+# "> ", the longest key and two spaces come before a value.
+VALUE_COLUMN = max(len(x.key) for x in orch_settings.listed("global")) + 5
+FIELD_ROOM = 20
 REFRESH_S = 3
 ENV_NOTE = "Only this editor's environment is visible; a variable exported elsewhere is not shown."
 MAIN_HINT = (
-    "↑↓ select · Enter/space change · ←→ choose · u default · / filter · Esc/q close"
+    "←→ tab · ↑↓ select · Enter edit · u default · a Apply · / filter · Esc/q close"
 )
+SENT = "Sent to the Coordinator"
 LIST_HINT = "Enter edit · a add · x delete · J/K move · s save · Esc discard"
 CHECK_HINT = "↑↓ select · space tick · s save · Esc discard"
-FIELD_HINT = "Enter ok · Ctrl-U clear · Esc discard"
+FIELD_HINT = "Enter save · Esc cancel"
+ENTRY_HINT = "Enter ok · Ctrl-U clear · Esc discard"
 ARROWS = {"A": "up", "B": "down", "C": "right", "D": "left"}
 ARROW = re.compile(r"\x1b[\[O]([ABCD])")
 MOUSE = re.compile(r"\x1b\[<0;(\d+);(\d+)M")
@@ -161,6 +177,31 @@ def clean(text):
     return "".join(c if c.isprintable() else "�" for c in str(text))
 
 
+def apply_line(keys, now):
+    """The Coordinator feed line that asks it to apply the settings named by keys."""
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now))
+    return f"{stamp} settings: SETTINGS APPLY {', '.join(keys)} (start)\n"
+
+
+def tab_of(setting):
+    return next(i for i, (_, tables) in enumerate(TABS) if setting.table in tables)
+
+
+def tail(text, room):
+    """The end of text that fits in room terminal cells."""
+    start, used = len(text), 0
+    while start and used + cells(text[start - 1]) <= room:
+        start -= 1
+        used += cells(text[start])
+    return text[start:]
+
+
+def choice_label(value):
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    return value or "empty"
+
+
 def typed_value(setting, text):
     """The value a field's text stands for."""
     if setting.kind == "str":
@@ -176,8 +217,16 @@ def typed_value(setting, text):
 
 
 class Field:
-    def __init__(self, text, done):
+    """A value being edited in its row: typed text, or one of fixed choices."""
+
+    def __init__(self, text, done, choices=None, entry=None):
         self.text, self.done, self.error = text, done, ""
+        self.choices, self.entry = choices, entry
+
+    def shown(self, room):
+        if self.choices:
+            return f"‹ {clean(choice_label(self.text))} ›"
+        return f"[{tail(clean(self.text), max(1, room - 3))}▏]"
 
 
 class Editor:
@@ -199,8 +248,9 @@ class Editor:
 class App:
     """Screen state, driven by feed(), lone_escape() and tick(); needs no terminal."""
 
-    def __init__(self, environ, out, size):
+    def __init__(self, environ, out, size, feed=feed_attach.FEED):
         self.environ, self.out, self.size = environ, out, size
+        self.feed_path, self.unapplied = Path(feed), []
         self.closing = False
         self.buf, self.status, self.error = "", "", ""
         self.filter, self.filtering = "", False
@@ -208,8 +258,11 @@ class App:
         self.selected, self.top, self.hits = 0, 0, {}
         self.values, self.path, self.create = {}, "", False
         self.last_refresh, self.shown_size = None, None
-        self.settings = orch_settings.listed("global")
-        self.rows = list(self.settings)
+        self.settings = sorted(
+            orch_settings.listed("global"), key=lambda x: TABLE_ORDER.index(x.table)
+        )
+        self.tab, self.rows = 0, []
+        self.show_tab(0)
 
     # --- the file ---
 
@@ -251,6 +304,8 @@ class App:
         except (orch_settings.ConfigError, OSError) as error:
             return str(error).removeprefix(f"{self.path}: ")
         self.load()
+        if value != original and setting.key not in self.unapplied:
+            self.unapplied.append(setting.key)
         self.status = "saved" + self.missing_models(setting)
         return ""
 
@@ -268,19 +323,52 @@ class App:
             return f"; {error}"
         return f"; still to set: {' '.join(missing)}" if missing else ""
 
+    # --- apply ---
+
+    def send_apply(self):
+        """One feed line naming the unapplied settings; only a running Feed Monitor reads it."""
+        if not self.unapplied:
+            self.status = "nothing to apply"
+            return
+        now = time.time()
+        try:
+            monitor = self.feed_path.with_name(feed_attach.MONITOR_NAME)
+            if not feed_attach.follower_runs(monitor, now):
+                self.status = "not sent: no Coordinator Feed Monitor is running"
+                return
+            feed_attach.append_line(self.feed_path, apply_line(self.unapplied, now))
+        except OSError as error:
+            self.status = f"not sent: {error.strerror or error}"
+            return
+        self.unapplied, self.status = [], SENT
+
     # --- input ---
 
     def current(self):
         return self.rows[self.selected] if self.selected < len(self.rows) else None
 
+    def searching(self):
+        return bool(self.filtering or self.filter)
+
+    def show_tab(self, index):
+        self.tab = index % len(TABS)
+        self.rows = [x for x in self.settings if tab_of(x) == self.tab]
+        self.selected, self.top, self.status = 0, 0, ""
+
     def apply_filter(self):
+        """The matches from every tab; without a filter, the selected row's tab."""
         chosen = self.current()
-        wanted = self.filter.lower()
-        self.rows = [x for x in self.settings if wanted in x.key.lower()]
+        if self.searching():
+            wanted = self.filter.lower()
+            self.rows = [x for x in self.settings if wanted in x.key.lower()]
+        else:
+            if chosen:
+                self.tab = tab_of(chosen)
+            self.rows = [x for x in self.settings if tab_of(x) == self.tab]
         self.selected = self.rows.index(chosen) if chosen in self.rows else 0
 
     def change(self, action):
-        """Enter, space, an arrow or u on the selected setting."""
+        """Enter, space or u on the selected setting."""
         setting = self.current()
         if setting is None:
             return
@@ -291,18 +379,22 @@ class App:
         kind, value = editor_kind(setting), self.value(setting)
         if action == "default":
             self.status = self.save(setting, setting.default, value) or self.status
-        elif kind == "toggle" and action in ("enter", "space"):
+        elif kind == "toggle" and action == "space":
             self.status = self.save(setting, not value, value) or self.status
-        elif kind == "cycle":
+        elif kind == "cycle" and action == "space":
             choices = ["", *setting.choices]
-            step = -1 if action == "left" else 1
-            chosen = choices[(choices.index(value) + step) % len(choices)]
+            chosen = choices[(choices.index(value) + 1) % len(choices)]
             self.status = self.save(setting, chosen, value) or self.status
         elif action != "enter":
             return
         elif kind in ("list", "checklist"):
             self.editor = Editor(setting, value)
-        elif kind in ("number", "text"):
+        elif kind in ("toggle", "cycle"):
+            choices = [True, False] if kind == "toggle" else ["", *setting.choices]
+            self.field = Field(
+                value, lambda new: self.save(setting, new, value), choices
+            )
+        else:
 
             def done(text):
                 try:
@@ -319,6 +411,11 @@ class App:
             field.error = field.done(field.text)
             if not field.error:
                 self.field = None
+        elif field.choices:
+            if token in ("left", "right"):
+                step = -1 if token == "left" else 1
+                index = field.choices.index(field.text) + step
+                field.text = field.choices[index % len(field.choices)]
         elif token in ("\x7f", "\b"):
             field.text = field.text[:-1]
         elif token == "\x15":
@@ -340,7 +437,11 @@ class App:
                 editor.items[position] = text
             return ""
 
-        self.field = Field("" if position is None else editor.items[position], done)
+        self.field = Field(
+            "" if position is None else editor.items[position],
+            done,
+            entry=len(editor.items) if position is None else position,
+        )
 
     def editor_key(self, token):
         editor = self.editor
@@ -385,8 +486,7 @@ class App:
         elif len(token) != 1:
             return
         if self.field:
-            if len(token) == 1:
-                self.field_key(token)
+            self.field_key(token)
         elif self.editor:
             self.editor_key(token)
         elif self.filtering:
@@ -405,16 +505,20 @@ class App:
             self.status = ""
         elif token == "/":
             self.filtering = True
+            self.apply_filter()
+        elif token in ("left", "right"):
+            if not self.filter:
+                self.show_tab(self.tab + (-1 if token == "left" else 1))
         elif token == "q":
             self.closing = True
+        elif token == "a":
+            self.send_apply()
         else:
             action = {
                 "\r": "enter",
                 "\n": "enter",
                 " ": "space",
                 "u": "default",
-                "left": "left",
-                "right": "right",
             }.get(token)
             if action:
                 self.change(action)
@@ -435,8 +539,7 @@ class App:
             return
         self.selected, self.status = self.hits[line], ""
         if column >= VALUE_COLUMN:
-            kind = editor_kind(self.current())
-            self.change("right" if kind == "cycle" else "enter")
+            self.change("enter")
 
     def feed(self, data):
         tokens, self.buf = split_input(self.buf + data)
@@ -481,7 +584,7 @@ class App:
         if kind == "toggle":
             text = "[x] on" if value else "[ ] off"
         elif kind == "cycle":
-            text = f"< {value or 'empty'} >"
+            text = choice_label(value)
         elif kind == "checklist":
             text = f"{', '.join(value) or 'automatic'} >"
         elif kind == "list":
@@ -492,34 +595,70 @@ class App:
             text = f'"{value}"'
         return clean(text) + ("" if setting in self.values else "  default")
 
-    def body(self):
-        """The scrolling lines, the line to keep visible and {line: row index}."""
-        lines, rows, focus = [], {}, 0
-        if self.editor:
-            editor = self.editor
-            lines.append(editor.setting.key)
-            for index, item in enumerate(editor.rows()):
-                tick = ""
-                if editor.checks:
-                    tick = "[x] " if item in editor.items else "[ ] "
-                mark = ">" if index == editor.index else " "
-                if index == editor.index:
-                    focus = len(lines)
+    def tab_bar(self, width):
+        """The tab names and the line under the active one."""
+        chosen = self.current()
+        active = tab_of(chosen) if self.searching() and chosen else self.tab
+        first = 0
+        while True:
+            names, start = "", 0
+            for index, (name, _) in enumerate(TABS[first:], first):
+                if index == active:
+                    start = len(names) + 1
+                names += f"  {name} "
+            end = start + len(TABS[active][0]) + 2
+            if end <= width or first == active:
+                return [names, " " * start + "━" * (end - start)]
+            first += 1
+
+    def editing_row(self, label, width):
+        """label and the open field; a narrow terminal cuts the label, not the field."""
+        if width - len(label) < FIELD_ROOM:
+            label = label[: max(2, width - FIELD_ROOM) - 1] + " "
+        return label + self.field.shown(width - len(label))
+
+    def editor_body(self, width):
+        editor, field = self.editor, self.field
+        items = list(editor.rows())
+        if field and field.entry == len(items):
+            items.append("")
+        picked = field.entry if field else editor.index
+        lines, focus = [editor.setting.key], 0
+        for index, item in enumerate(items):
+            tick = ""
+            if editor.checks:
+                tick = "[x] " if item in editor.items else "[ ] "
+            mark = ">" if index == picked else " "
+            if index == picked:
+                focus = len(lines)
+            if field and index == picked:
+                lines.append(f" {mark} {field.shown(width - 3)}")
+            else:
                 lines.append(f" {mark} {tick}{clean(item)}")
-            if not editor.rows():
-                lines.append("   (no entries)")
-            return lines, focus, rows
-        table = None
+        if not items:
+            lines.append("   (no entries)")
+        return lines, focus, {}
+
+    def body(self, width):
+        """The scrolling lines, the line to keep visible and {line: row index}."""
+        if self.editor:
+            return self.editor_body(width)
+        lines, rows, focus = [], {}, 0
+        group = None
         for index, setting in enumerate(self.rows):
-            if setting.table != table:
-                table = setting.table
-                lines.append(f"\033[1m[{table}]{RESET}")
+            if self.searching() and tab_of(setting) != group:
+                group = tab_of(setting)
+                lines.append(f"\033[1m{TABS[group][0]}{RESET}")
             picked = index == self.selected
             if picked:
                 focus = len(lines)
             rows[len(lines)] = index
-            name = f"{'>' if picked else ' '} {setting.name} "
-            text = f"{name:<{VALUE_COLUMN - 1}}{self.shown(setting)}"
+            label = f"{'>' if picked else ' '} {setting.key} "
+            label = f"{label:<{VALUE_COLUMN - 1}}"
+            if picked and self.field:
+                text = self.editing_row(label, width)
+            else:
+                text = label + self.shown(setting)
             lines.append(f"\033[7m{text}{RESET}" if picked else text)
         if not self.rows:
             lines.append("no setting matches")
@@ -528,44 +667,47 @@ class App:
     def footer(self, width, limit):
         """At most limit rows; help rows go first, then the hint."""
         lines = ["─" * width]
-        if self.field:
-            room = max(1, width - 8)
-            lines.append(f"edit: {clean(self.field.text)[-room:]}▏")
         error = (self.field and self.field.error) or (self.editor and self.editor.error)
         if error:
             lines += wrap(clean(error), width)[:3]
         help_rows = []
         setting = self.editor.setting if self.editor else self.current()
         if setting:
-            help_rows += wrap(clean(f"{setting.key}: {setting.doc}"), width)[:3]
+            help_rows += wrap(clean(setting.doc), width)[:3]
             help_rows += wrap(f"Applies: {APPLIES[setting.key]}", width)[:2]
         help_rows += wrap(ENV_NOTE, width)[:2]
         if self.field:
-            hint = FIELD_HINT
+            hint = FIELD_HINT if self.field.entry is None else ENTRY_HINT
         elif self.editor:
             hint = CHECK_HINT if self.editor.checks else LIST_HINT
         else:
             hint = MAIN_HINT
         hints = [f"\033[2m{row}{RESET}" for row in wrap(hint, width)[:2]]
+        if self.unapplied:
+            count = len(self.unapplied)
+            noun = "change" if count == 1 else "changes"
+            hints = [f"{count} {noun} not applied", *hints]
         spare = max(0, limit - len(lines) - len(hints))
         return (lines + help_rows[:spare] + hints)[:limit]
 
     def render(self):
         size = self.size()
         width, height = size.columns or 80, size.lines or 24
-        head = [f"Settings  {clean(self.path)}"]
+        head = [f"{TITLE}  {clean(self.path)}"]
         if self.error:
             head += wrap(clean(self.error), width)[:4]
-        if self.filtering or self.filter:
+        head += self.tab_bar(width)
+        if self.searching():
             head.append(
                 f"/ filter: {clean(self.filter)}{'▏' if self.filtering else ''}"
             )
-        body, focus, rows = self.body()
+        body, focus, rows = self.body(width)
         room = max(1, height - 1 - len(head))
         footer = self.footer(width, max(0, room - 3))
         room = max(1, room - len(footer))
-        if focus < self.top + 1:
-            self.top = max(0, focus - 1)
+        above = 1 if room > 1 else 0
+        if focus < self.top + above:
+            self.top = max(0, focus - above)
         elif focus >= self.top + room:
             self.top = focus - room + 1
         self.top = max(0, min(self.top, len(body) - room))
