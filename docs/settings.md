@@ -46,6 +46,7 @@ Enter edits a value inside its row: Enter saves, Esc cancels. An on/off setting 
 - A file that does not load is shown with its error and is not edited. A missing default file is created from the example on the first change; a missing `ORCH_CONFIG` file is an error.
 - A setting overridden by an `ORCH_*` variable shows that value and cannot be changed. The editor sees only its own environment (in the popup, the one Herdr runs it in): a variable exported in another shell or service is not shown.
 - The popup never runs `install.sh` and restarts nothing.
+- **Apply.** The footer counts the settings whose value you changed since the popup opened (`2 changes not applied`). `a` appends one line, `SETTINGS APPLY <key>, <key> ...`, to the Coordinator's feed, shows `Sent to the Coordinator` and clears the count. The Coordinator then acts on each key's `Applies:` text ([the rule](../skills/coordinate/SKILL.md)). With no running Feed Monitor, or a feed that cannot be written, the popup shows the error and keeps the count. Closing the popup forgets the count.
 
 Limits: file 1 MiB, text field 4096 characters, list 200 entries, filter 64 characters, 3 write attempts when another program changes the file. One settings popup per Herdr session.
 

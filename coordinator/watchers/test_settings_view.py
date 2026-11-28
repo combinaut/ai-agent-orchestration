@@ -11,6 +11,9 @@ from unittest.mock import patch
 
 from test_support import IsolatedTestCase
 
+import feed_actions
+import feed_attach
+
 WATCHERS = Path(__file__).resolve().parent
 sys.path.insert(0, str(WATCHERS.parents[1] / "lib"))
 import orch_settings as s  # noqa: E402
@@ -41,10 +44,12 @@ class ViewCase(IsolatedTestCase):
         self.path.write_text(self.TEXT)
         self.env = {"ORCH_CONFIG": str(self.path)}
         self.size = Size(100, 30)
+        self.feed = Path(tmp.name) / "coordinator-feed.log"
+        feed_attach.write_record(self.feed.with_name(feed_attach.MONITOR_NAME), 1, 0, 0)
 
     def app(self):
         self.out = io.StringIO()
-        app = self.view.App(self.env, self.out, lambda: self.size)
+        app = self.view.App(self.env, self.out, lambda: self.size, feed=self.feed)
         app.tick()
         return app
 
@@ -207,7 +212,7 @@ class TabTest(ViewCase):
         self.size = Size(100, 30)
         self.app()
         self.assertIn(
-            "←→ tab · ↑↓ select · Enter edit · u default · / filter · Esc/q close",
+            "←→ tab · ↑↓ select · Enter edit · u default · a Apply · / filter · Esc/q close",
             self.frame(),
         )
 
@@ -519,6 +524,104 @@ class EditTest(ViewCase):
         self.keys(app, ENTER)
         self.assertIn("changed in the file", self.frame())
         self.assertEqual(self.saved("pr.author"), "other")
+
+
+class ApplyTest(ViewCase):
+    def change(self, app, key, *keys):
+        self.select(app, key)
+        self.keys(app, *keys)
+
+    def two_changes(self):
+        app = self.app()
+        self.change(app, "herdr.todo_pane", " ")
+        self.change(app, "pr.author", ENTER, "x", ENTER)
+        return app
+
+    def sent(self):
+        return self.feed.read_text().splitlines() if self.feed.exists() else []
+
+    def test_the_footer_counts_each_saved_setting_once(self):
+        app = self.app()
+        app.render()
+        self.assertNotIn("not applied", self.frame())
+        self.change(app, "herdr.todo_pane", " ")
+        self.assertIn("\r\n1 change not applied\r\n", self.frame())
+        self.change(app, "pr.author", ENTER, "x", ENTER)
+        self.change(app, "herdr.todo_pane", " ")
+        self.assertIn("\r\n2 changes not applied\r\n", self.frame())
+
+    def test_a_save_that_changes_no_value_is_not_pending(self):
+        app = self.app()
+        self.change(app, "pr.author", ENTER, ENTER)
+        self.change(app, "herdr.todo_pane", "u")
+        self.assertEqual(app.unapplied, [])
+
+    def test_a_refused_value_is_not_pending(self):
+        app = self.app()
+        self.change(app, "audit.page_prs", ENTER, CLEAR, *"101", ENTER)
+        self.assertEqual(app.unapplied, [])
+
+    def test_a_sends_one_line_naming_the_keys_and_clears_the_list(self):
+        app = self.two_changes()
+        self.keys(app, "a")
+        (line,) = self.sent()
+        self.assertRegex(line, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d{4} ")
+        self.assertEqual(
+            line.split(" ", 1)[1],
+            "settings: SETTINGS APPLY herdr.todo_pane, pr.author (start)",
+        )
+        self.assertEqual(app.status, "Sent to the Coordinator")
+        self.assertIn("Sent to the Coordinator", self.frame())
+        self.assertNotIn("not applied", self.frame())
+        self.keys(app, "a")
+        self.assertEqual(len(self.sent()), 1)
+
+    def test_a_feed_that_cannot_be_written_shows_the_error_and_keeps_the_list(self):
+        app = self.two_changes()
+        self.feed.mkdir()
+        self.keys(app, "a")
+        self.assertIn("not sent:", self.frame())
+        self.assertIn("directory", app.status)
+        self.assertIn("2 changes not applied", self.frame())
+
+    def test_without_a_feed_monitor_nothing_is_sent_and_the_list_stays(self):
+        app = self.two_changes()
+        self.feed.with_name(feed_attach.MONITOR_NAME).unlink()
+        self.keys(app, "a")
+        self.assertIn("no Coordinator Feed Monitor", app.status)
+        self.assertEqual(self.sent(), [])
+        self.assertEqual(app.unapplied, ["herdr.todo_pane", "pr.author"])
+
+    def test_a_with_nothing_changed_sends_nothing(self):
+        self.keys(self.app(), "a")
+        self.assertEqual(self.sent(), [])
+
+    def test_a_typed_into_a_field_or_the_filter_sends_nothing(self):
+        app = self.two_changes()
+        self.keys(app, ENTER, "a", ESC, "/", "a", ENTER)
+        self.assertEqual(self.sent(), [])
+        self.assertEqual(app.filter, "a")
+
+    def test_a_short_terminal_keeps_the_count_of_unapplied_changes(self):
+        app = self.two_changes()
+        self.size = Size(100, 9)
+        app.render()
+        self.assertIn("2 changes not applied", self.frame())
+        self.assertLessEqual(len(self.frame().split("\r\n")), 9)
+
+    def test_the_feed_monitor_prints_the_sent_line_as_an_action(self):
+        app = self.two_changes()
+        self.keys(app, "a")
+        (line,) = self.sent()
+        patterns = feed_actions.action_patterns()
+        self.assertTrue(feed_actions.is_action(line, patterns))
+        self.assertFalse(feed_actions.is_action(line, feed_actions.fyi_patterns()))
+        self.assertEqual(feed_actions.native(line), line)
+        for other in (
+            line.replace("pr.author", "pr.author; rm -rf x"),
+            line.replace("settings:", "todo:"),
+        ):
+            self.assertFalse(feed_actions.is_action(other, patterns), other)
 
 
 class OverrideAndErrorTest(ViewCase):

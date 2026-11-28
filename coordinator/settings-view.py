@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "watchers"))
 sys.path.insert(0, str(ROOT.parent / "lib"))
+import feed_attach  # noqa: E402
 import orch_settings  # noqa: E402
 import popup_terminal  # noqa: E402
 import todo_popup  # noqa: E402
@@ -149,7 +150,10 @@ VALUE_COLUMN = max(len(x.key) for x in orch_settings.listed("global")) + 5
 FIELD_ROOM = 20
 REFRESH_S = 3
 ENV_NOTE = "Only this editor's environment is visible; a variable exported elsewhere is not shown."
-MAIN_HINT = "←→ tab · ↑↓ select · Enter edit · u default · / filter · Esc/q close"
+MAIN_HINT = (
+    "←→ tab · ↑↓ select · Enter edit · u default · a Apply · / filter · Esc/q close"
+)
+SENT = "Sent to the Coordinator"
 LIST_HINT = "Enter edit · a add · x delete · J/K move · s save · Esc discard"
 CHECK_HINT = "↑↓ select · space tick · s save · Esc discard"
 FIELD_HINT = "Enter save · Esc cancel"
@@ -171,6 +175,12 @@ def editor_kind(setting):
 
 def clean(text):
     return "".join(c if c.isprintable() else "�" for c in str(text))
+
+
+def apply_line(keys, now):
+    """The Coordinator feed line that asks it to apply the settings named by keys."""
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now))
+    return f"{stamp} settings: SETTINGS APPLY {', '.join(keys)} (start)\n"
 
 
 def tab_of(setting):
@@ -238,8 +248,9 @@ class Editor:
 class App:
     """Screen state, driven by feed(), lone_escape() and tick(); needs no terminal."""
 
-    def __init__(self, environ, out, size):
+    def __init__(self, environ, out, size, feed=feed_attach.FEED):
         self.environ, self.out, self.size = environ, out, size
+        self.feed_path, self.unapplied = Path(feed), []
         self.closing = False
         self.buf, self.status, self.error = "", "", ""
         self.filter, self.filtering = "", False
@@ -293,6 +304,8 @@ class App:
         except (orch_settings.ConfigError, OSError) as error:
             return str(error).removeprefix(f"{self.path}: ")
         self.load()
+        if value != original and setting.key not in self.unapplied:
+            self.unapplied.append(setting.key)
         self.status = "saved" + self.missing_models(setting)
         return ""
 
@@ -309,6 +322,25 @@ class App:
         except orch_settings.ConfigError as error:
             return f"; {error}"
         return f"; still to set: {' '.join(missing)}" if missing else ""
+
+    # --- apply ---
+
+    def send_apply(self):
+        """One feed line naming the unapplied settings; only a live Feed Monitor reads it."""
+        if not self.unapplied:
+            self.status = "nothing to apply"
+            return
+        now = time.time()
+        try:
+            monitor = self.feed_path.with_name(feed_attach.MONITOR_NAME)
+            if feed_attach.read_record(monitor, now) is None:
+                self.status = "not sent: no Coordinator Feed Monitor is running"
+                return
+            feed_attach.append_line(self.feed_path, apply_line(self.unapplied, now))
+        except OSError as error:
+            self.status = f"not sent: {error.strerror or error}"
+            return
+        self.unapplied, self.status = [], SENT
 
     # --- input ---
 
@@ -479,6 +511,8 @@ class App:
                 self.show_tab(self.tab + (-1 if token == "left" else 1))
         elif token == "q":
             self.closing = True
+        elif token == "a":
+            self.send_apply()
         else:
             action = {
                 "\r": "enter",
@@ -649,6 +683,10 @@ class App:
         else:
             hint = MAIN_HINT
         hints = [f"\033[2m{row}{RESET}" for row in wrap(hint, width)[:2]]
+        if self.unapplied:
+            count = len(self.unapplied)
+            noun = "change" if count == 1 else "changes"
+            hints = [f"{count} {noun} not applied", *hints]
         spare = max(0, limit - len(lines) - len(hints))
         return (lines + help_rows[:spare] + hints)[:limit]
 

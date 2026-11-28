@@ -7,6 +7,7 @@
 ^[^ ]+ todo: TODO [0-9]+ new: .* \(start\)$
 ^[^ ]+ todo: TODO READFAIL .* \(start\)$
 ^[^ ]+ answers: ANSWER [^:]+: .* \(start\)$
+^[^ ]+ settings: SETTINGS APPLY [a-z0-9_]+\.[a-z0-9_]+(, [a-z0-9_]+\.[a-z0-9_]+)* \(start\)$
 ^[^ ]+ answers: DISMISSED [^ ]+ \(start\)$
 ^[^ ]+ answers: REMIND [^ ]+ [0-9-]+ [0-9:]+ \(start\)$
 ^[^ ]+ balance: SLOT (KILLED|RUNLONG) .*\(start\)$
