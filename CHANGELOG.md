@@ -1,5 +1,73 @@
 # Changelog
 
+## [1.3.0](https://github.com/combinaut/ai-agent-orchestration/compare/v1.2.1...v1.3.0) (2026-11-28)
+
+
+### Features
+
+* gate APPROVE on an orch-sweep record of the exact head ([#172](https://github.com/combinaut/ai-agent-orchestration/issues/172)) ([f3435b0](https://github.com/combinaut/ai-agent-orchestration/commit/f3435b0c730e49b935b94d14577f835309d8958d))
+* **guard-bash:** deny an agy start outside gemini-start.sh ([#209](https://github.com/combinaut/ai-agent-orchestration/issues/209)) ([d3263c7](https://github.com/combinaut/ai-agent-orchestration/commit/d3263c7164e4397ab7e2812145b57c201f981ae4))
+* **guard-bash:** run the Bash guard for agy workers ([#239](https://github.com/combinaut/ai-agent-orchestration/issues/239)) ([43d9027](https://github.com/combinaut/ai-agent-orchestration/commit/43d902776b1a415719c0d090a62b221229084829))
+* **install:** install an agy plugin with the orch skills and the user's global rules ([#233](https://github.com/combinaut/ai-agent-orchestration/issues/233)) ([b82a6b4](https://github.com/combinaut/ai-agent-orchestration/commit/b82a6b4f5fca931e1c7c7fc004a87b71c9e7f92d))
+* make the bot reviewer optional ([#195](https://github.com/combinaut/ai-agent-orchestration/issues/195)) ([4092b93](https://github.com/combinaut/ai-agent-orchestration/commit/4092b934e2bb7ecf0423b4858405e6a60a510c87))
+* **pr-tabs:** distinct group colours, recent repos first, add repos in settings ([#208](https://github.com/combinaut/ai-agent-orchestration/issues/208)) ([1fda2c2](https://github.com/combinaut/ai-agent-orchestration/commit/1fda2c209a71577c8937d7dd3c3857959fa7074f))
+* **pr-tabs:** hide chosen files on pull request pages ([#206](https://github.com/combinaut/ai-agent-orchestration/issues/206)) ([ffaeb7c](https://github.com/combinaut/ai-agent-orchestration/commit/ffaeb7c4eec89b1a9d81942b457f39d60d62fa83))
+* **pr-tabs:** one-field popup that guesses the repo for a PR number ([#198](https://github.com/combinaut/ai-agent-orchestration/issues/198)) ([ba66106](https://github.com/combinaut/ai-agent-orchestration/commit/ba661064190554b268cac3602bb7fe8c5dbb0f25))
+* **providers:** add gemini family via the agy CLI ([#199](https://github.com/combinaut/ai-agent-orchestration/issues/199)) ([8089ff3](https://github.com/combinaut/ai-agent-orchestration/commit/8089ff38505935cea04f9b4a47201a67c2ce4de1))
+* record and check the finalize-sweep validate step ([#166](https://github.com/combinaut/ai-agent-orchestration/issues/166)) ([d8a5612](https://github.com/combinaut/ai-agent-orchestration/commit/d8a5612a60c1b3c392ca8ca174dc75e2e69391d4))
+* **review-prs:** sweep first and approving reviews ([#168](https://github.com/combinaut/ai-agent-orchestration/issues/168)) ([4e3624c](https://github.com/combinaut/ai-agent-orchestration/commit/4e3624cf08926414e19b5084e0b525f23bec2995))
+* run /finalize-sweep as a script with headless agents and a checked record ([#171](https://github.com/combinaut/ai-agent-orchestration/issues/171)) ([baaa2da](https://github.com/combinaut/ai-agent-orchestration/commit/baaa2dafc7647cbf78f7e78ff4944031d5c8274c))
+* **settings:** add a settings popup and a switch for the to-do pane ([#240](https://github.com/combinaut/ai-agent-orchestration/issues/240)) ([c2a4e92](https://github.com/combinaut/ai-agent-orchestration/commit/c2a4e92bb987289df98a133c57d2e1bc883aefd8))
+* **settings:** tabs, inline editing and a cross-tab filter in the settings popup ([#241](https://github.com/combinaut/ai-agent-orchestration/issues/241)) ([4f25fc9](https://github.com/combinaut/ai-agent-orchestration/commit/4f25fc9cdeb758965e639acb669ed72f32d89080))
+* **skills:** add /defend-pr ([#180](https://github.com/combinaut/ai-agent-orchestration/issues/180)) ([f0ca452](https://github.com/combinaut/ai-agent-orchestration/commit/f0ca452e60ca719fe8c8a7408872acf267c2b15c))
+* **skills:** check changed values for readers ([#178](https://github.com/combinaut/ai-agent-orchestration/issues/178)) ([88db718](https://github.com/combinaut/ai-agent-orchestration/commit/88db718f074540e0af78ed06ca4da018f6874470))
+* **skills:** check the PR text in the finalize sweep ([#162](https://github.com/combinaut/ai-agent-orchestration/issues/162)) ([f26db9e](https://github.com/combinaut/ai-agent-orchestration/commit/f26db9ee023f9ca0427f5b851c0c652f63ef8420))
+* **skills:** require a unique kill per test and fix stale comments ([#161](https://github.com/combinaut/ai-agent-orchestration/issues/161)) ([abf2d85](https://github.com/combinaut/ai-agent-orchestration/commit/abf2d8567141614672ee4248bd67044b868c34a9))
+* **skills:** slice and validate the finalize sweep ([#160](https://github.com/combinaut/ai-agent-orchestration/issues/160)) ([9ddfd34](https://github.com/combinaut/ai-agent-orchestration/commit/9ddfd346a6a0c00da24b57112c6d36cca7597488))
+* **sweep:** collapse the dropped findings in the sweep comment ([#225](https://github.com/combinaut/ai-agent-orchestration/issues/225)) ([fc9243c](https://github.com/combinaut/ai-agent-orchestration/commit/fc9243c428c97650deb8655636049873883aa414))
+* tell the architect about worker questions and waiting reviews ([#204](https://github.com/combinaut/ai-agent-orchestration/issues/204)) ([1c4ee84](https://github.com/combinaut/ai-agent-orchestration/commit/1c4ee84de79f94593a302c0612a82bfa908bd824))
+* **todo:** answer the to-do list from a claude.ai panel ([#194](https://github.com/combinaut/ai-agent-orchestration/issues/194)) ([81c4178](https://github.com/combinaut/ai-agent-orchestration/commit/81c41787d3c703b3b773b56ae5ac9b0d3e2782e2))
+* **todo:** close items whose linked PRs and issues are resolved ([#167](https://github.com/combinaut/ai-agent-orchestration/issues/167)) ([02f00ef](https://github.com/combinaut/ai-agent-orchestration/commit/02f00ef57084d313b17002da521352dd3369d870))
+
+
+### Bug Fixes
+
+* allow wiki pushes with compact git directory option ([#150](https://github.com/combinaut/ai-agent-orchestration/issues/150)) ([4993a35](https://github.com/combinaut/ai-agent-orchestration/commit/4993a352a392587cb22598cb0f09b32e2f672b2a))
+* block singular hook review screen ([#154](https://github.com/combinaut/ai-agent-orchestration/issues/154)) ([2c1a370](https://github.com/combinaut/ai-agent-orchestration/commit/2c1a37001ae1be374afa370723e440acc674c460))
+* bound PR watch cycles and back off during outages ([#211](https://github.com/combinaut/ai-agent-orchestration/issues/211)) ([8582cb6](https://github.com/combinaut/ai-agent-orchestration/commit/8582cb6e63ee959b10298fd627d1bf8fcc38b0a7))
+* **codex:** preserve mise PATH order in worker shells ([#182](https://github.com/combinaut/ai-agent-orchestration/issues/182)) ([8369f4c](https://github.com/combinaut/ai-agent-orchestration/commit/8369f4cbd4831c0b37095f38bc70965bd8331127))
+* **deadline:** restore the alarm state when a deadline fires in enter or exit ([#229](https://github.com/combinaut/ai-agent-orchestration/issues/229)) ([29c63ce](https://github.com/combinaut/ai-agent-orchestration/commit/29c63ce0fc2daa69c7397dd31cee6a6e82ab611d))
+* **gemini:** open agy's terminal sandbox to the paths a worker needs ([#238](https://github.com/combinaut/ai-agent-orchestration/issues/238)) ([c17a970](https://github.com/combinaut/ai-agent-orchestration/commit/c17a970e8eff7d006963335dc9642235b5563ba2))
+* **gemini:** trust the worker folder before starting agy ([#237](https://github.com/combinaut/ai-agent-orchestration/issues/237)) ([ff504d2](https://github.com/combinaut/ai-agent-orchestration/commit/ff504d2e89b54e612bf487873f4ea8b02c313d5f))
+* **guard:** block whole-machine search roots ([#197](https://github.com/combinaut/ai-agent-orchestration/issues/197)) ([fc64948](https://github.com/combinaut/ai-agent-orchestration/commit/fc64948165d70448c695c5b81c32d582797aaac4))
+* **install:** put github-write on PATH for every install ([#227](https://github.com/combinaut/ai-agent-orchestration/issues/227)) ([02d6083](https://github.com/combinaut/ai-agent-orchestration/commit/02d6083f3e3bf63f4a813ffff20d593f11c840a9))
+* move the To-do pane to a recycled Coordinator tab ([#159](https://github.com/combinaut/ai-agent-orchestration/issues/159)) ([079a624](https://github.com/combinaut/ai-agent-orchestration/commit/079a624a48d5738c2f5009d2df4234aaf81151b1))
+* **orch-signal:** fail fast when the sandbox blocks a write ([#164](https://github.com/combinaut/ai-agent-orchestration/issues/164)) ([b671098](https://github.com/combinaut/ai-agent-orchestration/commit/b671098228d511fb4440f2543e3815e4362a8961))
+* **orchestration:** ignore prompt suggestions in composer checks ([#169](https://github.com/combinaut/ai-agent-orchestration/issues/169)) ([614b135](https://github.com/combinaut/ai-agent-orchestration/commit/614b135265f29a262d8910339b76e4bfc38d37dc))
+* **poll:** keep nested call deadlines armed and restored ([#223](https://github.com/combinaut/ai-agent-orchestration/issues/223)) ([bf2f0bb](https://github.com/combinaut/ai-agent-orchestration/commit/bf2f0bbb4dea0ecb665efa353398836323ecf1d7))
+* **poll:** survive the SIGALRM macOS sends after a tick is disarmed ([#228](https://github.com/combinaut/ai-agent-orchestration/issues/228)) ([463131a](https://github.com/combinaut/ai-agent-orchestration/commit/463131ae83dd6e0fa511726196f8c1ab78a91c60))
+* **pr-tabs:** keep tabs opened on an already finished PR ([#201](https://github.com/combinaut/ai-agent-orchestration/issues/201)) ([f1c57b3](https://github.com/combinaut/ai-agent-orchestration/commit/f1c57b3e25085992d29c15bf57e94525a9defd98))
+* pre-authorize dispatched review posts ([#153](https://github.com/combinaut/ai-agent-orchestration/issues/153)) ([5ab9dd9](https://github.com/combinaut/ai-agent-orchestration/commit/5ab9dd96e4884d1996bc11d5523fceed3762c895))
+* preserve nested PR watch deadlines ([#214](https://github.com/combinaut/ai-agent-orchestration/issues/214)) ([ea71d42](https://github.com/combinaut/ai-agent-orchestration/commit/ea71d42ec8ffa2d4ce1d950ecfab76795c5544cd))
+* retry GitHub writes after secondary limits ([#156](https://github.com/combinaut/ai-agent-orchestration/issues/156)) ([a26bb97](https://github.com/combinaut/ai-agent-orchestration/commit/a26bb97bc24b68cf0c421ccf883482a7926b8eaf))
+* **signals:** an escalated worker question reaches the user and outlives the ask ([#216](https://github.com/combinaut/ai-agent-orchestration/issues/216)) ([19c4b42](https://github.com/combinaut/ai-agent-orchestration/commit/19c4b4281d8c66240d4450a9e2918bd9cda9d49e))
+* **signals:** attribute worker signals to the right pane ([#207](https://github.com/combinaut/ai-agent-orchestration/issues/207)) ([f0d2f52](https://github.com/combinaut/ai-agent-orchestration/commit/f0d2f52dcc136cf43a2d97f8287861fdd081320b))
+* **signals:** open the Codex state store as a URI on every platform ([#219](https://github.com/combinaut/ai-agent-orchestration/issues/219)) ([1b7093e](https://github.com/combinaut/ai-agent-orchestration/commit/1b7093ec436efda63effd23306d0dedc11c56011))
+* **signals:** say why a detached orch-signal command cannot verify its pane ([#217](https://github.com/combinaut/ai-agent-orchestration/issues/217)) ([f247a28](https://github.com/combinaut/ai-agent-orchestration/commit/f247a288ee43c5b38c39d33810e4d48dcdd7ae3f))
+* **signals:** wake idle Codex workers for answers and subagents ([#215](https://github.com/combinaut/ai-agent-orchestration/issues/215)) ([cd4a461](https://github.com/combinaut/ai-agent-orchestration/commit/cd4a4616ae5050bce019dc7b4fb2c69dd64683c8))
+* **sweep:** fit large sweep records into one GitHub comment ([#226](https://github.com/combinaut/ai-agent-orchestration/issues/226)) ([218097b](https://github.com/combinaut/ai-agent-orchestration/commit/218097b36705a71f48714724ed79361b5fbf5fc6))
+* **sweep:** hide record JSON in HTML comment ([#202](https://github.com/combinaut/ai-agent-orchestration/issues/202)) ([ef097d4](https://github.com/combinaut/ai-agent-orchestration/commit/ef097d40e5cfed5426795ef3f742d10a9f695384))
+* **sweep:** let tests give the herdr session lookup more time ([#224](https://github.com/combinaut/ai-agent-orchestration/issues/224)) ([7afbb32](https://github.com/combinaut/ai-agent-orchestration/commit/7afbb32b8163114fc026f386700b5e87ee470325))
+* **sweep:** run the reviewer sweep on Claude when Codex is off ([#218](https://github.com/combinaut/ai-agent-orchestration/issues/218)) ([121d95e](https://github.com/combinaut/ai-agent-orchestration/commit/121d95e1641dd58b119c687bf529d3b046c7de15))
+* **sweep:** say that post-review reads disputes from the APPROVE body ([#231](https://github.com/combinaut/ai-agent-orchestration/issues/231)) ([d88cf4b](https://github.com/combinaut/ai-agent-orchestration/commit/d88cf4bb553274477623f423242aff0b2b8f7961))
+* **todo:** answer any to-do item and show undelivered answers ([#187](https://github.com/combinaut/ai-agent-orchestration/issues/187)) ([d6e2455](https://github.com/combinaut/ai-agent-orchestration/commit/d6e245552014ac6cf48243c36e70e8cba8793222))
+* **todo:** deliver queued answers and show why one fails ([#186](https://github.com/combinaut/ai-agent-orchestration/issues/186)) ([375a9a2](https://github.com/combinaut/ai-agent-orchestration/commit/375a9a254863e25c3edcc1f7f61c28a16c740cf1))
+* **watchers:** accept legacy monotonic supervisor deadlines ([#196](https://github.com/combinaut/ai-agent-orchestration/issues/196)) ([8d64da7](https://github.com/combinaut/ai-agent-orchestration/commit/8d64da746b155ae9f6c6439b897a5826533fd7a2))
+* **watchers:** alarm earlier on memory hogs and let the coordinator stop a slot job ([#230](https://github.com/combinaut/ai-agent-orchestration/issues/230)) ([4961ffa](https://github.com/combinaut/ai-agent-orchestration/commit/4961ffa9433098cb5be4a9b7229541f242d7ec9a))
+* **watchers:** alert once for a stale binding whose pid is reused ([#212](https://github.com/combinaut/ai-agent-orchestration/issues/212)) ([553861c](https://github.com/combinaut/ai-agent-orchestration/commit/553861c528c2e4312e9018f9ddcb384ab199aba2))
+* **watchers:** hard wall-clock deadline on GitHub poll calls ([#192](https://github.com/combinaut/ai-agent-orchestration/issues/192)) ([df7263e](https://github.com/combinaut/ai-agent-orchestration/commit/df7263e11bdfce2c9f51150d8edbbab43adf28e1))
+* **workers:** keep architect questions out of Q panel ([#236](https://github.com/combinaut/ai-agent-orchestration/issues/236)) ([058fa71](https://github.com/combinaut/ai-agent-orchestration/commit/058fa710e7916880fb87f976ed3a6dd30ca5f449))
+
 ## [1.2.1](https://github.com/combinaut/ai-agent-orchestration/compare/v1.2.0...v1.2.1) (2026-10-31)
 
 
