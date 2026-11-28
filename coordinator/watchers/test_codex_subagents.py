@@ -1,3 +1,4 @@
+import contextlib
 import io
 import json
 import sqlite3
@@ -23,7 +24,7 @@ class SubagentWakeTests(IsolatedTestCase):
         home.start()
         self.addCleanup(home.stop)
         self.db = self.store / "state_5.sqlite"
-        with sqlite3.connect(self.db) as db:
+        with contextlib.closing(sqlite3.connect(self.db)) as db, db:
             db.executescript("""
                 CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT,
                     updated_at INTEGER, archived INTEGER DEFAULT 0);
@@ -59,7 +60,7 @@ class SubagentWakeTests(IsolatedTestCase):
             ),
         ]
         path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-        with sqlite3.connect(self.db) as db:
+        with contextlib.closing(sqlite3.connect(self.db)) as db, db:
             db.execute(
                 "INSERT OR REPLACE INTO threads VALUES (?, ?, ?, 0)",
                 (identifier, str(path), when),
@@ -130,7 +131,7 @@ class SubagentWakeTests(IsolatedTestCase):
         self.queue.assert_not_called()
 
     def test_unknown_schema_fails_safe_and_logs_once(self):
-        with sqlite3.connect(self.db) as db:
+        with contextlib.closing(sqlite3.connect(self.db)) as db, db:
             db.execute("DROP TABLE thread_spawn_edges")
         with patch("sys.stderr", new_callable=io.StringIO) as stderr:
             self.poll()
@@ -197,6 +198,27 @@ class SubagentWakeTests(IsolatedTestCase):
         self.work["panes"] = []
         self.poll()
         self.assertEqual(list(state.iterdir()), [])
+
+    def test_store_connection_is_closed_after_each_read(self):
+        real = sqlite3.connect
+        closed = []
+
+        class Recording(sqlite3.Connection):
+            def close(self):
+                closed.append(self)
+                super().close()
+
+        opened = []
+
+        def recording_connect(*args, **kwargs):
+            db = real(*args, factory=Recording, **kwargs)
+            opened.append(db)
+            return db
+
+        with patch("sqlite3.connect", side_effect=recording_connect):
+            self.poll()
+        self.assertTrue(opened)
+        self.assertEqual(closed, opened)
 
     def test_store_is_opened_read_only(self):
         real = sqlite3.connect

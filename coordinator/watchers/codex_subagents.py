@@ -1,5 +1,6 @@
 """Fail-safe completion hints from the undocumented local Codex store."""
 
+import contextlib
 import hashlib
 import json
 import os
@@ -65,7 +66,9 @@ def lifecycle(root, identifier, rollout, parent=None):
 
 
 def completions(root, database, session):
-    with sqlite3.connect(database.as_uri() + "?mode=ro", timeout=0.1, uri=True) as db:
+    with contextlib.closing(
+        sqlite3.connect(database.as_uri() + "?mode=ro", timeout=0.1, uri=True)
+    ) as db:
         db.set_progress_handler(lambda: 1, 1_000_000)
         row = db.execute(
             "SELECT rollout_path FROM threads WHERE id=?", (session,)
