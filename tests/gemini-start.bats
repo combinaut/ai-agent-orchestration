@@ -230,6 +230,14 @@ writable() {
   done
 }
 
+@test "a configured heavy-slot dir gets the write rule" {
+  export ORCH_HEAVY_SLOTS_DIR="$TMP/slots"
+  run "$SCRIPT" w1 pane1 worker "$REPORTS"
+  [ "$status" -eq 0 ]
+  has_rule "write_file($TMP/slots)"
+  ! has_rule "write_file($HOME/.claude/heavy-slots)" || false
+}
+
 @test "the global git config, its includes, the excludes file and the worktree's git dir are readable" {
   printf '[include]\n\tpath = ~/.gitconfig.local\n[core]\n\texcludesFile = ~/.gitignore_global\n' >"$HOME/.gitconfig"
   printf '[user]\n\tname = probe\n' >"$HOME/.gitconfig.local"

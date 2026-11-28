@@ -3347,7 +3347,7 @@ pkill -f vite
         "x=$(timeout 5 grep -c agy docs/bash-guard.md)",
         "nice ps -p agy",
         "time printf '%s\\n' agy",
-        "~/.claude/coordinator/gemini-start.sh w p worker",
+        "~/.claude/coordinator/gemini-start.sh w p worker ~/.claude/worker-reports/a",
     ):
         case(f"allowed agy {command}", command)
     for name, command in [
