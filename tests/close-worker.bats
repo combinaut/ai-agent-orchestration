@@ -52,7 +52,7 @@ with sqlite3.connect(sys.argv[1]) as connection:
     connection.execute("CREATE TABLE trajectory_metadata_blob (id TEXT PRIMARY KEY, data BLOB)")
     connection.execute(
         "INSERT INTO trajectory_metadata_blob VALUES ('main', ?)",
-        (f"file://{sys.argv[2]}".encode(),),
+        ((lambda uri: b"\x0a" + bytes((len(uri),)) + uri)(f"file://{sys.argv[2]}".encode()),),
     )
 PY
 }

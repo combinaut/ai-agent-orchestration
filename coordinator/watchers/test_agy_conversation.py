@@ -27,11 +27,15 @@ class ConversationResolutionTests(IsolatedTestCase):
             )
             connection.execute(
                 "INSERT INTO trajectory_metadata_blob VALUES ('main', ?)",
-                (f"file://{folder}".encode(),),
+                (self.metadata(f"file://{folder}".encode()),),
             )
             connection.commit()
         finally:
             connection.close()
+
+    @staticmethod
+    def metadata(uri):
+        return b"\x0a" + bytes((len(uri),)) + uri
 
     def test_resolves_the_one_conversation_for_a_worktree(self):
         folder = self.root / "one"
@@ -62,6 +66,31 @@ class ConversationResolutionTests(IsolatedTestCase):
         folder = self.root / "worktree"
         self.conversation(
             "11111111-1111-1111-1111-111111111111", self.root / "worktree-copy"
+        )
+
+        self.assertIsNone(agy_conversation.resolve(folder, self.store))
+
+    def test_does_not_match_a_worktree_with_a_space_suffix(self):
+        folder = self.root / "worktree"
+        self.conversation(
+            "11111111-1111-1111-1111-111111111111", self.root / "worktree copy"
+        )
+
+        self.assertIsNone(agy_conversation.resolve(folder, self.store))
+
+    def test_does_not_match_a_worktree_with_a_plus_suffix(self):
+        folder = self.root / "worktree"
+        self.conversation(
+            "11111111-1111-1111-1111-111111111111", self.root / "worktree+copy"
+        )
+
+        self.assertIsNone(agy_conversation.resolve(folder, self.store))
+
+    def test_returns_unknown_when_a_conversation_database_is_unreadable(self):
+        folder = self.root / "one"
+        self.conversation("11111111-1111-1111-1111-111111111111", folder)
+        (self.store / "22222222-2222-2222-2222-222222222222.db").write_bytes(
+            b"not sqlite"
         )
 
         self.assertIsNone(agy_conversation.resolve(folder, self.store))

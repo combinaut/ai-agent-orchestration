@@ -4,32 +4,50 @@ import os
 import sqlite3
 import uuid
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 STORE = Path.home() / ".gemini/antigravity-cli/conversations"
 
 
-def workspace_uris(folder):
+def workspace_paths(folder):
     shown = os.fspath(folder)
     path = Path(os.path.normpath(shown))
     paths = (path.absolute(), path.resolve())
-    return {
-        f"file://{shown}".encode(),
-        *(candidate.as_uri().encode() for candidate in paths),
-    }
+    return {os.path.normpath(shown), *(os.fspath(candidate) for candidate in paths)}
 
 
-def matches_workspace(data, uri):
-    """Whether a trajectory metadata blob names exactly ``uri`` as its workspace."""
+def protobuf_strings(data):
+    """Yield length-delimited values from agy's nested protobuf metadata."""
     offset = 0
-    while (offset := data.find(uri, offset)) >= 0:
-        end = offset + len(uri)
-        if (
-            end == len(data)
-            or data[end : end + 1]
-            not in b"/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~%-"
-        ):
+    while offset < len(data):
+        key = data[offset]
+        offset += 1
+        if key & 7 != 2:
+            return
+        length = shift = 0
+        while offset < len(data):
+            byte = data[offset]
+            offset += 1
+            length |= (byte & 127) << shift
+            if not byte & 128:
+                break
+            shift += 7
+        else:
+            return
+        value, offset = data[offset : offset + length], offset + length
+        yield value
+        yield from protobuf_strings(value)
+
+
+def matches_workspace(data, paths):
+    """Whether agy's metadata stores exactly one of ``paths`` as a workspace URI."""
+    for value in protobuf_strings(data):
+        try:
+            uri = urlsplit(value.decode())
+        except UnicodeDecodeError:
+            continue
+        if uri.scheme == "file" and os.path.normpath(unquote(uri.path)) in paths:
             return True
-        offset = end
     return False
 
 
@@ -49,7 +67,7 @@ def conversation_data(database):
 def resolve(folder, store=STORE):
     """Return the sole agy conversation for ``folder``, or ``None`` when unsure."""
     try:
-        uris = workspace_uris(folder)
+        paths = workspace_paths(folder)
         matches = []
         for database in Path(store).glob("*.db"):
             if database.is_symlink():
@@ -57,13 +75,12 @@ def resolve(folder, store=STORE):
             try:
                 identifier = str(uuid.UUID(database.stem))
                 if any(
-                    matches_workspace(data, uri)
+                    matches_workspace(data, paths)
                     for data in conversation_data(database)
-                    for uri in uris
                 ):
                     matches.append(identifier)
             except (OSError, sqlite3.Error, UnicodeError, ValueError):
-                continue
+                return None
         return matches[0] if len(matches) == 1 else None
     except OSError:
         return None
